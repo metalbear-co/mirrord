@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
-    ops::Not,
+    error::Report,
+    ops::{Not, RangeInclusive},
     pin::Pin,
     task::{Context, Poll},
     vec,
@@ -37,6 +38,7 @@ use crate::{
         BoxBody, IncomingStream, IncomingStreamItem, ResponseProvider, StolenHttp, StolenTcp,
     },
     util::{protocol_version::SharedProtocolVersion, remote_runtime::BgTaskStatus, ClientId},
+    AgentError,
 };
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
@@ -50,7 +52,7 @@ pub struct TcpStealApi {
     task_status: BgTaskStatus,
     connections: HashMap<ConnectionId, IncomingConnection>,
     incoming_streams: StreamMap<ConnectionId, IncomingStream>,
-    next_connection_id: ConnectionId,
+    connection_ids_iter: RangeInclusive<ConnectionId>,
     queued_messages: VecDeque<DaemonMessage>,
 }
 
@@ -87,7 +89,7 @@ impl TcpStealApi {
             task_status,
             connections: Default::default(),
             incoming_streams: Default::default(),
-            next_connection_id: Default::default(),
+            connection_ids_iter: (0..=ConnectionId::MAX),
             queued_messages: Default::default(),
         })
     }
@@ -125,9 +127,9 @@ impl TcpStealApi {
                         StealerMessage::PortSubscribed(port) => {
                             break Ok(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))));
                         },
-                        StealerMessage::StolenHttp(http) => self.handle_request(http),
+                        StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => {
-                            break Ok(DaemonMessage::Tcp(self.handle_connection(tcp)));
+                            break Ok(DaemonMessage::Tcp(self.handle_connection(tcp)?));
                         },
                     }
                 }
@@ -139,14 +141,11 @@ impl TcpStealApi {
         }
     }
 
-    fn next_connection_id(&mut self) -> ConnectionId {
-        let connection_id = self.next_connection_id;
-        self.next_connection_id += 1;
-        connection_id
-    }
-
-    fn handle_request(&mut self, request: StolenHttp) {
-        let connection_id = self.next_connection_id();
+    fn handle_request(&mut self, request: StolenHttp) -> AgentResult<()> {
+        let connection_id = self
+            .connection_ids_iter
+            .next()
+            .ok_or(AgentError::ExhaustedConnectionId)?;
         let StolenHttp {
             info,
             request_head,
@@ -273,10 +272,15 @@ impl TcpStealApi {
                     port: info.original_destination.port(),
                 })));
         }
+
+        Ok(())
     }
 
-    fn handle_connection(&mut self, connection: StolenTcp) -> DaemonTcp {
-        let connection_id = self.next_connection_id();
+    fn handle_connection(&mut self, connection: StolenTcp) -> AgentResult<DaemonTcp> {
+        let connection_id = self
+            .connection_ids_iter
+            .next()
+            .ok_or(AgentError::ExhaustedConnectionId)?;
         let StolenTcp {
             info,
             stream,
@@ -302,7 +306,7 @@ impl TcpStealApi {
             local_address: info.local_addr.ip(),
         };
 
-        if self.protocol_version.matches(&NEW_CONNECTION_V2_VERSION) {
+        let message = if self.protocol_version.matches(&NEW_CONNECTION_V2_VERSION) {
             DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
                 connection: new_connection,
                 transport: info
@@ -312,7 +316,9 @@ impl TcpStealApi {
             })
         } else {
             DaemonTcp::NewConnection(new_connection)
-        }
+        };
+
+        Ok(message)
     }
 
     fn handle_incoming_item(&mut self, connection_id: ConnectionId, item: IncomingStreamItem) {
@@ -346,7 +352,8 @@ impl TcpStealApi {
                 if let Err(error) = result {
                     self.queued_messages
                         .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "Stolen connection {connection_id} failed: {error}"
+                            "Stolen connection {connection_id} failed: {}",
+                            Report::new(error),
                         ))));
                 }
 

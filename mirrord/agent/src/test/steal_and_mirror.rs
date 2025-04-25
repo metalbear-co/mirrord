@@ -1,534 +1,791 @@
-// //! Tests for redirecting TCP connections with the
-// //! [`RedirectorTask`](crate::incoming::RedirectorTask).
+//! Tests verifying our implementation of concurrent stealing and mirroring of the incoming traffic.
 
-// use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-// use futures::StreamExt;
-// use rstest::rstest;
-// use tokio::{
-//     io::{AsyncReadExt, AsyncWriteExt},
-//     net::{TcpListener, TcpStream},
-//     task::JoinSet,
-// };
+use bytes::Bytes;
+use futures::{FutureExt, StreamExt};
+use http_body_util::{combinators::BoxBody, BodyExt, StreamBody};
+use hyper::{
+    body::Frame,
+    http::{header, HeaderValue, Method, StatusCode},
+    Request,
+};
+use hyper_util::rt::TokioIo;
+use mirrord_protocol::{
+    tcp::{
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedResponse, DaemonTcp, Filter, HttpFilter,
+        HttpRequestMetadata, HttpResponse, InternalHttpBodyFrame, InternalHttpBodyNew,
+        InternalHttpResponse, LayerTcpSteal, StealType, TcpClose, TcpData,
+    },
+    DaemonMessage,
+};
+use rstest::rstest;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    sync::{mpsc, Notify},
+    task::JoinSet,
+};
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 
-// use crate::incoming::{test::dummy_redirector::DummyRedirectorSetup, IncomingStreamItem};
+use super::test_service::{self, full_body};
+use crate::{
+    http::HttpVersion,
+    incoming::test::start_redirector_task,
+    mirror::TcpMirrorApi,
+    steal::{TcpStealApi, TcpStealerTask},
+    test::{get_mirror_api_with_subscription, get_steal_api_with_subscription},
+    util::remote_runtime::{BgTaskRuntime, IntoStatus},
+};
 
-// pub async fn echo_tcp_server(listener: TcpListener) {
-//     let mut conn = listener.accept().await.unwrap().0;
-//     let mut buffer = [0_u8; 64];
+/// Tests a scenario where there are:
+/// 1. Two stealing clients, each with a header HTTP filter.
+/// 2. One mirroring client.
+///
+/// The HTTP client sends a total of 3 or 6 requests, depending on HTTP version:
+/// 1. 3 requests that result in no HTTP upgrade.
+/// 2. (HTTP/1 only) 3 requests that result in an HTTP upgrade.
+///
+/// The 1. and 4. request should not be stolen.
+/// The other requests should be stolen by one of the stealing clients.
+#[rstest]
+#[timeout(Duration::from_secs(5))]
+#[tokio::test]
+async fn filtered_stealing_with_mirroring(
+    #[values(HttpVersion::V1, HttpVersion::V2)] http_version: HttpVersion,
+) {
+    let (mut connections, steal_handle, mirror_handle) =
+        start_redirector_task(Default::default()).await;
+    let (stealer_tx, stealer_rx) = mpsc::channel(8);
+    let stealer_task = TcpStealerTask::new(steal_handle, stealer_rx);
+    let stealer_status = BgTaskRuntime::Local
+        .spawn(stealer_task.run())
+        .into_status("stealer task");
 
-//     loop {
-//         let bytes = conn.read(&mut buffer).await.unwrap();
-//         if bytes == 0 {
-//             conn.shutdown().await.unwrap();
-//             break;
-//         }
-//         conn.write_all(buffer.get(..bytes).unwrap()).await.unwrap();
-//     }
-// }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let destination = listener.local_addr().unwrap();
+    let (request_tx, mut request_rx) = mpsc::channel(8);
+    let (steal_1, steal_2, mut mirror) = tokio::join!(
+        get_steal_api_with_subscription(
+            1,
+            stealer_tx.clone(),
+            stealer_status.clone(),
+            Some("1.19.4"),
+            StealType::FilteredHttpEx(
+                destination.port(),
+                HttpFilter::Header(Filter::new("x-client: 1".into()).unwrap())
+            )
+        )
+        .map(|res| res.0),
+        get_steal_api_with_subscription(
+            2,
+            stealer_tx.clone(),
+            stealer_status.clone(),
+            Some("1.19.4"),
+            StealType::FilteredHttpEx(
+                destination.port(),
+                HttpFilter::Header(Filter::new("x-client: 2".into()).unwrap())
+            )
+        )
+        .map(|res| res.0),
+        get_mirror_api_with_subscription(mirror_handle, Some("1.19.4"), destination.port())
+            .map(|res| res.0),
+    );
 
-// pub async fn echo_tcp_client(mut stream: TcpStream, message: &[u8], times: usize) {
-//     let mut buffer = vec![0_u8; message.len()];
+    let mut tasks = JoinSet::new();
+    let token = CancellationToken::new();
+    let token_clone = token.clone();
 
-//     for _ in 0..times {
-//         stream.write_all(message).await.unwrap();
-//         stream.read_exact(buffer.as_mut_slice()).await.unwrap();
-//         assert_eq!(&buffer, message);
-//     }
+    // Original destination HTTP server.
+    tasks.spawn(async move {
+        tokio::join!(
+            test_service::run_test_service(listener, http_version, request_tx, token_clone,),
+            async move {
+                // Handle first request, with no upgrade.
+                let mut request = request_rx.recv().await.unwrap();
+                println!(
+                    "Original destination: received the first request {:?}",
+                    request.request
+                );
+                request.assert_header("x-request-id", Some("0"));
+                request.assert_header("x-client", Some("0"));
+                request.assert_body(&[0]).await;
+                request.respond_simple(StatusCode::OK, &[0]);
+                println!("Original destination: first request finished");
 
-//     stream.shutdown().await.unwrap();
+                if http_version == HttpVersion::V2 {
+                    // HTTP/2 has no upgrades.
+                    return;
+                }
 
-//     let bytes = stream.read(&mut buffer).await.unwrap();
-//     assert_eq!(bytes, 0);
-// }
+                // Handle second request, with upgrade.
+                let mut request = request_rx.recv().await.unwrap();
+                println!(
+                    "Original destination: received the second request {:?}",
+                    request.request
+                );
+                request.assert_header("x-request-id", Some("3"));
+                request.assert_header("x-client", Some("0"));
+                request.assert_header("connection", Some("upgrade"));
+                request.assert_header("upgrade", Some("dummy"));
+                request.assert_body(&[]).await;
+                let mut upgraded = request.respond_expect_upgrade("dummy").await;
+                upgraded.write_all(&[0]).await.unwrap();
+                upgraded.shutdown().await.unwrap();
+                println!("Original destination: second request finished");
+            },
+        );
+    });
 
-// /// Verifies that a single redireceted TCP connection is sent to all clients.
-// #[rstest]
-// #[case::steal_and_mirror(true, true)]
-// #[case::steal(true, false)]
-// #[case::mirror(false, true)]
-// #[timeout(Duration::from_secs(5))]
-// #[tokio::test]
-// async fn tcp_connection_sent_to_all_clients(#[case] steal: bool, #[case] mirror: bool) {
-//     assert!(steal || mirror, "this test cannot handle no subscription");
+    // HTTP client.
+    tasks.spawn(async move {
+        let mut request_sender = connections.new_http(destination, http_version).await;
 
-//     let DummyRedirectorSetup {
-//         listener,
-//         destination,
-//         redirector_state: _,
-//         connections,
-//         mut steal_handle,
-//         mut mirror_handle,
-//     } = DummyRedirectorSetup::new().await;
+        // Send 3 simple requests (original dst / client 1 / client 2).
+        for i in 0_u8..3 {
+            let request = Request::builder()
+                .method(Method::GET)
+                .uri("http://some-server.com")
+                .header("x-request-id", i.to_string())
+                .header("x-client", (i % 3).to_string())
+                .body(full_body([i]))
+                .unwrap();
+            println!("HTTP client: sending request {i} {request:?}");
+            let (parts, body) = request_sender.send(request).await.unwrap().into_parts();
+            assert_eq!(parts.status, StatusCode::OK);
+            let body = body.collect().await.unwrap().to_bytes();
+            assert_eq!(body, &[i][..]);
+            println!("HTTP client: request {i} finished");
+        }
 
-//     if steal {
-//         steal_handle.steal(destination.port()).await.unwrap();
-//     }
-//     if mirror {
-//         mirror_handle.mirror(destination.port()).await.unwrap();
-//     }
+        if http_version == HttpVersion::V2 {
+            // HTTP/2 has no upgrades.
+            token.cancel();
+            return;
+        }
 
-//     let mut tasks = JoinSet::new();
-//     if steal {
-//         tasks.spawn(async move {
-//             let mut conn = steal_handle
-//                 .next()
-//                 .await
-//                 .unwrap()
-//                 .unwrap()
-//                 .unwrap_tcp()
-//                 .steal();
-//             for _ in 0..5 {
-//                 conn.data_tx.send(b" hello there".into()).await.unwrap();
-//                 conn.stream.assert_data(b" hello there").await;
-//             }
-//             std::mem::drop(conn.data_tx);
-//             let item = conn.stream.next().await.unwrap();
-//             assert!(matches!(&item, IncomingStreamItem::NoMoreData), "{item:?}");
-//             let item = conn.stream.next().await.unwrap();
-//             assert!(
-//                 matches!(&item, IncomingStreamItem::Finished(Ok(()))),
-//                 "{item:?}"
-//             );
-//         });
-//     } else {
-//         tasks.spawn(echo_tcp_server(listener));
-//     }
+        // Send 3 upgrade requests (original dst / client 1 / client 2).
+        for i in 3_u8..6 {
+            let mut request_sender = connections.new_http(destination, http_version).await;
 
-//     if mirror {
-//         tasks.spawn(async move {
-//             let mut conn = mirror_handle.next().await.unwrap().unwrap().unwrap_tcp();
-//             let expected = std::iter::repeat_n(b" hello there", 5)
-//                 .flatten()
-//                 .copied()
-//                 .collect::<Vec<_>>();
-//             conn.stream.assert_data(&expected).await;
-//             let item = conn.stream.next().await.unwrap();
-//             assert!(matches!(&item, IncomingStreamItem::NoMoreData), "{item:?}");
-//             let item = conn.stream.next().await.unwrap();
-//             assert!(matches!(item, IncomingStreamItem::Finished(Ok(()))));
-//         });
-//     }
+            let request = Request::builder()
+                .method(Method::GET)
+                .uri("http://some-server.com")
+                .header("x-request-id", i.to_string())
+                .header("x-client", (i - 3).to_string())
+                .header("connection", "upgrade")
+                .header("upgrade", "dummy")
+                .body(full_body([]))
+                .unwrap();
+            println!("HTTP client: sending request {i}: {request:?}");
+            let mut response = request_sender.send(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+            let upgrade = hyper::upgrade::on(&mut response);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(body.is_empty());
+            let mut upgraded = TokioIo::new(upgrade.await.unwrap());
+            let mut buf = vec![];
+            upgraded.read_to_end(&mut buf).await.unwrap();
+            assert_eq!(buf, &[i - 3][..]);
+            upgraded.shutdown().await.unwrap();
+            println!("HTTP client: request {i} finished");
+        }
 
-//     let conn = connections.new_tcp(destination).await;
-//     echo_tcp_client(conn, b" hello there", 5).await;
+        token.cancel();
+    });
 
-//     tasks.join_all().await;
-// }
+    async fn stealing_client_logic(id: u8, mut api: TcpStealApi, http_version: HttpVersion) {
+        // Handle first request, with no upgrade.
+        let request = match api.recv().await.unwrap() {
+            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
+                request
+            }
+            other => panic!("unexpected message: {other:?}"),
+        };
+        println!("Stealing client {id}: received the first request {request:?}");
+        assert_eq!(
+            request.request.headers.get("x-request-id").unwrap(),
+            id.to_string().as_str()
+        );
+        assert_eq!(
+            request.request.headers.get("x-client").unwrap(),
+            id.to_string().as_str()
+        );
+        assert_eq!(
+            request.request.body,
+            InternalHttpBodyNew {
+                frames: vec![InternalHttpBodyFrame::Data(vec![id])],
+                is_last: true
+            }
+        );
+        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+        api.handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(
+            HttpResponse {
+                connection_id: request.connection_id,
+                request_id: request.request_id,
+                port: destination.port(),
+                internal_response: InternalHttpResponse {
+                    status: StatusCode::OK,
+                    headers: Default::default(),
+                    version: request.request.version,
+                    body: vec![InternalHttpBodyFrame::Data(vec![id])],
+                },
+            },
+        )))
+        .await
+        .unwrap();
+        api.handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+            ChunkedRequestBodyV1 {
+                connection_id: request.connection_id,
+                request_id: request.request_id,
+                frames: Default::default(),
+                is_last: true,
+            },
+        )))
+        .await
+        .unwrap();
+        match api.recv().await.unwrap() {
+            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id })) => {
+                assert_eq!(connection_id, request.connection_id)
+            }
+            other => panic!("unexpected message: {other:?}"),
+        };
+        println!("Stealing client {id}: first request finished");
 
-// //! Tests for redirecting HTTP requests with the
-// //! [`RedirectorTask`](crate::incoming::RedirectorTask).
+        if http_version == HttpVersion::V2 {
+            // HTTP/2 has no upgrades.
+            return;
+        }
 
-// use std::{
-//     net::{Ipv4Addr, SocketAddr},
-//     ops::Not,
-//     time::Duration,
-// };
+        // Handle second request, with upgrade.
+        let request = match api.recv().await.unwrap() {
+            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
+                request
+            }
+            other => panic!("unexpected message: {other:?}"),
+        };
+        println!("Stealing client {id}: received the second request {request:?}");
+        assert_eq!(
+            request.request.headers.get("x-request-id").unwrap(),
+            (id + 3).to_string().as_str()
+        );
+        assert_eq!(
+            request.request.headers.get("x-client").unwrap(),
+            id.to_string().as_str()
+        );
+        assert_eq!(
+            request.request.headers.get("connection").unwrap(),
+            "upgrade"
+        );
+        assert_eq!(request.request.headers.get("upgrade").unwrap(), "dummy");
+        assert_eq!(
+            request.request.body,
+            InternalHttpBodyNew {
+                frames: vec![],
+                is_last: true
+            }
+        );
+        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+        api.handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(
+            HttpResponse {
+                connection_id: request.connection_id,
+                request_id: request.request_id,
+                port: destination.port(),
+                internal_response: InternalHttpResponse {
+                    status: StatusCode::SWITCHING_PROTOCOLS,
+                    headers: [
+                        (header::CONNECTION, HeaderValue::from_static("upgrade")),
+                        (header::UPGRADE, HeaderValue::from_static("dummy")),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    version: request.request.version,
+                    body: Default::default(),
+                },
+            },
+        )))
+        .await
+        .unwrap();
+        api.handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+            ChunkedRequestBodyV1 {
+                connection_id: request.connection_id,
+                request_id: request.request_id,
+                frames: Default::default(),
+                is_last: true,
+            },
+        )))
+        .await
+        .unwrap();
+        api.handle_client_message(LayerTcpSteal::Data(TcpData {
+            connection_id: request.connection_id,
+            bytes: vec![id],
+        }))
+        .await
+        .unwrap();
+        api.handle_client_message(LayerTcpSteal::Data(TcpData {
+            connection_id: request.connection_id,
+            bytes: vec![],
+        }))
+        .await
+        .unwrap();
+        match api.recv().await.unwrap() {
+            DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                connection_id,
+                bytes,
+            })) => {
+                assert_eq!(connection_id, request.connection_id);
+                assert!(bytes.is_empty());
+            }
+            other => panic!("unexpected message: {other:?}"),
+        };
+        match api.recv().await.unwrap() {
+            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id })) => {
+                assert_eq!(connection_id, request.connection_id)
+            }
+            other => panic!("unexpected message: {other:?}"),
+        };
+        println!("Stealing client {id}: second request finished");
+    }
 
-// use bytes::Bytes;
-// use futures::{
-//     future::{BoxFuture, Either},
-//     StreamExt,
-// };
-// use http_body_util::{BodyExt, Full};
-// use hyper::{
-//     body::Incoming,
-//     http::{Method, StatusCode, Version},
-//     service::Service,
-//     Request, Response,
-// };
-// use hyper_util::rt::{TokioExecutor, TokioIo};
-// use mirrord_protocol::tcp::InternalHttpBodyFrame;
-// use rstest::rstest;
-// use tokio::{net::TcpListener, sync::Notify, task::JoinSet};
-// use tokio_util::sync::CancellationToken;
+    // First stealing client.
+    tasks.spawn(stealing_client_logic(1, steal_1, http_version));
 
-// use crate::{
-//     http::HttpVersion,
-//     incoming::{
-//         test::dummy_redirector::{DummyRedirector, DummyRedirectorSetup},
-//         BoxBody, IncomingStreamItem, IncomingTlsHandlerStore, RedirectorTask,
-//     },
-// };
+    // Second stealing client.
+    tasks.spawn(stealing_client_logic(2, steal_2, http_version));
 
-// pub async fn run_http_server<S>(
-//     listener: TcpListener,
-//     http_version: HttpVersion,
-//     service: S,
-//     shutdown: CancellationToken,
-// ) where
-//     S: 'static
-//         + Clone
-//         + Service<Request<Incoming>, Response = Response<BoxBody>, Error = hyper::Error>
-//         + Send,
-//     S::Future: Send,
-// {
-//     let mut connection_tasks = JoinSet::new();
+    // Mirroring client.
+    tasks.spawn(async move {
+        // Get first 3 requests, with no upgrade.
+        for i in 0_u8..3 {
+            let request = match mirror.recv().await.unwrap().unwrap() {
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
+                    request,
+                ))) => request,
+                other => panic!("unexpected message: {other:?}"),
+            };
+            println!("Mirroring client: received request {i} {request:?}");
+            assert_eq!(
+                request.request.headers.get("x-request-id").unwrap(),
+                i.to_string().as_str()
+            );
+            assert_eq!(
+                request.request.headers.get("x-client").unwrap(),
+                i.to_string().as_str()
+            );
+            assert_eq!(
+                request.request.body,
+                InternalHttpBodyNew {
+                    frames: vec![InternalHttpBodyFrame::Data(vec![i])],
+                    is_last: true
+                }
+            );
+            match mirror.recv().await.unwrap().unwrap() {
+                DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id })) => {
+                    assert_eq!(connection_id, request.connection_id)
+                }
+                other => panic!("unexpected message: {other:?}"),
+            };
+            println!("Mirroring client: request {i} finished");
+        }
 
-//     loop {
-//         let conn = tokio::select! {
-//             result = listener.accept() => result.unwrap().0,
-//             _ = shutdown.cancelled() => {
-//                 break;
-//             }
-//         };
+        if http_version == HttpVersion::V2 {
+            // HTTP/2 has no upgrades.
+            return;
+        }
 
-//         let mut conn = match http_version {
-//             HttpVersion::V1 => {
-//                 let conn = hyper::server::conn::http1::Builder::new()
-//                     .preserve_header_case(true)
-//                     .serve_connection(TokioIo::new(conn), service.clone())
-//                     .with_upgrades();
-//                 Either::Left(conn)
-//             }
+        // Get second 3 requests, with upgrades.
+        for i in 3_u8..6 {
+            let request = match mirror.recv().await.unwrap().unwrap() {
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
+                    request,
+                ))) => request,
+                other => panic!("unexpected message: {other:?}"),
+            };
+            println!("Mirroring client: received request {i} {request:?}");
+            assert_eq!(
+                request.request.headers.get("x-request-id").unwrap(),
+                i.to_string().as_str()
+            );
+            assert_eq!(
+                request.request.headers.get("x-client").unwrap(),
+                (i - 3).to_string().as_str()
+            );
+            assert_eq!(
+                request.request.headers.get("connection").unwrap(),
+                "upgrade"
+            );
+            assert_eq!(request.request.headers.get("upgrade").unwrap(), "dummy");
+            assert_eq!(
+                request.request.body,
+                InternalHttpBodyNew {
+                    frames: vec![],
+                    is_last: true
+                }
+            );
+            match mirror.recv().await.unwrap().unwrap() {
+                DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                    connection_id,
+                    bytes,
+                })) => {
+                    assert_eq!(connection_id, request.connection_id);
+                    assert!(bytes.is_empty());
+                }
+                other => panic!("unexpected message: {other:?}"),
+            };
+            match mirror.recv().await.unwrap().unwrap() {
+                DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id })) => {
+                    assert_eq!(connection_id, request.connection_id)
+                }
+                other => panic!("unexpected message: {other:?}"),
+            };
+            println!("Mirroring client: request {i} finished");
+        }
+    });
 
-//             HttpVersion::V2 => {
-//                 let conn = hyper::server::conn::http2::Builder::new(TokioExecutor::default())
-//                     .serve_connection(TokioIo::new(conn), service.clone());
-//                 Either::Right(conn)
-//             }
-//         };
+    tasks.join_all().await;
+}
 
-//         let shutdown = shutdown.clone();
-//         connection_tasks.spawn(async move {
-//             tokio::select! {
-//                 result = &mut conn => {
-//                     result.unwrap();
-//                     return;
-//                 }
+/// Verifies that request and response bodies are correctly streamed.
+///
+/// The HTTP client sends a total of 2 requests:
+/// 1. The first request should be passed through to the original destination.
+/// 2. The second request should be stolne by a client using an HTTP filter.
+#[rstest]
+#[timeout(Duration::from_secs(5))]
+#[tokio::test]
+async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_version: HttpVersion) {
+    let (mut connections, steal_handle, mirror_handle) =
+        start_redirector_task(Default::default()).await;
+    let (stealer_tx, stealer_rx) = mpsc::channel(8);
+    let stealer_task = TcpStealerTask::new(steal_handle, stealer_rx);
+    let stealer_status = BgTaskRuntime::Local
+        .spawn(stealer_task.run())
+        .into_status("stealer task");
 
-//                 _ = shutdown.cancelled() => {
-//                     match &mut conn {
-//                         Either::Left(conn) => {
-//                             Pin::new(conn).graceful_shutdown();
-//                         }
-//                         Either::Right(conn) => {
-//                             Pin::new(conn).graceful_shutdown();
-//                         }
-//                     }
-//                 }
-//             }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let destination = listener.local_addr().unwrap();
+    let (request_tx, mut request_rx) = mpsc::channel(8);
+    let (mut steal, mut mirror) = tokio::join!(
+        get_steal_api_with_subscription(
+            1,
+            stealer_tx.clone(),
+            stealer_status.clone(),
+            Some("1.19.4"),
+            StealType::FilteredHttpEx(
+                destination.port(),
+                HttpFilter::Header(Filter::new("x-client: 1".into()).unwrap())
+            )
+        )
+        .map(|res| res.0),
+        get_mirror_api_with_subscription(mirror_handle, Some("1.19.4"), destination.port())
+            .map(|res| res.0),
+    );
 
-//             conn.await.unwrap();
-//         });
-//     }
+    let mut tasks = JoinSet::new();
+    let token = CancellationToken::new();
+    let token_clone = token.clone();
 
-//     connection_tasks.join_all().await;
-// }
+    let notify = Arc::new(Notify::new());
 
-// #[derive(Clone)]
-// pub struct ReadBodyReturnOk {
-//     pub expected_body: Vec<u8>,
-// }
+    // Original destination HTTP server.
+    let notify_cloned = notify.clone();
+    tasks.spawn(async move {
+        tokio::join!(
+            test_service::run_test_service(listener, http_version, request_tx, token_clone),
+            async move {
+                let mut request = request_rx.recv().await.unwrap();
+                println!(
+                    "Original destination: received request {:?}",
+                    request.request
+                );
+                request.assert_header("x-client", Some("0"));
+                notify_cloned.notify_one(); // Notify the client to send the first frame.
+                request.assert_ready_body(b"hello ").await;
+                notify_cloned.notify_one(); // Notify the client to send the second frame.
+                request.assert_ready_body(b"there").await;
+                notify_cloned.notify_one(); // Notify the client to end the body.
+                request.assert_body(&[]).await;
 
-// impl ReadBodyReturnOk {
-//     pub const RESPONSE_BODY: &'static [u8] = b"remote";
-// }
+                let body_tx = request.respond_streaming(StatusCode::OK);
+                notify_cloned.notified().await; // Wait until the client wants the first frame.
+                body_tx.send(b"general ".into()).await.unwrap();
+                notify_cloned.notified().await; // Wait until the client wants the second frame.
+                body_tx.send(b"kenobi".into()).await.unwrap();
+                notify_cloned.notified().await; // Wait until the client wants us to end the body.
+                std::mem::drop(body_tx);
+            },
+        );
+    });
 
-// impl Service<Request<Incoming>> for ReadBodyReturnOk {
-//     type Response = Response<BoxBody>;
-//     type Error = hyper::Error;
-//     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    // HTTP client.
+    let notify_cloned = notify.clone();
+    tasks.spawn(async move {
+        for i in 0..2 {
+            let mut request_sender = connections.new_http(destination, http_version).await;
 
-//     fn call(&self, request: Request<Incoming>) -> Self::Future {
-//         let expected_body = self.expected_body.clone();
+            let (body_tx, body_rx) = mpsc::channel::<Vec<u8>>(8);
+            let body = BoxBody::new(StreamBody::new(
+                ReceiverStream::new(body_rx).map(|data| Ok(Frame::data(Bytes::from(data)))),
+            ));
+            let mut builder = Request::builder()
+                .method(Method::GET)
+                .uri("http://some-server.com")
+                .header("x-client", i.to_string());
+            if http_version == HttpVersion::V1 {
+                builder = builder.header(header::TRANSFER_ENCODING, "chunked");
+            }
+            let request = builder.body(body).unwrap();
+            println!("HTTP client: sending request {i} {request:?}");
+            let response = tokio::spawn(async move { request_sender.send(request).await.unwrap() });
 
-//         Box::pin(async move {
-//             let (parts, body) = request.into_parts();
-//             let collected = body.collect().await?.to_bytes();
+            notify_cloned.notified().await; // Wait until the server wants the first frame.
+            body_tx.send(b"hello ".into()).await.unwrap();
+            notify_cloned.notified().await; // Wait until the server wants the second frame.
+            body_tx.send(b"there".into()).await.unwrap();
+            notify_cloned.notified().await; // Wait until the server wants us to end the body.
+            std::mem::drop(body_tx);
 
-//             let mut response = Response::new(
-//                 Full::new(Bytes::from_static(Self::RESPONSE_BODY))
-//                     .map_err(|_| unreachable!())
-//                     .boxed(),
-//             );
-//             *response.status_mut() = if collected == expected_body {
-//                 StatusCode::OK
-//             } else {
-//                 StatusCode::BAD_REQUEST
-//             };
-//             *response.version_mut() = parts.version;
+            let mut response = response.await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            notify_cloned.notify_one(); // Notify the server to send the first frame.
+            let data = response
+                .body_mut()
+                .frame()
+                .await
+                .unwrap()
+                .unwrap()
+                .into_data()
+                .unwrap();
+            assert_eq!(data, b"general ".as_slice());
+            notify_cloned.notify_one(); // Notify the server to send the second frame.
+            let data = response
+                .body_mut()
+                .frame()
+                .await
+                .unwrap()
+                .unwrap()
+                .into_data()
+                .unwrap();
+            assert_eq!(data, b"kenobi".as_slice());
+            notify_cloned.notify_one(); // Notify the server to end the body.
+            assert!(response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .is_empty());
+            println!("HTTP client: request {i} finished");
+        }
 
-//             Ok(response)
-//         })
-//     }
-// }
+        token.cancel();
+    });
 
-// /// Verifies that multiple redirected HTTP requests are sent to all clients.
-// #[rstest]
-// #[case::steal_and_mirror(true, true)]
-// #[case::steal(true, false)]
-// #[case::mirror(false, true)]
-// #[timeout(Duration::from_secs(5))]
-// #[tokio::test]
-// async fn http_requests_sent_to_all_clients(
-//     #[case] steal: bool,
-//     #[case] mirror: bool,
-//     #[values(HttpVersion::V1, HttpVersion::V2)] http_version: HttpVersion,
-// ) {
-//     assert!(steal || mirror, "this test cannot handle no subscription");
+    // Stealing client.
+    let notify_cloned = notify.clone();
+    tasks.spawn(async move {
+        let request = match steal.recv().await.unwrap() {
+            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
+                request
+            }
+            other => panic!("unexpected message: {other:?}"),
+        };
+        assert_eq!(request.request.headers.get("x-client").unwrap(), "1",);
+        assert_eq!(
+            request.request.body,
+            InternalHttpBodyNew {
+                frames: vec![],
+                is_last: false,
+            },
+        );
+        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
 
-//     let DummyRedirectorSetup {
-//         listener,
-//         destination,
-//         redirector_state: _,
-//         connections,
-//         mut steal_handle,
-//         mut mirror_handle,
-//     } = DummyRedirectorSetup::new().await;
+        notify_cloned.notify_one(); // Notify the client to send the first frame.
+        assert_eq!(
+            steal.recv().await.unwrap(),
+            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                ChunkedRequestBodyV1 {
+                    frames: vec![InternalHttpBodyFrame::Data(b"hello ".into())],
+                    is_last: false,
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                }
+            ))),
+        );
+        notify_cloned.notify_one(); // Notify the client to send the second frame.
+        assert_eq!(
+            steal.recv().await.unwrap(),
+            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                ChunkedRequestBodyV1 {
+                    frames: vec![InternalHttpBodyFrame::Data(b"there".into())],
+                    is_last: false,
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                }
+            ))),
+        );
+        notify_cloned.notify_one(); // Notify the client to end the body.
+        if http_version == HttpVersion::V2 {
+            assert_eq!(
+                steal.recv().await.unwrap(),
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                    ChunkedRequestBodyV1 {
+                        frames: vec![InternalHttpBodyFrame::Data(Default::default())],
+                        is_last: false,
+                        connection_id: request.connection_id,
+                        request_id: request.request_id,
+                    }
+                ))),
+            );
+        }
+        assert_eq!(
+            steal.recv().await.unwrap(),
+            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                ChunkedRequestBodyV1 {
+                    frames: vec![],
+                    is_last: true,
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                }
+            ))),
+        );
 
-//     if steal {
-//         steal_handle.steal(destination.port()).await.unwrap();
-//     }
-//     if mirror {
-//         mirror_handle.mirror(destination.port()).await.unwrap();
-//     }
+        steal
+            .handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(
+                HttpResponse {
+                    port: destination.port(),
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    internal_response: InternalHttpResponse {
+                        status: StatusCode::OK,
+                        version: request.request.version,
+                        headers: Default::default(),
+                        body: vec![],
+                    },
+                },
+            )))
+            .await
+            .unwrap();
+        notify_cloned.notified().await; // Wait until the client wants us to send the first frame.
+        steal
+            .handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+                ChunkedRequestBodyV1 {
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    frames: vec![InternalHttpBodyFrame::Data(b"general ".into())],
+                    is_last: false,
+                },
+            )))
+            .await
+            .unwrap();
+        notify_cloned.notified().await; // Wait until the client wants us to send the second frame.
+        steal
+            .handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+                ChunkedRequestBodyV1 {
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    frames: vec![InternalHttpBodyFrame::Data(b"kenobi".into())],
+                    is_last: false,
+                },
+            )))
+            .await
+            .unwrap();
+        notify_cloned.notified().await; // Wait until the client wants us to end the body.
+        steal
+            .handle_client_message(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+                ChunkedRequestBodyV1 {
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    frames: vec![],
+                    is_last: true,
+                },
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            steal.recv().await.unwrap(),
+            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id: request.connection_id,
+            })),
+        );
+    });
 
-//     let request_body = b"hello there, I am an HTTP request body";
-//     let token = CancellationToken::new();
+    // Mirroring client.
+    tasks.spawn(async move {
+        for i in 0..2 {
+            let request = match mirror.recv().await.unwrap().unwrap() {
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
+                    request,
+                ))) => request,
+                other => panic!("unexpected message: {other:?}"),
+            };
+            println!("Mirroring client: received request {i} {request:?}");
+            assert_eq!(
+                request.request.headers.get("x-client").unwrap(),
+                i.to_string().as_str()
+            );
+            assert_eq!(
+                request.request.body,
+                InternalHttpBodyNew {
+                    frames: vec![],
+                    is_last: false,
+                },
+            );
+            assert_eq!(
+                mirror.recv().await.unwrap().unwrap(),
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                    ChunkedRequestBodyV1 {
+                        frames: vec![InternalHttpBodyFrame::Data(b"hello ".into())],
+                        is_last: false,
+                        connection_id: request.connection_id,
+                        request_id: request.request_id,
+                    }
+                ))),
+            );
+            assert_eq!(
+                mirror.recv().await.unwrap().unwrap(),
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                    ChunkedRequestBodyV1 {
+                        frames: vec![InternalHttpBodyFrame::Data(b"there".into())],
+                        is_last: false,
+                        connection_id: request.connection_id,
+                        request_id: request.request_id,
+                    }
+                ))),
+            );
+            if http_version == HttpVersion::V2 {
+                assert_eq!(
+                    mirror.recv().await.unwrap().unwrap(),
+                    DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                        ChunkedRequestBodyV1 {
+                            frames: vec![InternalHttpBodyFrame::Data(Default::default())],
+                            is_last: false,
+                            connection_id: request.connection_id,
+                            request_id: request.request_id,
+                        }
+                    ))),
+                );
+            }
+            assert_eq!(
+                mirror.recv().await.unwrap().unwrap(),
+                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                    ChunkedRequestBodyV1 {
+                        frames: vec![],
+                        is_last: true,
+                        connection_id: request.connection_id,
+                        request_id: request.request_id,
+                    }
+                ))),
+            );
+            assert_eq!(
+                mirror.recv().await.unwrap().unwrap(),
+                DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                    connection_id: request.connection_id,
+                })),
+            );
+        }
+    });
 
-//     let mut tasks = JoinSet::new();
-//     if steal {
-//         tasks.spawn(async move {
-//             for _ in 0..2 {
-//                 let mut request = steal_handle
-//                     .next()
-//                     .await
-//                     .unwrap()
-//                     .unwrap()
-//                     .unwrap_http()
-//                     .steal();
-//                 assert_eq!(
-//                     &request.request_head.body,
-//                     &[InternalHttpBodyFrame::Data(request_body.into())],
-//                 );
-//                 assert!(request.request_head.has_more_frames.not());
-//                 request.response_provider.send(
-//                     Response::builder()
-//                         .status(StatusCode::OK)
-//                         .body(
-//                             Full::new(Bytes::from_static(b"stolen"))
-//                                 .map_err(|_| unreachable!())
-//                                 .boxed(),
-//                         )
-//                         .unwrap(),
-//                 );
-//                 let item = request.stream.next().await.unwrap();
-//                 assert!(
-//                     matches!(&item, IncomingStreamItem::Finished(Ok(()))),
-//                     "{item:?}"
-//                 );
-//             }
-//         });
-//     } else {
-//         tasks.spawn(run_http_server(
-//             listener,
-//             http_version,
-//             ReadBodyReturnOk {
-//                 expected_body: request_body.to_vec(),
-//             },
-//             token.clone(),
-//         ));
-//     }
-
-//     if mirror {
-//         tasks.spawn(async move {
-//             for _ in 0..2 {
-//                 let mut request = mirror_handle.next().await.unwrap().unwrap().unwrap_http();
-//                 assert_eq!(
-//                     &request.request_head.body,
-//                     &[InternalHttpBodyFrame::Data(request_body.into())],
-//                 );
-//                 assert!(request.request_head.has_more_frames.not());
-//                 let item = request.stream.next().await.unwrap();
-//                 assert!(
-//                     matches!(&item, IncomingStreamItem::Finished(Ok(()))),
-//                     "{item:?}"
-//                 );
-//             }
-//         });
-//     }
-
-//     let request = Request::builder()
-//         .method(Method::GET)
-//         .uri("http://some-server.com")
-//         .version(if http_version == HttpVersion::V1 {
-//             Version::HTTP_11
-//         } else {
-//             Version::HTTP_2
-//         })
-//         .body(Full::new(Bytes::from(request_body.as_slice())).map_err(|_| unreachable!()))
-//         .unwrap();
-//     let mut sender = connections.new_http(destination, http_version).await;
-//     let response = sender
-//         .send(request.clone().map(BoxBody::new))
-//         .await
-//         .unwrap();
-//     assert_eq!(response.status(), StatusCode::OK);
-//     let got_body = response.into_body().collect().await.unwrap().to_bytes();
-//     if steal {
-//         assert_eq!(got_body.as_ref(), b"stolen");
-//     } else {
-//         assert_eq!(got_body.as_ref(), ReadBodyReturnOk::RESPONSE_BODY);
-//     }
-
-//     let response = sender.send(request.map(BoxBody::new)).await.unwrap();
-//     assert_eq!(response.status(), StatusCode::OK);
-//     let got_body = response.into_body().collect().await.unwrap().to_bytes();
-//     if steal {
-//         assert_eq!(got_body.as_ref(), b"stolen");
-//     } else {
-//         assert_eq!(got_body.as_ref(), ReadBodyReturnOk::RESPONSE_BODY);
-//     }
-
-//     token.cancel();
-
-//     tasks.join_all().await;
-// }
-
-// /// Verifies that a client can start receiving requests from the middle of an HTTP connection.
-// #[rstest]
-// #[case::steal_and_mirror(true, false)]
-// #[case::mirror_and_mirror(false, false)]
-// #[case::mirror_and_steal(false, true)]
-// #[timeout(Duration::from_secs(5))]
-// #[tokio::test]
-// async fn http_requests_picked_up_from_the_middle(
-//     #[case] first_client_steals: bool,
-//     #[case] second_client_steals: bool,
-//     #[values(HttpVersion::V1, HttpVersion::V2)] http_version: HttpVersion,
-// ) {
-//     use std::sync::Arc;
-
-//     assert!(
-//         first_client_steals.not() || second_client_steals.not(),
-//         "this test cannot handle two stealing clients"
-//     );
-
-//     let DummyRedirectorSetup {
-//         listener,
-//         destination,
-//         redirector_state: _,
-//         connections,
-//         steal_handle,
-//         mirror_handle,
-//     } = DummyRedirectorSetup::new().await;
-
-//     let mut tasks = JoinSet::new();
-//     let token = CancellationToken::new();
-//     let notify = Arc::new(Notify::new());
-
-//     if first_client_steals.not() && second_client_steals.not() {
-//         let token  = token.clone();
-//         tasks.spawn(run_http_server(listener, http_version, ReadBodyReturnOk { expected_body:
-// Default::default() }, token));     }
-
-//     let mut steal_handle = Some(steal_handle);
-
-//     if steal {
-//         steal_handle.steal(destination.port()).await.unwrap();
-//     }
-//     if mirror {
-//         mirror_handle.mirror(destination.port()).await.unwrap();
-//     }
-
-//     let request_body = b"hello there, I am an HTTP request body";
-//     let token = CancellationToken::new();
-
-//     if steal {
-//         tasks.spawn(async move {
-//             for _ in 0..2 {
-//                 let mut request = steal_handle
-//                     .next()
-//                     .await
-//                     .unwrap()
-//                     .unwrap()
-//                     .unwrap_http()
-//                     .steal();
-//                 assert_eq!(
-//                     &request.request_head.body,
-//                     &[InternalHttpBodyFrame::Data(request_body.into())],
-//                 );
-//                 assert!(request.request_head.has_more_frames.not());
-//                 request.response_provider.send(
-//                     Response::builder()
-//                         .status(StatusCode::OK)
-//                         .body(
-//                             Full::new(Bytes::from_static(b"stolen"))
-//                                 .map_err(|_| unreachable!())
-//                                 .boxed(),
-//                         )
-//                         .unwrap(),
-//                 );
-//                 let item = request.stream.next().await.unwrap();
-//                 assert!(
-//                     matches!(&item, IncomingStreamItem::Finished(Ok(()))),
-//                     "{item:?}"
-//                 );
-//             }
-//         });
-//     } else {
-//         tasks.spawn(run_http_server(
-//             listener,
-//             http_version,
-//             ReadBodyReturnOk {
-//                 expected_body: request_body.to_vec(),
-//             },
-//             token.clone(),
-//         ));
-//     }
-
-//     if mirror {
-//         tasks.spawn(async move {
-//             for _ in 0..2 {
-//                 let mut request = mirror_handle.next().await.unwrap().unwrap().unwrap_http();
-//                 assert_eq!(
-//                     &request.request_head.body,
-//                     &[InternalHttpBodyFrame::Data(request_body.into())],
-//                 );
-//                 assert!(request.request_head.has_more_frames.not());
-//                 let item = request.stream.next().await.unwrap();
-//                 assert!(
-//                     matches!(&item, IncomingStreamItem::Finished(Ok(()))),
-//                     "{item:?}"
-//                 );
-//             }
-//         });
-//     }
-
-//     let request = Request::builder()
-//         .method(Method::GET)
-//         .uri("http://some-server.com")
-//         .version(if http_version == HttpVersion::V1 {
-//             Version::HTTP_11
-//         } else {
-//             Version::HTTP_2
-//         })
-//         .body(Full::new(Bytes::from(request_body.as_slice())).map_err(|_| unreachable!()))
-//         .unwrap();
-//     let mut sender = connections.new_http(destination, http_version).await;
-//     let response = sender
-//         .send(request.clone().map(BoxBody::new))
-//         .await
-//         .unwrap();
-//     assert_eq!(response.status(), StatusCode::OK);
-//     let got_body = response.into_body().collect().await.unwrap().to_bytes();
-//     if steal {
-//         assert_eq!(got_body.as_ref(), b"stolen");
-//     } else {
-//         assert_eq!(got_body.as_ref(), ReadBodyReturnOk::RESPONSE_BODY);
-//     }
-
-//     let response = sender.send(request.map(BoxBody::new)).await.unwrap();
-//     assert_eq!(response.status(), StatusCode::OK);
-//     let got_body = response.into_body().collect().await.unwrap().to_bytes();
-//     if steal {
-//         assert_eq!(got_body.as_ref(), b"stolen");
-//     } else {
-//         assert_eq!(got_body.as_ref(), ReadBodyReturnOk::RESPONSE_BODY);
-//     }
-
-//     token.cancel();
-
-//     tasks.join_all().await;
-// }
+    tasks.join_all().await;
+}

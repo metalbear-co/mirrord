@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, ops::Not};
+use std::{
+    collections::VecDeque,
+    error::Report,
+    ops::{Not, RangeInclusive},
+};
 
 use axum::async_trait;
 use futures::StreamExt;
@@ -14,6 +18,7 @@ use tokio_stream::StreamMap;
 
 use super::TcpMirrorApi;
 use crate::{
+    error::AgentResult,
     incoming::{
         IncomingStream, IncomingStreamItem, MirrorHandle, MirroredHttp, MirroredTcp,
         MirroredTraffic,
@@ -31,7 +36,7 @@ pub struct MirrorHandleWrapper {
     /// We use this buffer to save them and return later from the next [`TcpMirrorApi::recv`] call.
     queued_messages: VecDeque<DaemonMessage>,
     incoming_streams: StreamMap<ConnectionId, IncomingStream>,
-    next_connection_id: ConnectionId,
+    connection_idx_iter: RangeInclusive<ConnectionId>,
 }
 
 impl MirrorHandleWrapper {
@@ -43,36 +48,33 @@ impl MirrorHandleWrapper {
     /// Since `mirrord-intproxy` processes requests independently, it's fine.
     const REQUEST_ID: RequestId = 0;
 
-    pub fn new(handle: MirrorHandle) -> Self {
+    pub fn new(handle: MirrorHandle, protocol_version: SharedProtocolVersion) -> Self {
         Self {
             handle,
-            protocol_version: Default::default(),
+            protocol_version,
             queued_messages: Default::default(),
             incoming_streams: Default::default(),
-            next_connection_id: Default::default(),
+            connection_idx_iter: (0..=ConnectionId::MAX),
         }
     }
 
-    fn next_connection_id(&mut self) -> ConnectionId {
-        let id = self.next_connection_id;
-        self.next_connection_id += 1;
-        id
-    }
-
-    fn handle_tcp(&mut self, tcp: MirroredTcp) -> DaemonMessage {
+    fn handle_tcp(&mut self, tcp: MirroredTcp) -> AgentResult<DaemonMessage> {
         let blocked = tcp.info.tls_connector.is_some()
             && self
                 .protocol_version
                 .matches(&NEW_CONNECTION_V2_VERSION)
                 .not();
         if blocked {
-            return DaemonMessage::LogMessage(LogMessage::warn(format!(
+            return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
                 "A TCP connection was not mirrored due to mirrord-protocol version requirement: {}",
                 *NEW_CONNECTION_V2_VERSION,
-            )));
+            ))));
         }
 
-        let id = self.next_connection_id();
+        let id = self
+            .connection_idx_iter
+            .next()
+            .ok_or(AgentError::ExhaustedConnectionId)?;
         self.incoming_streams.insert(id, tcp.stream);
 
         let new_connection = NewTcpConnection {
@@ -84,35 +86,40 @@ impl MirrorHandleWrapper {
         };
 
         let Some(tls) = tcp.info.tls_connector else {
-            return DaemonMessage::Tcp(DaemonTcp::NewConnection(new_connection));
+            return Ok(DaemonMessage::Tcp(DaemonTcp::NewConnection(new_connection)));
         };
 
-        DaemonMessage::Tcp(DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
-            connection: new_connection,
-            transport: TrafficTransportType::Tls {
-                alpn_protocol: tls.alpn_protocol().map(From::from),
-                server_name: tls.server_name().map(|name| name.to_str().into()),
+        Ok(DaemonMessage::Tcp(DaemonTcp::NewConnectionV2(
+            NewTcpConnectionV2 {
+                connection: new_connection,
+                transport: TrafficTransportType::Tls {
+                    alpn_protocol: tls.alpn_protocol().map(From::from),
+                    server_name: tls.server_name().map(|name| name.to_str().into()),
+                },
             },
-        }))
+        )))
     }
 
-    fn handle_http(&mut self, http: MirroredHttp) -> DaemonMessage {
+    fn handle_http(&mut self, http: MirroredHttp) -> AgentResult<DaemonMessage> {
         let blocked = self
             .protocol_version
             .matches(&NEW_CONNECTION_V2_VERSION)
             .not();
         if blocked {
-            return DaemonMessage::LogMessage(LogMessage::warn(format!(
+            return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
                 "An HTTP request was not mirrored due to mirrord-protocol version requirement: {}",
                 *NEW_CONNECTION_V2_VERSION,
-            )));
+            ))));
         }
 
-        let id = self.next_connection_id();
+        let id = self
+            .connection_idx_iter
+            .next()
+            .ok_or(AgentError::ExhaustedConnectionId)?;
         self.incoming_streams.insert(id, http.stream);
 
-        DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
-            ChunkedRequestStartV2 {
+        Ok(DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
+            ChunkedRequest::StartV2(ChunkedRequestStartV2 {
                 connection_id: id,
                 request_id: Self::REQUEST_ID,
                 request: InternalHttpRequest {
@@ -134,7 +141,7 @@ impl MirrorHandleWrapper {
                     .tls_connector
                     .map(From::from)
                     .unwrap_or(TrafficTransportType::Tcp),
-            },
+            }),
         )))
     }
 
@@ -177,7 +184,8 @@ impl MirrorHandleWrapper {
                         connection_id,
                     })));
                 DaemonMessage::LogMessage(LogMessage::warn(format!(
-                    "Mirrored connection {connection_id} failed: {error}"
+                    "Mirrored connection {connection_id} failed: {}",
+                    Report::new(error),
                 )))
             }
         }
@@ -191,27 +199,25 @@ impl TcpMirrorApi for MirrorHandleWrapper {
             return Some(Ok(message));
         }
 
-        let message = tokio::select! {
+        let result = tokio::select! {
             Some(message) = self.handle.next() => match message {
-                Err(error) => return Some(Err(error.into())),
-
+                Err(error) => Err(error.into()),
                 Ok(MirroredTraffic::Tcp(tcp)) => {
                     self.handle_tcp(tcp)
                 },
-
                 Ok(MirroredTraffic::Http(http)) => {
                     self.handle_http(http)
                 },
             },
 
             Some((id, item)) = self.incoming_streams.next() => {
-                self.handle_incoming_item(id, item)
+                Ok(self.handle_incoming_item(id, item))
             }
 
             else => return None,
         };
 
-        Some(Ok(message))
+        Some(result)
     }
 
     async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {

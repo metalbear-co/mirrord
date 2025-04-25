@@ -264,9 +264,10 @@ impl ClientConnectionHandler {
         let protocol_version = SharedProtocolVersion::default();
 
         let tcp_mirror_api: Option<Box<dyn TcpMirrorApi>> = match bg_tasks.mirror_handle {
-            Some(mirror_handle) => {
-                Some(Box::new(MirrorHandleWrapper::new(mirror_handle)) as Box<_>)
-            }
+            Some(mirror_handle) => Some(Box::new(MirrorHandleWrapper::new(
+                mirror_handle,
+                protocol_version.clone(),
+            )) as Box<_>),
             None => Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection)
                 .await
                 .map(|api| Box::new(SnifferApiWrapper::new(api)) as Box<_>),

@@ -21,7 +21,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, Interest},
     net::TcpListener,
     sync::Notify,
-    task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -461,33 +460,23 @@ async fn passthrough_http() {
     let token = CancellationToken::new();
     let token_cloned = token.clone();
     let server = tokio::spawn(async move {
-        let mut tasks = JoinSet::new();
+        let result = tokio::select! {
+            _ = token_cloned.cancelled() => return,
+            result = listener.accept() => result,
+        };
 
-        loop {
-            let result = tokio::select! {
-                _ = token_cloned.cancelled() => {
-                    break;
-                }
-                result = listener.accept() => result,
-            };
-
-            let stream = result.unwrap().0;
-            let shutdown = token_cloned.clone().cancelled_owned();
-            tasks.spawn(async move {
-                let service = hyper::service::service_fn(|_request: Request<Incoming>| {
-                    std::future::ready(Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .version(Version::HTTP_11)
-                        .body(Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed())
-                        .unwrap()))
-                });
-                crate::http::run_http_server(stream, service, HttpVersion::V1, shutdown)
-                    .await
-                    .unwrap();
-            });
-        }
-
-        tasks.join_all().await;
+        let stream = result.unwrap().0;
+        let shutdown = token_cloned.clone().cancelled_owned();
+        let service = hyper::service::service_fn(|_request: Request<Incoming>| {
+            std::future::ready(Ok(Response::builder()
+                .status(StatusCode::OK)
+                .version(Version::HTTP_11)
+                .body(Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed())
+                .unwrap()))
+        });
+        crate::http::run_http_server(stream, service, HttpVersion::V1, shutdown)
+            .await
+            .unwrap();
     });
 
     let (mut connections, _, mut mirror_handle) = start_redirector_task(Default::default()).await;
