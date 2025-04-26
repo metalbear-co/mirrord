@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{ConfigContext, ConfigError};
 
 /// Stolen TLS traffic (including HTTPS requests) can be delivered to the local application either
-/// as TLS or as plain TLS (HTTPS/HTTP).
+/// as TLS (HTTPS) or as plain TCP (HTTP).
 ///
 /// Note that this feature requires mirrord Operator support,
 /// and is crucial when stealing HTTPS requests with an HTTP filter.

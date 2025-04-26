@@ -309,20 +309,16 @@ pub struct IncomingAdvancedFileConfig {
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
     pub ports: Option<Vec<u16>>,
 
-    /// ### https_delivery
-    ///
-    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
-    /// to the local application.
-    ///
-    /// This field is deprecated and will be removed in the future.
-    /// Use `tls_delivery` instead.
-    pub https_delivery: Option<LocalTlsDelivery>,
-
     /// ### tls_delivery
     ///
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
     pub tls_delivery: Option<LocalTlsDelivery>,
+
+    /// ### https_delivery
+    ///
+    /// DEPRECATED, WILL BE REMOVED: moved to `tls_delivery`.
+    pub https_delivery: Option<LocalTlsDelivery>,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -488,20 +484,16 @@ pub struct IncomingConfig {
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
 
-    /// ### feature.network.https_delivery
-    ///
-    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
-    /// to the local application.
-    ///
-    /// This field is deprecated and will be removed in the future.
-    /// Use `tls_delivery` instead.
-    pub https_delivery: Option<LocalTlsDelivery>,
-
     /// ### feature.network.tls_delivery
     ///
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
     pub tls_delivery: Option<LocalTlsDelivery>,
+
+    /// ### feature.network.https_delivery
+    ///
+    /// DEPRECATED, WILL BE REMOVED: moved to `tls_delivery`.
+    pub https_delivery: Option<LocalTlsDelivery>,
 }
 
 impl IncomingConfig {

@@ -196,8 +196,11 @@ messages, the agent stays alive until there are no more heartbeat messages.
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
 Disables specified Linux capabilities for the agent container.
-If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
-`SYS_ADMIN`.
+If nothing is disabled here, agent uses:
+1. `NET_ADMIN`,
+2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
+3. `SYS_PTRACE`,
+4. `SYS_ADMIN`.
 
 Has no effect when using the targetless mode,
 as targetless agent containers have no capabilities.
@@ -215,8 +218,10 @@ Defaults to `false`.
 
 ### agent.flush_connections {#agent-flush_connections}
 
-Flushes existing connections when starting to steal, might fix issues where connections
-aren't stolen (due to being already established)
+Flushes existing connections when starting to steal or mirror (in the passthrough mode).
+
+Might fix issues where connections aren't stolen or mirrored,
+because they had already been established before the agent was spawned.
 
 Defaults to `true`.
 
@@ -340,6 +345,8 @@ Which network interface to use for mirroring.
 The default behavior is try to access the internet and use that interface. If that fails
 it uses `eth0`.
 
+This setting is ignored when `agent.passthrough_mirroring` is enabled.
+
 ### agent.nftables {#agent-nftables}
 
 Use iptables-nft instead of iptables-legacy.
@@ -357,6 +364,20 @@ as targeted agent always runs on the same node as its target container.
   "node_selector": { "kubernetes.io/hostname": "node1" }
 }
 ```
+
+### agent.passthrough_mirroring {#agent-passthrough_mirroring}
+
+Enables an alternative implementation of traffic mirroring.
+
+The implementation is based on iptables redirects,
+following traffic stealing.
+
+When used with `agent.flush_connections`, it might fix issues
+with mirroring non HTTP/1 traffic.
+
+When this is set, `network_interface` setting is ignored.
+
+Defaults to `false`.
 
 ### agent.privileged {#agent-privileged}
 
@@ -508,13 +529,8 @@ DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
 
-Sets buffer size for readonly remote files (in bytes, for example 4096).
-If set, such files will be read in chunks and buffered locally.
-This improves performace when the user application reads data in small portions.
-
-Setting to 0 disables file buffering.
-
-<https://github.com/metalbear-co/mirrord/issues/2069>
+DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
+stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -924,6 +940,15 @@ if file matching the pattern is opened for writing or read/write it will be open
 
 Specify file path patterns that if matched will be read and written to the remote.
 
+### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
+
+Sets buffer size for read-only remote files in bytes. By default, the value is
+128000 bytes, or 128 kB.
+
+Setting the value to 0 disables file buffering.
+Otherwise, read-only remote files will be read in chunks and buffered locally.
+This improves performance when the user application reads data in small portions.
+
 ## feature.hostname {#feature-hostname}
 
 Should mirrord return the hostname of the target pod when calling `gethostname`
@@ -1250,15 +1275,17 @@ Other ports will *not* be stolen, unless listed in
 
 Set to [80, 8080] by default.
 
-#### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
+### feature.network.https_delivery
 
-(Operator Only): configures how mirrord delivers stolen HTTPS requests
-to the local application.
+DEPRECATED, WILL BE REMOVED: moved to `tls_delivery`.
 
-Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP
-requests. Note that stealing HTTPS requests requires mirrord Operator support.
+Stolen TLS traffic (including HTTPS requests) can be delivered to the local application either
+as TLS (HTTPS) or as plain TCP (HTTP).
 
-To have the stolen HTTPS requests delivered with plain HTTP, use:
+Note that this feature requires mirrord Operator support,
+and is crucial when stealing HTTPS requests with an HTTP filter.
+
+To have the stolen TLS traffic delivered with plain TCP, use:
 
 ```json
 {
@@ -1266,7 +1293,7 @@ To have the stolen HTTPS requests delivered with plain HTTP, use:
 }
 ```
 
-To have the requests delivered with HTTPS, use:
+To have the requests delivered with TLS, use:
 ```json
 {
   "protocol": "tls"
@@ -1274,7 +1301,7 @@ To have the requests delivered with HTTPS, use:
 ```
 
 By default, the local mirrord TLS client will trust any certificate presented by the local
-application's HTTP server. To override this behavior, you can either:
+application's TLS server. To override this behavior, you can either:
 
 1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file
    directories. Each found certificate will be used as a trust anchor.
@@ -1296,7 +1323,7 @@ Example with certificate chain:
 }
 ```
 
-To make a TLS connection to the local application's HTTPS server,
+To make a TLS connection to the local application's TLS server,
 mirrord's TLS client needs a server name. You can supply it manually like this:
 ```json
 {
@@ -1315,24 +1342,24 @@ If you don't supply the server name:
    used;
 4. Otherwise, `localhost` will be used.
 
-##### feature.network.incoming.https_delivery.protocol {#feature-network-incoming-https_delivery-protocol}
+##### feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}
 
-Protocol to use when delivering the HTTPS requests locally.
+Protocol to use when delivering the TLS traffic locally.
 
 
-Path to a PEM file containing the certificate chain used by the local application's HTTPS
+Path to a PEM file containing the certificate chain used by the local application's TLS
 server.
 
 This file must contain at least one certificate.
 It can contain entries of other types, e.g private keys, which are ignored.
 
-##### feature.network.incoming.https_delivery.server_name {#feature-network-incoming-https_delivery-server_name}
+##### feature.network.incoming.tls_delivery.server_name {#feature-network-incoming-tls_delivery-server_name}
 
 Server name to use when making a connection.
 
 Must be a valid DNS name or an IP address.
 
-##### feature.network.incoming.https_delivery.trust_roots {#feature-network-incoming-https_delivery-trust_roots}
+##### feature.network.incoming.tls_delivery.trust_roots {#feature-network-incoming-tls_delivery-trust_roots}
 
 Paths to PEM files and directories with PEM files containing allowed root certificates.
 
@@ -1411,6 +1438,100 @@ List of ports to mirror/steal traffic from. Other ports will remain local.
 
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
+
+### feature.network.tls_delivery
+
+(Operator Only): configures how mirrord delivers stolen TLS traffic
+to the local application.
+
+Stolen TLS traffic (including HTTPS requests) can be delivered to the local application either
+as TLS (HTTPS) or as plain TCP (HTTP).
+
+Note that this feature requires mirrord Operator support,
+and is crucial when stealing HTTPS requests with an HTTP filter.
+
+To have the stolen TLS traffic delivered with plain TCP, use:
+
+```json
+{
+  "protocol": "tcp"
+}
+```
+
+To have the requests delivered with TLS, use:
+```json
+{
+  "protocol": "tls"
+}
+```
+
+By default, the local mirrord TLS client will trust any certificate presented by the local
+application's TLS server. To override this behavior, you can either:
+
+1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file
+   directories. Each found certificate will be used as a trust anchor.
+2. Specify a path to the cartificate chain used by the server.
+
+Example with trust roots:
+```json
+{
+  "protocol": "tls",
+  "trust_roots": ["/path/to/cert.pem", "/path/to/cert/dir"]
+}
+```
+
+Example with certificate chain:
+```json
+{
+  "protocol": "tls",
+  "server_cert": "/path/to/cert.pem"
+}
+```
+
+To make a TLS connection to the local application's TLS server,
+mirrord's TLS client needs a server name. You can supply it manually like this:
+```json
+{
+  "protocol": "tls",
+  "server_name": "my.test.server.name"
+}
+```
+
+If you don't supply the server name:
+
+1. If `server_cert` is given, and the found end-entity certificate contains a valid server name,
+   this server name will be used;
+2. Otherwise, if the original client supplied an SNI extension, the server name from that
+   extension will be used;
+3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be
+   used;
+4. Otherwise, `localhost` will be used.
+
+##### feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}
+
+Protocol to use when delivering the TLS traffic locally.
+
+
+Path to a PEM file containing the certificate chain used by the local application's TLS
+server.
+
+This file must contain at least one certificate.
+It can contain entries of other types, e.g private keys, which are ignored.
+
+##### feature.network.incoming.tls_delivery.server_name {#feature-network-incoming-tls_delivery-server_name}
+
+Server name to use when making a connection.
+
+Must be a valid DNS name or an IP address.
+
+##### feature.network.incoming.tls_delivery.trust_roots {#feature-network-incoming-tls_delivery-trust_roots}
+
+Paths to PEM files and directories with PEM files containing allowed root certificates.
+
+Directories are not traversed recursively.
+
+Each certificate found in the files is treated as an allowed root.
+The files can contain entries of other types, e.g private keys, which are ignored.
 
 ### feature.network.ipv6 {#feature-network-ipv6}
 
