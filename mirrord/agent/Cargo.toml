@@ -69,7 +69,7 @@ tokio-rustls.workspace = true
 x509-parser.workspace = true
 rustls.workspace = true
 socket2.workspace = true
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 axum = { version = "0.7", features = ["macros"] }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"

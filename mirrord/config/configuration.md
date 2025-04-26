@@ -561,6 +561,13 @@ If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve
 }
 ```
 
+### external_proxy.host_ip {#external_proxy-host_ip}
+
+Specify a custom host ip addr to listen on.
+
+This address must be accessible from within the container.
+If not specified, mirrord will try and resolve a local address to use.
+
 ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
 
 How much time to wait while we don't have any active connections before exiting.
@@ -1793,7 +1800,7 @@ while `/usr/bin/bash` would apply only for that binary).
 
 ```json
 {
-  "sip_binaries": "bash;python"
+  "sip_binaries": ["bash", "python"]
 }
 ```
 
@@ -1818,7 +1825,7 @@ Accepts a single value, or multiple values separated by `;`.
 
 ```json
 {
- "skip_processes": "bash;node"
+ "skip_processes": ["bash", "node"]
 }
 ```
 

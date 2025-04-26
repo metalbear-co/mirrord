@@ -216,8 +216,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue1,
-        "client",
-        &["a", "b", "c", "c", "b", "a"],
+        "cliENT",                        // Test attribute name case-insensitivity
+        &["a", "b", "c", "C", "B", "A"], // Should also be case-insensitive
         &["1", "2", "3", "4", "5", "6"],
     )
     .await;
@@ -225,8 +225,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue2,
-        "client",
-        &["a", "b", "c", "c", "b", "a"],
+        "CLIent",                        // Test attribute name case-insensitivity
+        &["A", "B", "C", "c", "b", "a"], // Should also be case-insensitive
         &["10", "20", "30", "40", "50", "60"],
     )
     .await;
