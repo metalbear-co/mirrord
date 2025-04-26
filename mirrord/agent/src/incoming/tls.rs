@@ -36,14 +36,14 @@ pub const HTTP_1_1_ALPN_NAME: &[u8] = b"http/1.1";
 /// Name of HTTP/1.0 in the ALPN protocol.
 pub const HTTP_1_0_ALPN_NAME: &[u8] = b"http/1.0";
 
-/// An already built [`StealTlsHandler`] or a configuration to build one.
+/// An already built [`IncomingTlsHandler`] or a configuration to build one.
 #[derive(Debug)]
 enum MaybeBuilt {
     Config(IncomingPortTlsConfig),
     Handler(IncomingTlsHandler),
 }
 
-/// Inner state of [`StealTlsHandlerStore`].
+/// Inner state of [`IncomingTlsHandlerStore`].
 ///
 /// Extracted into a separate struct for a nice [`Arc`] wrap.
 struct State {
@@ -51,7 +51,8 @@ struct State {
     path_resolver: InTargetPathResolver,
 }
 
-/// Holds [`IncomingPortTlsConfig`]s for all relevant ports and caches built [`StealTlsHandler`]s.
+/// Holds [`IncomingPortTlsConfig`]s for all relevant ports and caches built
+/// [`IncomingTlsHandler`]s.
 #[derive(Clone)]
 pub struct IncomingTlsHandlerStore(Arc<State>);
 
@@ -69,7 +70,7 @@ impl IncomingTlsHandlerStore {
         }))
     }
 
-    /// Reuses or builds a [`StealTlsHandler`] for the given port.
+    /// Reuses or builds a [`IncomingTlsHandler`] for the given port.
     ///
     /// Returns [`None`] if this port is not covered by the TLS steal config.
     #[tracing::instrument(level = Level::DEBUG, ret, err)]

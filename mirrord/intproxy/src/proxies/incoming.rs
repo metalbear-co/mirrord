@@ -212,8 +212,8 @@ impl IncomingProxy {
 
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
     ///
-    /// If we don't have a [`PortSubscription`] for the port, the task is not started.
-    /// Instead, we respond immediately to the agent.
+    /// If we don't have a [`PortSubscription`](mirrord_intproxy_protocol::PortSubscription) for the
+    /// port, the task is not started. Instead, we respond immediately to the agent.
     #[tracing::instrument(
         level = Level::DEBUG,
         skip(self, message_bus),
@@ -312,8 +312,8 @@ impl IncomingProxy {
 
     /// Handles [`NewTcpConnection`] message from the agent, starting a new [`TcpProxyTask`].
     ///
-    /// If we don't have a [`PortSubscription`] for the port, the task is not started.
-    /// Instead, we respond immediately to the agent.
+    /// If we don't have a [`PortSubscription`](mirrord_intproxy_protocol::PortSubscription) for the
+    /// port, the task is not started. Instead, we respond immediately to the agent.
     #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_new_connection(
         &mut self,

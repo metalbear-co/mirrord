@@ -5,8 +5,9 @@ use rustls::server::VerifierBuilderError;
 use thiserror::Error;
 use tokio::task::JoinError;
 
-/// Errors that can occur when building a [`StealTlsHandler`](super::handler::StealTlsHandler)
-/// with [`StealTlsHandlerStore`](super::StealTlsHandlerStore).
+/// Errors that can occur when building an
+/// [`IncomingTlsHandler`](super::handler::IncomingTlsHandler)
+/// with [`IncomingTlsHandlerStore`](super::IncomingTlsHandlerStore).
 #[derive(Error, Debug)]
 pub enum IncomingTlsSetupError {
     #[error("TLS handlers store mutex is poisoned")]

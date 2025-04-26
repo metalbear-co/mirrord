@@ -70,10 +70,8 @@ pub enum ConnError {
 /// As most inner errors in [`ConnError`] are wrapped in [`Arc`],
 /// single [`ResultExt::map_err_into`] call can be used instead of a chain like:
 ///
-/// ```rust,no-run
-/// result
-///     .map_err(Arc::new)
-///     .map_err(ConnError::TcpConnectError)
+/// ```rust,no_run
+/// result.map_err(Arc::new).map_err(ConnError::TcpConnectError)
 /// ```
 pub trait ResultExt {
     type Ok;

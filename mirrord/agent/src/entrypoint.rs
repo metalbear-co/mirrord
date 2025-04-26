@@ -57,7 +57,7 @@ use crate::{
 
 mod setup;
 
-/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
+/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealApi`]s with the background
 /// task.
 const CHANNEL_SIZE: usize = 1024;
 

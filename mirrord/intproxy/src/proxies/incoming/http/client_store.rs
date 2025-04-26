@@ -50,8 +50,8 @@ impl fmt::Debug for IdleLocalClient {
 /// 2. HTTP [`Version`]
 /// 3. Whether the client uses TLS
 ///
-/// We ignore the fact that [`HttpRequestTransportType::Tls::alpn_protocol`] and
-/// [`HttpRequestTransportType::Tls::server_name`] might be different.
+/// We ignore the fact that [`TrafficTransportType::Tls::alpn_protocol`] and
+/// [`TrafficTransportType::Tls::server_name`] might be different.
 /// This is because these parameters are only relevant **before** the connection is upgraded to
 /// HTTP. Since an idle [`LocalHttpClient`] is ready to send HTTP requests, we assume it's safe to
 /// reuse it.
