@@ -486,7 +486,7 @@ impl LayerConfig {
             (None, Some(config)) => {
                 config.verify(context)?;
             }
-            (None, None) => todo!()
+            (None, None) => {},
         }
 
         if !self.feature.copy_target.enabled
