@@ -3657,6 +3657,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "issue3248"
+version = "0.1.0"
+
+[[package]]
 name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4532,6 +4536,7 @@ name = "mirrord-layer"
 version = "3.140.0"
 dependencies = [
  "actix-codec",
+ "apple-codesign",
  "base64 0.22.1",
  "bincode",
  "ctor",

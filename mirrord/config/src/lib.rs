@@ -205,11 +205,11 @@ pub struct LayerConfig {
     ///
     /// Useful when process A spawns process B, and the user wants mirrord to operate only on
     /// process B.
-    /// Accepts a single value, or multiple values separated by `;`.
+    /// Accepts a single value, or an array of values.
     ///
     ///```json
     /// {
-    ///  "skip_processes": "bash;node"
+    ///  "skip_processes": ["bash", "node"]
     /// }
     /// ```
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
@@ -266,7 +266,7 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///   "sip_binaries": "bash;python"
+    ///   "sip_binaries": ["bash", "python"]
     /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
@@ -329,6 +329,15 @@ pub struct LayerConfig {
     /// ## experimental {#root-experimental}
     #[config(nested)]
     pub experimental: ExperimentalConfig,
+
+    /// ## skip_sip {#root-skip_sip}
+    ///
+    /// Allows mirrord to skip patching (macOS SIP) unwanted processes.
+    ///
+    /// When patching is skipped, mirrord will no longer be able to load into
+    /// the process and its child processes.
+    #[config(env = "MIRRORD_SKIP_SIP")]
+    pub skip_sip: Option<VecOrSingle<String>>,
 }
 
 impl LayerConfig {
@@ -1002,6 +1011,7 @@ mod tests {
             internal_proxy: None,
             use_proxy: None,
             experimental: None,
+            skip_sip: None,
         };
 
         assert_eq!(config, expect);
