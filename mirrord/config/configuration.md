@@ -1699,7 +1699,7 @@ while `/usr/bin/bash` would apply only for that binary).
 
 ```json
 {
-  "sip_binaries": "bash;python"
+  "sip_binaries": ["bash", "python"]
 }
 ```
 
@@ -1724,7 +1724,7 @@ Accepts a single value, or multiple values separated by `;`.
 
 ```json
 {
- "skip_processes": "bash;node"
+ "skip_processes": ["bash", "node"]
 }
 ```
 

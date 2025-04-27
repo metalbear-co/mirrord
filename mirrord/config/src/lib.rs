@@ -205,11 +205,11 @@ pub struct LayerConfig {
     ///
     /// Useful when process A spawns process B, and the user wants mirrord to operate only on
     /// process B.
-    /// Accepts a single value, or multiple values separated by `;`.
+    /// Accepts a single value, or an array of values.
     ///
     ///```json
     /// {
-    ///  "skip_processes": "bash;node"
+    ///  "skip_processes": ["bash", "node"]
     /// }
     /// ```
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
@@ -266,7 +266,7 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///   "sip_binaries": "bash;python"
+    ///   "sip_binaries": ["bash", "python"]
     /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,

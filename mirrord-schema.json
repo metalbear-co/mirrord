@@ -112,7 +112,7 @@
     },
     "sip_binaries": {
       "title": "sip_binaries {#root-sip_binaries}",
-      "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically patched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).\n\n```json { \"sip_binaries\": \"bash;python\" } ```",
+      "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically patched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).\n\n```json { \"sip_binaries\": [\"bash\", \"python\"] } ```",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
@@ -132,7 +132,7 @@
     },
     "skip_processes": {
       "title": "skip_processes {#root-skip_processes}",
-      "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or multiple values separated by `;`.\n\n```json { \"skip_processes\": \"bash;node\" } ```",
+      "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or an array of values.\n\n```json { \"skip_processes\": [\"bash\", \"node\"] } ```",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
