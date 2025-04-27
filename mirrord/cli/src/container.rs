@@ -112,6 +112,12 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
             .await?;
     sub_progress.success(None);
 
+    let extproxy_addr = config
+        .container
+        .override_host_ip
+        .map(|host_ip| SocketAddr::new(host_ip, extproxy_addr.port()))
+        .unwrap_or(extproxy_addr);
+
     let sidecar =
         IntproxySidecar::create(config, runtime, extproxy_addr, tls_setup.as_ref()).await?;
 
@@ -139,13 +145,11 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
         pipe_intproxy_sidecar_logs(config, sidecar_intproxy_logs.into_merged_lines()).await?;
     tokio::spawn(intproxy_logs_pipe);
 
-    let intproxy_address_str = match config.container.override_host_ip {
-        Some(host_ip) => SocketAddr::new(host_ip, sidecar_intproxy_address.port()).to_string(),
-        None => sidecar_intproxy_address.to_string(),
-    };
-
     // Provide internal proxy address to the layer.
-    runtime_command.add_env(MIRRORD_LAYER_INTPROXY_ADDR, &intproxy_address_str);
+    runtime_command.add_env(
+        MIRRORD_LAYER_INTPROXY_ADDR,
+        &sidecar_intproxy_address.to_string(),
+    );
 
     Ok((runtime_command, execution_info, tls_setup))
 }
