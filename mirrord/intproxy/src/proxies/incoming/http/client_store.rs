@@ -7,9 +7,6 @@ use std::{
 
 use futures::FutureExt;
 use hyper::{Uri, Version};
-use mirrord_config::feature::network::incoming::https_delivery::{
-    HttpsDeliveryProtocol, LocalHttpsDelivery,
-};
 use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
@@ -20,7 +17,8 @@ use tokio::{
 };
 use tracing::Level;
 
-use super::{tls::LocalTlsSetup, HttpSender, LocalHttpClient, LocalHttpError};
+use super::{HttpSender, LocalHttpClient, LocalHttpError};
+use crate::proxies::incoming::tls::LocalTlsSetup;
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -72,31 +70,11 @@ impl ClientStore {
     /// Creates a new store.
     ///
     /// The store will keep unused clients alive for at least the given time.
-    pub fn new_with_timeout(timeout: Duration, https_delivery: LocalHttpsDelivery) -> Self {
+    pub fn new_with_timeout(timeout: Duration, tls_setup: Option<Arc<LocalTlsSetup>>) -> Self {
         let store = Self {
             clients: Default::default(),
             notify: Default::default(),
-            tls_setup: match https_delivery.protocol {
-                HttpsDeliveryProtocol::Tcp => None,
-                HttpsDeliveryProtocol::Tls => {
-                    let server_name = https_delivery.server_name.and_then(|name| {
-                        ServerName::try_from(name)
-                            .inspect_err(|_| {
-                                tracing::error!(
-                                    "Invalid server name was specified for the local HTTPS delivery. \
-                                    This should be detected during config verification."
-                                )
-                            })
-                            .ok()
-                    });
-
-                    Some(Arc::new(LocalTlsSetup::new(
-                        https_delivery.trust_roots,
-                        https_delivery.server_cert,
-                        server_name,
-                    )))
-                }
-            },
+            tls_setup,
         };
 
         tokio::spawn(cleanup_task(store.clone(), timeout));

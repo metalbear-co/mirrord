@@ -6,13 +6,15 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{collections::HashMap, io, net::SocketAddr, ops::Not, time::Duration};
+use std::{collections::HashMap, io, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
-use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
+use mirrord_config::feature::network::incoming::https_delivery::{
+    HttpsDeliveryProtocol, LocalHttpsDelivery,
+};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscription, ProxyToLayerMessage,
@@ -26,9 +28,11 @@ use mirrord_protocol::{
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
+use rustls::pki_types::ServerName;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
+use tls::LocalTlsSetup;
 use tokio::sync::mpsc;
 use tracing::Level;
 
@@ -49,6 +53,7 @@ mod port_subscription_ext;
 mod subscriptions;
 mod tasks;
 mod tcp_proxy;
+mod tls;
 
 /// Errors that can occur when handling the `incoming` feature.
 #[derive(Error, Debug)]
@@ -140,6 +145,8 @@ pub struct IncomingProxy {
     response_mode: ResponseMode,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
+    /// For connecting to the user application's server with TLS.
+    tls_setup: Option<Arc<LocalTlsSetup>>,
     /// Each mirrored remote connection is mapped to a [`TcpProxyTask`] in mirror mode.
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
@@ -165,14 +172,37 @@ impl IncomingProxy {
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalHttpsDelivery,
     ) -> Self {
+        let tls_setup = match https_delivery.protocol {
+            HttpsDeliveryProtocol::Tcp => None,
+            HttpsDeliveryProtocol::Tls => {
+                let server_name = https_delivery.server_name.and_then(|name| {
+                    ServerName::try_from(name)
+                        .inspect_err(|_| {
+                            tracing::error!(
+                                "Invalid server name was specified for the local HTTPS delivery. \
+                                This should be detected during config verification."
+                            )
+                        })
+                        .ok()
+                });
+
+                Some(Arc::new(LocalTlsSetup::new(
+                    https_delivery.trust_roots,
+                    https_delivery.server_cert,
+                    server_name,
+                )))
+            }
+        };
+
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
             response_mode: Default::default(),
             client_store: ClientStore::new_with_timeout(
                 idle_local_http_connection_timeout,
-                https_delivery,
+                tls_setup.clone(),
             ),
+            tls_setup,
             mirror_tcp_proxies: Default::default(),
             steal_tcp_proxies: Default::default(),
             http_gateways: Default::default(),
