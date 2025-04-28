@@ -290,7 +290,7 @@ impl IncomingProxy {
             .insert(request_id, HttpGatewayHandle { _tx: tx, body_tx });
     }
 
-    /// Handles [`NewTcpConnection`] message from the agent, starting a new [`TcpProxyTask`].
+    /// Handles [`NewTcpConnectionV2`] message from the agent, starting a new [`TcpProxyTask`].
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.

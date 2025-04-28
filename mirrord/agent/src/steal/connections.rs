@@ -138,7 +138,7 @@ pub enum ConnectionMessageOut {
     /// Subscribed the client to a new TCP connection.
     ///
     /// This variant translates to
-    /// [`DaemonTcp::NewConnection`](mirrord_protocol::tcp::DaemonTcp::NewConnection).
+    /// [`DaemonTcp::NewConnectionV1`](mirrord_protocol::tcp::DaemonTcp::NewConnectionV1).
     ///
     /// # Note
     ///
