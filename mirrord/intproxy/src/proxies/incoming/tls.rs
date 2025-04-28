@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{fmt, path::PathBuf, sync::Arc};
 
 use mirrord_tls_util::{
     best_effort_root_store, DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames,
@@ -115,5 +115,15 @@ impl LocalTlsSetup {
         };
 
         Ok((builder.with_no_client_auth(), server_name))
+    }
+}
+
+impl fmt::Debug for LocalTlsSetup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LocalTlsSetup")
+            .field("trust_roots", &self.trust_roots)
+            .field("server_cert", &self.server_cert)
+            .field("server_name", &self.server_name)
+            .finish()
     }
 }

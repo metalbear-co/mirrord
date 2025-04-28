@@ -374,8 +374,10 @@ impl IncomingProxy {
                 LocalTcpConnection::FromTheStart {
                     socket,
                     peer: subscription.listening_on,
+                    transport,
+                    tls_setup: self.tls_setup.clone(),
                 },
-                !is_steal,
+                is_steal.not(),
             ),
             id,
             Self::CHANNEL_SIZE,
@@ -778,9 +780,9 @@ impl IncomingProxy {
 
                 match result {
                     Ok(()) => {}
-                    Err(TaskError::Error(
-                        InProxyTaskError::IoError(..) | InProxyTaskError::UpgradeError(..),
-                    )) => unreachable!("HttpGatewayTask does not return any errors"),
+                    Err(TaskError::Error(..)) => {
+                        unreachable!("HttpGatewayTask does not return any errors")
+                    }
                     Err(TaskError::Panic) => {
                         tracing::error!(
                             connection_id = id.connection_id,
