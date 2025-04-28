@@ -128,6 +128,19 @@ pub struct MirrordKafkaTopicsConsumerSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumer_restart_timeout: Option<u32>,
 
+    /// Period of time to wait before cleaning up Kafka splits for this consumer and reverting Pod
+    /// template patches (in seconds).
+    ///
+    /// For any given topic, starting the first Kafka splitting session requires patching the
+    /// target workload. Similarly, stopping the last Kafka splitting session requires another
+    /// patch, that reverts the first one.
+    ///
+    /// If the target workload takes a long time to restart, it may be desirable to keep the Kafka
+    /// splits alive longer, so that the next Kafka splitting session will not have to patch
+    /// the workload again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub split_ttl: Option<u32>,
+
     /// List of consumed splittable topics.
     pub topics: Vec<KafkaTopicDetails>,
 }
