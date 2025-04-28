@@ -95,6 +95,7 @@ jobs:
             .dockerignore
             rust-toolchain.toml
             rustfmt.toml
+            deny.toml
             .cargo/**
       - name: get markdown changes
         id: changed-markdown
