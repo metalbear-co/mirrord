@@ -19,7 +19,7 @@ use tokio::{
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
 // impl deref with pin
 #[derive(Debug)]
-pub(crate) struct ReversibleStream<const HEADER_SIZE: usize, IO> {
+pub struct ReversibleStream<const HEADER_SIZE: usize, IO> {
     stream: IO,
 
     header: [u8; HEADER_SIZE],
@@ -39,20 +39,13 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize, IO> {
     num_forwarded: usize,
 }
 
-impl<const HEADER_SIZE: usize, IO> ReversibleStream<HEADER_SIZE, IO> {
-    /// Returns a reference to the inner IO stream.
-    pub(crate) fn inner(&self) -> &IO {
-        &self.stream
-    }
-}
-
 impl<const HEADER_SIZE: usize, IO> ReversibleStream<HEADER_SIZE, IO>
 where
     IO: AsyncRead + Unpin,
 {
     /// Build a [`ReversibleStream`] from the given IO stream, move on if not done within given
     /// timeout. Return an error if there was an error while reading from the stream.
-    pub(crate) async fn read_header(stream: IO, timeout: Duration) -> io::Result<Self> {
+    pub async fn read_header(stream: IO, timeout: Duration) -> io::Result<Self> {
         let mut this = Self {
             stream,
             header: [0; HEADER_SIZE],
@@ -104,7 +97,7 @@ where
         Ok(this)
     }
 
-    pub(crate) fn get_header(&mut self) -> &[u8] {
+    pub fn get_header(&mut self) -> &[u8] {
         &self.header[..self.header_len]
     }
 }

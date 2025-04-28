@@ -1,5 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
+use mirrord_config::feature::network::incoming::tls_delivery::{
+    LocalTlsDelivery, TlsDeliveryProtocol,
+};
 use mirrord_tls_util::{
     best_effort_root_store, DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames,
 };
@@ -47,6 +50,30 @@ impl LocalTlsSetup {
             server_cert,
             server_name,
             resolved: OnceCell::new(),
+        }
+    }
+
+    pub fn from_config(config: LocalTlsDelivery) -> Option<Self> {
+        match config.protocol {
+            TlsDeliveryProtocol::Tcp => None,
+            TlsDeliveryProtocol::Tls => {
+                let server_name = config.server_name.and_then(|name| {
+                    ServerName::try_from(name)
+                        .inspect_err(|_| {
+                            tracing::error!(
+                                "Invalid server name was specified for the local TLS delivery. \
+                                    This should be detected during config verification."
+                            )
+                        })
+                        .ok()
+                });
+
+                Some(LocalTlsSetup::new(
+                    config.trust_roots,
+                    config.server_cert,
+                    server_name,
+                ))
+            }
         }
     }
 

@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 
 pub mod error;
 pub mod path_resolver;
+pub mod protocol_version;
 pub mod remote_runtime;
 
 /// Struct that helps you manage topic -> subscribers

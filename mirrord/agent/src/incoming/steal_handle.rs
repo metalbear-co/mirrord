@@ -5,30 +5,30 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 
 use super::{
-    connection::RedirectedConnection,
+    connection::{http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
-    task::{StealRequest, TaskError},
+    task::{RedirectionRequest, TaskError},
 };
 
 /// Handle to a running [`RedirectorTask`](super::task::RedirectorTask).
 ///
-/// Allows for stealing incoming TCP connections.
+/// Allows for stealing incoming traffic.
 pub struct StealHandle {
     /// For sending steal requests to the task.
-    message_tx: mpsc::Sender<StealRequest>,
+    message_tx: mpsc::Sender<RedirectionRequest>,
     /// For fetching the task error.
     ///
-    /// [`RedirectorTask`](super::RedirectorTask) never exits before this handle is dropped.
-    /// Also, it never removes any port steal on its own.
+    /// [`RedirectorTask`](super::RedirectorTask) never exits successfully before all handles are
+    /// dropped. Also, it never removes any port steal on its own.
     /// Therefore, if one of our [`mpsc::channel`]s fails, we assume that the task has failed
-    /// and we use this [`TaskError`] to retrieve the task's error.
+    /// and we use this channel to retrieve the task's error.
     task_error: TaskError,
-    /// For receiving stolen connections.
-    stolen_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<RedirectedConnection>>>,
+    /// For receiving stolen traffic.
+    stolen_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<StolenTraffic>>>,
 }
 
 impl StealHandle {
-    pub(super) fn new(message_tx: mpsc::Sender<StealRequest>, task_error: TaskError) -> Self {
+    pub(super) fn new(message_tx: mpsc::Sender<RedirectionRequest>, task_error: TaskError) -> Self {
         Self {
             message_tx,
             task_error,
@@ -51,7 +51,7 @@ impl StealHandle {
         let (receiver_tx, receiver_rx) = oneshot::channel();
         if self
             .message_tx
-            .send(StealRequest { port, receiver_tx })
+            .send(RedirectionRequest::Steal { port, receiver_tx })
             .await
             .is_err()
         {
@@ -71,20 +71,33 @@ impl StealHandle {
     /// Stops stealing the given port.
     ///
     /// If this port is not stolen, does nothing.
-    ///
-    /// After this is called, [`Self::next`] might still return some connections redirected from the
-    /// given port.
     pub fn stop_steal(&mut self, port: u16) {
         self.stolen_ports.remove(&port);
     }
 
-    /// Returns the next redirected connection.
+    /// Returns stolen traffic.
     ///
     /// Returns nothing if no port is stolen.
-    pub async fn next(&mut self) -> Option<Result<RedirectedConnection, RedirectorTaskError>> {
+    pub async fn next(&mut self) -> Option<Result<StolenTraffic, RedirectorTaskError>> {
         match self.stolen_ports.next().await? {
             (.., Some(conn)) => Some(Ok(conn)),
             (.., None) => Some(Err(self.task_error.get().await)),
+        }
+    }
+}
+
+/// Infoming traffic stolen with a [`StealHandle`].
+pub enum StolenTraffic {
+    Tcp(RedirectedTcp),
+    Http(RedirectedHttp),
+}
+
+impl StolenTraffic {
+    /// Original destination port of the stolen connection/request.
+    pub fn destination_port(&self) -> u16 {
+        match self {
+            Self::Tcp(tcp) => tcp.info().original_destination.port(),
+            Self::Http(http) => http.info().original_destination.port(),
         }
     }
 }

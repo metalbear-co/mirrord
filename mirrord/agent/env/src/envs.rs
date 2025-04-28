@@ -4,7 +4,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use crate::{checked_env::CheckedEnv, steal_tls::StealPortTlsConfig};
+use crate::{checked_env::CheckedEnv, steal_tls::IncomingPortTlsConfig};
 
 /// Used to pass operator's x509 certificate to the agent.
 ///
@@ -53,7 +53,7 @@ pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_
 pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
 
 /// Provides the agent with a steal TLS configuration.
-pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
+pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<IncomingPortTlsConfig>> =
     CheckedEnv::new("MIRRORD_AGENT_STEAL_TLS_CONFIG");
 
 /// Container id of the target we're attaching to, e.g. `mirrord exec -t
@@ -67,3 +67,10 @@ pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
 /// **Attention**: this is **not** the ephemeral container id, it's the target's!
 pub const EPHEMERAL_TARGET_CONTAINER_ID: CheckedEnv<String> =
     CheckedEnv::new("MIRRORD_AGENT_EPHEMERAL_TARGET_CONTAINER_ID");
+
+/// Enables passthrough mirroring in the agent.
+///
+/// When this is set, the agent should handle traffic mirroring via iptables instead of the raw
+/// socket.
+pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_PASSTHROUGH_MIRRORING");

@@ -4,6 +4,7 @@
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(tcp_quickack)]
+#![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
@@ -22,11 +23,13 @@ mod file;
 mod http;
 mod incoming;
 mod metrics;
+mod mirror;
 mod namespace;
 mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
+mod test;
 mod util;
 mod vpn;
 

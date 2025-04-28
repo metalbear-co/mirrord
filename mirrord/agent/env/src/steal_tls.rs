@@ -1,4 +1,4 @@
-//! This module contains definition of TLS steal configuration for the agent.
+//! This module contains definition of TLS steal/mirror configuration for the agent.
 //!
 //! These structs are also used in the CRDs fetched by the operator.
 //!
@@ -117,17 +117,17 @@ pub struct AgentClientConfig {
     pub verification: TlsServerVerification,
 }
 
-/// Configures TLS setup for stealing traffic from some port.
+/// Configures TLS setup for stealing/mirroring traffic from some port.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct StealPortTlsConfig {
+pub struct IncomingPortTlsConfig {
     /// Remote port to which this configuration applies.
     pub port: u16,
     /// Configures how mirrord-agent authenticates itself and the clients when acting as a TLS
     /// server.
     ///
-    /// mirrord-agent acts as a TLS server when accepting stolen connections.
+    /// mirrord-agent acts as a TLS server when accepting redirected connections.
     pub agent_as_server: AgentServerConfig,
     /// Configures how mirrord-agent authenticates itself and the server when acting as a TLS
     /// client.

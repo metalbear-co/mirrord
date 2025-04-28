@@ -408,6 +408,14 @@ impl LayerConfig {
             );
         }
 
+        if self.agent.passthrough_mirroring && self.agent.network_interface.is_some() {
+            context.add_warning(
+                "agent.network_interface setting is ignored \
+                when agent.passthrough_mirroring is enabled."
+                    .into(),
+            );
+        }
+
         if matches!(
             self.feature.network.outgoing.filter,
             Some(OutgoingFilterConfig::Remote(_))
@@ -480,11 +488,23 @@ impl LayerConfig {
             }
         }
 
-        self.feature
-            .network
-            .incoming
-            .https_delivery
-            .verify(context)?;
+        match (&self.feature.network.incoming.https_delivery, &self.feature.network.incoming.tls_delivery) {
+            (Some(..), Some(..)) => return Err(ConfigError::Conflict(
+                "`feature.network.incoming.https_delivery` and `feature.network.incoming.tls_delivery` \
+                cannot be specified together, please use only `feature.network.incoming.tls_delivery`".into(),
+            )),
+            (Some(config), None) => {
+                context.add_warning(
+                    "`feature.network.incoming.https_delivery` is deprecated, \
+                    please use `feature.network.incoming.tls_delivery` instead.".into(),
+                );
+                config.verify(context)?;
+            },
+            (None, Some(config)) => {
+                config.verify(context)?;
+            }
+            (None, None) => {},
+        }
 
         if !self.feature.copy_target.enabled
             && self
@@ -989,6 +1009,7 @@ mod tests {
                             on_concurrent_steal: None,
                             ports: None,
                             https_delivery: Default::default(),
+                            tls_delivery: Default::default(),
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

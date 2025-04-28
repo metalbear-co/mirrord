@@ -1,3 +1,18 @@
+use std::{io, time::Duration};
+
+use reversible_stream::ReversibleStream;
+use tokio::io::AsyncRead;
+use tracing::Level;
+
+mod filter;
+mod reversible_stream;
+mod sender;
+mod server;
+
+pub use filter::HttpFilter;
+pub use sender::HttpSender;
+pub use server::run_http_server;
+
 /// Helper enum for representing HTTP/1.x and HTTP/2, which are handled very differently in some
 /// parts of the code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,7 +42,11 @@ impl HttpVersion {
     ///
     /// The given `buffer` must contain at least [`Self::MINIMAL_HEADER_SIZE`] bytes, otherwise this
     /// function always returns [`None`].
-    #[tracing::instrument(level = "trace")]
+    ///
+    /// # TODO
+    ///
+    /// Fix detection of HTTP/1 requests. Currently `hello ther` passes as HTTP/1.
+    #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(buffer: &[u8]) -> Option<Self> {
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
@@ -42,4 +61,19 @@ impl HttpVersion {
             }
         }
     }
+}
+
+pub type PeekedStream<IO> = ReversibleStream<{ HttpVersion::MINIMAL_HEADER_SIZE }, IO>;
+
+pub async fn detect_http_version<IO>(
+    stream: IO,
+    timeout: Duration,
+) -> io::Result<(PeekedStream<IO>, Option<HttpVersion>)>
+where
+    IO: AsyncRead + Unpin,
+{
+    let mut stream = PeekedStream::read_header(stream, timeout).await?;
+    let header = HttpVersion::new(stream.get_header());
+
+    Ok((stream, header))
 }

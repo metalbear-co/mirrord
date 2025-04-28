@@ -19,7 +19,7 @@ use k8s_openapi::{
 };
 use kube::{api::ObjectMeta, Api, Client};
 use mirrord_agent_env::steal_tls::{
-    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+    AgentClientConfig, AgentServerConfig, IncomingPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_operator::crd::steal_tls::{MirrordTlsStealConfig, MirrordTlsStealConfigSpec};
@@ -287,9 +287,9 @@ impl GoServTlsConfig {
 
 /// Generates:
 /// 1. Configuration for the [`GoServService`] in mTLS mode
-/// 2. [`StealPortTlsConfig`] to configure TLS stealing via the operator
+/// 2. [`IncomingPortTlsConfig`] to configure TLS stealing via the operator
 /// 3. Root certificate for [`GoServService`] clients
-fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey) {
+fn generate_tls_configs() -> (GoServTlsConfig, IncomingPortTlsConfig, CertifiedKey) {
     let mut pem_files: BTreeMap<String, String> = Default::default();
     let mut env: HashMap<String, String> = Default::default();
 
@@ -352,7 +352,7 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
         ),
     );
 
-    let tls_steal_config = StealPortTlsConfig {
+    let tls_steal_config = IncomingPortTlsConfig {
         port: 80,
         agent_as_server: AgentServerConfig {
             authentication: TlsAuthentication {

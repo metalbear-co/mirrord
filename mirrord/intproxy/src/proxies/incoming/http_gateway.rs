@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
+    error::Report,
     fmt,
     net::SocketAddr,
     ops::ControlFlow,
@@ -12,9 +13,8 @@ use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
-        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest,
-        HttpRequestTransportType, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
-        InternalHttpResponse,
+        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
+        InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse, TrafficTransportType,
     },
 };
 use tokio::time;
@@ -42,7 +42,7 @@ pub struct HttpGatewayTask {
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
     /// How to transport the HTTP request to the server.
-    transport: HttpRequestTransportType,
+    transport: TrafficTransportType,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -63,7 +63,7 @@ impl HttpGatewayTask {
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
-        transport: HttpRequestTransportType,
+        transport: TrafficTransportType,
     ) -> Self {
         Self {
             request,
@@ -91,7 +91,6 @@ impl HttpGatewayTask {
     ) -> Result<ControlFlow<()>, LocalHttpError> {
         let frames = body
             .ready_frames()
-            .map_err(From::from)
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
         if frames.is_last {
@@ -236,7 +235,6 @@ impl HttpGatewayTask {
                 let body: Vec<u8> = body
                     .collect()
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
@@ -265,7 +263,6 @@ impl HttpGatewayTask {
                 let start = Instant::now();
                 let body = InternalHttpBody::from_body(body)
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::ReadBodyFailed)?;
                 tracing::debug!(
                     ?body,
@@ -341,7 +338,7 @@ impl BackgroundTask for HttpGatewayTask {
                         tracing::warn!(
                             gateway = ?self,
                             failed_attempts = attempt,
-                            %error,
+                            error = %Report::new(&error),
                             "Failed to send an HTTP request",
                         );
 
@@ -351,7 +348,7 @@ impl BackgroundTask for HttpGatewayTask {
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
-                        %error,
+                        error = %Report::new(error),
                         "Trying again after backoff",
                     );
 
@@ -363,7 +360,7 @@ impl BackgroundTask for HttpGatewayTask {
         };
 
         let response = mirrord_error_response(
-            error,
+            Report::new(error).pretty(true),
             self.request.version(),
             self.request.connection_id,
             self.request.request_id,
@@ -595,12 +592,12 @@ mod test {
                 ResponseMode::Basic,
                 local_destination,
                 if use_tls {
-                    HttpRequestTransportType::Tls {
+                    TrafficTransportType::Tls {
                         alpn_protocol: Some(b"http/1.1".into()),
                         server_name: None,
                     }
                 } else {
-                    HttpRequestTransportType::Tcp
+                    TrafficTransportType::Tcp
                 },
             );
             tasks.register(gateway, 0, 8)
@@ -761,7 +758,7 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 response_mode,
                 addr,
-                HttpRequestTransportType::Tcp,
+                TrafficTransportType::Tcp,
             ),
             (),
             8,
@@ -912,7 +909,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                HttpRequestTransportType::Tcp,
+                TrafficTransportType::Tcp,
             ),
             (),
             8,
@@ -987,7 +984,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                HttpRequestTransportType::Tcp,
+                TrafficTransportType::Tcp,
             ),
             0,
             8,
@@ -998,7 +995,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                HttpRequestTransportType::Tcp,
+                TrafficTransportType::Tcp,
             ),
             1,
             8,
