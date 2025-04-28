@@ -732,11 +732,12 @@ mod test {
     /// [`LayerTcpSteal::HttpResponseChunked`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseChunked)
     /// is streamed.
     #[rstest]
-    #[case::basic(ResponseMode::Basic)]
-    #[case::framed(ResponseMode::Framed)]
-    #[case::chunked(ResponseMode::Chunked)]
+    #[case::basic(Some(ResponseMode::Basic))]
+    #[case::framed(Some(ResponseMode::Framed))]
+    #[case::chunked(Some(ResponseMode::Chunked))]
+    #[case::discard(None)]
     #[tokio::test]
-    async fn produces_correct_response_variant(#[case] response_mode: ResponseMode) {
+    async fn produces_correct_response_variant(#[case] response_mode: Option<ResponseMode>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let semaphore: Arc<Semaphore> = Arc::new(Semaphore::const_new(0));
@@ -792,7 +793,7 @@ mod test {
             HttpGatewayTask::new(
                 request,
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
-                Some(response_mode),
+                response_mode,
                 addr,
                 IncomingTrafficTransportType::Tcp,
             ),
@@ -801,7 +802,7 @@ mod test {
         );
 
         match response_mode {
-            ResponseMode::Basic => {
+            Some(ResponseMode::Basic) => {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
@@ -811,7 +812,7 @@ mod test {
                 }
             }
 
-            ResponseMode::Framed => {
+            Some(ResponseMode::Framed) => {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseFramed(response)) => {
@@ -831,7 +832,7 @@ mod test {
                 }
             }
 
-            ResponseMode::Chunked => {
+            Some(ResponseMode::Chunked) => {
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseChunked(ChunkedResponse::Start(
                         response,
@@ -868,6 +869,10 @@ mod test {
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }
+            }
+
+            None => {
+                semaphore.add_permits(2);
             }
         }
 
