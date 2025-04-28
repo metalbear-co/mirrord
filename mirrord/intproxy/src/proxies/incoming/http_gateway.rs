@@ -38,7 +38,9 @@ pub struct HttpGatewayTask {
     /// Shared cache of [`LocalHttpClient`](super::http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Determines response variant.
-    response_mode: ResponseMode,
+    ///
+    /// [`None`] if this is a mirrored request and we should discard the response.
+    response_mode: Option<ResponseMode>,
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
     /// How to transport the HTTP request to the server.
@@ -61,7 +63,7 @@ impl HttpGatewayTask {
     pub fn new(
         request: HttpRequest<StreamingBody>,
         client_store: ClientStore,
-        response_mode: ResponseMode,
+        response_mode: Option<ResponseMode>,
         server_addr: SocketAddr,
         transport: IncomingTrafficTransportType,
     ) -> Self {
@@ -228,10 +230,10 @@ impl HttpGatewayTask {
             tracing::debug!("Detected an HTTP upgrade");
             hyper::upgrade::on(&mut response)
         });
-        let (parts, body) = response.into_parts();
+        let (parts, mut body) = response.into_parts();
 
         let flow = match self.response_mode {
-            ResponseMode::Basic => {
+            Some(ResponseMode::Basic) => {
                 let start = Instant::now();
                 let body: Vec<u8> = body
                     .collect()
@@ -261,7 +263,7 @@ impl HttpGatewayTask {
 
                 ControlFlow::Continue(())
             }
-            ResponseMode::Framed => {
+            Some(ResponseMode::Framed) => {
                 let start = Instant::now();
                 let body = InternalHttpBody::from_body(body)
                     .await
@@ -288,9 +290,23 @@ impl HttpGatewayTask {
 
                 ControlFlow::Continue(())
             }
-            ResponseMode::Chunked => {
+            Some(ResponseMode::Chunked) => {
                 self.handle_response_chunked(parts, body, message_bus)
                     .await?
+            }
+            None => {
+                let start = Instant::now();
+                while let Some(frame) = body.frame().await {
+                    frame
+                        .map_err(From::from)
+                        .map_err(LocalHttpError::ReadBodyFailed)?;
+                }
+                tracing::debug!(
+                    ?body,
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "Collected the whole response body",
+                );
+                ControlFlow::Continue(())
             }
         };
 
@@ -592,7 +608,7 @@ mod test {
             let gateway = HttpGatewayTask::new(
                 request,
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 local_destination,
                 if use_tls {
                     IncomingTrafficTransportType::Tls {
@@ -759,7 +775,7 @@ mod test {
             HttpGatewayTask::new(
                 request,
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
-                response_mode,
+                Some(response_mode),
                 addr,
                 IncomingTrafficTransportType::Tcp,
             ),
@@ -910,7 +926,7 @@ mod test {
             HttpGatewayTask::new(
                 request,
                 client_store.clone(),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 addr,
                 IncomingTrafficTransportType::Tcp,
             ),
@@ -985,7 +1001,7 @@ mod test {
             HttpGatewayTask::new(
                 request.clone(),
                 client_store.clone(),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 addr,
                 IncomingTrafficTransportType::Tcp,
             ),
@@ -996,7 +1012,7 @@ mod test {
             HttpGatewayTask::new(
                 request.clone(),
                 client_store.clone(),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 addr,
                 IncomingTrafficTransportType::Tcp,
             ),

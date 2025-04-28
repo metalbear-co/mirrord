@@ -295,7 +295,7 @@ impl IncomingProxy {
             HttpGatewayTask::new(
                 request,
                 self.client_store.clone(),
-                self.response_mode,
+                is_steal.then_some(self.response_mode),
                 subscription.listening_on,
                 transport,
             ),
