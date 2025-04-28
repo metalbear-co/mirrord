@@ -67,7 +67,7 @@ pub struct ContainerConfig {
     /// }
     /// ```
     ///
-    /// This should be useful if your host machine is exposed with a different IP address than the one
-    /// bound as host.
+    /// This should be useful if your host machine is exposed with a different IP address than the
+    /// one bound as host.
     pub override_host_ip: Option<IpAddr>,
 }
