@@ -589,7 +589,7 @@ impl OperatorClusterRole {
                 verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
-            // Allow the operator to list+get mirrord policies.
+            // Allow the operator to list+get+watch mirrord policies.
             PolicyRule {
                 // Both namespaced and cluster-wide policies live in the same API group.
                 api_groups: Some(vec![MirrordPolicy::group(&()).into_owned()]),
@@ -597,7 +597,7 @@ impl OperatorClusterRole {
                     MirrordPolicy::plural(&()).into_owned(),
                     MirrordClusterPolicy::plural(&()).into_owned(),
                 ]),
-                verbs: vec!["list".to_owned(), "get".to_owned()],
+                verbs: vec!["list".to_owned(), "get".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
             // Allow for patching replicas and environment variables.
