@@ -22,7 +22,7 @@ use mirrord_kube::{
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
-use mirrord_progress::Progress;
+use mirrord_progress::{messages::MODIFIED_HTTP_FILTER_PORTS, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -641,9 +641,7 @@ impl OperatorApi<PreparedClientCert> {
                     .incoming
                     .add_probe_ports_to_http_filter_ports(&runtime_data.containers_probe_ports)
                 {
-                    progress.info(&format!(
-                        "`incoming.http_filter.ports` has been set to use ports {modified_ports}."
-                    ));
+                    progress.info(&format!("{MODIFIED_HTTP_FILTER_PORTS} {modified_ports}."));
                 }
 
                 let stolen_probes = runtime_data

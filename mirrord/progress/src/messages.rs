@@ -24,3 +24,7 @@ pub const HTTP_FILTER_WARNING: (&str, &str) = (
 pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> ...` detected! \
     If you try to run a container with mirrord, please use \
     `mirrord container [options] -- <docker|podman|nerdctl> ...` instead.";
+
+/// Info when we modify the user's `network.incoming.http_filter.ports` config.
+pub const MODIFIED_HTTP_FILTER_PORTS: &str =
+    "`network.incoming.http_filter.ports` has been set to use ports";
