@@ -50,11 +50,7 @@ pub struct LayerSetup {
 }
 
 impl LayerSetup {
-    pub fn new(
-        mut config: LayerConfig,
-        debugger_ports: DebuggerPorts,
-        local_hostname: bool,
-    ) -> Self {
+    pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts, local_hostname: bool) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
@@ -79,7 +75,7 @@ impl LayerSetup {
             .parse::<SocketAddr>()
             .expect("malformed internal proxy address");
 
-        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
+        let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
