@@ -72,7 +72,7 @@ impl WorkflowRuntimeProvider<'_> {
             .as_ref()
             .ok_or_else(|| KubeApiError::missing_field(self.resource, ".status"))?;
 
-        let lookup = match self.step.as_deref() {
+        let lookup = match self.step {
             Some(step) => {
                 let (steps_workflow_node_key, steps_workflow_node) = workflow_status
                     .nodes
@@ -81,7 +81,7 @@ impl WorkflowRuntimeProvider<'_> {
                         node_status.r#type.as_deref() == Some("Steps")
                             && node_status.template_name.as_deref() == Some(template_name)
                     })
-                    .ok_or_else(|| workflow_lookup_error(&self.resource))?;
+                    .ok_or_else(|| workflow_lookup_error(self.resource))?;
 
                 let steps_workflow_node_id =
                     steps_workflow_node.id.as_deref().ok_or_else(|| {
@@ -105,7 +105,7 @@ impl WorkflowRuntimeProvider<'_> {
             .nodes
             .iter()
             .find(|(_, node_status)| lookup.matches(node_status))
-            .ok_or_else(|| workflow_lookup_error(&self.resource))?;
+            .ok_or_else(|| workflow_lookup_error(self.resource))?;
 
         let workflow_node_id = workflow_node.id.as_deref().ok_or_else(|| {
             KubeApiError::missing_field(
