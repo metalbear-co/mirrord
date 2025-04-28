@@ -8,6 +8,36 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.141.0](https://github.com/metalbear-co/mirrord/tree/3.141.0) - 2025-04-28
+
+
+### Added
+
+- Added the option to skip sip patching.
+- Extended the `MirrordKafkaTopicsConsumer` CRD with a `split_ttl` field.
+
+
+### Changed
+
+- Increased the maximum allowed size of `config.feature.fs.readonly_file_buffer`
+  to 15 MB. Added a warning when using size over 1 MB.
+
+
+### Fixed
+
+- Tied SIP patch files to the version of mirrord binary, so that fixes to patching
+  logic will create new files.
+  [#3245](https://github.com/metalbear-co/mirrord/issues/3245)
+- Fixed docs on how to specify multiple binaries.
+  [#3271](https://github.com/metalbear-co/mirrord/issues/3271)
+- Fixed logic for detecting whether the operator supports Kafka splitting
+  without copying the target.
+
+
+### Internal
+
+- Added a verification of case-insensitive matching in the SQS E2E test.
+
 ## [3.140.0](https://github.com/metalbear-co/mirrord/tree/3.140.0) - 2025-04-22
 
 
