@@ -68,7 +68,7 @@ pub enum WorkflowTargetLookup {
         template: String,
     },
     Step {
-        template: String,
+        template: Option<String>,
         step: String,
     },
 }
@@ -76,8 +76,8 @@ pub enum WorkflowTargetLookup {
 impl WorkflowTargetLookup {
     fn template(&self) -> Option<&str> {
         match self {
-            WorkflowTargetLookup::Template { template }
-            | WorkflowTargetLookup::Step { template, .. } => Some(&template),
+            WorkflowTargetLookup::Template { template } => Some(&template),
+            WorkflowTargetLookup::Step { template, .. } => template.as_deref(),
             WorkflowTargetLookup::Entrypoint => None,
         }
     }
@@ -345,10 +345,9 @@ impl ResolvedTarget<false> {
                 .await
                 .map(|resource| {
                     let lookup = match (target.step.clone(), target.template.clone()) {
-                        (Some(step), Some(template)) => {
-                            WorkflowTargetLookup::Step { step, template }
-                        }
-                        _ => todo!(),
+                        (None, None) => WorkflowTargetLookup::Entrypoint,
+                        (None, Some(template)) => WorkflowTargetLookup::Template { template },
+                        (Some(step), template) => WorkflowTargetLookup::Step { step, template },
                     };
 
                     ResolvedTarget::Workflow(
