@@ -234,7 +234,9 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         let all_of = None;
         let any_of = None;
 
-        let ports = None;
+        let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
+            .source_value(context)
+            .transpose()?;
 
         Ok(Self::Generated {
             header_filter,

@@ -891,7 +891,7 @@ enum IncomingMode {
 
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
-    fn new(config: &mut IncomingConfig) -> Self {
+    fn new(config: &IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;
         }
@@ -900,7 +900,8 @@ impl IncomingMode {
             config
                 .http_filter
                 .ports
-                .get_or_insert_default()
+                .clone()
+                .unwrap_or_default()
                 .iter()
                 .copied()
                 .collect()
