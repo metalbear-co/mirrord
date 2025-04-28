@@ -1843,7 +1843,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`; - `workflow/{workflow-name}[/template/{template-name}][/container/{container-name}]`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`; - `workflow/{workflow-name}[/template/{template-name}][/step/{step-name}][/container/ {container-name}]`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
@@ -2068,6 +2068,12 @@
       ],
       "properties": {
         "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
           "type": [
             "string",
             "null"

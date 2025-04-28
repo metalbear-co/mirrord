@@ -1,6 +1,6 @@
 use kube::Client;
 
-use super::ResolvedResource;
+use super::{ResolvedResource, WorkflowTargetLookup};
 use crate::{
     api::{
         kubernetes::workflow::Workflow,
@@ -9,13 +9,16 @@ use crate::{
     error::Result,
 };
 
-impl RuntimeDataProvider for ResolvedResource<Workflow> {
+impl RuntimeDataProvider for (&ResolvedResource<Workflow>, &WorkflowTargetLookup) {
     async fn runtime_data(&self, client: &Client, _namespace: Option<&str>) -> Result<RuntimeData> {
+        let (resolved, lookup) = self;
+
         WorkflowRuntimeProvider {
             client,
-            resource: &self.resource,
-            template: self.template.as_deref(),
-            container: self.container.as_deref(),
+            resource: &resolved.resource,
+            template: lookup.template(),
+            step: lookup.step(),
+            container: resolved.container.as_deref(),
         }
         .try_into_runtime_data()
         .await

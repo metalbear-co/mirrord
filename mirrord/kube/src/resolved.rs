@@ -47,7 +47,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     StatefulSet(ResolvedResource<StatefulSet>),
     Service(ResolvedResource<Service>),
     ReplicaSet(ResolvedResource<ReplicaSet>),
-    Workflow(ResolvedResource<Workflow>),
+    Workflow(ResolvedResource<Workflow>, WorkflowTargetLookup),
 
     /// [`Pod`] is a special case, in that it does not implement [`RuntimeDataFromLabels`],
     /// and instead we implement a `runtime_data` method directly in its
@@ -58,6 +58,36 @@ pub enum ResolvedTarget<const CHECKED: bool> {
         /// Agent pod's namespace.
         String,
     ),
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum WorkflowTargetLookup {
+    #[default]
+    Entrypoint,
+    Template {
+        template: String,
+    },
+    Step {
+        template: String,
+        step: String,
+    },
+}
+
+impl WorkflowTargetLookup {
+    fn template(&self) -> Option<&str> {
+        match self {
+            WorkflowTargetLookup::Template { template }
+            | WorkflowTargetLookup::Step { template, .. } => Some(&template),
+            WorkflowTargetLookup::Entrypoint => None,
+        }
+    }
+
+    fn step(&self) -> Option<&str> {
+        match self {
+            WorkflowTargetLookup::Step { step, .. } => Some(&step),
+            _ => None,
+        }
+    }
 }
 
 /// A kubernetes [`Resource`], and container pair to be used based on the target we
@@ -72,8 +102,6 @@ where
     R: Resource,
 {
     pub resource: R,
-    /// This is only relevant for workflow target
-    pub template: Option<String>,
     pub container: Option<String>,
 }
 
@@ -104,7 +132,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.name.as_deref()
             }
-            ResolvedTarget::Workflow(ResolvedResource { resource, .. }) => {
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => {
                 resource.metadata.name.as_deref()
             }
             ResolvedTarget::Targetless(_) => None,
@@ -121,7 +149,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => resource.name_any(),
-            ResolvedTarget::Workflow(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => resource.name_any(),
             ResolvedTarget::Targetless(..) => "targetless".to_string(),
         }
     }
@@ -152,7 +180,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.namespace.as_deref()
             }
-            ResolvedTarget::Workflow(ResolvedResource { resource, .. }) => {
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => {
                 resource.metadata.namespace.as_deref()
             }
             ResolvedTarget::Targetless(namespace) => Some(namespace),
@@ -176,7 +204,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.labels
             }
-            ResolvedTarget::Workflow(ResolvedResource { resource, .. }) => resource.metadata.labels,
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => {
+                resource.metadata.labels
+            }
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -191,7 +221,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(_) => "statefulset",
             ResolvedTarget::Service(_) => "service",
             ResolvedTarget::ReplicaSet(_) => "replicaset",
-            ResolvedTarget::Workflow(_) => "workflow",
+            ResolvedTarget::Workflow(_, _) => "workflow",
             ResolvedTarget::Targetless(_) => "targetless",
         }
     }
@@ -207,7 +237,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             | ResolvedTarget::Service(ResolvedResource { container, .. })
             | ResolvedTarget::Pod(ResolvedResource { container, .. })
             | ResolvedTarget::ReplicaSet(ResolvedResource { container, .. })
-            | ResolvedTarget::Workflow(ResolvedResource { container, .. }) => container.as_deref(),
+            | ResolvedTarget::Workflow(ResolvedResource { container, .. }, _) => {
+                container.as_deref()
+            }
             ResolvedTarget::Targetless(..) => None,
         }
     }
@@ -243,7 +275,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Deployment(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::Rollout(target) => get_k8s_resource_api::<Rollout>(client, namespace)
@@ -253,7 +284,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Rollout(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::Job(target) => get_k8s_resource_api::<Job>(client, namespace)
@@ -263,7 +293,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Job(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::CronJob(target) => get_k8s_resource_api::<CronJob>(client, namespace)
@@ -273,7 +302,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::CronJob(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::StatefulSet(target) => get_k8s_resource_api::<StatefulSet>(client, namespace)
@@ -283,7 +311,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::StatefulSet(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::Pod(target) => get_k8s_resource_api::<Pod>(client, namespace)
@@ -293,7 +320,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Pod(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::Service(target) => get_k8s_resource_api::<Service>(client, namespace)
@@ -303,7 +329,6 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Service(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::ReplicaSet(target) => get_k8s_resource_api::<ReplicaSet>(client, namespace)
@@ -313,18 +338,26 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::ReplicaSet(ResolvedResource {
                         resource,
                         container: target.container.clone(),
-                        template: None,
                     })
                 }),
             Target::Workflow(target) => get_k8s_resource_api::<Workflow>(client, namespace)
                 .get(&target.workflow)
                 .await
                 .map(|resource| {
-                    ResolvedTarget::Workflow(ResolvedResource {
-                        resource,
-                        container: target.container.clone(),
-                        template: target.template.clone(),
-                    })
+                    let lookup = match (target.step.clone(), target.template.clone()) {
+                        (Some(step), Some(template)) => {
+                            WorkflowTargetLookup::Step { step, template }
+                        }
+                        _ => todo!(),
+                    };
+
+                    ResolvedTarget::Workflow(
+                        ResolvedResource {
+                            resource,
+                            container: target.container.clone(),
+                        },
+                        lookup,
+                    )
                 }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
                 namespace.unwrap_or("default").to_string(),
@@ -357,7 +390,6 @@ impl ResolvedTarget<false> {
             ResolvedTarget::Deployment(ResolvedResource {
                 resource,
                 container,
-                template,
             }) => {
                 let available = resource
                     .status
@@ -392,27 +424,23 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Deployment(ResolvedResource {
                     resource,
                     container,
-                    template,
                 }))
             }
 
             ResolvedTarget::Pod(ResolvedResource {
                 resource,
                 container,
-                template,
             }) => {
                 let _ = RuntimeData::from_pod(&resource, container.as_deref())?;
                 Ok(ResolvedTarget::Pod(ResolvedResource {
                     resource,
                     container,
-                    template,
                 }))
             }
 
             ResolvedTarget::Rollout(ResolvedResource {
                 resource,
                 container,
-                template,
             }) => {
                 let available = resource
                     .status
@@ -442,7 +470,6 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Rollout(ResolvedResource {
                     resource,
                     container,
-                    template,
                 }))
             }
 
@@ -457,7 +484,6 @@ impl ResolvedTarget<false> {
             ResolvedTarget::StatefulSet(ResolvedResource {
                 resource,
                 container,
-                template,
             }) => {
                 let available = resource
                     .status
@@ -492,14 +518,12 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::StatefulSet(ResolvedResource {
                     resource,
                     container,
-                    template,
                 }))
             }
 
             ResolvedTarget::Service(ResolvedResource {
                 resource,
                 container,
-                template,
             }) => {
                 let pods = ResolvedResource::<Service>::get_pods(&resource, client).await?;
 
@@ -527,14 +551,12 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Service(ResolvedResource {
                     resource,
                     container,
-                    template,
                 }))
             }
 
             ResolvedTarget::ReplicaSet(ResolvedResource {
                 resource,
                 container,
-                template,
             }) => {
                 let available = resource
                     .status
@@ -566,22 +588,25 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::ReplicaSet(ResolvedResource {
                     resource,
                     container,
-                    template,
                 }))
             }
 
-            ResolvedTarget::Workflow(ResolvedResource {
-                resource,
-                container,
-                template,
-            }) => {
-                // TODO: this
-
-                Ok(ResolvedTarget::Workflow(ResolvedResource {
+            ResolvedTarget::Workflow(
+                ResolvedResource {
                     resource,
                     container,
-                    template,
-                }))
+                },
+                workflow_lookup,
+            ) => {
+                // Maybe todo?
+
+                Ok(ResolvedTarget::Workflow(
+                    ResolvedResource {
+                        resource,
+                        container,
+                    },
+                    workflow_lookup,
+                ))
             }
 
             ResolvedTarget::Targetless(namespace) => {

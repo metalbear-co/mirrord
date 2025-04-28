@@ -243,7 +243,7 @@ mirrord-layer failed to parse the provided target!
     >> `statefulset/{statefulset-name}[/container/{container-name}]`;
     >> `service/{service-name}[/container/{container-name}]`;
     >> `replicaset/{replicaset-name}[/container/{container-name}]`;
-    >> `workflow/{workflow-name}[/template/{template-name}][/container/{container-name}]`;
+    >> `workflow/{workflow-name}[/template/{template-name}][/step/{step-name}][/container/{container-name}]`;
 
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
@@ -270,7 +270,8 @@ mirrord-layer failed to parse the provided target!
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
-/// - `workflow/{workflow-name}[/template/{template-name}][/container/{container-name}]`;
+/// - `workflow/{workflow-name}[/template/{template-name}][/step/{step-name}][/container/
+///   {container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
@@ -431,27 +432,7 @@ impl_target_display!(CronJobTarget, cron_job, "cronjob");
 impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
 impl_target_display!(ServiceTarget, service, "service");
 impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
-
 impl_target_display_trait!(WorkflowTarget, workflow, "workflow");
-
-impl fmt::Display for WorkflowTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}/{}{}{}",
-            self.type_(),
-            self.name(),
-            self.template
-                .as_ref()
-                .map(|name| format!("/template/{name}"))
-                .unwrap_or_default(),
-            self.container
-                .as_ref()
-                .map(|name| format!("/container/{name}"))
-                .unwrap_or_default()
-        )
-    }
-}
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -666,6 +647,32 @@ mod tests {
             namespace: None
         }
     )] // Rollout specified.
+    #[case(
+        Some("workflow/foo/template/bar"),
+        None,
+        TargetConfig{
+            path: Some(Target::Workflow(WorkflowTarget {
+                workflow: "foo".to_string(),
+                template: Some("bar".to_string()),
+                step: None,
+                container: None
+            })),
+            namespace: None
+        }
+    )] // Workflow with template
+    #[case(
+        Some("workflow/foo/template/bar/step/2000"),
+        None,
+        TargetConfig{
+            path: Some(Target::Workflow(WorkflowTarget {
+                workflow: "foo".to_string(),
+                template: Some("bar".to_string()),
+                step: Some("2000".to_string()),
+                container: None
+            })),
+            namespace: None
+        }
+    )] // Workflow with template and step
     fn default(
         #[case] path_env: Option<&str>,
         #[case] namespace_env: Option<&str>,
@@ -745,5 +752,35 @@ mod tests {
             .generate_config(&mut cfg_context)
             .unwrap();
         assert_eq!(target_config, expected_target_config);
+    }
+
+    #[rstest]
+    #[case("pod/foo")]
+    #[case("pod/foo/container/bar")]
+    #[case("deployment/foo")]
+    #[case("deployment/foo/container/bar")]
+    #[case("rollout/foo")]
+    #[case("rollout/foo/container/bar")]
+    #[case("job/foo")]
+    #[case("job/foo/container/bar")]
+    #[case("cronjob/foo")]
+    #[case("cronjob/foo/container/bar")]
+    #[case("statefulset/foo")]
+    #[case("statefulset/foo/container/bar")]
+    #[case("service/foo")]
+    #[case("service/foo/container/bar")]
+    #[case("replicaset/foo")]
+    #[case("replicaset/foo/container/bar")]
+    #[case("workflow/foo")]
+    #[case("workflow/foo/container/bar")]
+    #[case("workflow/foo/template/bar")]
+    #[case("workflow/foo/template/bar/container/main")]
+    #[case("workflow/foo/template/bar/step/uno")]
+    #[case("workflow/foo/template/bar/step/uno/container/main")]
+    fn parse_and_to_string_are_same(#[case] target_path: &str) {
+        let target =
+            Target::from_str(target_path).expect("target should be parsed from target_path");
+
+        assert_eq!(target.to_string(), target_path)
     }
 }

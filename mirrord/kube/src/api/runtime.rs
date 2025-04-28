@@ -482,7 +482,9 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Self::Service(target) => target.runtime_data(client, namespace).await,
             Self::ReplicaSet(target) => target.runtime_data(client, namespace).await,
-            Self::Workflow(target) => target.runtime_data(client, namespace).await,
+            Self::Workflow(target, selector) => {
+                (target, selector).runtime_data(client, namespace).await
+            }
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }

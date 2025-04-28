@@ -4,7 +4,7 @@ use mirrord_config::target::workflow::WorkflowTarget;
 
 use crate::{
     api::{
-        kubernetes::workflow::Workflow,
+        kubernetes::workflow::{Workflow, WorkflowNodeStatus},
         runtime::{get_k8s_resource_api, RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
@@ -14,12 +14,49 @@ pub(crate) struct WorkflowRuntimeProvider<'a> {
     pub client: &'a Client,
     pub resource: &'a Workflow,
     pub template: Option<&'a str>,
+    pub step: Option<&'a str>,
     pub container: Option<&'a str>,
+}
+
+enum TargetLookup<'a> {
+    Template(&'a str),
+    Step(&'a str, String),
+}
+
+impl TargetLookup<'_> {
+    fn matches(&self, status: &WorkflowNodeStatus) -> bool {
+        status.r#type.as_deref() == Some("Pod")
+            && match self {
+                TargetLookup::Template(template_name) => {
+                    status.template_name.as_deref() == Some(template_name)
+                }
+                TargetLookup::Step(prefix, suffix) => status
+                    .name
+                    .as_ref()
+                    .map(|name| name.starts_with(prefix) && name.ends_with(suffix))
+                    .unwrap_or(false),
+            }
+    }
+}
+
+fn workflow_lookup_error(resource: &Workflow) -> KubeApiError {
+    let kind = Workflow::kind(&());
+    let name = resource.meta().name.as_ref();
+    let namespace = resource.meta().namespace.as_deref().unwrap_or("default");
+
+    let message = match name {
+        Some(name) => {
+            format!("{kind} `{namespace}/{name}` unable to resolve requested target in workflow")
+        }
+        None => format!("{kind} unable to resolve requested target in workflow"),
+    };
+
+    KubeApiError::MalformedResource(message)
 }
 
 impl WorkflowRuntimeProvider<'_> {
     pub async fn try_into_runtime_data(self) -> Result<RuntimeData> {
-        let entrypoint = match self.template.as_ref() {
+        let template_name = match self.template.as_ref() {
             Some(template) => template,
             None => self
                 .resource
@@ -31,35 +68,41 @@ impl WorkflowRuntimeProvider<'_> {
                 .ok_or_else(|| KubeApiError::missing_field(self.resource, ".spec.entrypoint"))?,
         };
 
-        let (workflow_node_key, workflow_node) = self
+        let workflow_status = self
             .resource
             .status
             .as_ref()
-            .ok_or_else(|| KubeApiError::missing_field(self.resource, ".status"))?
+            .ok_or_else(|| KubeApiError::missing_field(self.resource, ".status"))?;
+
+        let lookup = match self.step.as_deref() {
+            Some(step) => {
+                let (steps_workflow_node_key, steps_workflow_node) = workflow_status
+                    .nodes
+                    .iter()
+                    .find(|(_, node_status)| {
+                        node_status.r#type.as_deref() == Some("Steps")
+                            && node_status.template_name.as_deref() == Some(template_name)
+                    })
+                    .ok_or_else(|| workflow_lookup_error(&self.resource))?;
+
+                let steps_workflow_node_id =
+                    steps_workflow_node.id.as_deref().ok_or_else(|| {
+                        KubeApiError::missing_field(
+                            self.resource,
+                            format!(".status.nodes.{steps_workflow_node_key}.id"),
+                        )
+                    })?;
+
+                TargetLookup::Step(steps_workflow_node_id, format!(".{step}"))
+            }
+            None => TargetLookup::Template(template_name),
+        };
+
+        let (workflow_node_key, workflow_node) = workflow_status
             .nodes
             .iter()
-            .find(|(_, node_status)| node_status.template_name.as_deref() == Some(entrypoint))
-            .ok_or_else(|| {
-                KubeApiError::missing_field(self.resource, format!(".status.nodes.{entrypoint}*"))
-            })?;
-
-        if workflow_node.r#type.as_deref() != Some("Pod") {
-            let kind = Workflow::kind(&());
-            let name = self.resource.meta().name.as_ref();
-            let namespace = self
-                .resource
-                .meta()
-                .namespace
-                .as_deref()
-                .unwrap_or("default");
-
-            let message = match name {
-                Some(name) => format!("{kind} `{namespace}/{name}` expected workflow node type to be \"Pod\" but got {:?}", workflow_node.r#type),
-                None => format!("{kind} expected workflow node type to be \"Pod\" but got {:?}", workflow_node.r#type),
-            };
-
-            return Err(KubeApiError::MalformedResource(message));
-        }
+            .find(|(_, node_status)| lookup.matches(node_status))
+            .ok_or_else(|| workflow_lookup_error(&self.resource))?;
 
         let workflow_node_id = workflow_node.id.as_deref().ok_or_else(|| {
             KubeApiError::missing_field(
@@ -118,6 +161,7 @@ impl RuntimeDataProvider for WorkflowTarget {
             client,
             resource: &resource,
             template: self.template.as_deref(),
+            step: self.step.as_deref(),
             container: self.container.as_deref(),
         }
         .try_into_runtime_data()
