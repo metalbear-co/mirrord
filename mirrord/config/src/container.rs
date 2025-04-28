@@ -56,8 +56,8 @@ pub struct ContainerConfig {
 
     /// ### container.override_host_ip {#container-override_host_ip}
     ///
-    /// Allow the setting of override ip addr for intproxy to use when using mirrord containers
-    /// feature
+    /// Allows to override the IP address for the internal proxy to use
+    /// when connecting to the host machine from within the container.
     ///
     /// ```json5
     /// {
@@ -67,7 +67,7 @@ pub struct ContainerConfig {
     /// }
     /// ```
     ///
-    /// This should be useful if your host machine is exposed via different ip addr than one bound
-    /// as host
+    /// This should be useful if your host machine is exposed with a different IP address than the one
+    /// bound as host.
     pub override_host_ip: Option<IpAddr>,
 }
