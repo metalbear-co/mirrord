@@ -95,6 +95,7 @@ jobs:
             .dockerignore
             rust-toolchain.toml
             rustfmt.toml
+            deny.toml
             .cargo/**
       - name: get markdown changes
         id: changed-markdown
@@ -367,6 +368,9 @@ jobs:
           cd mirrord/layer/tests/apps/issue2438
           cargo build
       - run: |
+          cd mirrord/layer/tests/apps/issue3248
+          cargo build
+      - run: |
           cd mirrord/layer/tests/apps/rebind0
           cargo build
       - run: ./scripts/build_c_apps.sh
@@ -414,6 +418,8 @@ jobs:
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: verify SIP status
+        run: csrutil status
       # this is required for clippy lint because the layer path variable is checked at compile time
       - name: create fake layer file
         run: touch /tmp/file.dylib
@@ -493,6 +499,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2438
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue3248
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/rebind0

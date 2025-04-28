@@ -330,6 +330,15 @@ pub struct LayerConfig {
     /// ## experimental {#root-experimental}
     #[config(nested)]
     pub experimental: ExperimentalConfig,
+
+    /// ## skip_sip {#root-skip_sip}
+    ///
+    /// Allows mirrord to skip patching (macOS SIP) unwanted processes.
+    ///
+    /// When patching is skipped, mirrord will no longer be able to load into
+    /// the process and its child processes.
+    #[config(env = "MIRRORD_SKIP_SIP")]
+    pub skip_sip: Option<VecOrSingle<String>>,
 }
 
 impl LayerConfig {
@@ -1003,6 +1012,7 @@ mod tests {
             internal_proxy: None,
             use_proxy: None,
             experimental: None,
+            skip_sip: None,
         };
 
         assert_eq!(config, expect);
