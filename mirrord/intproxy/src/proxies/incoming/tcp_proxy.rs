@@ -74,7 +74,7 @@ impl LocalTcpConnection {
             }
 
             LocalTcpConnection::AfterUpgrade(on_upgrade) => {
-                let upgraded = on_upgrade.await.map_err(InProxyTaskError::UpgradeError)?;
+                let upgraded = on_upgrade.await.map_err(InProxyTaskError::Upgrade)?;
                 let parts = upgraded
                     .downcast::<TokioIo<MaybeTls>>()
                     .expect("IO type is known");
@@ -159,7 +159,7 @@ impl BackgroundTask for TcpProxyTask {
         if self.discard_data.not() && read_buf.is_empty().not() {
             // We don't send empty data,
             // because the agent recognizes it as a shutdown from the user application.
-            message_bus.send(Vec::from(read_buf)).await;
+            message_bus.send(read_buf).await;
         }
 
         let peer_addr = stream.as_ref().peer_addr()?;
