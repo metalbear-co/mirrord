@@ -12,8 +12,8 @@ use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
-        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest,
-        HttpRequestTransportType, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
+        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
+        IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame,
         InternalHttpResponse,
     },
 };
@@ -42,7 +42,7 @@ pub struct HttpGatewayTask {
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
     /// How to transport the HTTP request to the server.
-    transport: HttpRequestTransportType,
+    transport: IncomingTrafficTransportType,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -63,7 +63,7 @@ impl HttpGatewayTask {
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
-        transport: HttpRequestTransportType,
+        transport: IncomingTrafficTransportType,
     ) -> Self {
         Self {
             request,
@@ -595,12 +595,12 @@ mod test {
                 ResponseMode::Basic,
                 local_destination,
                 if use_tls {
-                    HttpRequestTransportType::Tls {
+                    IncomingTrafficTransportType::Tls {
                         alpn_protocol: Some(b"http/1.1".into()),
                         server_name: None,
                     }
                 } else {
-                    HttpRequestTransportType::Tcp
+                    IncomingTrafficTransportType::Tcp
                 },
             );
             tasks.register(gateway, 0, 8)
@@ -761,7 +761,7 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 response_mode,
                 addr,
-                HttpRequestTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             (),
             8,
@@ -912,7 +912,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                HttpRequestTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             (),
             8,
@@ -987,7 +987,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                HttpRequestTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             0,
             8,
@@ -998,7 +998,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                HttpRequestTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             1,
             8,

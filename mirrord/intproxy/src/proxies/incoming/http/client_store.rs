@@ -10,7 +10,7 @@ use hyper::{Uri, Version};
 use mirrord_config::feature::network::incoming::https_delivery::{
     HttpsDeliveryProtocol, LocalHttpsDelivery,
 };
-use mirrord_protocol::tcp::HttpRequestTransportType;
+use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -114,11 +114,11 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        transport: &HttpRequestTransportType,
+        transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls =
-            matches!(transport, HttpRequestTransportType::Tls { .. }) && self.tls_setup.is_some();
+        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
+            && self.tls_setup.is_some();
 
         if let Some(ready) = self
             .wait_for_ready(server_addr, version, uses_tls)
@@ -194,14 +194,14 @@ impl ClientStore {
         &self,
         local_server_address: SocketAddr,
         version: Version,
-        transport: &HttpRequestTransportType,
+        transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let connector_and_name = match (transport, self.tls_setup.as_ref()) {
-            (HttpRequestTransportType::Tcp, ..) => None,
+            (IncomingTrafficTransportType::Tcp, ..) => None,
             (.., None) => None,
             (
-                HttpRequestTransportType::Tls {
+                IncomingTrafficTransportType::Tls {
                     alpn_protocol,
                     server_name: original_server_name,
                 },
@@ -314,7 +314,7 @@ mod test {
         Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{HttpRequest, HttpRequestTransportType, InternalHttpRequest};
+    use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
         KeyUsagePurpose,
@@ -351,7 +351,7 @@ mod test {
             .get(
                 addr,
                 Version::HTTP_11,
-                &HttpRequestTransportType::Tcp,
+                &IncomingTrafficTransportType::Tcp,
                 &"http://some.server.com".parse().unwrap(),
             )
             .await
@@ -440,7 +440,7 @@ mod test {
                 .make_client(
                     addr,
                     request.internal_request.version,
-                    &HttpRequestTransportType::Tls {
+                    &IncomingTrafficTransportType::Tls {
                         alpn_protocol: Some(b"h2".into()),
                         server_name: None,
                     },

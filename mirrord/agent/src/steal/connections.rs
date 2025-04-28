@@ -10,7 +10,7 @@ use std::{
 
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{
-    tcp::{HttpRequestMetadata, HttpRequestTransportType, NewTcpConnection},
+    tcp::{HttpRequestMetadata, IncomingTrafficTransportType, NewTcpConnectionV1},
     ConnectionId, LogMessage, RequestId,
 };
 use original_destination::OriginalDestination;
@@ -133,7 +133,7 @@ pub enum ConnectionMessageOut {
         request: Request<Incoming>,
         id: RequestId,
         metadata: HttpRequestMetadata,
-        transport: HttpRequestTransportType,
+        transport: IncomingTrafficTransportType,
     },
     /// Subscribed the client to a new TCP connection.
     ///
@@ -147,7 +147,7 @@ pub enum ConnectionMessageOut {
     /// should follow.
     SubscribedTcp {
         client_id: ClientId,
-        connection: NewTcpConnection,
+        connection: NewTcpConnectionV1,
     },
     /// Subscribed the client to a new filtered HTTP connection.
     ///
@@ -489,7 +489,7 @@ impl ConnectionTask {
                 self.tx
                     .send(ConnectionMessageOut::SubscribedTcp {
                         client_id,
-                        connection: NewTcpConnection {
+                        connection: NewTcpConnectionV1 {
                             connection_id: self.connection_id,
                             remote_address: source.ip(),
                             source_port: source.port(),

@@ -6,7 +6,7 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, io, net::SocketAddr, ops::Not, time::Duration};
 
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
@@ -20,9 +20,9 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, HttpRequestTransportType,
-        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        StealType, TcpData,
+        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
+        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
+        NewTcpConnectionV2, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -193,7 +193,8 @@ impl IncomingProxy {
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
-        transport: HttpRequestTransportType,
+        transport: IncomingTrafficTransportType,
+        is_steal: bool,
         message_bus: &MessageBus<Self>,
     ) {
         tracing::info!(
@@ -203,12 +204,10 @@ impl IncomingProxy {
         );
 
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
-            matches!(
-                subscription.subscription,
-                PortSubscription::Steal(
-                    StealType::FilteredHttp(..) | StealType::FilteredHttpEx(..)
-                )
-            )
+            match &subscription.subscription {
+                PortSubscription::Mirror(..) => is_steal.not(),
+                PortSubscription::Steal(..) => is_steal,
+            }
         });
         let Some(subscription) = subscription else {
             tracing::debug!(
@@ -277,25 +276,28 @@ impl IncomingProxy {
     #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_new_connection(
         &mut self,
-        connection: NewTcpConnection,
+        connection: NewTcpConnectionV2,
         is_steal: bool,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), IncomingProxyError> {
-        let NewTcpConnection {
-            connection_id,
-            remote_address,
-            destination_port,
-            source_port,
-            local_address,
+        let NewTcpConnectionV2 {
+            connection:
+                NewTcpConnectionV1 {
+                    connection_id,
+                    remote_address,
+                    destination_port,
+                    source_port,
+                    local_address,
+                },
+            transport,
         } = connection;
 
         let subscription = self
             .subscriptions
             .get(destination_port)
             .filter(|subscription| match &subscription.subscription {
-                PortSubscription::Mirror(..) if !is_steal => true,
-                PortSubscription::Steal(StealType::All(..)) if is_steal => true,
-                _ => false,
+                PortSubscription::Mirror(..) => is_steal.not(),
+                PortSubscription::Steal(..) => is_steal,
             });
         let Some(subscription) = subscription else {
             tracing::debug!(
@@ -362,6 +364,7 @@ impl IncomingProxy {
     async fn handle_chunked_request(
         &mut self,
         request: ChunkedRequest,
+        is_steal: bool,
         message_bus: &mut MessageBus<Self>,
     ) {
         match request {
@@ -371,7 +374,8 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request,
                     Some(body_tx),
-                    HttpRequestTransportType::Tcp,
+                    IncomingTrafficTransportType::Tcp,
+                    is_steal,
                     message_bus,
                 )
                 .await;
@@ -404,7 +408,7 @@ impl IncomingProxy {
                     port: destination.port(),
                 };
 
-                self.start_http_gateway(request, body_tx, transport, message_bus)
+                self.start_http_gateway(request, body_tx, transport, is_steal, message_bus)
                     .await;
             }
 
@@ -532,7 +536,8 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
-                    HttpRequestTransportType::Tcp,
+                    IncomingTrafficTransportType::Tcp,
+                    is_steal,
                     message_bus,
                 )
                 .await;
@@ -542,17 +547,31 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
-                    HttpRequestTransportType::Tcp,
+                    IncomingTrafficTransportType::Tcp,
+                    is_steal,
                     message_bus,
                 )
                 .await;
             }
 
             DaemonTcp::HttpRequestChunked(request) => {
-                self.handle_chunked_request(request, message_bus).await;
+                self.handle_chunked_request(request, is_steal, message_bus)
+                    .await;
             }
 
-            DaemonTcp::NewConnection(connection) => {
+            DaemonTcp::NewConnectionV1(connection) => {
+                self.handle_new_connection(
+                    NewTcpConnectionV2 {
+                        connection,
+                        transport: IncomingTrafficTransportType::Tcp,
+                    },
+                    is_steal,
+                    message_bus,
+                )
+                .await?;
+            }
+
+            DaemonTcp::NewConnectionV2(connection) => {
                 self.handle_new_connection(connection, is_steal, message_bus)
                     .await?;
             }
