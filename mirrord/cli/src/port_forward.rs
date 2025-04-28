@@ -502,7 +502,7 @@ impl ReversePortForwarder {
             .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
             .await;
 
-        let incoming_mode = IncomingMode::new(&mut network_config);
+        let incoming_mode = IncomingMode::new(&network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;

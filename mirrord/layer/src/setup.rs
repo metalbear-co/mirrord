@@ -220,21 +220,19 @@ pub enum IncomingMode {
 
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
-    fn new(config: &mut IncomingConfig) -> Self {
+    fn new(config: &IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;
         }
 
-        let ports = {
-            config
-                .http_filter
-                .ports
-                .get_or_insert_default()
-                .clone()
-                .iter()
-                .copied()
-                .collect()
-        };
+        let ports = config
+            .http_filter
+            .ports
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .collect();
 
         let http_filter_config = &config.http_filter;
 
