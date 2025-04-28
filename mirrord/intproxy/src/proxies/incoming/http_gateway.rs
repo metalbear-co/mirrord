@@ -393,7 +393,7 @@ impl BackgroundTask for HttpGatewayTask {
 
 #[cfg(test)]
 mod test {
-    use std::{io, pin::Pin, sync::Arc};
+    use std::{io, ops::Not, pin::Pin, sync::Arc};
 
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};
@@ -558,10 +558,12 @@ mod test {
     /// Verifies that [`HttpGatewayTask`] and [`TcpProxyTask`] together correctly handle HTTP
     /// upgrades.
     #[rstest]
-    #[case::with_tls(true)]
-    #[case::without_tls(false)]
+    #[case::with_tls_mirror(true, false)]
+    #[case::with_tls_steal(true, true)]
+    #[case::without_tls_mirror(false, false)]
+    #[case::without_tls_steal(false, true)]
     #[tokio::test]
-    async fn handles_http_upgrades(#[case] use_tls: bool) {
+    async fn handles_http_upgrades(#[case] use_tls: bool, #[case] is_steal: bool) {
         let _ = rustls::crypto::CryptoProvider::install_default(
             rustls::crypto::aws_lc_rs::default_provider(),
         );
@@ -612,7 +614,7 @@ mod test {
                     Duration::from_secs(1),
                     LocalTlsSetup::from_config(Default::default()),
                 ),
-                Some(ResponseMode::Basic),
+                is_steal.then_some(ResponseMode::Basic),
                 local_destination,
                 if use_tls {
                     IncomingTrafficTransportType::Tls {
@@ -626,33 +628,35 @@ mod test {
             tasks.register(gateway, 0, 8)
         };
 
-        let message = tasks
-            .next()
-            .await
-            .expect("no task result")
-            .1
-            .unwrap_message();
-        match message {
-            InProxyTaskMessage::Http(HttpOut::ResponseBasic(res)) => {
-                assert_eq!(
-                    res.internal_response.status,
-                    StatusCode::SWITCHING_PROTOCOLS
-                );
-                println!("Received response from the gateway: {res:?}");
-                assert!(res
-                    .internal_response
-                    .headers
-                    .get(CONNECTION)
-                    .filter(|v| *v == "upgrade")
-                    .is_some());
-                assert!(res
-                    .internal_response
-                    .headers
-                    .get(UPGRADE)
-                    .filter(|v| *v == TEST_PROTO)
-                    .is_some());
+        if is_steal {
+            let message = tasks
+                .next()
+                .await
+                .expect("no task result")
+                .1
+                .unwrap_message();
+            match message {
+                InProxyTaskMessage::Http(HttpOut::ResponseBasic(res)) => {
+                    assert_eq!(
+                        res.internal_response.status,
+                        StatusCode::SWITCHING_PROTOCOLS
+                    );
+                    println!("Received response from the gateway: {res:?}");
+                    assert!(res
+                        .internal_response
+                        .headers
+                        .get(CONNECTION)
+                        .filter(|v| *v == "upgrade")
+                        .is_some());
+                    assert!(res
+                        .internal_response
+                        .headers
+                        .get(UPGRADE)
+                        .filter(|v| *v == TEST_PROTO)
+                        .is_some());
+                }
+                other => panic!("unexpected task update: {other:?}"),
             }
-            other => panic!("unexpected task update: {other:?}"),
         }
 
         let message = tasks
@@ -675,7 +679,7 @@ mod test {
             TcpProxyTask::new(
                 update.0,
                 LocalTcpConnection::AfterUpgrade(on_upgrade),
-                false,
+                is_steal.not(),
             ),
             1,
             8,
@@ -683,30 +687,39 @@ mod test {
 
         proxy.send(b"test test test".to_vec()).await;
 
-        let message = tasks
-            .next()
-            .await
-            .expect("no task result")
-            .1
-            .unwrap_message();
-        match message {
-            InProxyTaskMessage::Tcp(bytes) => {
-                assert_eq!(bytes, INITIAL_MESSAGE);
+        if is_steal {
+            let message = tasks
+                .next()
+                .await
+                .expect("no task result")
+                .1
+                .unwrap_message();
+            match message {
+                InProxyTaskMessage::Tcp(bytes) => {
+                    assert_eq!(bytes, INITIAL_MESSAGE);
+                }
+                _ => panic!("unexpected task update: {update:?}"),
             }
-            _ => panic!("unexpected task update: {update:?}"),
+
+            let message = tasks
+                .next()
+                .await
+                .expect("no task result")
+                .1
+                .unwrap_message();
+            match message {
+                InProxyTaskMessage::Tcp(bytes) => {
+                    assert_eq!(bytes, b"test test test");
+                }
+                _ => panic!("unexpected task update: {update:?}"),
+            }
         }
 
-        let message = tasks
-            .next()
-            .await
-            .expect("no task result")
-            .1
-            .unwrap_message();
-        match message {
-            InProxyTaskMessage::Tcp(bytes) => {
-                assert_eq!(bytes, b"test test test");
-            }
-            _ => panic!("unexpected task update: {update:?}"),
+        std::mem::drop(proxy);
+        let update = tasks.next().await.expect("not task result");
+        match update.1 {
+            TaskUpdate::Finished(Ok(())) => {}
+            other => panic!("unexpected task update: {other:?}"),
         }
 
         let _ = shutdown_tx.send(true);
