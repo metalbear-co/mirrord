@@ -288,6 +288,17 @@ impl From<PortList> for HashSet<u16> {
     }
 }
 
+impl core::fmt::Display for PortList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for port in self.iter() {
+            write!(f, "{port} ")?;
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
 impl CollectAnalytics for &HttpFilterConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("header_filter", self.header_filter.is_some());

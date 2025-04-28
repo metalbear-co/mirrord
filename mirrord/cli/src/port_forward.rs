@@ -466,7 +466,7 @@ impl ReversePortForwarder {
     pub(crate) async fn new(
         mut agent_connection: AgentConnection,
         mappings: HashMap<RemotePort, LocalPort>,
-        mut network_config: IncomingConfig,
+        network_config: IncomingConfig,
         idle_local_http_connection_timeout: Duration,
     ) -> Result<Self, PortForwardError> {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =

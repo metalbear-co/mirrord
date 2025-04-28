@@ -531,7 +531,10 @@ impl IncomingConfig {
     /// avoid overriding their config. We also take care to not create conflicts with other
     /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
     /// [`IncomingConfig::ports`].
-    pub fn add_probe_ports_to_http_filter_ports(&mut self, probes_ports: &[u16]) {
+    pub fn add_probe_ports_to_http_filter_ports(
+        &mut self,
+        probes_ports: &[u16],
+    ) -> Option<&PortList> {
         if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .iter()
@@ -551,9 +554,11 @@ impl IncomingConfig {
             // Only add something if we have a port to add, otherwise leave it as `None` so
             // we can use the `PortList::default` when initializing things.
             if filtered_ports.is_empty().not() {
-                self.http_filter.ports = Some(filtered_ports.into())
+                self.http_filter.ports = Some(filtered_ports.into());
             }
         }
+
+        self.http_filter.ports.as_ref()
     }
 }
 
