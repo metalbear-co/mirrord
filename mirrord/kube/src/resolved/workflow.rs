@@ -9,7 +9,7 @@ use crate::{
     error::Result,
 };
 
-impl RuntimeDataProvider for (&ResolvedResource<Workflow>, &WorkflowTargetLookup) {
+impl RuntimeDataProvider for (&ResolvedResource<Workflow>, &WorkflowTargetLookup<true>) {
     async fn runtime_data(&self, client: &Client, _namespace: Option<&str>) -> Result<RuntimeData> {
         let (resolved, lookup) = self;
 

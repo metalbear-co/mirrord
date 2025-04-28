@@ -19,18 +19,16 @@ pub(crate) struct WorkflowRuntimeProvider<'a> {
 }
 
 enum TargetLookup<'a> {
-    Template(&'a str),
-    Step(&'a str, String),
+    Template { name: &'a str },
+    Step { prefix: &'a str, suffix: String },
 }
 
 impl TargetLookup<'_> {
     fn matches(&self, status: &WorkflowNodeStatus) -> bool {
         status.r#type.as_deref() == Some("Pod")
             && match self {
-                TargetLookup::Template(template_name) => {
-                    status.template_name.as_deref() == Some(template_name)
-                }
-                TargetLookup::Step(prefix, suffix) => status
+                TargetLookup::Template { name } => status.template_name.as_deref() == Some(name),
+                TargetLookup::Step { prefix, suffix } => status
                     .name
                     .as_ref()
                     .map(|name| name.starts_with(prefix) && name.ends_with(suffix))
@@ -93,9 +91,14 @@ impl WorkflowRuntimeProvider<'_> {
                         )
                     })?;
 
-                TargetLookup::Step(steps_workflow_node_id, format!(".{step}"))
+                TargetLookup::Step {
+                    prefix: steps_workflow_node_id,
+                    suffix: format!(".{step}"),
+                }
             }
-            None => TargetLookup::Template(template_name),
+            None => TargetLookup::Template {
+                name: template_name,
+            },
         };
 
         let (workflow_node_key, workflow_node) = workflow_status

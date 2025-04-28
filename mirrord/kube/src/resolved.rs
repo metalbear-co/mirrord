@@ -47,7 +47,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     StatefulSet(ResolvedResource<StatefulSet>),
     Service(ResolvedResource<Service>),
     ReplicaSet(ResolvedResource<ReplicaSet>),
-    Workflow(ResolvedResource<Workflow>, WorkflowTargetLookup),
+    Workflow(ResolvedResource<Workflow>, WorkflowTargetLookup<CHECKED>),
 
     /// [`Pod`] is a special case, in that it does not implement [`RuntimeDataFromLabels`],
     /// and instead we implement a `runtime_data` method directly in its
@@ -61,7 +61,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
 }
 
 #[derive(Clone, Debug)]
-pub struct WorkflowTargetLookup {
+pub struct WorkflowTargetLookup<const CHECKED: bool> {
     template: Option<String>,
     step: Option<String>,
 }
@@ -568,16 +568,42 @@ impl ResolvedTarget<false> {
                     resource,
                     container,
                 },
-                workflow_lookup,
+                WorkflowTargetLookup { template, step },
             ) => {
-                // Maybe todo?
+                let resource_spec = resource
+                    .spec
+                    .as_ref()
+                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec"))?;
+
+                match template.as_deref() {
+                    Some(template) => {
+                        if !resource_spec
+                            .templates
+                            .iter()
+                            .any(|template_spec| template_spec.name.as_deref() == Some(template))
+                        {
+                            return Err(KubeApiError::invalid_state(
+                                &resource,
+                                "requested template is missing in spec",
+                            ));
+                        }
+                    }
+                    None => {
+                        if resource_spec.entrypoint.is_none() {
+                            return Err(KubeApiError::invalid_state(
+                                &resource,
+                                "no template requested and there is no entrypoint in spec",
+                            ));
+                        }
+                    }
+                };
 
                 Ok(ResolvedTarget::Workflow(
                     ResolvedResource {
                         resource,
                         container,
                     },
-                    workflow_lookup,
+                    WorkflowTargetLookup { template, step },
                 ))
             }
 

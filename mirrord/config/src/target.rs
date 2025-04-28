@@ -385,7 +385,7 @@ pub trait TargetDisplay {
 }
 
 /// Implements the [`TargetDisplay`] only.
-macro_rules! impl_target_display_trait {
+macro_rules! impl_target_display {
     ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
         impl TargetDisplay for $struct_name {
             fn type_(&self) -> &str {
@@ -404,9 +404,9 @@ macro_rules! impl_target_display_trait {
 }
 
 /// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
-macro_rules! impl_target_display {
+macro_rules! impl_display_and_target_display {
     ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
-        impl_target_display_trait!($struct_name, $target_type, $target_type_display);
+        impl_target_display!($struct_name, $target_type, $target_type_display);
 
         impl fmt::Display for $struct_name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -424,15 +424,15 @@ macro_rules! impl_target_display {
     };
 }
 
-impl_target_display!(PodTarget, pod, "pod");
-impl_target_display!(DeploymentTarget, deployment, "deployment");
-impl_target_display!(RolloutTarget, rollout, "rollout");
-impl_target_display!(JobTarget, job, "job");
-impl_target_display!(CronJobTarget, cron_job, "cronjob");
-impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
-impl_target_display!(ServiceTarget, service, "service");
-impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
-impl_target_display_trait!(WorkflowTarget, workflow, "workflow");
+impl_display_and_target_display!(PodTarget, pod, "pod");
+impl_display_and_target_display!(DeploymentTarget, deployment, "deployment");
+impl_display_and_target_display!(RolloutTarget, rollout, "rollout");
+impl_display_and_target_display!(JobTarget, job, "job");
+impl_display_and_target_display!(CronJobTarget, cron_job, "cronjob");
+impl_display_and_target_display!(StatefulSetTarget, stateful_set, "statefulset");
+impl_display_and_target_display!(ServiceTarget, service, "service");
+impl_display_and_target_display!(ReplicaSetTarget, replica_set, "replicaset");
+impl_target_display!(WorkflowTarget, workflow, "workflow");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
