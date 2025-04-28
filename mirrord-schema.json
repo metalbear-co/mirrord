@@ -616,7 +616,7 @@
         },
         "override_host_ip": {
           "title": "container.override_host_ip {#container-override_host_ip}",
-          "description": "Allow the setting of override ip addr for intproxy to use when using mirrord containers feature\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed via different ip addr than one bound as host",
+          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.",
           "type": [
             "string",
             "null"
