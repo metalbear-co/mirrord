@@ -50,7 +50,11 @@ pub struct LayerSetup {
 }
 
 impl LayerSetup {
-    pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts, local_hostname: bool) -> Self {
+    pub fn new(
+        mut config: LayerConfig,
+        debugger_ports: DebuggerPorts,
+        local_hostname: bool,
+    ) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
@@ -75,7 +79,8 @@ impl LayerSetup {
             .parse::<SocketAddr>()
             .expect("malformed internal proxy address");
 
-        let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
+        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
+        tracing::info!(?incoming_mode, ?config, "incoming has changed");
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
@@ -225,7 +230,7 @@ pub enum IncomingMode {
 
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
-    fn new(config: &IncomingConfig) -> Self {
+    fn new(config: &mut IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;
         }
@@ -233,8 +238,7 @@ impl IncomingMode {
         let ports = config
             .http_filter
             .ports
-            .clone()
-            .unwrap_or_default()
+            .get_or_insert_default()
             .iter()
             .copied()
             .collect();
