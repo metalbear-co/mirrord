@@ -16,9 +16,9 @@ impl RuntimeDataProvider for (&ResolvedResource<Workflow>, &WorkflowTargetLookup
         WorkflowRuntimeProvider {
             client,
             resource: &resolved.resource,
-            template: lookup.template(),
-            step: lookup.step(),
             container: resolved.container.as_deref(),
+            template: lookup.template.as_deref(),
+            step: lookup.step.as_deref(),
         }
         .try_into_runtime_data()
         .await

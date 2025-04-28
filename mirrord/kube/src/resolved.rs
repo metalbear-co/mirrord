@@ -60,34 +60,10 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     ),
 }
 
-#[derive(Clone, Debug, Default)]
-pub enum WorkflowTargetLookup {
-    #[default]
-    Entrypoint,
-    Template {
-        template: String,
-    },
-    Step {
-        template: Option<String>,
-        step: String,
-    },
-}
-
-impl WorkflowTargetLookup {
-    fn template(&self) -> Option<&str> {
-        match self {
-            WorkflowTargetLookup::Template { template } => Some(&template),
-            WorkflowTargetLookup::Step { template, .. } => template.as_deref(),
-            WorkflowTargetLookup::Entrypoint => None,
-        }
-    }
-
-    fn step(&self) -> Option<&str> {
-        match self {
-            WorkflowTargetLookup::Step { step, .. } => Some(&step),
-            _ => None,
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct WorkflowTargetLookup {
+    template: Option<String>,
+    step: Option<String>,
 }
 
 /// A kubernetes [`Resource`], and container pair to be used based on the target we
@@ -344,18 +320,15 @@ impl ResolvedTarget<false> {
                 .get(&target.workflow)
                 .await
                 .map(|resource| {
-                    let lookup = match (target.step.clone(), target.template.clone()) {
-                        (None, None) => WorkflowTargetLookup::Entrypoint,
-                        (None, Some(template)) => WorkflowTargetLookup::Template { template },
-                        (Some(step), template) => WorkflowTargetLookup::Step { step, template },
-                    };
-
                     ResolvedTarget::Workflow(
                         ResolvedResource {
                             resource,
                             container: target.container.clone(),
                         },
-                        lookup,
+                        WorkflowTargetLookup {
+                            template: target.template.clone(),
+                            step: target.step.clone(),
+                        },
                     )
                 }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
