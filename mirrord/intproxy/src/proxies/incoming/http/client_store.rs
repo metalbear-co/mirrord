@@ -302,7 +302,7 @@ mod test {
     use tokio_rustls::TlsAcceptor;
 
     use super::ClientStore;
-    use crate::proxies::incoming::http::StreamingBody;
+    use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]
@@ -412,7 +412,10 @@ mod test {
         let addr = listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            let client_store = ClientStore::new_with_timeout(Duration::ZERO, Default::default());
+            let client_store = ClientStore::new_with_timeout(
+                Duration::ZERO,
+                LocalTlsSetup::from_config(Default::default()),
+            );
 
             let mut client = client_store
                 .make_client(

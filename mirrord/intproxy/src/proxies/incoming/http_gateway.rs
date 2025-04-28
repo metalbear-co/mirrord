@@ -426,6 +426,7 @@ mod test {
         background_tasks::{BackgroundTasks, TaskUpdate},
         proxies::incoming::{
             tcp_proxy::{LocalTcpConnection, TcpProxyTask},
+            tls::LocalTlsSetup,
             InProxyTaskError,
         },
     };
@@ -607,7 +608,10 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
+                ClientStore::new_with_timeout(
+                    Duration::from_secs(1),
+                    LocalTlsSetup::from_config(Default::default()),
+                ),
                 Some(ResponseMode::Basic),
                 local_destination,
                 if use_tls {

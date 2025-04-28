@@ -12,9 +12,7 @@ use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
-use mirrord_config::feature::network::incoming::https_delivery::{
-    HttpsDeliveryProtocol, LocalHttpsDelivery,
-};
+use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscription, ProxyToLayerMessage,
@@ -28,7 +26,6 @@ use mirrord_protocol::{
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
-use rustls::pki_types::ServerName;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
@@ -192,27 +189,7 @@ impl IncomingProxy {
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalHttpsDelivery,
     ) -> Self {
-        let tls_setup = match https_delivery.protocol {
-            HttpsDeliveryProtocol::Tcp => None,
-            HttpsDeliveryProtocol::Tls => {
-                let server_name = https_delivery.server_name.and_then(|name| {
-                    ServerName::try_from(name)
-                        .inspect_err(|_| {
-                            tracing::error!(
-                                "Invalid server name was specified for the local HTTPS delivery. \
-                                This should be detected during config verification."
-                            )
-                        })
-                        .ok()
-                });
-
-                Some(Arc::new(LocalTlsSetup::new(
-                    https_delivery.trust_roots,
-                    https_delivery.server_cert,
-                    server_name,
-                )))
-            }
-        };
+        let tls_setup = LocalTlsSetup::from_config(https_delivery);
 
         Self {
             subscriptions: Default::default(),
