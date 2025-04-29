@@ -13,6 +13,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 ///
 /// Its [`AsyncRead`] implementation will first read from the prefix, and only when it is
 /// exhausted, it will read from the inner stream.
+///
+/// Once the prefix is exhausted, it is dropped to free the memory.
 pub struct RolledBackStream<IO, B> {
     stream: IO,
     prefix: Option<B>,

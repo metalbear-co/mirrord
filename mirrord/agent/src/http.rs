@@ -90,8 +90,16 @@ impl DetectedHttpVersion {
 /// Attempts to detect HTTP version from the first bytes of a stream.
 ///
 /// Keeps reading data until the timeout elapses or we're certain whether the stream is an HTTP
-/// connection or not. Note that the given `timeout` starts elapsing only after we complete the
-/// first read.
+/// connection or not.
+///
+/// # Notes
+///
+/// * The given `timeout` starts elapsing only after we complete the first read.
+/// * This function can read arbitrarily large amount of data from the stream. However,
+///   [`HttpVersion::detect`] should almost always be able to determine the stream type after
+///   reading no more than ~2kb (assuming **very** long request URI).
+/// * Consumed data is stored in [`RolledBackStream`]'s prefix, which will be dropped after the data
+///   is read again.
 pub async fn detect_http_version<IO>(
     mut stream: IO,
     timeout: Duration,
