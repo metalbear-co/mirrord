@@ -59,7 +59,7 @@ pub async fn agent_exits_on_dirty_tables(
         delete_after_fail,
     )
     .await
-    .expect(format!("Should be able to create namespace {namespace}").as_str());
+    .unwrap_or_else(|error| panic!("Should be able to create namespace {namespace}: {error}"));
 
     // Create a single pod as the target and wrap it in ResourceGuard
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &namespace);
@@ -103,9 +103,9 @@ pub async fn agent_exits_on_dirty_tables(
             .unwrap(),
         )
         .await
-        .expect(
-            format!("Should be able to create pod {pod_name} in namespace {namespace}").as_str(),
-        );
+        .unwrap_or_else(|error| {
+            panic!("Should be able to create pod {pod_name} in namespace {namespace}: {error}")
+        });
     println!("Created pod `{pod_name}`");
 
     // Use the pod as a target, which has an init container that inserts a mirrord chain name

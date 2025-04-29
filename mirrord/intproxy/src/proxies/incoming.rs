@@ -6,7 +6,7 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, io, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
@@ -20,15 +20,16 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, HttpRequestTransportType,
-        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        StealType, TcpData,
+        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
+        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
+        NewTcpConnectionV2, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
+use tls::LocalTlsSetup;
 use tokio::sync::mpsc;
 use tracing::Level;
 
@@ -49,6 +50,42 @@ mod port_subscription_ext;
 mod subscriptions;
 mod tasks;
 mod tcp_proxy;
+mod tls;
+
+/// Maps IDs of remote connections to `T`.
+///
+/// Stores mirrored and stolen connections separately.
+struct ConnectionMap<T> {
+    mirror: HashMap<ConnectionId, T>,
+    steal: HashMap<ConnectionId, T>,
+}
+
+impl<T> ConnectionMap<T> {
+    fn get_mut(&mut self, is_steal: bool) -> &mut HashMap<ConnectionId, T> {
+        if is_steal {
+            &mut self.steal
+        } else {
+            &mut self.mirror
+        }
+    }
+
+    fn get(&self, is_steal: bool) -> &HashMap<ConnectionId, T> {
+        if is_steal {
+            &self.steal
+        } else {
+            &self.mirror
+        }
+    }
+}
+
+impl<T> Default for ConnectionMap<T> {
+    fn default() -> Self {
+        Self {
+            mirror: Default::default(),
+            steal: Default::default(),
+        }
+    }
+}
 
 /// Errors that can occur when handling the `incoming` feature.
 #[derive(Error, Debug)]
@@ -89,26 +126,27 @@ struct HttpGatewayHandle {
 /// Utilizes multiple background tasks ([`TcpProxyTask`]s and [`HttpGatewayTask`]s) to handle
 /// incoming connections and requests.
 ///
-/// # Connections mirrored or stolen without a filter
+/// # Connections mirrored or stolen in whole
 ///
 /// Each such connection exists in two places:
 ///
 /// 1. Here, between the intproxy and the user application. Managed by a single [`TcpProxyTask`].
 /// 2. In the cluster, between the agent and the original TCP client.
 ///
-/// We are notified about such connections with the [`NewTcpConnection`] message.
+/// We are notified about such connections with the [`NewTcpConnectionV1`]/[`NewTcpConnectionV2`]
+/// message.
 ///
 /// The local connection lives until the agent or the user application closes it, or a local IO
 /// error occurs. When we want to close this connection, we simply drop the [`TcpProxyTask`]'s
 /// [`TaskSender`]. When a local IO error occurs, the [`TcpProxyTask`] finishes with an
 /// [`InProxyTaskError`].
 ///
-/// # Requests stolen with a filter
+/// # Mirrored or stolen requests
 ///
 /// In the cluster, we have a real persistent connection between the agent and the original HTTP
 /// client. From this connection, intproxy receives a subset of requests.
 ///
-/// Locally, we don't have a concept of a filered connection.
+/// Locally, we don't have a concept of a filtered connection.
 /// Each request is handled independently by a single [`HttpGatewayTask`].
 /// Also:
 /// 1. Local HTTP connections are reused when possible.
@@ -117,7 +155,7 @@ struct HttpGatewayHandle {
 ///    independently). If a request fails locally, we send a
 ///    [`StatusCode::BAD_GATEWAY`](hyper::http::StatusCode::BAD_GATEWAY) response.
 ///
-/// We are notified about stolen requests with the [`HttpRequest`] messages.
+/// We are notified about mirrored/stolen requests with the [`HttpRequest`] messages.
 ///
 /// The request can be cancelled only when one of the following happen:
 /// 1. The agent closes the remote connection to which this request belongs
@@ -128,9 +166,9 @@ struct HttpGatewayHandle {
 ///
 /// # HTTP upgrades
 ///
-/// An HTTP request stolen with a filter can result in an HTTP upgrade.
+/// A mirrored/stolen HTTP request can result in an HTTP upgrade.
 /// When this happens, the TCP connection is recovered and passed to a new [`TcpProxyTask`].
-/// The TCP connection is then treated as stolen without a filter.
+/// The TCP connection is then treated as mirrored/stolen in whole.
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
     subscriptions: SubscriptionsManager,
@@ -140,19 +178,16 @@ pub struct IncomingProxy {
     response_mode: ResponseMode,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
-    /// Each mirrored remote connection is mapped to a [`TcpProxyTask`] in mirror mode.
+    /// For connecting to the user application's server with TLS.
+    tls_setup: Option<Arc<LocalTlsSetup>>,
+    /// Each mirrored/stolen remote connection is mapped to a [`TcpProxyTask`].
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
-    mirror_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
-    /// Each remote connection stolen without a filter is mapped to a [`TcpProxyTask`] in steal
-    /// mode.
-    ///
-    /// Each entry here maps to a connection that is in progress both locally and remotely.
-    steal_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
-    /// Each remote HTTP request stolen with a filter is mapped to a [`HttpGatewayTask`].
+    tcp_proxies: ConnectionMap<TaskSender<TcpProxyTask>>,
+    /// Each mirrored/stolen remote HTTP request is mapped to a [`HttpGatewayTask`].
     ///
     /// Each entry here maps to a request that is in progress both locally and remotely.
-    http_gateways: HashMap<ConnectionId, HashMap<RequestId, HttpGatewayHandle>>,
+    http_gateways: ConnectionMap<HashMap<RequestId, HttpGatewayHandle>>,
     /// Running [`BackgroundTask`]s utilized by this proxy.
     tasks: BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>,
 }
@@ -165,16 +200,18 @@ impl IncomingProxy {
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalHttpsDelivery,
     ) -> Self {
+        let tls_setup = LocalTlsSetup::from_config(https_delivery);
+
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
             response_mode: Default::default(),
             client_store: ClientStore::new_with_timeout(
                 idle_local_http_connection_timeout,
-                https_delivery,
+                tls_setup.clone(),
             ),
-            mirror_tcp_proxies: Default::default(),
-            steal_tcp_proxies: Default::default(),
+            tls_setup,
+            tcp_proxies: Default::default(),
             http_gateways: Default::default(),
             tasks: Default::default(),
         }
@@ -193,22 +230,22 @@ impl IncomingProxy {
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
-        transport: HttpRequestTransportType,
+        transport: IncomingTrafficTransportType,
+        is_steal: bool,
         message_bus: &MessageBus<Self>,
     ) {
         tracing::info!(
             full_headers = ?request.internal_request.headers,
             ?request,
+            is_steal,
             "Received an HTTP request from the agent",
         );
 
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
-            matches!(
-                subscription.subscription,
-                PortSubscription::Steal(
-                    StealType::FilteredHttp(..) | StealType::FilteredHttpEx(..)
-                )
-            )
+            match &subscription.subscription {
+                PortSubscription::Mirror(..) => is_steal.not(),
+                PortSubscription::Steal(..) => is_steal,
+            }
         });
         let Some(subscription) = subscription else {
             tracing::debug!(
@@ -216,18 +253,7 @@ impl IncomingProxy {
                 sending an unsubscribe request or an error response."
             );
 
-            let no_other_requests = self
-                .http_gateways
-                .get(&request.connection_id)
-                .map(|gateways| gateways.is_empty())
-                .unwrap_or(true);
-            if no_other_requests {
-                message_bus
-                    .send(ClientMessage::TcpSteal(
-                        LayerTcpSteal::ConnectionUnsubscribe(request.connection_id),
-                    ))
-                    .await;
-            } else {
+            if is_steal {
                 let response = http::mirrord_error_response(
                     "port no longer subscribed with an HTTP filter",
                     request.version(),
@@ -257,57 +283,66 @@ impl IncomingProxy {
             HttpGatewayTask::new(
                 request,
                 self.client_store.clone(),
-                self.response_mode,
+                is_steal.then_some(self.response_mode),
                 subscription.listening_on,
                 transport,
             ),
-            InProxyTask::HttpGateway(id),
+            if is_steal {
+                InProxyTask::StealHttpGateway(id)
+            } else {
+                InProxyTask::MirrorHttpGateway(id)
+            },
             Self::CHANNEL_SIZE,
         );
         self.http_gateways
+            .get_mut(is_steal)
             .entry(connection_id)
             .or_default()
             .insert(request_id, HttpGatewayHandle { _tx: tx, body_tx });
     }
 
-    /// Handles [`NewTcpConnection`] message from the agent, starting a new [`TcpProxyTask`].
+    /// Handles [`NewTcpConnectionV2`] message from the agent, starting a new [`TcpProxyTask`].
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.
     #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_new_connection(
         &mut self,
-        connection: NewTcpConnection,
+        connection: NewTcpConnectionV2,
         is_steal: bool,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), IncomingProxyError> {
-        let NewTcpConnection {
-            connection_id,
-            remote_address,
-            destination_port,
-            source_port,
-            local_address,
+        let NewTcpConnectionV2 {
+            connection:
+                NewTcpConnectionV1 {
+                    connection_id,
+                    remote_address,
+                    destination_port,
+                    source_port,
+                    local_address,
+                },
+            transport,
         } = connection;
 
         let subscription = self
             .subscriptions
             .get(destination_port)
             .filter(|subscription| match &subscription.subscription {
-                PortSubscription::Mirror(..) if !is_steal => true,
-                PortSubscription::Steal(StealType::All(..)) if is_steal => true,
-                _ => false,
+                PortSubscription::Mirror(..) => is_steal.not(),
+                PortSubscription::Steal(..) => is_steal,
             });
         let Some(subscription) = subscription else {
             tracing::debug!(
                 port = destination_port,
                 connection_id,
+                is_steal,
                 "Received a new connection within a stale port subscription, sending an unsubscribe request.",
             );
 
             let message = if is_steal {
-                ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id))
-            } else {
                 ClientMessage::TcpSteal(LayerTcpSteal::ConnectionUnsubscribe(connection_id))
+            } else {
+                ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id))
             };
             message_bus.send(message).await;
 
@@ -342,18 +377,16 @@ impl IncomingProxy {
                 LocalTcpConnection::FromTheStart {
                     socket,
                     peer: subscription.listening_on,
+                    transport,
+                    tls_setup: self.tls_setup.clone(),
                 },
-                !is_steal,
+                is_steal.not(),
             ),
             id,
             Self::CHANNEL_SIZE,
         );
 
-        if is_steal {
-            self.steal_tcp_proxies.insert(connection_id, tx);
-        } else {
-            self.mirror_tcp_proxies.insert(connection_id, tx);
-        }
+        self.tcp_proxies.get_mut(is_steal).insert(connection_id, tx);
 
         Ok(())
     }
@@ -362,6 +395,7 @@ impl IncomingProxy {
     async fn handle_chunked_request(
         &mut self,
         request: ChunkedRequest,
+        is_steal: bool,
         message_bus: &mut MessageBus<Self>,
     ) {
         match request {
@@ -371,7 +405,8 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request,
                     Some(body_tx),
-                    HttpRequestTransportType::Tcp,
+                    IncomingTrafficTransportType::Tcp,
+                    is_steal,
                     message_bus,
                 )
                 .await;
@@ -404,7 +439,7 @@ impl IncomingProxy {
                     port: destination.port(),
                 };
 
-                self.start_http_gateway(request, body_tx, transport, message_bus)
+                self.start_http_gateway(request, body_tx, transport, is_steal, message_bus)
                     .await;
             }
 
@@ -416,6 +451,7 @@ impl IncomingProxy {
             }) => {
                 let gateway = self
                     .http_gateways
+                    .get_mut(is_steal)
                     .get_mut(&connection_id)
                     .and_then(|gateways| gateways.get_mut(&request_id));
                 let Some(gateway) = gateway else {
@@ -424,6 +460,7 @@ impl IncomingProxy {
                         request_id,
                         frames = ?frames,
                         last_body_chunk = is_last,
+                        is_steal,
                         "Received a body chunk for a request that is no longer alive locally"
                     );
 
@@ -436,6 +473,7 @@ impl IncomingProxy {
                         request_id,
                         frames = ?frames,
                         last_body_chunk = is_last,
+                        is_steal,
                         "Received a body chunk for a request with a closed body"
                     );
 
@@ -448,6 +486,7 @@ impl IncomingProxy {
                             frame = ?err.0,
                             connection_id,
                             request_id,
+                            is_steal,
                             "Failed to send an HTTP request body frame to the HttpGatewayTask, channel is closed"
                         );
                         break;
@@ -466,10 +505,12 @@ impl IncomingProxy {
                 tracing::debug!(
                     connection_id,
                     request_id,
+                    is_steal,
                     "Received an error in an HTTP request body",
                 );
 
-                if let Some(gateways) = self.http_gateways.get_mut(&connection_id) {
+                if let Some(gateways) = self.http_gateways.get_mut(is_steal).get_mut(&connection_id)
+                {
                     gateways.remove(&request_id);
                 };
             }
@@ -483,10 +524,12 @@ impl IncomingProxy {
                     connection_id,
                     request_id,
                     error = error_message,
+                    is_steal,
                     "Received an error in an HTTP request body",
                 );
 
-                if let Some(gateways) = self.http_gateways.get_mut(&connection_id) {
+                if let Some(gateways) = self.http_gateways.get_mut(is_steal).get_mut(&connection_id)
+                {
                     gateways.remove(&request_id);
                 };
             }
@@ -502,20 +545,16 @@ impl IncomingProxy {
     ) -> Result<(), IncomingProxyError> {
         match message {
             DaemonTcp::Close(close) => {
-                if is_steal {
-                    self.steal_tcp_proxies.remove(&close.connection_id);
-                    self.http_gateways.remove(&close.connection_id);
-                } else {
-                    self.mirror_tcp_proxies.remove(&close.connection_id);
-                }
+                self.tcp_proxies
+                    .get_mut(is_steal)
+                    .remove(&close.connection_id);
+                self.http_gateways
+                    .get_mut(is_steal)
+                    .remove(&close.connection_id);
             }
 
             DaemonTcp::Data(data) => {
-                let tx = if is_steal {
-                    self.steal_tcp_proxies.get(&data.connection_id)
-                } else {
-                    self.mirror_tcp_proxies.get(&data.connection_id)
-                };
+                let tx = self.tcp_proxies.get(is_steal).get(&data.connection_id);
 
                 if let Some(tx) = tx {
                     tx.send(data.bytes).await;
@@ -523,6 +562,7 @@ impl IncomingProxy {
                     tracing::debug!(
                         connection_id = data.connection_id,
                         bytes = data.bytes.len(),
+                        is_steal,
                         "Received new data for a connection that does not belong to any TcpProxy task",
                     );
                 }
@@ -532,7 +572,8 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
-                    HttpRequestTransportType::Tcp,
+                    IncomingTrafficTransportType::Tcp,
+                    is_steal,
                     message_bus,
                 )
                 .await;
@@ -542,17 +583,31 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
-                    HttpRequestTransportType::Tcp,
+                    IncomingTrafficTransportType::Tcp,
+                    is_steal,
                     message_bus,
                 )
                 .await;
             }
 
             DaemonTcp::HttpRequestChunked(request) => {
-                self.handle_chunked_request(request, message_bus).await;
+                self.handle_chunked_request(request, is_steal, message_bus)
+                    .await;
             }
 
-            DaemonTcp::NewConnection(connection) => {
+            DaemonTcp::NewConnectionV1(connection) => {
+                self.handle_new_connection(
+                    NewTcpConnectionV2 {
+                        connection,
+                        transport: IncomingTrafficTransportType::Tcp,
+                    },
+                    is_steal,
+                    message_bus,
+                )
+                .await?;
+            }
+
+            DaemonTcp::NewConnectionV2(connection) => {
                 self.handle_new_connection(connection, is_steal, message_bus)
                     .await?;
             }
@@ -633,8 +688,10 @@ impl IncomingProxy {
             }
 
             IncomingProxyMessage::ConnectionRefresh => {
-                self.mirror_tcp_proxies.clear();
-                self.steal_tcp_proxies.clear();
+                self.tcp_proxies.mirror.clear();
+                self.tcp_proxies.steal.clear();
+                self.http_gateways.mirror.clear();
+                self.http_gateways.steal.clear();
                 self.tasks.clear();
 
                 for subscription in self.subscriptions.iter_mut() {
@@ -673,15 +730,18 @@ impl IncomingProxy {
 
                 self.metadata_store.no_longer_expect(connection_id);
 
-                if is_steal {
-                    if self.steal_tcp_proxies.remove(&connection_id).is_some() {
-                        message_bus
-                            .send(ClientMessage::TcpSteal(
-                                LayerTcpSteal::ConnectionUnsubscribe(connection_id),
-                            ))
-                            .await;
-                    }
-                } else if self.mirror_tcp_proxies.remove(&connection_id).is_some() {
+                let send_close = self
+                    .tcp_proxies
+                    .get_mut(is_steal)
+                    .remove(&connection_id)
+                    .is_some();
+                if send_close && is_steal {
+                    message_bus
+                        .send(ClientMessage::TcpSteal(
+                            LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+                        ))
+                        .await;
+                } else if send_close {
                     message_bus
                         .send(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
                             connection_id,
@@ -695,7 +755,7 @@ impl IncomingProxy {
             }
 
             TaskUpdate::Message(InProxyTaskMessage::Tcp(bytes)) => {
-                if self.steal_tcp_proxies.contains_key(&connection_id) {
+                if self.tcp_proxies.steal.contains_key(&connection_id) {
                     message_bus
                         .send(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                             connection_id,
@@ -716,6 +776,7 @@ impl IncomingProxy {
     async fn handle_http_gateway_update(
         &mut self,
         id: HttpGatewayId,
+        is_steal: bool,
         update: TaskUpdate<InProxyTaskMessage, InProxyTaskError>,
         message_bus: &mut MessageBus<Self>,
     ) {
@@ -723,15 +784,17 @@ impl IncomingProxy {
             TaskUpdate::Finished(result) => {
                 let respond_on_panic = self
                     .http_gateways
+                    .get_mut(is_steal)
                     .get_mut(&id.connection_id)
                     .and_then(|gateways| gateways.remove(&id.request_id))
-                    .is_some();
+                    .is_some()
+                    && is_steal;
 
                 match result {
                     Ok(()) => {}
-                    Err(TaskError::Error(
-                        InProxyTaskError::IoError(..) | InProxyTaskError::UpgradeError(..),
-                    )) => unreachable!("HttpGatewayTask does not return any errors"),
+                    Err(TaskError::Error(..)) => {
+                        unreachable!("HttpGatewayTask does not return any errors")
+                    }
                     Err(TaskError::Panic) => {
                         tracing::error!(
                             connection_id = id.connection_id,
@@ -760,6 +823,7 @@ impl IncomingProxy {
             TaskUpdate::Message(InProxyTaskMessage::Http(message)) => {
                 let exists = self
                     .http_gateways
+                    .get(is_steal)
                     .get(&id.connection_id)
                     .and_then(|gateways| gateways.get(&id.request_id))
                     .is_some();
@@ -768,6 +832,28 @@ impl IncomingProxy {
                 }
 
                 match message {
+                    HttpOut::Upgraded(on_upgrade) => {
+                        let proxy = self.tasks.register(
+                            TcpProxyTask::new(
+                                id.connection_id,
+                                LocalTcpConnection::AfterUpgrade(on_upgrade),
+                                is_steal.not(),
+                            ),
+                            if is_steal {
+                                InProxyTask::StealTcpProxy(id.connection_id)
+                            } else {
+                                InProxyTask::MirrorTcpProxy(id.connection_id)
+                            },
+                            Self::CHANNEL_SIZE,
+                        );
+
+                        self.tcp_proxies
+                            .get_mut(is_steal)
+                            .insert(id.connection_id, proxy);
+                    }
+                    _ if is_steal.not() => {
+                        unreachable!("HttpGatewayTask does not produce responses in mirror mode")
+                    }
                     HttpOut::ResponseBasic(response) => {
                         tracing::info!(
                             full_headers = ?response.internal_response.headers,
@@ -809,18 +895,6 @@ impl IncomingProxy {
                             )))
                             .await;
                     }
-                    HttpOut::Upgraded(on_upgrade) => {
-                        let proxy = self.tasks.register(
-                            TcpProxyTask::new(
-                                id.connection_id,
-                                LocalTcpConnection::AfterUpgrade(on_upgrade),
-                                false,
-                            ),
-                            InProxyTask::StealTcpProxy(id.connection_id),
-                            Self::CHANNEL_SIZE,
-                        );
-                        self.steal_tcp_proxies.insert(id.connection_id, proxy);
-                    }
                 }
             }
 
@@ -855,8 +929,11 @@ impl BackgroundTask for IncomingProxy {
                     InProxyTask::StealTcpProxy(connection_id) => {
                         self.handle_tcp_proxy_update(connection_id, true, update, message_bus).await;
                     }
-                    InProxyTask::HttpGateway(id) => {
-                        self.handle_http_gateway_update(id, update, message_bus).await;
+                    InProxyTask::MirrorHttpGateway(id) => {
+                        self.handle_http_gateway_update(id, false, update, message_bus).await;
+                    }
+                    InProxyTask::StealHttpGateway(id) => {
+                        self.handle_http_gateway_update(id, true, update, message_bus).await;
                     }
                 },
             }
