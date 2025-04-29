@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     ConnectionId, LogMessage, Port,
 };
 use tokio::sync::{
@@ -111,7 +111,7 @@ impl TcpSnifferApi {
                     self.connections.insert(id, StreamNotifyClose::new(BroadcastStream::new(conn.data)));
 
                     Ok((
-                        DaemonTcp::NewConnection(NewTcpConnection {
+                        DaemonTcp::NewConnectionV1(NewTcpConnectionV1 {
                             connection_id: id,
                             remote_address: conn.session_id.source_addr.into(),
                             local_address: conn.session_id.dest_addr.into(),

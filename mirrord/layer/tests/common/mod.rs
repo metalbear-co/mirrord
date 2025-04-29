@@ -21,7 +21,7 @@ use mirrord_protocol::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
@@ -300,8 +300,8 @@ impl TestIntProxy {
     pub async fn send_new_connection(&mut self, port: u16) -> u64 {
         let new_connection_id = self.num_connections;
         self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
-                NewTcpConnection {
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnectionV1(
+                NewTcpConnectionV1 {
                     connection_id: new_connection_id,
                     remote_address: "127.0.0.1".parse().unwrap(),
                     destination_port: port,

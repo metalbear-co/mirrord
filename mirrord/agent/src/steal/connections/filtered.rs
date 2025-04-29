@@ -17,7 +17,7 @@ use hyper::{
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
     tcp::{
-        HttpRequestMetadata, HttpRequestTransportType, HTTP_CHUNKED_REQUEST_V2_VERSION,
+        HttpRequestMetadata, IncomingTrafficTransportType, HTTP_CHUNKED_REQUEST_V2_VERSION,
         HTTP_FILTERED_UPGRADE_VERSION,
     },
     ConnectionId, LogMessage, RequestId,
@@ -712,11 +712,11 @@ where
         self.next_request_id += 1;
 
         let transport = match self.original_destination.connector() {
-            Some(connector) => HttpRequestTransportType::Tls {
+            Some(connector) => IncomingTrafficTransportType::Tls {
                 alpn_protocol: connector.alpn_protocol().map(Vec::from),
                 server_name: connector.server_name().map(|name| name.to_str().into()),
             },
-            None => HttpRequestTransportType::Tcp,
+            None => IncomingTrafficTransportType::Tcp,
         };
 
         tx.send(ConnectionMessageOut::Request {
@@ -1327,7 +1327,7 @@ mod test {
                             connection_id: TestSetup::CONNECTION_ID,
                             id,
                             metadata: HttpRequestMetadata::V1 { destination, .. },
-                            transport: HttpRequestTransportType::Tcp,
+                            transport: IncomingTrafficTransportType::Tcp,
                             ..
                         } => {
                             assert_eq!(received_client_id, client_id);
@@ -1424,7 +1424,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(received_client_id, subscribed_client_id);
@@ -1511,7 +1511,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1551,7 +1551,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1617,7 +1617,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1702,7 +1702,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1755,7 +1755,7 @@ mod test {
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
                         request,
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1888,7 +1888,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -2136,7 +2136,7 @@ mod test {
                 connection_id: 0,
                 id: 0,
                 transport:
-                    HttpRequestTransportType::Tls {
+                    IncomingTrafficTransportType::Tls {
                         alpn_protocol,
                         server_name,
                     },
@@ -2221,7 +2221,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
-                        transport: HttpRequestTransportType::Tcp,
+                        transport: IncomingTrafficTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(received_client_id, 0);

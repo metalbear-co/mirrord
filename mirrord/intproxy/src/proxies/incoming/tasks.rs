@@ -7,6 +7,8 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
+use super::tls::LocalTlsSetupError;
+
 /// Messages produced by the [`BackgroundTask`](crate::background_tasks::BackgroundTask)s used in
 /// the [`IncomingProxy`](super::IncomingProxy).
 pub enum InProxyTaskMessage {
@@ -73,9 +75,11 @@ impl From<HttpOut> for InProxyTaskMessage {
 #[derive(Error, Debug)]
 pub enum InProxyTaskError {
     #[error("io failed: {0}")]
-    IoError(#[from] io::Error),
+    Io(#[from] io::Error),
     #[error("local HTTP upgrade failed: {0}")]
-    UpgradeError(#[source] hyper::Error),
+    Upgrade(#[source] hyper::Error),
+    #[error("failed to prepare TLS client configuration: {0}")]
+    TlsSetup(#[from] LocalTlsSetupError),
 }
 
 impl From<Infallible> for InProxyTaskError {
@@ -92,8 +96,10 @@ pub enum InProxyTask {
     MirrorTcpProxy(ConnectionId),
     /// [`TcpProxyTask`](super::tcp_proxy::TcpProxyTask) handling a stolen connection.
     StealTcpProxy(ConnectionId),
+    /// [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask) handling a mirrored HTTP request.
+    MirrorHttpGateway(HttpGatewayId),
     /// [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask) handling a stolen HTTP request.
-    HttpGateway(HttpGatewayId),
+    StealHttpGateway(HttpGatewayId),
 }
 
 /// Identifies a [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask).
