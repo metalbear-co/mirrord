@@ -7,10 +7,7 @@ use std::{
 
 use futures::FutureExt;
 use hyper::{Uri, Version};
-use mirrord_config::feature::network::incoming::https_delivery::{
-    HttpsDeliveryProtocol, LocalHttpsDelivery,
-};
-use mirrord_protocol::tcp::HttpRequestTransportType;
+use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -20,7 +17,8 @@ use tokio::{
 };
 use tracing::Level;
 
-use super::{tls::LocalTlsSetup, HttpSender, LocalHttpClient, LocalHttpError};
+use super::{HttpSender, LocalHttpClient, LocalHttpError};
+use crate::proxies::incoming::tls::LocalTlsSetup;
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -52,8 +50,8 @@ impl fmt::Debug for IdleLocalClient {
 /// 2. HTTP [`Version`]
 /// 3. Whether the client uses TLS
 ///
-/// We ignore the fact that [`HttpRequestTransportType::Tls::alpn_protocol`] and
-/// [`HttpRequestTransportType::Tls::server_name`] might be different.
+/// We ignore the fact that [`IncomingTrafficTransportType::Tls::alpn_protocol`] and
+/// [`IncomingTrafficTransportType::Tls::server_name`] might be different.
 /// This is because these parameters are only relevant **before** the connection is upgraded to
 /// HTTP. Since an idle [`LocalHttpClient`] is ready to send HTTP requests, we assume it's safe to
 /// reuse it.
@@ -72,31 +70,11 @@ impl ClientStore {
     /// Creates a new store.
     ///
     /// The store will keep unused clients alive for at least the given time.
-    pub fn new_with_timeout(timeout: Duration, https_delivery: LocalHttpsDelivery) -> Self {
+    pub fn new_with_timeout(timeout: Duration, tls_setup: Option<Arc<LocalTlsSetup>>) -> Self {
         let store = Self {
             clients: Default::default(),
             notify: Default::default(),
-            tls_setup: match https_delivery.protocol {
-                HttpsDeliveryProtocol::Tcp => None,
-                HttpsDeliveryProtocol::Tls => {
-                    let server_name = https_delivery.server_name.and_then(|name| {
-                        ServerName::try_from(name)
-                            .inspect_err(|_| {
-                                tracing::error!(
-                                    "Invalid server name was specified for the local HTTPS delivery. \
-                                    This should be detected during config verification."
-                                )
-                            })
-                            .ok()
-                    });
-
-                    Some(Arc::new(LocalTlsSetup::new(
-                        https_delivery.trust_roots,
-                        https_delivery.server_cert,
-                        server_name,
-                    )))
-                }
-            },
+            tls_setup,
         };
 
         tokio::spawn(cleanup_task(store.clone(), timeout));
@@ -114,11 +92,11 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        transport: &HttpRequestTransportType,
+        transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls =
-            matches!(transport, HttpRequestTransportType::Tls { .. }) && self.tls_setup.is_some();
+        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
+            && self.tls_setup.is_some();
 
         if let Some(ready) = self
             .wait_for_ready(server_addr, version, uses_tls)
@@ -194,14 +172,14 @@ impl ClientStore {
         &self,
         local_server_address: SocketAddr,
         version: Version,
-        transport: &HttpRequestTransportType,
+        transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let connector_and_name = match (transport, self.tls_setup.as_ref()) {
-            (HttpRequestTransportType::Tcp, ..) => None,
+            (IncomingTrafficTransportType::Tcp, ..) => None,
             (.., None) => None,
             (
-                HttpRequestTransportType::Tls {
+                IncomingTrafficTransportType::Tls {
                     alpn_protocol,
                     server_name: original_server_name,
                 },
@@ -314,7 +292,7 @@ mod test {
         Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{HttpRequest, HttpRequestTransportType, InternalHttpRequest};
+    use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
         KeyUsagePurpose,
@@ -324,7 +302,7 @@ mod test {
     use tokio_rustls::TlsAcceptor;
 
     use super::ClientStore;
-    use crate::proxies::incoming::http::StreamingBody;
+    use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]
@@ -351,7 +329,7 @@ mod test {
             .get(
                 addr,
                 Version::HTTP_11,
-                &HttpRequestTransportType::Tcp,
+                &IncomingTrafficTransportType::Tcp,
                 &"http://some.server.com".parse().unwrap(),
             )
             .await
@@ -434,13 +412,16 @@ mod test {
         let addr = listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            let client_store = ClientStore::new_with_timeout(Duration::ZERO, Default::default());
+            let client_store = ClientStore::new_with_timeout(
+                Duration::ZERO,
+                LocalTlsSetup::from_config(Default::default()),
+            );
 
             let mut client = client_store
                 .make_client(
                     addr,
                     request.internal_request.version,
-                    &HttpRequestTransportType::Tls {
+                    &IncomingTrafficTransportType::Tls {
                         alpn_protocol: Some(b"h2".into()),
                         server_name: None,
                     },
