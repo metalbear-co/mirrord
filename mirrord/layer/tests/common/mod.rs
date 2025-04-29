@@ -1409,6 +1409,9 @@ pub fn get_env(
         ),
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         (
+            // The universal layer library loads arm64 library from the path specified in this
+            // environment variable when the host runs arm64e.
+            // See `mirorrd/layer/shim.c` for more information.
             "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
             arm64_dylib_path().to_str().unwrap().to_string(),
         ),
@@ -1420,17 +1423,24 @@ pub fn get_env(
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn arm64_dylib_path() -> PathBuf {
-    match std::env::var("MIRRORD_MACOS_ARM64_LIBRARY") {
-        Ok(path) => {
-            let dylib_path = PathBuf::from(path);
-            println!("Using existing macOS arm64 layer lib from: {dylib_path:?}");
-            assert!(dylib_path.exists());
-            dylib_path
-        }
-        Err(_) => {
-            let dylib_path = test_cdylib::build_current_project();
-            println!("Built macOS arm64 layer lib at {dylib_path:?}");
-            dylib_path
+    if let Ok(path) = std::env::var("MIRRORD_MACOS_ARM64_LIBRARY") {
+        let dylib_path = PathBuf::from(path);
+        println!("Using existing macOS arm64 layer lib from: {dylib_path:?}");
+        assert!(dylib_path.exists());
+        return dylib_path;
+    }
+
+    if let Ok(path) = std::env::var("MIRRORD_TEST_USE_EXISTING_LIB") {
+        let derived_path = path.replace("universal-apple-darwin", "aarch64-apple-darwin");
+        let dylib_path = PathBuf::from(&derived_path);
+        if dylib_path.exists() {
+            return dylib_path;
+        } else {
+            println!("Derived arm64 layer lib path does not exist: {derived_path}");
         }
     }
+
+    let dylib_path = test_cdylib::build_current_project();
+    println!("Built macOS arm64 layer lib at {dylib_path:?}");
+    dylib_path
 }

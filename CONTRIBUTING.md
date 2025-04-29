@@ -201,13 +201,6 @@ And then in order to use that dylib in the tests, run the tests like this:
 MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
 ```
 
-On Apple Silicon, set `MIRRORD_MACOS_ARM64_LIBRARY` additionally to use the arm64 layer lib as well:
-```bash
-MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
-MIRRORD_MACOS_ARM64_LIBRARY=../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib \
-cargo test -p mirrord-layer
-```
-
 ### Integration Tests logs and you
 
 These tests will try writing the `mirrord-intproxy` logs to a file in `/tmp/intproxy_logs`
