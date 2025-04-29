@@ -36,7 +36,7 @@ pub enum LocalTcpConnection {
 
 impl LocalTcpConnection {
     /// Makes the connection, returning the IO stream and data ready to be sent to the agent.
-    async fn make(self) -> Result<(MaybeTls, Vec<u8>), InProxyTaskError> {
+    async fn connect(self) -> Result<(MaybeTls, Vec<u8>), InProxyTaskError> {
         match self {
             LocalTcpConnection::FromTheStart {
                 socket,
@@ -149,7 +149,7 @@ impl BackgroundTask for TcpProxyTask {
 
         let Some((mut stream, read_buf)) = message_bus
             .closed()
-            .cancel_on_close(connection.make())
+            .cancel_on_close(connection.connect())
             .await
             .transpose()?
         else {
