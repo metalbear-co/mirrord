@@ -1039,7 +1039,7 @@ mod test {
         },
         tcp::{
             DaemonTcp, Filter, HttpRequest, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
-            InternalHttpRequest, InternalHttpResponse, LayerTcp, LayerTcpSteal, NewTcpConnection,
+            InternalHttpRequest, InternalHttpResponse, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
             StealType, TcpClose, TcpData,
         },
         ClientMessage, DaemonMessage,
@@ -1354,8 +1354,8 @@ mod test {
 
         // send new connection from agent and some data
         test_connection
-            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
-                NewTcpConnection {
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnectionV1(
+                NewTcpConnectionV1 {
                     connection_id: 1,
                     remote_address,
                     destination_port,
@@ -1429,8 +1429,8 @@ mod test {
 
         // send new connection from agent and some data
         test_connection
-            .send(DaemonMessage::TcpSteal(DaemonTcp::NewConnection(
-                NewTcpConnection {
+            .send(DaemonMessage::TcpSteal(DaemonTcp::NewConnectionV1(
+                NewTcpConnectionV1 {
                     connection_id: 1,
                     remote_address,
                     destination_port,
@@ -1526,8 +1526,8 @@ mod test {
 
         // send new connections from agent and some data
         test_connection
-            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
-                NewTcpConnection {
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnectionV1(
+                NewTcpConnectionV1 {
                     connection_id: 1,
                     remote_address,
                     destination_port: destination_port_1,
@@ -1539,8 +1539,8 @@ mod test {
         let mut stream_1 = listener_1.accept().await.unwrap().0;
 
         test_connection
-            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
-                NewTcpConnection {
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnectionV1(
+                NewTcpConnectionV1 {
                     connection_id: 2,
                     remote_address,
                     destination_port: destination_port_2,

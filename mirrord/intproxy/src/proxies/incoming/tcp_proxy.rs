@@ -1,10 +1,11 @@
-use std::{io::ErrorKind, net::SocketAddr, time::Duration};
+use std::{io::ErrorKind, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::ConnectionId;
+use mirrord_protocol::{tcp::IncomingTrafficTransportType, ConnectionId};
 use mirrord_tls_util::MaybeTls;
+use rustls::pki_types::ServerName;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     time,
@@ -14,6 +15,7 @@ use tracing::Level;
 use super::{
     bound_socket::BoundTcpSocket,
     tasks::{InProxyTaskError, InProxyTaskMessage},
+    tls::LocalTlsSetup,
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
@@ -25,9 +27,62 @@ pub enum LocalTcpConnection {
     FromTheStart {
         socket: BoundTcpSocket,
         peer: SocketAddr,
+        transport: IncomingTrafficTransportType,
+        tls_setup: Option<Arc<LocalTlsSetup>>,
     },
     /// Upgraded HTTP connection from a previously stolen HTTP request.
     AfterUpgrade(OnUpgrade),
+}
+
+impl LocalTcpConnection {
+    /// Makes the connection, returning the IO stream and data ready to be sent to the agent.
+    async fn connect(self) -> Result<(MaybeTls, Vec<u8>), InProxyTaskError> {
+        match self {
+            LocalTcpConnection::FromTheStart {
+                socket,
+                peer,
+                transport,
+                tls_setup,
+            } => {
+                let stream = socket.connect(peer).await?;
+                let stream = match (transport, tls_setup) {
+                    (IncomingTrafficTransportType::Tcp, ..) => MaybeTls::NoTls(stream),
+                    (.., None) => MaybeTls::NoTls(stream),
+                    (
+                        IncomingTrafficTransportType::Tls {
+                            alpn_protocol,
+                            server_name: original_server_name,
+                        },
+                        Some(setup),
+                    ) => {
+                        let (connector, server_name) = setup.get(alpn_protocol).await?;
+                        let server_name = server_name
+                            .or_else(|| {
+                                let name = original_server_name.clone()?;
+                                ServerName::try_from(name).ok()
+                            })
+                            .unwrap_or_else(|| {
+                                ServerName::try_from("localhost")
+                                    .expect("'localhost' is a valid DNS name")
+                            });
+                        let stream = connector.connect(server_name, stream).await?;
+                        MaybeTls::Tls(Box::new(stream))
+                    }
+                };
+
+                Ok((stream, Default::default()))
+            }
+
+            LocalTcpConnection::AfterUpgrade(on_upgrade) => {
+                let upgraded = on_upgrade.await.map_err(InProxyTaskError::Upgrade)?;
+                let parts = upgraded
+                    .downcast::<TokioIo<MaybeTls>>()
+                    .expect("IO type is known");
+
+                Ok((parts.io.into_inner(), parts.read_buf.into()))
+            }
+        }
+    }
 }
 
 /// [`BackgroundTask`] of [`IncomingProxy`](super::IncomingProxy) that handles a remote
@@ -87,40 +142,25 @@ impl BackgroundTask for TcpProxyTask {
         ret, err(level = Level::WARN),
     )]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let mut stream = match self
+        let connection = self
             .connection
             .take()
-            .expect("task should have a valid connection before run")
-        {
-            LocalTcpConnection::FromTheStart { socket, peer } => {
-                let Some(stream) = message_bus
-                    .closed()
-                    .cancel_on_close(socket.connect(peer))
-                    .await
-                else {
-                    return Ok(());
-                };
+            .expect("task should have a valid connection before run");
 
-                MaybeTls::NoTls(stream?)
-            }
-
-            LocalTcpConnection::AfterUpgrade(on_upgrade) => {
-                let upgraded = on_upgrade.await.map_err(InProxyTaskError::UpgradeError)?;
-                let parts = upgraded
-                    .downcast::<TokioIo<MaybeTls>>()
-                    .expect("IO type is known");
-                let stream = parts.io.into_inner();
-                let read_buf = parts.read_buf;
-
-                if !self.discard_data && !read_buf.is_empty() {
-                    // We don't send empty data,
-                    // because the agent recognizes it as a shutdown from the user application.
-                    message_bus.send(Vec::from(read_buf)).await;
-                }
-
-                stream
-            }
+        let Some((mut stream, read_buf)) = message_bus
+            .closed()
+            .cancel_on_close(connection.connect())
+            .await
+            .transpose()?
+        else {
+            return Ok(());
         };
+
+        if self.discard_data.not() && read_buf.is_empty().not() {
+            // We don't send empty data,
+            // because the agent recognizes it as a shutdown from the user application.
+            message_bus.send(read_buf).await;
+        }
 
         let peer_addr = stream.as_ref().peer_addr()?;
         let self_addr = stream.as_ref().local_addr()?;
