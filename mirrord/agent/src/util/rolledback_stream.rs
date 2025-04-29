@@ -78,7 +78,7 @@ where
             this.prefix = None;
         }
 
-        return Poll::Ready(Ok(()));
+        Poll::Ready(Ok(()))
     }
 }
 
