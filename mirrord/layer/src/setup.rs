@@ -230,6 +230,9 @@ pub enum IncomingMode {
 
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
+    /// # Params
+    ///
+    /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
     fn new(config: &mut IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;

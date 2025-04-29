@@ -466,7 +466,7 @@ impl ReversePortForwarder {
     pub(crate) async fn new(
         mut agent_connection: AgentConnection,
         mappings: HashMap<RemotePort, LocalPort>,
-        network_config: IncomingConfig,
+        mut network_config: IncomingConfig,
         idle_local_http_connection_timeout: Duration,
     ) -> Result<Self, PortForwardError> {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
@@ -502,7 +502,7 @@ impl ReversePortForwarder {
             .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
             .await;
 
-        let incoming_mode = IncomingMode::new(&network_config);
+        let incoming_mode = IncomingMode::new(&mut network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;
@@ -891,21 +891,22 @@ enum IncomingMode {
 
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
-    fn new(config: &IncomingConfig) -> Self {
+    ///
+    /// # Params
+    ///
+    /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
+    fn new(config: &mut IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;
         }
 
-        let ports = {
-            config
-                .http_filter
-                .ports
-                .clone()
-                .unwrap_or_default()
-                .iter()
-                .copied()
-                .collect()
-        };
+        let ports = config
+            .http_filter
+            .ports
+            .get_or_insert_default()
+            .iter()
+            .copied()
+            .collect();
 
         let http_filter_config = &config.http_filter;
 
