@@ -88,11 +88,7 @@ impl TcpPacketData {
     /// connection.
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn treat_as_new_session(&self) -> bool {
-        self.is_new_connection()
-            || matches!(
-                HttpVersion::new(&self.bytes),
-                Some(HttpVersion::V1 | HttpVersion::V2)
-            )
+        self.is_new_connection() || HttpVersion::detect(&self.bytes).into_version().is_some()
     }
 }
 
