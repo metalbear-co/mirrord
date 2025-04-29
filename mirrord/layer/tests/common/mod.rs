@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -40,6 +40,9 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+static MIRRORD_MACOS_ARM64_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initializes tracing for the current thread, allowing us to have multiple tracing subscribers
 /// writin logs to different files.
@@ -1422,25 +1425,29 @@ pub fn get_env(
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn arm64_dylib_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MIRRORD_MACOS_ARM64_LIBRARY") {
-        let dylib_path = PathBuf::from(path);
-        println!("Using existing macOS arm64 layer lib from: {dylib_path:?}");
-        assert!(dylib_path.exists());
-        return dylib_path;
-    }
+fn arm64_dylib_path() -> &'static Path {
+    MIRRORD_MACOS_ARM64_LIBRARY
+        .get_or_init(|| {
+            if let Ok(path) = std::env::var("MIRRORD_MACOS_ARM64_LIBRARY") {
+                let dylib_path = PathBuf::from(path);
+                println!("Using existing macOS arm64 layer lib from: {dylib_path:?}");
+                assert!(dylib_path.exists());
+                return dylib_path;
+            }
 
-    if let Ok(path) = std::env::var("MIRRORD_TEST_USE_EXISTING_LIB") {
-        let derived_path = path.replace("universal-apple-darwin", "aarch64-apple-darwin");
-        let dylib_path = PathBuf::from(&derived_path);
-        if dylib_path.exists() {
-            return dylib_path;
-        } else {
-            println!("Derived arm64 layer lib path does not exist: {derived_path}");
-        }
-    }
+            if let Ok(path) = std::env::var("MIRRORD_TEST_USE_EXISTING_LIB") {
+                let derived_path = path.replace("universal-apple-darwin", "aarch64-apple-darwin");
+                let dylib_path = PathBuf::from(&derived_path);
+                if dylib_path.exists() {
+                    return dylib_path;
+                } else {
+                    println!("Derived arm64 layer lib path does not exist: {derived_path}");
+                }
+            }
 
-    let dylib_path = test_cdylib::build_current_project();
-    println!("Built macOS arm64 layer lib at {dylib_path:?}");
-    dylib_path
+            let dylib_path = test_cdylib::build_current_project();
+            println!("Built macOS arm64 layer lib at {dylib_path:?}");
+            dylib_path
+        })
+        .as_path()
 }
