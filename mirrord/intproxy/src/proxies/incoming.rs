@@ -52,14 +52,16 @@ mod tasks;
 mod tcp_proxy;
 mod tls;
 
-#[derive(Default)]
-struct MirrorOrSteal<T> {
-    mirror: T,
-    steal: T,
+/// Maps IDs of remote connections to `T`.
+///
+/// Stores mirrored and stolen connections separately.
+struct ConnectionMap<T> {
+    mirror: HashMap<ConnectionId, T>,
+    steal: HashMap<ConnectionId, T>,
 }
 
-impl<T> MirrorOrSteal<T> {
-    fn get_mut(&mut self, is_steal: bool) -> &mut T {
+impl<T> ConnectionMap<T> {
+    fn get_mut(&mut self, is_steal: bool) -> &mut HashMap<ConnectionId, T> {
         if is_steal {
             &mut self.steal
         } else {
@@ -67,11 +69,20 @@ impl<T> MirrorOrSteal<T> {
         }
     }
 
-    fn get(&self, is_steal: bool) -> &T {
+    fn get(&self, is_steal: bool) -> &HashMap<ConnectionId, T> {
         if is_steal {
             &self.steal
         } else {
             &self.mirror
+        }
+    }
+}
+
+impl<T> Default for ConnectionMap<T> {
+    fn default() -> Self {
+        Self {
+            mirror: Default::default(),
+            steal: Default::default(),
         }
     }
 }
@@ -172,11 +183,11 @@ pub struct IncomingProxy {
     /// Each mirrored/stolen remote connection is mapped to a [`TcpProxyTask`].
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
-    tcp_proxies: MirrorOrSteal<HashMap<ConnectionId, TaskSender<TcpProxyTask>>>,
+    tcp_proxies: ConnectionMap<TaskSender<TcpProxyTask>>,
     /// Each mirrored/stolen remote HTTP request is mapped to a [`HttpGatewayTask`].
     ///
     /// Each entry here maps to a request that is in progress both locally and remotely.
-    http_gateways: MirrorOrSteal<HashMap<ConnectionId, HashMap<RequestId, HttpGatewayHandle>>>,
+    http_gateways: ConnectionMap<HashMap<RequestId, HttpGatewayHandle>>,
     /// Running [`BackgroundTask`]s utilized by this proxy.
     tasks: BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>,
 }
