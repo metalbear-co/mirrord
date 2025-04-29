@@ -1,27 +1,33 @@
+//! Test application that listens on a sequence of localhost ports.
+//! On each port, it accepts one connection and expects to receive the string "HELLO" and a
+//! shutdown.
+//!
+//! Reads the semicolon-separated port list from the `APP_PORTS` environment variable.
+
 use std::{
     io::Read,
-    net::{SocketAddr, TcpListener},
+    net::{Ipv4Addr, SocketAddr, TcpListener},
 };
 
+const PORTS_ENV: &str = "APP_PORTS";
+
 fn main() {
-    let mut buf = [0_u8; 5];
+    let ports = std::env::var(PORTS_ENV)
+        .unwrap()
+        .split(';')
+        .map(|port| port.parse::<u16>().unwrap())
+        .collect::<Vec<_>>();
 
-    let addr: SocketAddr = "127.0.0.1:80".parse().unwrap();
-    // Check `listen_ports` work
-    let listener = TcpListener::bind(addr).unwrap();
-    // verify user could connect on port 51222
-    let (mut conn, _) = listener.accept().unwrap();
-    conn.read_exact(buf.as_mut_slice()).unwrap();
-    assert_eq!(buf.as_slice(), b"HELLO");
+    let mut buf = String::new();
 
-    // Check specific port but not in listen_ports works
-    let addr: SocketAddr = "127.0.0.1:40000".parse().unwrap();
-    let listener = TcpListener::bind(addr).unwrap();
-    // verify user could connect on port 40000
-    let (mut conn, _) = listener.accept().unwrap();
-    conn.read_exact(buf.as_mut_slice()).unwrap();
-    assert_eq!(buf.as_slice(), b"HELLO");
+    for port in ports {
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        let listener = TcpListener::bind(addr).unwrap();
 
-    // Checking that random port works is hard because we need to make libc return an error
-    // so we miss that for now.
+        let (mut conn, _) = listener.accept().unwrap();
+        conn.read_to_string(&mut buf).unwrap();
+        assert_eq!(buf, "HELLO");
+
+        buf.clear();
+    }
 }
