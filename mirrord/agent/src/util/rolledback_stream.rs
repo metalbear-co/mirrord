@@ -132,6 +132,7 @@ mod test {
             "a",
             "some mor",
             "e data",
+            "",
         ],
     )]
     #[case(
@@ -141,6 +142,7 @@ mod test {
             "GET / HT",
             "TP/1.1\r\n",
             "\r\n",
+            "",
         ],
     )]
     #[tokio::test]
