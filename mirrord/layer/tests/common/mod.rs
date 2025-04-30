@@ -1,3 +1,5 @@
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use std::sync::OnceLock;
 use std::{
     assert_matches::assert_matches,
     collections::HashMap,
@@ -8,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     str::FromStr,
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::Duration,
 };
 
