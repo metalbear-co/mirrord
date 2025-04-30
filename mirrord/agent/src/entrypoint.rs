@@ -631,7 +631,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             } else {
                 new_iptables()
             };
-            SafeIpTables::list_mirrord_rules(IPTablesWrapper::from(ipt)).await
+            SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(ipt)).await
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
@@ -804,11 +804,19 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain() -> Result<(), IPTablesError> {
-    let ipt = new_iptables();
+async fn clear_iptable_chain(ipv6: bool) -> Result<(), IPTablesError> {
+    let ipt = if ipv6 {
+        IPTablesWrapper::from(new_ip6tables())
+    } else {
+        IPTablesWrapper::from(new_iptables())
+    };
 
-    let tables = SafeIpTables::load(IPTablesWrapper::from(ipt), false).await?;
-    tables.cleanup().await?;
+    if !SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+        let tables = SafeIpTables::load(ipt, false).await?;
+        tables.cleanup().await?;
+    } else {
+        trace!("No mirorrd rules found, skipping iptables cleanup.");
+    }
 
     Ok(())
 }
@@ -874,7 +882,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 
     let runtime = RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?;
     runtime
-        .spawn(clear_iptable_chain())
+        .spawn(clear_iptable_chain(args.ipv6))
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {
             task: "IPTablesCleaner",
