@@ -813,12 +813,11 @@ async fn clear_iptable_chain(ipv6: bool) -> Result<(), IPTablesError> {
 
     if !SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
         let tables = SafeIpTables::load(ipt, false).await?;
-        tables.cleanup().await?;
+        tables.cleanup().await
     } else {
         trace!("No mirorrd rules found, skipping iptables cleanup.");
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Runs the current binary as a child process,
