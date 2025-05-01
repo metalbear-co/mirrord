@@ -64,10 +64,14 @@ impl KubeApiError {
     /// Pass full path to the field, e.g. `.spec.selector.matchLabels`.
     ///
     /// Produces [`KubeApiError::MalformedResource`].
-    pub fn missing_field<R: Resource<DynamicType = ()>>(resource: &R, field_path: &str) -> Self {
+    pub fn missing_field<R: Resource<DynamicType = ()>, S: AsRef<str>>(
+        resource: &R,
+        field_path: S,
+    ) -> Self {
         let kind = R::kind(&());
         let name = resource.meta().name.as_ref();
         let namespace = resource.meta().namespace.as_deref().unwrap_or("default");
+        let field_path = field_path.as_ref();
 
         let message = match name {
             Some(name) => format!("{kind} `{namespace}/{name}` is missing field `{field_path}`"),

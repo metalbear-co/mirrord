@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use self::{
     deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
-    service::ServiceTarget, stateful_set::StatefulSetTarget,
+    service::ServiceTarget, stateful_set::StatefulSetTarget, workflow::WorkflowTarget,
 };
 use crate::{
     config::{
@@ -27,6 +27,7 @@ pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
+pub mod workflow;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
@@ -242,6 +243,7 @@ mirrord-layer failed to parse the provided target!
     >> `statefulset/{statefulset-name}[/container/{container-name}]`;
     >> `service/{service-name}[/container/{container-name}]`;
     >> `replicaset/{replicaset-name}[/container/{container-name}]`;
+    >> `workflow/{workflow-name}[/template/{template-name}][/step/{step-name}][/container/{container-name}]`;
 
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
@@ -268,6 +270,8 @@ mirrord-layer failed to parse the provided target!
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
+/// - `workflow/{workflow-name}[/template/{template-name}][/step/{step-name}][/container/
+///   {container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
@@ -309,6 +313,10 @@ pub enum Target {
     ReplicaSet(replica_set::ReplicaSetTarget),
 
     /// <!--${internal}-->
+    /// [Argo Workflow](https://argo-workflows.readthedocs.io/en/latest/).
+    Workflow(workflow::WorkflowTarget),
+
+    /// <!--${internal}-->
     /// Spawn a new pod.
     #[schemars(skip)]
     Targetless,
@@ -333,6 +341,7 @@ impl FromStr for Target {
             Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             Some("service") => service::ServiceTarget::from_split(&mut split).map(Target::Service),
             Some("replicaset") => replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet),
+            Some("workflow") => workflow::WorkflowTarget::from_split(&mut split).map(Target::Workflow),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -375,7 +384,7 @@ pub trait TargetDisplay {
     fn container(&self) -> Option<&String>;
 }
 
-/// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
+/// Implements the [`TargetDisplay`] only.
 macro_rules! impl_target_display {
     ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
         impl TargetDisplay for $struct_name {
@@ -391,6 +400,13 @@ macro_rules! impl_target_display {
                 self.container.as_ref()
             }
         }
+    };
+}
+
+/// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
+macro_rules! impl_display_and_target_display {
+    ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
+        impl_target_display!($struct_name, $target_type, $target_type_display);
 
         impl fmt::Display for $struct_name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -408,14 +424,15 @@ macro_rules! impl_target_display {
     };
 }
 
-impl_target_display!(PodTarget, pod, "pod");
-impl_target_display!(DeploymentTarget, deployment, "deployment");
-impl_target_display!(RolloutTarget, rollout, "rollout");
-impl_target_display!(JobTarget, job, "job");
-impl_target_display!(CronJobTarget, cron_job, "cronjob");
-impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
-impl_target_display!(ServiceTarget, service, "service");
-impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
+impl_display_and_target_display!(PodTarget, pod, "pod");
+impl_display_and_target_display!(DeploymentTarget, deployment, "deployment");
+impl_display_and_target_display!(RolloutTarget, rollout, "rollout");
+impl_display_and_target_display!(JobTarget, job, "job");
+impl_display_and_target_display!(CronJobTarget, cron_job, "cronjob");
+impl_display_and_target_display!(StatefulSetTarget, stateful_set, "statefulset");
+impl_display_and_target_display!(ServiceTarget, service, "service");
+impl_display_and_target_display!(ReplicaSetTarget, replica_set, "replicaset");
+impl_target_display!(WorkflowTarget, workflow, "workflow");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -429,6 +446,7 @@ impl fmt::Display for Target {
             Target::StatefulSet(target) => target.fmt(f),
             Target::Service(target) => target.fmt(f),
             Target::ReplicaSet(target) => target.fmt(f),
+            Target::Workflow(target) => target.fmt(f),
         }
     }
 }
@@ -445,6 +463,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.type_(),
             Target::Service(target) => target.type_(),
             Target::ReplicaSet(target) => target.type_(),
+            Target::Workflow(target) => target.type_(),
         }
     }
 
@@ -459,6 +478,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.name(),
             Target::Service(target) => target.name(),
             Target::ReplicaSet(target) => target.name(),
+            Target::Workflow(target) => target.name(),
         }
     }
 
@@ -473,6 +493,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.container(),
             Target::Service(target) => target.container(),
             Target::ReplicaSet(target) => target.container(),
+            Target::Workflow(target) => target.container(),
         }
     }
 }
@@ -491,6 +512,7 @@ bitflags::bitflags! {
         const STATEFUL_SET = 128;
         const SERVICE = 256;
         const REPLICA_SET = 512;
+        const WORKFLOW = 1024;
     }
 }
 
@@ -546,6 +568,12 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::ReplicaSet(target) => {
                     flags |= TargetAnalyticFlags::REPLICA_SET;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Workflow(target) => {
+                    flags |= TargetAnalyticFlags::WORKFLOW;
                     if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
@@ -619,6 +647,32 @@ mod tests {
             namespace: None
         }
     )] // Rollout specified.
+    #[case(
+        Some("workflow/foo/template/bar"),
+        None,
+        TargetConfig{
+            path: Some(Target::Workflow(WorkflowTarget {
+                workflow: "foo".to_string(),
+                template: Some("bar".to_string()),
+                step: None,
+                container: None
+            })),
+            namespace: None
+        }
+    )] // Workflow with template
+    #[case(
+        Some("workflow/foo/template/bar/step/2000"),
+        None,
+        TargetConfig{
+            path: Some(Target::Workflow(WorkflowTarget {
+                workflow: "foo".to_string(),
+                template: Some("bar".to_string()),
+                step: Some("2000".to_string()),
+                container: None
+            })),
+            namespace: None
+        }
+    )] // Workflow with template and step
     fn default(
         #[case] path_env: Option<&str>,
         #[case] namespace_env: Option<&str>,
@@ -698,5 +752,35 @@ mod tests {
             .generate_config(&mut cfg_context)
             .unwrap();
         assert_eq!(target_config, expected_target_config);
+    }
+
+    #[rstest]
+    #[case("pod/foo")]
+    #[case("pod/foo/container/bar")]
+    #[case("deployment/foo")]
+    #[case("deployment/foo/container/bar")]
+    #[case("rollout/foo")]
+    #[case("rollout/foo/container/bar")]
+    #[case("job/foo")]
+    #[case("job/foo/container/bar")]
+    #[case("cronjob/foo")]
+    #[case("cronjob/foo/container/bar")]
+    #[case("statefulset/foo")]
+    #[case("statefulset/foo/container/bar")]
+    #[case("service/foo")]
+    #[case("service/foo/container/bar")]
+    #[case("replicaset/foo")]
+    #[case("replicaset/foo/container/bar")]
+    #[case("workflow/foo")]
+    #[case("workflow/foo/container/bar")]
+    #[case("workflow/foo/template/bar")]
+    #[case("workflow/foo/template/bar/container/main")]
+    #[case("workflow/foo/template/bar/step/uno")]
+    #[case("workflow/foo/template/bar/step/uno/container/main")]
+    fn parse_and_to_string_are_same(#[case] target_path: &str) {
+        let target =
+            Target::from_str(target_path).expect("target should be parsed from target_path");
+
+        assert_eq!(target.to_string(), target_path)
     }
 }

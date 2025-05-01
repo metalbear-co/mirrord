@@ -10,7 +10,7 @@ use mirrord_config::{
     target::{
         cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
         replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
-        stateful_set::StatefulSetTarget, Target, TargetConfig,
+        stateful_set::StatefulSetTarget, workflow::WorkflowTarget, Target, TargetConfig,
     },
     LayerConfig,
 };
@@ -53,6 +53,9 @@ enum VerifiedTarget {
 
     #[serde(untagged)]
     ReplicaSet(ReplicaSetTarget),
+
+    #[serde(untagged)]
+    Workflow(WorkflowTarget),
 }
 
 impl From<Target> for VerifiedTarget {
@@ -66,6 +69,7 @@ impl From<Target> for VerifiedTarget {
             Target::StatefulSet(target) => Self::StatefulSet(target),
             Target::Service(target) => Self::Service(target),
             Target::ReplicaSet(target) => Self::ReplicaSet(target),
+            Target::Workflow(target) => Self::Workflow(target),
             Target::Targetless => Self::Targetless,
         }
     }
@@ -83,6 +87,7 @@ impl From<VerifiedTarget> for TargetType {
             VerifiedTarget::StatefulSet(_) => TargetType::StatefulSet,
             VerifiedTarget::Service(_) => TargetType::Service,
             VerifiedTarget::ReplicaSet(_) => TargetType::ReplicaSet,
+            VerifiedTarget::Workflow(_) => TargetType::Workflow,
         }
     }
 }
@@ -115,6 +120,7 @@ enum TargetType {
     StatefulSet,
     Service,
     ReplicaSet,
+    Workflow,
 }
 
 impl core::fmt::Display for TargetType {
@@ -129,6 +135,7 @@ impl core::fmt::Display for TargetType {
             TargetType::StatefulSet => "statefulset",
             TargetType::Service => "service",
             TargetType::ReplicaSet => "replicaset",
+            TargetType::Workflow => "workflow",
         };
 
         f.write_str(stringifed)
@@ -147,6 +154,7 @@ impl TargetType {
             Self::StatefulSet,
             Self::Service,
             Self::ReplicaSet,
+            Self::Workflow,
         ]
         .into_iter()
     }
@@ -157,7 +165,7 @@ impl TargetType {
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
             Self::Job | Self::CronJob => config.copy_target.enabled,
             Self::Service => !config.copy_target.enabled,
-            Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
+            Self::Deployment | Self::StatefulSet | Self::ReplicaSet | Self::Workflow => true,
         }
     }
 }

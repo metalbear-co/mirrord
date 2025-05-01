@@ -13,7 +13,10 @@ use super::{
     api::{kubernetes::get_k8s_resource_api, runtime::RuntimeData},
     error::KubeApiError,
 };
-use crate::api::{kubernetes::rollout::Rollout, runtime::RuntimeDataFromLabels};
+use crate::api::{
+    kubernetes::{rollout::Rollout, workflow::Workflow},
+    runtime::RuntimeDataFromLabels,
+};
 
 pub mod cron_job;
 pub mod deployment;
@@ -23,6 +26,7 @@ pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
+pub mod workflow;
 
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
 ///
@@ -43,6 +47,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     StatefulSet(ResolvedResource<StatefulSet>),
     Service(ResolvedResource<Service>),
     ReplicaSet(ResolvedResource<ReplicaSet>),
+    Workflow(ResolvedResource<Workflow>, WorkflowTargetLookup<CHECKED>),
 
     /// [`Pod`] is a special case, in that it does not implement [`RuntimeDataFromLabels`],
     /// and instead we implement a `runtime_data` method directly in its
@@ -53,6 +58,12 @@ pub enum ResolvedTarget<const CHECKED: bool> {
         /// Agent pod's namespace.
         String,
     ),
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowTargetLookup<const CHECKED: bool> {
+    template: Option<String>,
+    step: Option<String>,
 }
 
 /// A kubernetes [`Resource`], and container pair to be used based on the target we
@@ -97,6 +108,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.name.as_deref()
             }
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => {
+                resource.metadata.name.as_deref()
+            }
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -111,6 +125,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => resource.name_any(),
             ResolvedTarget::Targetless(..) => "targetless".to_string(),
         }
     }
@@ -141,6 +156,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.namespace.as_deref()
             }
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => {
+                resource.metadata.namespace.as_deref()
+            }
             ResolvedTarget::Targetless(namespace) => Some(namespace),
         }
     }
@@ -162,6 +180,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.labels
             }
+            ResolvedTarget::Workflow(ResolvedResource { resource, .. }, _) => {
+                resource.metadata.labels
+            }
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -176,6 +197,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(_) => "statefulset",
             ResolvedTarget::Service(_) => "service",
             ResolvedTarget::ReplicaSet(_) => "replicaset",
+            ResolvedTarget::Workflow(_, _) => "workflow",
             ResolvedTarget::Targetless(_) => "targetless",
         }
     }
@@ -190,7 +212,8 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             | ResolvedTarget::StatefulSet(ResolvedResource { container, .. })
             | ResolvedTarget::Service(ResolvedResource { container, .. })
             | ResolvedTarget::Pod(ResolvedResource { container, .. })
-            | ResolvedTarget::ReplicaSet(ResolvedResource { container, .. }) => {
+            | ResolvedTarget::ReplicaSet(ResolvedResource { container, .. })
+            | ResolvedTarget::Workflow(ResolvedResource { container, .. }, _) => {
                 container.as_deref()
             }
             ResolvedTarget::Targetless(..) => None,
@@ -292,6 +315,21 @@ impl ResolvedTarget<false> {
                         resource,
                         container: target.container.clone(),
                     })
+                }),
+            Target::Workflow(target) => get_k8s_resource_api::<Workflow>(client, namespace)
+                .get(&target.workflow)
+                .await
+                .map(|resource| {
+                    ResolvedTarget::Workflow(
+                        ResolvedResource {
+                            resource,
+                            container: target.container.clone(),
+                        },
+                        WorkflowTargetLookup {
+                            template: target.template.clone(),
+                            step: target.step.clone(),
+                        },
+                    )
                 }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
                 namespace.unwrap_or("default").to_string(),
@@ -523,6 +561,50 @@ impl ResolvedTarget<false> {
                     resource,
                     container,
                 }))
+            }
+
+            ResolvedTarget::Workflow(
+                ResolvedResource {
+                    resource,
+                    container,
+                },
+                WorkflowTargetLookup { template, step },
+            ) => {
+                let resource_spec = resource
+                    .spec
+                    .as_ref()
+                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec"))?;
+
+                match template.as_deref() {
+                    Some(template) => {
+                        if !resource_spec
+                            .templates
+                            .iter()
+                            .any(|template_spec| template_spec.name.as_deref() == Some(template))
+                        {
+                            return Err(KubeApiError::invalid_state(
+                                &resource,
+                                "requested template is missing in spec",
+                            ));
+                        }
+                    }
+                    None => {
+                        if resource_spec.entrypoint.is_none() {
+                            return Err(KubeApiError::invalid_state(
+                                &resource,
+                                "no template requested and there is no entrypoint in spec",
+                            ));
+                        }
+                    }
+                };
+
+                Ok(ResolvedTarget::Workflow(
+                    ResolvedResource {
+                        resource,
+                        container,
+                    },
+                    WorkflowTargetLookup { template, step },
+                ))
             }
 
             ResolvedTarget::Targetless(namespace) => {

@@ -38,6 +38,7 @@ pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
+pub mod workflow;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
@@ -438,7 +439,11 @@ where
         }
 
         pods.iter()
-            .filter_map(|pod| RuntimeData::from_pod(pod, self.container()).ok())
+            .filter_map(|pod| {
+                RuntimeData::from_pod(pod, self.container())
+                    .inspect_err(|error| tracing::warn!(?error, "runtime data from pod info"))
+                    .ok()
+            })
             .next()
             .ok_or_else(|| {
                 KubeApiError::invalid_state(
@@ -460,6 +465,7 @@ impl RuntimeDataProvider for Target {
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Service(target) => target.runtime_data(client, namespace).await,
             Target::ReplicaSet(target) => target.runtime_data(client, namespace).await,
+            Target::Workflow(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -476,6 +482,9 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Self::Service(target) => target.runtime_data(client, namespace).await,
             Self::ReplicaSet(target) => target.runtime_data(client, namespace).await,
+            Self::Workflow(target, selector) => {
+                (target, selector).runtime_data(client, namespace).await
+            }
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }

@@ -13,7 +13,10 @@ use kube::{api::ListParams, Api, Resource};
 use serde::de::{self, DeserializeOwned};
 
 use crate::{
-    api::{container::SKIP_NAMES, kubernetes::rollout::Rollout},
+    api::{
+        container::SKIP_NAMES,
+        kubernetes::{rollout::Rollout, workflow::Workflow},
+    },
     error::{KubeApiError, Result},
 };
 
@@ -49,7 +52,17 @@ impl KubeResourceSeeker<'_> {
     /// 7. [`ReplicaSet`]s
     /// 8. [`Pod`]s
     pub async fn all(&self) -> Result<Vec<String>> {
-        let (pods, deployments, rollouts, jobs, cronjobs, statefulsets, services, replicasets) = tokio::try_join!(
+        let (
+            pods,
+            deployments,
+            rollouts,
+            jobs,
+            cronjobs,
+            statefulsets,
+            services,
+            replicasets,
+            workflows,
+        ) = tokio::try_join!(
             self.pods(),
             self.simple_list_resource::<Deployment>("deployment"),
             self.simple_list_resource::<Rollout>("rollout"),
@@ -58,6 +71,7 @@ impl KubeResourceSeeker<'_> {
             self.simple_list_resource::<StatefulSet>("statefulset"),
             self.simple_list_resource::<Service>("service"),
             self.simple_list_resource::<ReplicaSet>("replicaset"),
+            self.simple_list_resource::<Workflow>("workflow"),
         )?;
 
         Ok(deployments
@@ -68,6 +82,7 @@ impl KubeResourceSeeker<'_> {
             .chain(jobs)
             .chain(services)
             .chain(replicasets)
+            .chain(workflows)
             .chain(pods)
             .collect())
     }

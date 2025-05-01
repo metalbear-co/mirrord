@@ -35,6 +35,7 @@ use crate::{
 pub mod portforwarder;
 pub mod rollout;
 pub mod seeker;
+pub mod workflow;
 
 pub struct KubernetesAPI {
     client: Client,
