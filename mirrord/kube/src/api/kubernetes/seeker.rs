@@ -78,6 +78,18 @@ impl KubeResourceSeeker<'_> {
     /// 2. The operator is being used
     pub async fn filtered(
         &self,
+        resource_types: Vec<TargetType>,
+        operator_active: bool,
+    ) -> Result<Vec<String>> {
+        let mut targets = vec![];
+        for resource_type in resource_types {
+            targets.extend(self.filtered_single(resource_type, operator_active).await?);
+        };
+        Ok(targets)
+    }
+
+    async fn filtered_single(
+        &self,
         resource_type: TargetType,
         operator_active: bool,
     ) -> Result<Vec<String>> {

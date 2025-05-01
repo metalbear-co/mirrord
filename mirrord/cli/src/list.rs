@@ -1,5 +1,3 @@
-use std::{sync::LazyLock, time::Instant};
-
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
@@ -12,9 +10,14 @@ use mirrord_kube::{
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
+use serde_json::Value;
+use std::str::FromStr;
+use std::{sync::LazyLock, time::Instant};
 use tracing::Level;
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
+
+const LS_TARGET_TYPES_ENV: &str = "MIRRORD_LS_TARGET_TYPES";
 
 /// A mirrord target found in the cluster.
 #[derive(Serialize)]
@@ -69,7 +72,7 @@ impl FoundTargets {
     async fn resolve(
         config: LayerConfig,
         rich_output: bool,
-        target_type: Option<TargetType>,
+        target_types: Option<Vec<TargetType>>,
     ) -> CliResult<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
@@ -111,8 +114,10 @@ impl FoundTargets {
 
         let (targets, namespaces) = tokio::try_join!(
             async {
-                let paths = match (operator_api, target_type) {
-                    (None, _) if config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
+                let paths = match (operator_api, target_types) {
+                    (None, _) if config.operator == Some(true) => {
+                        Err(CliError::OperatorNotInstalled)
+                    }
 
                     (Some(api), None)
                         if !rich_output
@@ -124,19 +129,27 @@ impl FoundTargets {
                         })
                     }
 
-                    (Some(api), Some(target_type))
+                    (Some(api), Some(target_types))
                         if !rich_output
                             && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
                                 .matches(&api.operator().spec.operator_version) =>
                     {
-                        seeker.filtered(target_type, true).await.map_err(|error| {
-                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        seeker.filtered(target_types, true).await.map_err(|error| {
+                            CliError::friendlier_error_or_else(
+                                error,
+                                CliError::ListTargetsFailed,
+                            )
                         })
                     }
 
-                    (None, Some(target_type)) => seeker.filtered(target_type, false).await.map_err(|error| {
-                        CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                    }),
+                    (None, Some(target_types)) => {
+                        seeker.filtered(target_types, false).await.map_err(|error| {
+                            CliError::friendlier_error_or_else(
+                                error,
+                                CliError::ListTargetsFailed,
+                            )
+                        })
+                    }
 
                     _ => seeker.all_open_source().await.map_err(|error| {
                         CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
@@ -237,7 +250,24 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         util::remove_proxy_env();
     }
 
-    let targets = FoundTargets::resolve(layer_config, rich_output, args.target_type).await?;
+    let target_types = if let Some(target_type) = args.target_type {
+        Some(vec![target_type])
+    } else {
+        match std::env::var(LS_TARGET_TYPES_ENV)
+            .ok()
+            .map(|val| serde_json::from_str::<Vec<Value>>(val.as_ref()))
+            .transpose()?
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| value.as_str().map(|str| str.to_string()))
+            .filter_map(|string| TargetType::from_str(&string).ok())
+            .collect::<Vec<TargetType>>() {
+            vec if vec.is_empty() => None,
+            vec => Some(vec)
+        }
+    };
+
+    let targets = FoundTargets::resolve(layer_config, rich_output, target_types).await?;
 
     match args.output {
         Format::Json => {
