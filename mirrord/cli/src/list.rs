@@ -1,3 +1,5 @@
+use std::{str::FromStr, sync::LazyLock, time::Instant};
+
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
@@ -11,8 +13,6 @@ use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 use serde_json::Value;
-use std::str::FromStr;
-use std::{sync::LazyLock, time::Instant};
 use tracing::Level;
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
@@ -135,19 +135,13 @@ impl FoundTargets {
                                 .matches(&api.operator().spec.operator_version) =>
                     {
                         seeker.filtered(target_types, true).await.map_err(|error| {
-                            CliError::friendlier_error_or_else(
-                                error,
-                                CliError::ListTargetsFailed,
-                            )
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
                         })
                     }
 
                     (None, Some(target_types)) => {
                         seeker.filtered(target_types, false).await.map_err(|error| {
-                            CliError::friendlier_error_or_else(
-                                error,
-                                CliError::ListTargetsFailed,
-                            )
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
                         })
                     }
 
@@ -261,9 +255,10 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
             .into_iter()
             .filter_map(|value| value.as_str().map(|str| str.to_string()))
             .filter_map(|string| TargetType::from_str(&string).ok())
-            .collect::<Vec<TargetType>>() {
+            .collect::<Vec<TargetType>>()
+        {
             vec if vec.is_empty() => None,
-            vec => Some(vec)
+            vec => Some(vec),
         }
     };
 

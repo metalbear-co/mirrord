@@ -84,7 +84,7 @@ impl KubeResourceSeeker<'_> {
         let mut targets = vec![];
         for resource_type in resource_types {
             targets.extend(self.filtered_single(resource_type, operator_active).await?);
-        };
+        }
         Ok(targets)
     }
 
@@ -116,15 +116,24 @@ impl KubeResourceSeeker<'_> {
             }
             TargetType::Targetless => {
                 tracing::error!("Cannot list targets with resource type 'targetless'");
-                Err(KubeApiError::InvalidListTargetType(resource_type, "cannot list targets with resource type 'targetless'.".to_string()))
+                Err(KubeApiError::InvalidListTargetType(
+                    resource_type,
+                    "cannot list targets with resource type 'targetless'.".to_string(),
+                ))
             }
             resource_type if !operator_active => {
                 tracing::warn!("Cannot list targets with resource type '{resource_type}' unless the operator is enabled.");
-                Err(KubeApiError::InvalidListTargetType(resource_type, "this type requires the operator to be enabled.".to_string()))
+                Err(KubeApiError::InvalidListTargetType(
+                    resource_type,
+                    "this type requires the operator to be enabled.".to_string(),
+                ))
             }
             resource_type => {
                 tracing::error!("Cannot list targets with resource type '{resource_type}' due to a missing implementation. This is a bug.");
-                Err(KubeApiError::InvalidListTargetType(resource_type, "this type cannot be listed. This is a bug.".to_string()))
+                Err(KubeApiError::InvalidListTargetType(
+                    resource_type,
+                    "this type cannot be listed. This is a bug.".to_string(),
+                ))
             }
         }
     }
