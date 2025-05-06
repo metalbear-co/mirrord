@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use kube::{api::ObjectMeta, Api};
 use mirrord_operator::crd::profile::{
-    FeatureAdjustment, FeatureChange, MirrordProfile, MirrordProfileSpec,
+    FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordClusterProfileSpec,
 };
 use rstest::rstest;
 use tempfile::NamedTempFile;
@@ -27,13 +27,13 @@ pub async fn mirrord_profile_enforces_stealing(
     let target_path = service.pod_container_target();
 
     let (_profile_guard, profile_name) = {
-        let profile = MirrordProfile {
+        let profile = MirrordClusterProfile {
             metadata: ObjectMeta {
                 // Service name is randomized, so there should be no conflict.
                 name: Some(format!("test-profile-{}", service.name)),
                 ..Default::default()
             },
-            spec: MirrordProfileSpec {
+            spec: MirrordClusterProfileSpec {
                 feature_adjustments: vec![FeatureAdjustment {
                     change: FeatureChange::IncomingSteal,
                     unknown_fields: Default::default(),
@@ -42,7 +42,7 @@ pub async fn mirrord_profile_enforces_stealing(
             },
         };
         let (guard, profile) = ResourceGuard::create(
-            Api::<MirrordProfile>::all(kube_client.clone()),
+            Api::<MirrordClusterProfile>::all(kube_client.clone()),
             &profile,
             true,
         )
