@@ -119,8 +119,11 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> CliResult<()> {
                 .and_then(StatusCommandHandler::handle)
                 .await
         }
-        OperatorCommand::Session(session_command) => {
-            SessionCommandHandler::new(session_command)
+        OperatorCommand::Session {
+            command,
+            config_file,
+        } => {
+            SessionCommandHandler::new(command, config_file)
                 .and_then(SessionCommandHandler::handle)
                 .await
         }

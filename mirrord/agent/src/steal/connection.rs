@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+use std::collections::{HashMap, HashSet};
 
 use fancy_regex::Regex;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -13,7 +10,7 @@ use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
         ChunkedRequestStartV1, ChunkedRequestStartV2, DaemonTcp, HttpRequest, HttpRequestMetadata,
-        HttpRequestTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
+        IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
         InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
         HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
     },
@@ -52,7 +49,7 @@ struct MatchedHttpRequest {
     request_id: RequestId,
     request: Request<Incoming>,
     metadata: HttpRequestMetadata,
-    transport: HttpRequestTransportType,
+    transport: IncomingTrafficTransportType,
 }
 
 impl MatchedHttpRequest {
@@ -61,7 +58,7 @@ impl MatchedHttpRequest {
         request_id: RequestId,
         request: Request<Incoming>,
         metadata: HttpRequestMetadata,
-        transport: HttpRequestTransportType,
+        transport: IncomingTrafficTransportType,
     ) -> Self {
         HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -459,16 +456,6 @@ impl TcpConnectionStealer {
         connection: RedirectedConnection,
         port_subscription: PortSubscription,
     ) -> AgentResult<()> {
-        let mut real_address = connection.destination();
-        let localhost = if real_address.is_ipv6() {
-            IpAddr::V6(Ipv6Addr::LOCALHOST)
-        } else {
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        };
-        // If we use the original IP we would go through prerouting and hit a loop.
-        // localhost should always work.
-        real_address.set_ip(localhost);
-
         let stolen_connection = StolenConnection {
             connection,
             port_subscription,
@@ -530,7 +517,7 @@ impl TcpConnectionStealer {
 
                 let _ = client
                     .tx
-                    .send(StealerMessage::TcpSteal(DaemonTcp::NewConnection(
+                    .send(StealerMessage::TcpSteal(DaemonTcp::NewConnectionV1(
                         connection,
                     )))
                     .await;
@@ -798,7 +785,7 @@ mod test {
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{
         ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
-        HttpRequestTransportType, InternalHttpBodyFrame, StealType,
+        IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
     };
     use rstest::rstest;
     use tokio::{
@@ -909,7 +896,7 @@ mod test {
                 source: "1.3.3.7:1337".parse().unwrap(),
                 destination: "2.1.3.7:80".parse().unwrap(),
             },
-            transport: HttpRequestTransportType::Tcp,
+            transport: IncomingTrafficTransportType::Tcp,
             request_id: 0,
             request,
         });
@@ -985,7 +972,7 @@ mod test {
                 source: "1.3.3.7:1337".parse().unwrap(),
                 destination: "2.1.3.7:80".parse().unwrap(),
             },
-            transport: HttpRequestTransportType::Tcp,
+            transport: IncomingTrafficTransportType::Tcp,
             request_id: 0,
             request,
         });

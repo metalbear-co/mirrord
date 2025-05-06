@@ -88,11 +88,7 @@ impl TcpPacketData {
     /// connection.
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn treat_as_new_session(&self) -> bool {
-        self.is_new_connection()
-            || matches!(
-                HttpVersion::new(&self.bytes),
-                Some(HttpVersion::V1 | HttpVersion::V2)
-            )
+        self.is_new_connection() || HttpVersion::detect(&self.bytes).into_version().is_some()
     }
 }
 
@@ -408,7 +404,7 @@ mod test {
 
     use api::TcpSnifferApi;
     use mirrord_protocol::{
-        tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
         ConnectionId, LogLevel,
     };
     use rstest::rstest;
@@ -525,7 +521,7 @@ mod test {
         let (message, log) = api.recv().await.unwrap();
         assert_eq!(
             message,
-            DaemonTcp::NewConnection(NewTcpConnection {
+            DaemonTcp::NewConnectionV1(NewTcpConnectionV1 {
                 connection_id: 0,
                 remote_address: "1.1.1.1".parse().unwrap(),
                 destination_port: 80,
@@ -681,7 +677,7 @@ mod test {
         let (message, log) = api.recv().await.unwrap();
         assert_eq!(
             message,
-            DaemonTcp::NewConnection(NewTcpConnection {
+            DaemonTcp::NewConnectionV1(NewTcpConnectionV1 {
                 connection_id: 0,
                 remote_address: session_id.source_addr.into(),
                 destination_port: session_id.dest_port,
@@ -784,7 +780,7 @@ mod test {
             assert_eq!(log, None);
             assert_eq!(
                 msg,
-                DaemonTcp::NewConnection(NewTcpConnection {
+                DaemonTcp::NewConnectionV1(NewTcpConnectionV1 {
                     connection_id: i as ConnectionId,
                     remote_address: source_addr.into(),
                     destination_port: 80,
@@ -817,7 +813,7 @@ mod test {
         assert_eq!(log, None);
         assert_eq!(
             msg,
-            DaemonTcp::NewConnection(NewTcpConnection {
+            DaemonTcp::NewConnectionV1(NewTcpConnectionV1 {
                 connection_id: TcpSnifferApi::CONNECTION_CHANNEL_SIZE as ConnectionId,
                 remote_address: source_addr.into(),
                 destination_port: 80,

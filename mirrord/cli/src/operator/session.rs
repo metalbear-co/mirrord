@@ -1,6 +1,8 @@
+use std::path::PathBuf;
+
 use kube::{core::ErrorResponse, Api};
 use mirrord_analytics::NullReporter;
-use mirrord_config::LayerConfig;
+use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_operator::{
     client::{
         error::{OperatorApiError, OperatorOperation},
@@ -32,10 +34,15 @@ pub(super) struct SessionCommandHandler {
 impl SessionCommandHandler {
     /// Starts a new handler for [`SessionCommand`]s.
     #[tracing::instrument(level = Level::TRACE)]
-    pub(super) async fn new(command: SessionCommand) -> CliResult<Self> {
+    pub(super) async fn new(
+        command: SessionCommand,
+        config_file: Option<PathBuf>,
+    ) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
-        let config = LayerConfig::resolve(&mut Default::default()).inspect_err(|error| {
+        let mut cfg_context =
+            ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
+        let config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 

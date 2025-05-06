@@ -2,6 +2,7 @@
 name = "tests"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [lints]
 workspace = true
@@ -10,17 +11,25 @@ workspace = true
 doctest = false
 
 [dependencies]
-aws-config = { version = "1.5", features = ["behavior-version-latest"], optional = true }
+aws-config = { version = "1.5", features = [
+    "behavior-version-latest",
+], optional = true }
 aws-credential-types = "1.2"
 aws-sdk-sqs = { version = "1.39", optional = true }
 aws-types = "1.3"
-json-patch = "3.0"
-jsonptr = "0.6"
+json-patch = "4.0"
+jsonptr = "0.7"
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
 regex.workspace = true
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
+tokio = { workspace = true, features = [
+    "rt",
+    "rt-multi-thread",
+    "net",
+    "macros",
+    "process",
+] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
 mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
@@ -38,6 +47,7 @@ pem = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
 rustls.workspace = true
 rstest.workspace = true
+mirrord-kube = { path = "../mirrord/kube" }
 
 futures-util = "0.3"
 wsl = "0.1"
@@ -49,6 +59,13 @@ tokio-tungstenite.workspace = true
 default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
-operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env", "dep:pem", "dep:mirrord-tls-util"]
+operator = [
+    "dep:aws-config",
+    "dep:aws-sdk-sqs",
+    "dep:rcgen",
+    "dep:mirrord-agent-env",
+    "dep:pem",
+    "dep:mirrord-tls-util",
+]
 cli = []
 targetless = []

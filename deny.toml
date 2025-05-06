@@ -1,0 +1,55 @@
+[graph]
+targets = [
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+]
+all-features = true
+
+[advisories]
+version = 2
+ignore = [
+    "RUSTSEC-2020-0095", # difference is unmaintained. (part of apple-codesign)
+    "RUSTSEC-2023-0071", # rsa crate, potential key recovery through timing sidechannels, though it sounds bad
+                         # we only use rsa as part of apple-codesign for re-sign binaries, so this should not matter.
+    "RUSTSEC-2024-0436", # paste is unmaintained but we should not have an issue with it.
+]
+
+[licenses]
+version = 2
+allow = [
+    "Apache-2.0 WITH LLVM-exception",
+    "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSL-1.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "WTFPL",
+    "wxWindows",
+    "Zlib",
+]
+
+[[licenses.clarify]]
+crate = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 }
+]
+
+[bans]
+# enable this when dependencies are a bit more stable
+# multiple-versions = "deny"
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = ["https://github.com/metalbear-co/rawsocket", "https://github.com/metalbear-co/rust-iptables"]

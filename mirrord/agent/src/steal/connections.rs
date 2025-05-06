@@ -1,11 +1,16 @@
 //! Home for [`StolenConnections`] - manager for connections that were stolen based on active port
 //! subscriptions.
 
-use std::{collections::HashMap, fmt, io, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt, io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    time::Duration,
+};
 
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{
-    tcp::{HttpRequestMetadata, HttpRequestTransportType, NewTcpConnection},
+    tcp::{HttpRequestMetadata, IncomingTrafficTransportType, NewTcpConnectionV1},
     ConnectionId, LogMessage, RequestId,
 };
 use original_destination::OriginalDestination;
@@ -19,14 +24,15 @@ use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
 use super::{
-    http::DefaultReversibleStream,
     subscriptions::PortSubscription,
     tls::{self, error::StealTlsSetupError, StealTlsHandlerStore},
 };
 use crate::{
-    http::HttpVersion, incoming::RedirectedConnection,
+    http::{detect_http_version, HttpVersion},
+    incoming::RedirectedConnection,
     metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
-    steal::connections::filtered::FilteredStealTask, util::ClientId,
+    steal::connections::filtered::FilteredStealTask,
+    util::ClientId,
 };
 
 mod filtered;
@@ -128,12 +134,12 @@ pub enum ConnectionMessageOut {
         request: Request<Incoming>,
         id: RequestId,
         metadata: HttpRequestMetadata,
-        transport: HttpRequestTransportType,
+        transport: IncomingTrafficTransportType,
     },
     /// Subscribed the client to a new TCP connection.
     ///
     /// This variant translates to
-    /// [`DaemonTcp::NewConnection`](mirrord_protocol::tcp::DaemonTcp::NewConnection).
+    /// [`DaemonTcp::NewConnectionV1`](mirrord_protocol::tcp::DaemonTcp::NewConnectionV1).
     ///
     /// # Note
     ///
@@ -142,7 +148,7 @@ pub enum ConnectionMessageOut {
     /// should follow.
     SubscribedTcp {
         client_id: ClientId,
-        connection: NewTcpConnection,
+        connection: NewTcpConnectionV1,
     },
     /// Subscribed the client to a new filtered HTTP connection.
     ///
@@ -467,7 +473,16 @@ impl ConnectionTask {
             port_subscription,
         } = self.connection;
 
-        let destination = connection.destination();
+        let mut destination = connection.destination();
+        let localhost = if destination.is_ipv6() {
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        } else {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        };
+        // If we use the original IP we would go through prerouting and hit a loop.
+        // localhost should always work.
+        destination.set_ip(localhost);
+
         let source = connection.source();
 
         let filters = match port_subscription {
@@ -475,7 +490,7 @@ impl ConnectionTask {
                 self.tx
                     .send(ConnectionMessageOut::SubscribedTcp {
                         client_id,
-                        connection: NewTcpConnection {
+                        connection: NewTcpConnectionV1 {
                             connection_id: self.connection_id,
                             remote_address: source.ip(),
                             source_port: source.port(),
@@ -499,11 +514,10 @@ impl ConnectionTask {
         };
 
         let Some(tls_handler) = tls_handler else {
-            let mut stream =
-                DefaultReversibleStream::read_header(connection, Self::HTTP_DETECTION_TIMEOUT)
-                    .await?;
+            let (mut stream, http_version) =
+                detect_http_version(connection, Self::HTTP_DETECTION_TIMEOUT).await?;
 
-            let Some(http_version) = HttpVersion::new(stream.get_header()) else {
+            let Some(http_version) = http_version else {
                 tracing::trace!("No HTTP version detected, proxying the connection transparently");
 
                 let mut outgoing_io = TcpStream::connect(destination).await?;
@@ -576,11 +590,10 @@ impl ConnectionTask {
                 return Ok(());
             }
             None => {
-                let mut stream =
-                    DefaultReversibleStream::read_header(tls_stream, Self::HTTP_DETECTION_TIMEOUT)
-                        .await?;
+                let (mut stream, http_version) =
+                    detect_http_version(tls_stream, Self::HTTP_DETECTION_TIMEOUT).await?;
 
-                let Some(http_version) = HttpVersion::new(stream.get_header()) else {
+                let Some(http_version) = http_version else {
                     tracing::trace!(
                         "No HTTP version detected, proxying the connection transparently"
                     );

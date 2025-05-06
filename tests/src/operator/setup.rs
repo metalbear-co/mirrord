@@ -7,7 +7,7 @@ use rstest::*;
 use tempfile::{tempdir, TempDir};
 use tokio::{io::AsyncWriteExt, process::Command};
 
-use crate::utils::{run_mirrord, TestProcess};
+use crate::utils::{process::TestProcess, run_command::run_mirrord};
 
 pub enum OperatorSetup {
     Online,

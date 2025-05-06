@@ -2,6 +2,7 @@
 #![feature(ip)]
 #![warn(clippy::indexing_slicing)]
 
+mod argo_rollout;
 #[cfg(feature = "cli")]
 mod cli;
 mod env;
@@ -14,4 +15,5 @@ mod operator;
 mod targetless;
 mod traffic;
 
+mod dirty_iptables;
 pub mod utils;

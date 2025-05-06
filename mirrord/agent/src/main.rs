@@ -7,6 +7,10 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+use std::process::ExitCode;
+
+use crate::{entrypoint::IPTABLES_DIRTY_EXIT_CODE, error::AgentError};
+
 mod cli;
 mod client_connection;
 mod container_handle;
@@ -28,6 +32,10 @@ mod vpn;
 
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> crate::error::AgentResult<()> {
-    crate::entrypoint::main().await
+async fn main() -> ExitCode {
+    match crate::entrypoint::main().await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(AgentError::IPTablesDirty) => ExitCode::from(IPTABLES_DIRTY_EXIT_CODE),
+        _ => ExitCode::FAILURE,
+    }
 }

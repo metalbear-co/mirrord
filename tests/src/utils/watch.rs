@@ -12,6 +12,7 @@ use kube::{
     },
     Api, Client, Resource,
 };
+use mirrord_kube::api::kubernetes::rollout::Rollout;
 use serde::de::DeserializeOwned;
 
 type WatchCondition<R> = Box<dyn FnMut(&HashMap<String, R>) -> bool + Send>;
@@ -124,27 +125,100 @@ pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client
         ..Default::default()
     };
 
-    fn is_ready(pod: &Pod) -> bool {
-        let Some(status) = pod.status.as_ref() else {
-            return false;
-        };
-
-        if status.phase.as_deref() != Some("Running") {
-            return false;
-        }
-
-        let Some(containers) = status.container_statuses.as_ref() else {
-            return false;
-        };
-
-        containers.iter().all(|status| status.ready)
-    }
-
     let mut watcher = Watcher::new(api, config, move |map| {
-        map.values().filter(|p| is_ready(p)).count() >= min
+        map.values().filter(|p| pod_is_ready(p)).count() >= min
     });
 
     watcher.run().await;
 
-    watcher.resources.into_values().filter(is_ready).collect()
+    watcher
+        .resources
+        .into_values()
+        .filter(pod_is_ready)
+        .collect()
+}
+
+/// Waits until the given [`Pod`] is ready.
+///
+/// A [`Pod`] is considered to be ready when:
+/// 1. It's in the `Running` phase
+/// 2. All of its containers are ready
+#[cfg(test)]
+#[cfg(all(not(feature = "operator"), feature = "job"))]
+pub async fn wait_until_pod_ready(pod_name: &str, namespace: &str, client: Client) {
+    let api = Api::<Pod>::namespaced(client, namespace);
+
+    let config = Config {
+        field_selector: Some(format!("metadata.name={pod_name}")),
+        ..Default::default()
+    };
+
+    let pod_name = pod_name.to_string();
+    let mut watcher = Watcher::new(api, config, move |map| {
+        map.get(&pod_name).map(pod_is_ready).unwrap_or_default()
+    });
+
+    watcher.run().await;
+}
+
+/// Determines if the given [`Pod`] is ready.
+///
+/// A [`Pod`] is considered to be ready when:
+/// 1. It's in the `Running` phase
+/// 2. All of its containers are ready
+fn pod_is_ready(pod: &Pod) -> bool {
+    let Some(status) = pod.status.as_ref() else {
+        return false;
+    };
+
+    if status.phase.as_deref() != Some("Running") {
+        return false;
+    }
+
+    let Some(containers) = status.container_statuses.as_ref() else {
+        return false;
+    };
+
+    containers.iter().all(|status| status.ready)
+}
+
+/// Waits until the given [`Rollout`] has at least `min_available` available replicas.
+pub async fn wait_until_rollout_available(
+    rollout_name: &str,
+    namespace: &str,
+    min_available: usize,
+    client: Client,
+) {
+    let api = Api::<Rollout>::namespaced(client, namespace);
+    let config = Config {
+        field_selector: Some(format!("metadata.name={}", rollout_name)),
+        ..Default::default()
+    };
+
+    fn has_available_replicas(rollout: &Rollout, min: usize) -> bool {
+        let status = match &rollout.status {
+            Some(status) => status,
+            None => return false,
+        };
+
+        match status.available_replicas {
+            Some(available) => available >= min as i32,
+            None => false,
+        }
+    }
+
+    let mut watcher = Watcher::new(api, config, move |map| {
+        map.values()
+            .any(|r| has_available_replicas(r, min_available))
+    });
+
+    println!(
+        "Waiting for rollout '{}' to have at least {} available replica(s)...",
+        rollout_name, min_available
+    );
+    watcher.run().await;
+    println!(
+        "Rollout '{}' now has at least {} available replica(s)",
+        rollout_name, min_available
+    );
 }

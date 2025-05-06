@@ -15,7 +15,8 @@ use mirrord_operator::crd::{
 use rstest::{fixture, rstest};
 
 use crate::utils::{
-    config_dir, kube_client, service, Application, KubeService, ResourceGuard, TestProcess,
+    application::Application, config_dir, kube_client, kube_service::KubeService,
+    resource_guard::ResourceGuard, services::basic_service, TestProcess,
 };
 
 mod fs;
@@ -91,7 +92,7 @@ pub async fn services(
 ) -> (KubeService, KubeService) {
     let namespace = format!("e2e-tests-policies-{}", crate::utils::random_string());
     (
-        service(
+        basic_service(
             &namespace,
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
@@ -100,7 +101,7 @@ pub async fn services(
             kube_client,
         )
         .await,
-        service(
+        basic_service(
             &namespace,
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",

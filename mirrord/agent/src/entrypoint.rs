@@ -16,10 +16,7 @@ use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    error::IPTablesError, new_iptables, IPTablesWrapper, SafeIpTables,
-    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH,
-    IPTABLE_MESH_ENV, IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD,
-    IPTABLE_STANDARD_ENV,
+    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;
@@ -61,6 +58,15 @@ mod setup;
 /// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
 /// task.
 const CHANNEL_SIZE: usize = 1024;
+
+/// [`ExitCode`](std::process::ExitCode) returned from the child agent process
+/// when dirty iptables are detected.
+pub(crate) const IPTABLES_DIRTY_EXIT_CODE: u8 = 99;
+
+/// Env var that gets checked when a new agent is started.
+/// If var is false or not set, the agent starts as an IP table guard which itself starts another
+/// agent. The child agent performs normal agent behaviour.
+const CHILD_PROCESS_ENV: &str = "MIRRORD_AGENT_CHILD_PROCESS";
 
 /// Keeps track of next client id.
 /// Stores common data used when serving client connections.
@@ -191,7 +197,6 @@ impl State {
         client_id
     }
 }
-
 enum BackgroundTask<Command> {
     Running(BgTaskStatus, Sender<Command>),
     Disabled,
@@ -529,6 +534,59 @@ impl ClientConnectionHandler {
     }
 }
 
+/// Upon first client connection, immediately sends [`DaemonMessage::Close`] to the client due to
+/// the presence of dirty IP tables.
+pub async fn notify_client_about_dirty_iptables(
+    listener: TcpListener,
+    communication_timeout: u16,
+    tls_connector: Option<AgentTlsConnector>,
+) -> AgentResult<()> {
+    // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
+    // containing "agent_ready" to be printed. If you change this then mirrord fails to
+    // initialize.
+    println!("agent ready - version {}", env!("CARGO_PKG_VERSION"));
+
+    // We wait for the first client until `communication_timeout` elapses.
+    let first_connection = timeout(
+        Duration::from_secs(communication_timeout.into()),
+        listener.accept(),
+    )
+    .await;
+
+    // Attempt to send [`DaemonMessage::Close`]. Otherwise, the agent will still fail (but
+    // ungracefully).
+    match first_connection {
+        Ok(Ok((stream, ..))) => {
+            let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
+            connection
+                .send(DaemonMessage::Close(
+                    "Detected dirty iptables. Either some other mirrord agent is running \
+            or the previous agent failed to clean up before exit. \
+            If no other mirrord agent is targeting this pod, please delete the pod."
+                        .to_string(),
+                ))
+                .await?;
+        }
+
+        Ok(Err(error)) => {
+            tracing::warn!(
+                ?error,
+                "notify_client_about_dirty_iptables -> Failed to accept first connection"
+            );
+            Err(error)?
+        }
+
+        Err(..) => {
+            tracing::warn!(
+                "notify_client_about_dirty_iptables -> Failed to accept first connection: timeout"
+            );
+            Err(AgentError::FirstConnectionTimeout)?
+        }
+    }
+
+    Ok(())
+}
+
 /// Real mirrord-agent routine.
 ///
 /// Obtains the PID of the target container (if there is any),
@@ -563,6 +621,37 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     );
 
     let state = State::new(&args).await?;
+
+    // check that chain names won't conflict with another agent or failed cleanup
+    let leftover_rules = state
+        .network_runtime
+        .spawn(async move {
+            let ipt = if args.ipv6 {
+                new_ip6tables()
+            } else {
+                new_iptables()
+            };
+            SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(ipt)).await
+        })
+        .await
+        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+
+    if !leftover_rules.is_empty() {
+        tracing::error!(
+            leftover_rules = ?leftover_rules,
+            "Detected dirty iptables. Either some other mirrord agent is running \
+            or the previous agent failed to clean up before exit. \
+            If no other mirrord agent is targeting this pod, please delete the pod."
+        );
+        let _ = notify_client_about_dirty_iptables(
+            listener,
+            args.communication_timeout,
+            state.tls_connector.clone(),
+        )
+        .await;
+        return Err(AgentError::IPTablesDirty);
+    }
 
     let cancellation_token = CancellationToken::new();
 
@@ -618,6 +707,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         listener.accept(),
     )
     .await;
+
     match first_connection {
         Ok(Ok((stream, addr))) => {
             trace!(peer = %addr, "start_agent -> First connection accepted");
@@ -714,13 +804,20 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain() -> Result<(), IPTablesError> {
-    let ipt = new_iptables();
+async fn clear_iptable_chain(ipv6: bool) -> Result<(), IPTablesError> {
+    let ipt = if ipv6 {
+        IPTablesWrapper::from(new_ip6tables())
+    } else {
+        IPTablesWrapper::from(new_iptables())
+    };
 
-    let tables = SafeIpTables::load(IPTablesWrapper::from(ipt), false).await?;
-    tables.cleanup().await?;
-
-    Ok(())
+    if !SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+        let tables = SafeIpTables::load(ipt, false).await?;
+        tables.cleanup().await
+    } else {
+        trace!("No mirorrd rules found, skipping iptables cleanup.");
+        Ok(())
+    }
 }
 
 /// Runs the current binary as a child process,
@@ -734,6 +831,7 @@ async fn run_child_agent() -> AgentResult<()> {
         .expect("cannot spawn child agent: command missing from program arguments");
 
     let mut child_agent = Command::new(command)
+        .env(CHILD_PROCESS_ENV, "true")
         .args(args)
         .kill_on_drop(true)
         .spawn()?;
@@ -748,8 +846,8 @@ async fn run_child_agent() -> AgentResult<()> {
 
 /// Targeted agent's parent process.
 ///
-/// Sets iptable chains' names in env (e.g. [`IPTABLE_PREROUTING_ENV`]) and spawns the real agent
-/// routine in the child process. When the child process exits, cleans the iptables.
+/// Spawns the main agent routine in the child process and handles cleanup of iptables
+/// when the child process exits.
 ///
 /// Captures SIGTERM signals sent by Kubernetes when the pod is being gracefully deleted.
 /// When a signal is captured, the child process is killed and the iptables are cleaned.
@@ -759,14 +857,6 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     let state = State::new(&args).await?;
     let pid = state.container_pid();
 
-    std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
-    std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
-    std::env::set_var(IPTABLE_STANDARD_ENV, IPTABLE_STANDARD.as_str());
-    std::env::set_var(
-        IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV,
-        IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.as_str(),
-    );
-
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     let result = tokio::select! {
@@ -775,7 +865,14 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
             Ok(())
         }
 
-        result = run_child_agent() => result,
+        result = run_child_agent() => match result {
+            Err(AgentError::AgentFailed(status)) if status.code() == Some(IPTABLES_DIRTY_EXIT_CODE as i32) => {
+                // Err status `IPTABLES_DIRTY_EXIT_CODE` means dirty IP tables detected, skip cleanup
+                tracing::warn!("dirty IP tables, cleanup skipped");
+                return result;
+            }
+            _ => result,
+        },
     };
 
     let Some(pid) = pid else {
@@ -784,7 +881,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 
     let runtime = RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?;
     runtime
-        .spawn(clear_iptable_chain())
+        .spawn(clear_iptable_chain(args.ipv6))
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {
             task: "IPTablesCleaner",
@@ -810,9 +907,10 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 /// If the agent has a target, the flow is a bit different.
 /// This is because we might need to redirect incoming traffic.
 ///
-/// First, the agent generates randomized names for our iptables chains
-/// and puts them into some environment variables (e.g [`IPTABLE_PREROUTING_ENV`]).
-/// Then, it spawns a child process with the exact same command line,
+/// Note that the agent uses static IP tables chain names, and running multiple agents at the same
+/// time will cause an error.
+///
+/// The agent spawns a child process with the exact same command line,
 /// and waits for a SIGTERM signal. When the signal is received or the child process fails,
 /// the agent cleans the iptables (based on the previously set environment variables) before
 /// exiting.
@@ -857,12 +955,9 @@ pub async fn main() -> AgentResult<()> {
     );
 
     let args = cli::parse_args();
+    let second_process = std::env::var(CHILD_PROCESS_ENV).is_ok();
 
-    if args.mode.is_targetless()
-        || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
-            && std::env::var(IPTABLE_MESH_ENV).is_ok()
-            && std::env::var(IPTABLE_STANDARD_ENV).is_ok())
-    {
+    if args.mode.is_targetless() || second_process {
         start_agent(args).await
     } else {
         start_iptable_guard(args).await

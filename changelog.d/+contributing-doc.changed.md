@@ -1,1 +1,0 @@
-Updated contributing guidance.

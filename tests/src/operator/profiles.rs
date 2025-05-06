@@ -10,7 +10,8 @@ use rstest::rstest;
 use tempfile::NamedTempFile;
 
 use crate::utils::{
-    kube_client, port_forwarder::PortForwarder, service, Application, KubeService, ResourceGuard,
+    application::Application, kube_client, kube_service::KubeService,
+    port_forwarder::PortForwarder, resource_guard::ResourceGuard, services::basic_service,
 };
 
 #[rstest]
@@ -18,10 +19,10 @@ use crate::utils::{
 #[timeout(Duration::from_secs(120))]
 pub async fn mirrord_profile_enforces_stealing(
     #[future] kube_client: kube::Client,
-    #[future] service: KubeService,
+    #[future] basic_service: KubeService,
 ) {
     let kube_client = kube_client.await;
-    let service = service.await;
+    let service = basic_service.await;
     let deployed_at = Instant::now();
     let target_path = service.pod_container_target();
 

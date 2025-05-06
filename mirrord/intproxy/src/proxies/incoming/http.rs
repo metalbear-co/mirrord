@@ -17,18 +17,18 @@ use mirrord_protocol::{
     ConnectionId, Port, RequestId,
 };
 use thiserror::Error;
-use tls::LocalTlsSetupError;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::Level;
 
 mod client_store;
 mod response_mode;
 mod streaming_body;
-mod tls;
 
 pub use client_store::ClientStore;
 pub use response_mode::ResponseMode;
 pub use streaming_body::StreamingBody;
+
+use super::tls::LocalTlsSetupError;
 
 /// An HTTP client used to pass requests to the user application.
 pub struct LocalHttpClient {

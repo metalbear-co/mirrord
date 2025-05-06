@@ -8,6 +8,150 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.141.0](https://github.com/metalbear-co/mirrord/tree/3.141.0) - 2025-04-28
+
+
+### Added
+
+- Added the option to skip sip patching.
+- Extended the `MirrordKafkaTopicsConsumer` CRD with a `split_ttl` field.
+
+
+### Changed
+
+- Increased the maximum allowed size of `config.feature.fs.readonly_file_buffer`
+  to 15 MB. Added a warning when using size over 1 MB.
+
+
+### Fixed
+
+- Tied SIP patch files to the version of mirrord binary, so that fixes to patching
+  logic will create new files.
+  [#3245](https://github.com/metalbear-co/mirrord/issues/3245)
+- Fixed docs on how to specify multiple binaries.
+  [#3271](https://github.com/metalbear-co/mirrord/issues/3271)
+- Fixed logic for detecting whether the operator supports Kafka splitting
+  without copying the target.
+
+
+### Internal
+
+- Added a verification of case-insensitive matching in the SQS E2E test.
+
+## [3.140.0](https://github.com/metalbear-co/mirrord/tree/3.140.0) - 2025-04-22
+
+
+### Added
+
+- New config value to allow override of listen ip for external proxy
+  (`external_proxy.host_ip`).
+  [#3274](https://github.com/metalbear-co/mirrord/issues/3274)
+
+
+### Changed
+
+- The IP table chain names used by the agent are no longer randomized. The
+  agent detects if another agent is already
+  running or if a previous cleanup failed.
+  [#3159](https://github.com/metalbear-co/mirrord/issues/3159)
+- Corrected agent pod creation progress message.
+
+
+### Fixed
+
+- Fix issue with port-forward feature that prevented more than one open
+  connection per socket addr.
+  [#3158](https://github.com/metalbear-co/mirrord/issues/3158)
+- Use ss for killing existing connections to allow stealing to begin
+
+
+### Internal
+
+- Add cargo-deny action to check for any advisory or license issues.
+
+  *Small updates to dependencies is also inculded*
+  [#3250](https://github.com/metalbear-co/mirrord/issues/3250)
+- Refactors the e2e tests utils.rs into multiple files/modules.
+
+## [3.139.1](https://github.com/metalbear-co/mirrord/tree/3.139.1) - 2025-04-17
+
+
+### Fixed
+
+- Fixed an issue where mirrord-agent was being OOM killed due to a traffic
+  redirection loop.
+
+
+### Internal
+
+- Added verification of tmp queues deletion in the SQS E2E test.
+- Added E2E tests for rollout targets.
+  [#781](https://github.com/metalbear-co/mirrord/issues/781)
+
+## [3.139.0](https://github.com/metalbear-co/mirrord/tree/3.139.0) - 2025-04-16
+
+
+### Added
+
+- Added config file option for `mirrord operator session` commands (`-f`).
+  [#3178](https://github.com/metalbear-co/mirrord/issues/3178)
+
+
+### Changed
+
+- Increased number of OS threads used by the mirrord agent.
+
+## [3.138.0](https://github.com/metalbear-co/mirrord/tree/3.138.0) - 2025-04-15
+
+
+### Added
+
+- Added `applies_to_copy_targets` to the mirrord Policy specs, so we can enable
+  policies when using copied targets.
+  [#797](https://github.com/metalbear-co/mirrord/issues/797)
+- Added a sanity e2e test for the copy target feature.
+  [#799](https://github.com/metalbear-co/mirrord/issues/799)
+- Added CLI support for Kafka splitting without copying the target.
+- The agent now issues warnings to clients that do not meet minimum
+  protocol version requirement for stealing an HTTP request.
+  [#3119](https://github.com/metalbear-co/mirrord/issues/3119)
+
+
+### Changed
+
+- Improved mermaid diagrams readability (changed colors and lines).
+  [#819](https://github.com/metalbear-co/mirrord/issues/819)
+- Improved mirrord progress message from spawning the agent without an
+  operator.
+  [#3167](https://github.com/metalbear-co/mirrord/issues/3167)
+- By default, the `DOTNET_STARTUP_HOOKS` env var will not be fetched from the
+  target.
+- Updated contributing guidance.
+- Updated dev container base image and JSON configuration file.
+
+
+### Fixed
+
+- mirrord now correctly detects whether the configuration allows for stealing
+  health checks from the targeted pod.
+  [#3188](https://github.com/metalbear-co/mirrord/issues/3188)
+- Fixed `mirrord_agent_dns_request_count` Prometheus metric.
+
+
+### Internal
+
+- Reworked agent's threading model to avoid spawning excessive threads.
+  [#agent-threading](https://github.com/metalbear-co/mirrord/issues/agent-threading)
+- Added some documentation to the `mirrord-protocol` crate.
+  [#3182](https://github.com/metalbear-co/mirrord/issues/3182)
+- Added some documentation in the `mirrord-agent` crate.
+- Added timeouts to concurrent steal E2E tests.
+- Extracted incoming traffic redirection logic to a separate task running in
+  the target's network namespace.
+- Fixed 3 test HTTP servers used in E2E tests.
+- Fixed one of the E2E tests.
+- Test specifying a queue by URL instead of by name in SQS splitting.
+
 ## [3.137.0](https://github.com/metalbear-co/mirrord/tree/3.137.0) - 2025-03-26
 
 

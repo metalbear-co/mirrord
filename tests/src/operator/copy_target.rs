@@ -4,7 +4,10 @@
 
 use rstest::*;
 
-use crate::utils::{service, EnvApp, KubeService};
+use crate::utils::{
+    application::env::EnvApp, kube_service::KubeService, run_command::run_exec_with_target,
+    services::basic_service,
+};
 
 /// Starts mirrord with the `copy-target` feature just to validate that it can create a
 /// working copy-pod. Should work as a sanity check that the targets (see `target` parameter)
@@ -14,13 +17,11 @@ use crate::utils::{service, EnvApp, KubeService};
 pub async fn copy_target_starts_a_working_copy(
     #[future]
     #[notrace]
-    service: KubeService,
+    basic_service: KubeService,
     #[values(EnvApp::NodeInclude)] application: EnvApp,
     #[values("pod", "deployment")] target: &str,
 ) {
-    use crate::utils::run_exec_with_target;
-
-    let service = service.await;
+    let service = basic_service.await;
 
     let mut config_file = tempfile::Builder::new()
         .prefix("copy_target_starts_a_working_copy")

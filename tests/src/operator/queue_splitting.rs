@@ -9,12 +9,13 @@ use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Messa
 use rstest::*;
 
 use crate::utils::{
+    application::Application,
     config_dir,
+    process::TestProcess,
     sqs_resources::{
         await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
         QueueInfo, SqsTestResources,
     },
-    Application, TestProcess,
 };
 
 /// Verify that the test process printed all the expected messages, and none other.
@@ -215,8 +216,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue1,
-        "client",
-        &["a", "b", "c", "c", "b", "a"],
+        "cliENT",                        // Test attribute name case-insensitivity
+        &["a", "b", "c", "C", "B", "A"], // Should also be case-insensitive
         &["1", "2", "3", "4", "5", "6"],
     )
     .await;
@@ -224,8 +225,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue2,
-        "client",
-        &["a", "b", "c", "c", "b", "a"],
+        "CLIent",                        // Test attribute name case-insensitivity
+        &["A", "B", "C", "c", "b", "a"], // Should also be case-insensitive
         &["10", "20", "30", "40", "50", "60"],
     )
     .await;
@@ -253,8 +254,19 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     .await;
     println!("Queue 2 was split correctly!");
 
+    let num_temp_queues = sqs_test_resources.count_temp_queues().await;
+
+    assert_eq!(
+        num_temp_queues, 6,
+        "For each test queue, there should be one main temporary queue that is for the deployed \
+        app, and two temporary queues for the clients. If we could not identify them all, the test \
+        is invalid, and `count_temp_queues` might need to be updated."
+    );
+
     // TODO: verify queue tags.
 
     client_a.child.kill().await.unwrap();
     client_b.child.kill().await.unwrap();
+
+    sqs_test_resources.wait_for_temp_queue_deletion(30).await;
 }
