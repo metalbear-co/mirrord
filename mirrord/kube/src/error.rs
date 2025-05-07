@@ -59,10 +59,22 @@ pub enum KubeApiError {
         String,
     ),
 
+    /// Attempted to list a specific resource type with `mirrord ls` but was unable to because the
+    /// operator was required.
+    #[error(
+        "The requested resource type `{0}` could not be listed because it requires the operator."
+    )]
+    TargetTypeRequiresOperator(TargetType),
+
+    /// Attempted to list a specific resource type with `mirrord ls` but was unable to because that
+    /// type cannot be listed (for example, cannot list targets of type "targetless".
+    #[error("Targets of type `{0}` cannot be listed.")]
+    InvalidTargetType(TargetType),
+
     /// Attempted to list a specific resource type with `mirrord ls` but was unable to because
-    /// either the operator required but is not enabled, or the type was invalid.
-    #[error("The requested resource type `{0}` could not be listed: {1}")]
-    InvalidListTargetType(TargetType, String),
+    /// listing that type has not been implemented.
+    #[error("Targets of type `{0}` cannot be listed. This is a bug.")]
+    InvalidTargetTypeBug(TargetType),
 }
 
 impl KubeApiError {

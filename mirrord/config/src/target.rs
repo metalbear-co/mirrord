@@ -277,9 +277,10 @@ mirrord-layer failed to parse the provided target!
     Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants,
 )]
 #[serde(untagged, deny_unknown_fields)]
-#[strum_discriminants(derive(EnumString, Serialize))]
+#[strum_discriminants(derive(EnumString, Serialize, Deserialize))]
 #[strum_discriminants(name(TargetType))]
 #[strum_discriminants(strum(serialize_all = "lowercase"))]
+#[strum_discriminants(serde(rename_all = "lowercase"))]
 pub enum Target {
     /// <!--${internal}-->
     /// [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).
@@ -370,7 +371,7 @@ impl Target {
 
 impl fmt::Display for TargetType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let stringifed = match self {
+        let stringified = match self {
             TargetType::Targetless => "targetless",
             TargetType::Pod => "pod",
             TargetType::Deployment => "deployment",
@@ -382,7 +383,7 @@ impl fmt::Display for TargetType {
             TargetType::ReplicaSet => "replicaset",
         };
 
-        f.write_str(stringifed)
+        f.write_str(stringified)
     }
 }
 

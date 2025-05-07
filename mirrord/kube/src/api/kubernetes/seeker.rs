@@ -81,11 +81,13 @@ impl KubeResourceSeeker<'_> {
         resource_types: Vec<TargetType>,
         operator_active: bool,
     ) -> Result<Vec<String>> {
-        let mut targets = vec![];
-        for resource_type in resource_types {
-            targets.extend(self.filtered_single(resource_type, operator_active).await?);
-        }
-        Ok(targets)
+        Ok(futures::future::try_join_all(
+            resource_types
+                .into_iter()
+                .map(|resource_type| self.filtered_single(resource_type, operator_active)),
+        )
+        .await?
+        .concat())
     }
 
     async fn filtered_single(
@@ -114,27 +116,11 @@ impl KubeResourceSeeker<'_> {
             TargetType::ReplicaSet if operator_active => {
                 self.simple_list_resource::<ReplicaSet>("replicaset").await
             }
-            TargetType::Targetless => {
-                tracing::error!("Cannot list targets with resource type 'targetless'");
-                Err(KubeApiError::InvalidListTargetType(
-                    resource_type,
-                    "cannot list targets with resource type 'targetless'.".to_string(),
-                ))
-            }
+            TargetType::Targetless => Err(KubeApiError::InvalidTargetType(resource_type)),
             resource_type if !operator_active => {
-                tracing::warn!("Cannot list targets with resource type '{resource_type}' unless the operator is enabled.");
-                Err(KubeApiError::InvalidListTargetType(
-                    resource_type,
-                    "this type requires the operator to be enabled.".to_string(),
-                ))
+                Err(KubeApiError::TargetTypeRequiresOperator(resource_type))
             }
-            resource_type => {
-                tracing::error!("Cannot list targets with resource type '{resource_type}' due to a missing implementation. This is a bug.");
-                Err(KubeApiError::InvalidListTargetType(
-                    resource_type,
-                    "this type cannot be listed. This is a bug.".to_string(),
-                ))
-            }
+            resource_type => Err(KubeApiError::InvalidTargetTypeBug(resource_type)),
         }
     }
 

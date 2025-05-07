@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::LazyLock, time::Instant};
+use std::{sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
@@ -12,7 +12,6 @@ use mirrord_kube::{
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
-use serde_json::Value;
 use tracing::Level;
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
@@ -245,17 +244,13 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
     }
 
     let target_types = if let Some(target_type) = args.target_type {
-        Some(vec![target_type])
+        Some(target_type)
     } else {
         match std::env::var(LS_TARGET_TYPES_ENV)
             .ok()
-            .map(|val| serde_json::from_str::<Vec<Value>>(val.as_ref()))
+            .map(|val| serde_json::from_str::<Vec<TargetType>>(val.as_ref()))
             .transpose()?
             .unwrap_or_default()
-            .into_iter()
-            .filter_map(|value| value.as_str().map(|str| str.to_string()))
-            .filter_map(|string| TargetType::from_str(&string).ok())
-            .collect::<Vec<TargetType>>()
         {
             vec if vec.is_empty() => None,
             vec => Some(vec),

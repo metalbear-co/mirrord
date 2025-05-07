@@ -802,7 +802,7 @@ pub(super) struct ListTargetArgs {
 
     /// Specify the type of target to be retrieved. If `None`, all types are retrieved.
     #[arg(short = 't', long)]
-    pub target_type: Option<TargetType>,
+    pub target_type: Option<Vec<TargetType>>,
 }
 
 impl ListTargetArgs {
