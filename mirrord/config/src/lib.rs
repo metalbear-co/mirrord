@@ -227,6 +227,20 @@ pub struct LayerConfig {
     /// "debugserver"]`
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
+    
+    /// ## skip_extra_build_tools {#root-skip_build_tools}
+    ///
+    /// Same as skip_build_tools but allows for skipping custom build tools.
+    ///
+    /// Accepts a single value, or multiple values separated by `;`.
+    ///
+    ///```json
+    /// {
+    ///  "skip_extra_build_tools": "bash;node"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS")]
+    pub skip_extra_build_tools: Option<VecOrSingle<String>>,
 
     /// ## operator {#root-operator}
     ///

@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    env,
     ffi::OsString,
     fmt::{self, Display},
     sync::LazyLock,
@@ -11,7 +12,7 @@ use tracing::trace;
 
 use crate::error::LayerError;
 
-static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
         "as",
         "cc",
@@ -36,6 +37,14 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "jspawnhelper",
         "bazel-real",
     ])
+});
+
+static COMBINED_BUILD_TOOLS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    let mut combined = BUILD_TOOL_PROCESSES.iter().map(|&s| s.to_string()).collect::<HashSet<String>>();
+    if let Ok(extra_tools) = env::var("MIRRORD_SKIP_EXTRA_BUILD_TOOLS") {
+        combined.extend(extra_tools.split(';').map(|s| s.trim().to_string()));
+    }
+    combined
 });
 
 /// Credentials of the process the layer is injected into.
@@ -84,8 +93,8 @@ impl ExecuteArgs {
     }
 
     fn is_build_tool(&self) -> bool {
-        BUILD_TOOL_PROCESSES.contains(self.exec_name.as_str())
-            || BUILD_TOOL_PROCESSES.contains(self.invoked_as.as_str())
+        COMBINED_BUILD_TOOLS.contains(self.exec_name) 
+            || COMBINED_BUILD_TOOLS.contains(self.invoked_as)
     }
 
     /// Checks if mirrord-layer should load with this process.
