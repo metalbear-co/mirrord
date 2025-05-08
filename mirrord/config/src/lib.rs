@@ -963,6 +963,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
             }),
             skip_processes: None,
+            skip_extra_build_tools: None,
             skip_build_tools: None,
             agent: Some(AgentFileConfig {
                 privileged: None,
