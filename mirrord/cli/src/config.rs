@@ -801,6 +801,7 @@ pub(super) struct ListTargetArgs {
     pub config_file: Option<PathBuf>,
 
     /// Specify the type of target to be retrieved. If `None`, all types are retrieved.
+    /// Can be used multiple times to specify multiple target types.
     #[arg(short = 't', long)]
     pub target_type: Option<Vec<TargetType>>,
 }

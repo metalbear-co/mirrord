@@ -73,9 +73,8 @@ impl KubeResourceSeeker<'_> {
             .collect())
     }
 
-    /// Returns a specified resource type, as long as either:
-    /// 1. The resource type doesn't require the operator
-    /// 2. The operator is being used
+    /// Returns the targets of the specified resource type(s), as long as the operator is active or
+    /// no given types require the operator.
     pub async fn filtered(
         &self,
         resource_types: Vec<TargetType>,
@@ -90,6 +89,9 @@ impl KubeResourceSeeker<'_> {
         .concat())
     }
 
+    /// Returns the targets of a single specified resource type, as long as either:
+    /// 1. The resource type doesn't require the operator
+    /// 2. The operator is being used
     async fn filtered_single(
         &self,
         resource_type: TargetType,

@@ -16,6 +16,8 @@ use tracing::Level;
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
 
+/// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
+/// Primarily used by the plugins when the user picks a target to fetch fewer targets at once.
 const LS_TARGET_TYPES_ENV: &str = "MIRRORD_LS_TARGET_TYPES";
 
 /// A mirrord target found in the cluster.
