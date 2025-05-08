@@ -93,8 +93,8 @@ impl ExecuteArgs {
     }
 
     fn is_build_tool(&self) -> bool {
-        COMBINED_BUILD_TOOLS.contains(self.exec_name) 
-            || COMBINED_BUILD_TOOLS.contains(self.invoked_as)
+        COMBINED_BUILD_TOOLS.contains(self.exec_name.as_str()) 
+            || COMBINED_BUILD_TOOLS.contains(self.invoked_as.as_str())
     }
 
     /// Checks if mirrord-layer should load with this process.
