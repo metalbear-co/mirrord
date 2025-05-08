@@ -130,6 +130,18 @@
         "null"
       ]
     },
+    "skip_extra_build_tools": {
+      "title": "skip_extra_build_tools {#root-skip_build_tools}",
+      "description": "Same as skip_build_tools but allows for skipping custom build tools.\n\nAccepts a single value, or multiple values separated by `;`.\n\n```json { \"skip_extra_build_tools\": \"bash;node\" } ```",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "skip_processes": {
       "title": "skip_processes {#root-skip_processes}",
       "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or an array of values.\n\n```json { \"skip_processes\": [\"bash\", \"node\"] } ```",
@@ -145,18 +157,6 @@
     "skip_sip": {
       "title": "skip_sip {#root-skip_sip}",
       "description": "Allows mirrord to skip patching (macOS SIP) unwanted processes.\n\nWhen patching is skipped, mirrord will no longer be able to load into the process and its child processes.",
-      "anyOf": [
-        {
-          "$ref": "#/definitions/VecOrSingle_for_String"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "skip_extra_build_tools": {
-      "title": "skip_extra_build_tools {#root-skip_extra_build_tools}",
-      "description": "Allows mirrord to skip unwanted build tools. Useful when running command lines that build and run the application in a single command.```",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
