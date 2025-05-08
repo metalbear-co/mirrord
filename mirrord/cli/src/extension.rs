@@ -7,7 +7,7 @@ use crate::{config::ExtensionExecArgs, execution::MirrordExecution, CliResult};
 /// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
     #[cfg(target_os = "macos")] executable: Option<&str>,
-    config: LayerConfig,
+    mut config: LayerConfig,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
@@ -15,7 +15,7 @@ where
     P: Progress + Send + Sync,
 {
     let execution_info = MirrordExecution::start_internal(
-        &config,
+        &mut config,
         #[cfg(target_os = "macos")]
         executable,
         &mut progress,

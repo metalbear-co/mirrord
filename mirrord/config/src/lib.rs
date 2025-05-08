@@ -1,5 +1,6 @@
 #![feature(slice_concat_trait)]
 #![feature(iterator_try_collect)]
+#![feature(let_chains)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
