@@ -227,7 +227,7 @@ pub struct LayerConfig {
     /// "debugserver"]`
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
-    
+
     /// ## skip_extra_build_tools {#root-skip_build_tools}
     ///
     /// Same as skip_build_tools but allows for skipping custom build tools.

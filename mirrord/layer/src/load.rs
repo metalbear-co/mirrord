@@ -40,7 +40,10 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| 
 });
 
 static COMBINED_BUILD_TOOLS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    let mut combined = BUILD_TOOL_PROCESSES.iter().map(|&s| s.to_string()).collect::<HashSet<String>>();
+    let mut combined = BUILD_TOOL_PROCESSES
+        .iter()
+        .map(|&s| s.to_string())
+        .collect::<HashSet<String>>();
     if let Ok(extra_tools) = env::var("MIRRORD_SKIP_EXTRA_BUILD_TOOLS") {
         combined.extend(extra_tools.split(';').map(|s| s.trim().to_string()));
     }
@@ -93,7 +96,7 @@ impl ExecuteArgs {
     }
 
     fn is_build_tool(&self) -> bool {
-        COMBINED_BUILD_TOOLS.contains(self.exec_name.as_str()) 
+        COMBINED_BUILD_TOOLS.contains(self.exec_name.as_str())
             || COMBINED_BUILD_TOOLS.contains(self.invoked_as.as_str())
     }
 
