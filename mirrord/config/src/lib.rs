@@ -228,6 +228,20 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
+    /// ## skip_extra_build_tools {#root-skip_build_tools}
+    ///
+    /// Same as skip_build_tools but allows for skipping custom build tools.
+    ///
+    /// Accepts a single value, or multiple values separated by `;`.
+    ///
+    ///```json
+    /// {
+    ///  "skip_extra_build_tools": "bash;node"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS")]
+    pub skip_extra_build_tools: Option<VecOrSingle<String>>,
+
     /// ## operator {#root-operator}
     ///
     /// Whether mirrord should use the operator.
@@ -949,6 +963,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
             }),
             skip_processes: None,
+            skip_extra_build_tools: None,
             skip_build_tools: None,
             agent: Some(AgentFileConfig {
                 privileged: None,
