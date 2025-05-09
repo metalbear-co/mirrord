@@ -645,7 +645,7 @@ impl LayerConfig {
             // but the mirrord profile introduced changes that triggered the warnings.
             context.add_warning(format!(
                 "Config verification was done after applying mirrord profile `{profile}`. \
-                You can inspect the profile with `kubectl get mirrordprofile {profile} -o yaml`.",
+                You can inspect the profile with `kubectl get mirrordclusterprofile {profile} -o yaml`.",
             ));
         }
 
