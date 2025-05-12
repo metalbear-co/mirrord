@@ -16,7 +16,6 @@ use serde_json::Value;
 /// This feature should not be used in order to prevent malicious actions.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    // The operator group is handled by the operator, we want profiles to be handled by k8s.
     group = "profiles.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordClusterProfile"
