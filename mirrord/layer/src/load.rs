@@ -11,7 +11,7 @@ use tracing::trace;
 
 use crate::error::LayerError;
 
-static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     HashSet::from([
         "as",
         "cc",
