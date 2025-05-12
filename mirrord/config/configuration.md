@@ -465,8 +465,8 @@ Don't add `--rm` to sidecar command to prevent cleanup.
 
 ### container.override_host_ip {#container-override_host_ip}
 
-Allow the setting of override ip addr for intproxy to use when using mirrord containers
-feature
+Allows to override the IP address for the internal proxy to use
+when connecting to the host machine from within the container.
 
 ```json5
 {
@@ -476,8 +476,8 @@ feature
 }
 ```
 
-This should be useful if your host machine is exposed via different ip addr than one bound
-as host
+This should be useful if your host machine is exposed with a different IP address than the
+one bound as host.
 
 ## experimental {#root-experimental}
 
@@ -1714,19 +1714,44 @@ Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc",
 "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch",
 "debugserver"]`
 
+## skip_extra_build_tools {#root-skip_build_tools}
+
+Allows mirrord to skip the specified build tools. Useful when running command lines that
+build and run the application in a single command.
+
+Must also enable [`skip_build_tools`](#root-skip_build_tools) for this to take an effect.
+
+It's similar to [`skip_processes`](#root-skip_processes), except that here it also skips
+SIP patching.
+
+Accepts a single value, or an array of values.
+
+```json
+{
+ "skip_extra_build_tools": ["bash", "node"]
+}
+```
+
 ## skip_processes {#root-skip_processes}
 
 Allows mirrord to skip unwanted processes.
 
 Useful when process A spawns process B, and the user wants mirrord to operate only on
 process B.
-Accepts a single value, or multiple values separated by `;`.
+Accepts a single value, or an array of values.
 
 ```json
 {
  "skip_processes": ["bash", "node"]
 }
 ```
+
+## skip_sip {#root-skip_sip}
+
+Allows mirrord to skip patching (macOS SIP) unwanted processes.
+
+When patching is skipped, mirrord will no longer be able to load into
+the process and its child processes.
 
 ## target {#root-target}
 
