@@ -216,17 +216,19 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("test", "test", &["foo"], false)]
-    #[case("test", "test", &[], false)]
-    #[case("test", "test", &["foo", "bar", "baz"], false)]
-    #[case("cargo", "cargo", &[], false)]
-    #[case("cargo", "cargo", &["foo"], false)]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], false)]
+    #[case("test", "test", &["foo"], false, Some(vec!["KonradIofMasovia".to_string()]))]
+    #[case("test", "test", &[], false, None)]
+    #[case("test", "test", &["foo", "bar", "baz"], false, Some(vec!["HenryIIthePious".to_string()]))]
+    #[case("cargo", "cargo", &[], false, Some(vec!["BolesławIItheHorned".to_string()]))]
+    #[case("cargo", "cargo", &["foo"], false, Some(vec!["HenrykIVProbus".to_string()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], false, Some(vec!["PrzemysłII".to_string()]))]
+    #[case("test", "test", &[], true, Some(vec!["HenryItheBearded".to_string()]))]
     fn should_load_true(
         #[case] exec_name: &str,
         #[case] invoked_as: &str,
         #[case] skip_processes: &[&str],
         #[case] skip_build_tools: bool,
+        #[case] skip_extra_build_tools: Option<Vec<String>>,
     ) {
         let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
@@ -234,21 +236,27 @@ mod tests {
             args: Vec::new(),
         };
 
-        assert!(executable_name.should_load(skip_processes, skip_build_tools, None));
+        assert!(executable_name.should_load(
+            skip_processes,
+            skip_build_tools,
+            skip_extra_build_tools.as_deref()
+        ));
     }
 
     #[rstest]
-    #[case("test", "test", &["test"], false)]
-    #[case("test", "test", &["test", "foo", "bar", "baz"], false)]
-    #[case("cargo", "cargo", &[], true)]
-    #[case("cargo", "cargo", &["foo"], true)]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &["ld"], false)]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], true)]
+    #[case("test", "test", &["test"], false, None)]
+    #[case("test", "test", &["test", "foo", "bar", "baz"], false, Some(vec!["KonradIofMasovia".to_string()]))]
+    #[case("cargo", "cargo", &[], true, None)]
+    #[case("cargo", "cargo", &["foo"], true, Some(vec!["HenryItheBearded".to_string()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &["ld"], false, Some(vec!["BolesławIItheHorned".to_string()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], true, None)]
+    #[case("PrzemysłII", "PrzemysłII", &[], true, Some(vec!["PrzemysłII".to_string()]))]
     fn should_load_false(
         #[case] exec_name: &str,
         #[case] invoked_as: &str,
         #[case] skip_processes: &[&str],
         #[case] skip_build_tools: bool,
+        #[case] skip_extra_build_tools: Option<Vec<String>>,
     ) {
         let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
@@ -256,6 +264,10 @@ mod tests {
             args: Vec::new(),
         };
 
-        assert!(!executable_name.should_load(skip_processes, skip_build_tools, None));
+        assert!(!executable_name.should_load(
+            skip_processes,
+            skip_build_tools,
+            skip_extra_build_tools.as_deref()
+        ));
     }
 }

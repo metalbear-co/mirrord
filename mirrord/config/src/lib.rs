@@ -230,13 +230,19 @@ pub struct LayerConfig {
 
     /// ## skip_extra_build_tools {#root-skip_build_tools}
     ///
-    /// Same as skip_build_tools but allows for skipping custom build tools.
+    /// Allows mirrord to skip the specified build tools. Useful when running command lines that
+    /// build and run the application in a single command.
     ///
-    /// Accepts a single value, or multiple values separated by `;`.
+    /// Must also enable [`skip_build_tools`](#root-skip_build_tools) for this to take an effect.
+    ///
+    /// It's similar to [`skip_processes`](#root-skip_processes), except that here it also skips
+    /// SIP patching.
+    ///
+    /// Accepts a single value, or an array of values.
     ///
     ///```json
     /// {
-    ///  "skip_extra_build_tools": "bash;node"
+    ///  "skip_extra_build_tools": ["bash", "node"]
     /// }
     /// ```
     #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS")]
