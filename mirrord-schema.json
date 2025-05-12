@@ -132,7 +132,7 @@
     },
     "skip_extra_build_tools": {
       "title": "skip_extra_build_tools {#root-skip_build_tools}",
-      "description": "Same as skip_build_tools but allows for skipping custom build tools.\n\nAccepts a single value, or multiple values separated by `;`.\n\n```json { \"skip_extra_build_tools\": \"bash;node\" } ```",
+      "description": "Allows mirrord to skip the specified build tools. Useful when running command lines that build and run the application in a single command.\n\nMust also enable [`skip_build_tools`](#root-skip_build_tools) for this to take an effect.\n\nIt's similar to [`skip_processes`](#root-skip_processes), except that here it also skips SIP patching.\n\nAccepts a single value, or an array of values.\n\n```json { \"skip_extra_build_tools\": [\"bash\", \"node\"] } ```",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
