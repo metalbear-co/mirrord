@@ -1,6 +1,7 @@
-//! This module contains utilities for working with [`MirrordProfile`]s.
+//! This module contains utilities for working with [`MirrordClusterProfile`]s and
+//! [`MirrordProfile`]s.
 
-use kube::{Api, Client};
+use kube::{Api, Client, Resource};
 use miette::Diagnostic;
 use mirrord_config::{
     feature::{network::incoming::IncomingMode, FeatureConfig},
@@ -9,7 +10,8 @@ use mirrord_config::{
 };
 use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{
-    FeatureAdjustment, FeatureChange, MirrordProfile, MirrordProfileSpec,
+    FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordClusterProfileSpec,
+    MirrordProfile, MirrordProfileSpec,
 };
 use mirrord_progress::Progress;
 use thiserror::Error;
@@ -29,7 +31,7 @@ pub enum ProfileError {
 
     #[error("mirrord profile was not found in the cluster")]
     #[diagnostic(help(
-        "Use `kubectl get mirrordprofiles <profile-name>` \
+        "Use `kubectl get mirrordclusterprofiles <profile-name>` \
         to verify that the profile exists \
         and its name is spelled correctly in your mirrord config."
     ))]
@@ -94,9 +96,33 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
     }
 }
 
-/// Applies the given [`MirrordProfile`] to the given [`FeatureConfig`].
-fn apply_profile(config: &mut FeatureConfig, profile: MirrordProfile) -> Result<(), ProfileError> {
+/// Applies the given legacy [`MirrordProfile`] to the given [`FeatureConfig`].
+fn apply_legacy_profile(
+    config: &mut FeatureConfig,
+    profile: MirrordProfile,
+) -> Result<(), ProfileError> {
     let MirrordProfileSpec {
+        feature_adjustments,
+        unknown_fields,
+    } = profile.spec;
+
+    if let Some(field) = unknown_fields.into_keys().next() {
+        return Err(ProfileError::UnknownField(field));
+    }
+
+    for adjustment in feature_adjustments {
+        adjustment.apply_to(config)?;
+    }
+
+    Ok(())
+}
+
+/// Applies the given [`MirrordClusterProfile`] to the given [`FeatureConfig`].
+fn apply_profile(
+    config: &mut FeatureConfig,
+    profile: MirrordClusterProfile,
+) -> Result<(), ProfileError> {
+    let MirrordClusterProfileSpec {
         feature_adjustments,
         unknown_fields,
     } = profile.spec;
@@ -125,7 +151,20 @@ pub async fn apply_profile_if_configured<P: Progress>(
     };
 
     let mut subtask = progress.subtask(&format!("fetching mirrord profile `{name}`"));
-    let profile: Result<MirrordProfile, KubeApiError> = try {
+    let profile: Result<MirrordClusterProfile, KubeApiError> = try {
+        let client: Client = create_kube_config(
+            config.accept_invalid_certificates,
+            config.kubeconfig.as_deref(),
+            config.kube_context.clone(),
+        )
+        .await?
+        .try_into()
+        .map_err(KubeApiError::from)?;
+
+        let api = Api::<MirrordClusterProfile>::all(client);
+        api.get(name).await?
+    };
+    let legacy_profile: Result<MirrordProfile, KubeApiError> = try {
         let client: Client = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.as_deref(),
@@ -138,23 +177,40 @@ pub async fn apply_profile_if_configured<P: Progress>(
         let api = Api::<MirrordProfile>::all(client);
         api.get(name).await?
     };
+    if legacy_profile.is_ok() {
+        subtask.warning(
+            &format!(
+                "Legacy resource kind detected, please contact your admin to migrate all resources of kind {} to {}", 
+                MirrordProfile::kind(&()),
+                MirrordClusterProfile::kind(&()),
+            )
+        );
+    }
 
-    let profile = match profile {
-        Ok(profile) => profile,
-        Err(KubeApiError::KubeError(kube::Error::Api(error))) if error.code == 404 => {
-            return Err(CliError::ProfileError(ProfileError::ProfileNotFound));
+    match (profile, legacy_profile) {
+        (Ok(profile), _) => {
+            subtask.success(Some(&format!("mirrord cluster profile `{name}` fetched")));
+            let mut subtask = progress.subtask(&format!("applying mirrord profile `{name}`"));
+            apply_profile(&mut config.feature, profile)?;
+            subtask.success(Some(&format!("mirrord profile `{name}` applied")));
+            Ok(())
         }
-        Err(error) => {
-            return Err(CliError::friendlier_error_or_else(error, |error| {
-                CliError::ProfileError(ProfileError::ProfileFetchError(error))
-            }));
+        (_, Ok(legacy_profile)) => {
+            subtask.success(Some(&format!("legacy mirrord profile `{name}` fetched")));
+            let mut subtask =
+                progress.subtask(&format!("applying legacy mirrord profile `{name}`"));
+            apply_legacy_profile(&mut config.feature, legacy_profile)?;
+            subtask.success(Some(&format!("legacy mirrord profile `{name}` applied")));
+            Ok(())
         }
-    };
-    subtask.success(Some(&format!("mirrord profile `{name}` fetched")));
-
-    let mut subtask = progress.subtask(&format!("applying mirrord profile `{name}`"));
-    apply_profile(&mut config.feature, profile)?;
-    subtask.success(Some(&format!("mirrord profile `{name}` applied")));
-
-    Ok(())
+        (Err(KubeApiError::KubeError(kube::Error::Api(error))), _) if error.code == 404 => {
+            Err(CliError::ProfileError(ProfileError::ProfileNotFound))
+        }
+        (_, Err(KubeApiError::KubeError(kube::Error::Api(error)))) if error.code == 404 => {
+            Err(CliError::ProfileError(ProfileError::ProfileNotFound))
+        }
+        (Err(error), _) => Err(CliError::friendlier_error_or_else(error, |error| {
+            CliError::ProfileError(ProfileError::ProfileFetchError(error))
+        })),
+    }
 }

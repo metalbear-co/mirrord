@@ -17,6 +17,7 @@ use mirrord_config::{
         MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
         MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
     },
+    target::TargetType,
     LayerConfig,
 };
 use mirrord_operator::setup::OperatorNamespace;
@@ -798,6 +799,11 @@ pub(super) struct ListTargetArgs {
     /// Specify config file to use.
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
+
+    /// Specify the type of target to be retrieved. If `None`, all types are retrieved.
+    /// Can be used multiple times to specify multiple target types.
+    #[arg(short = 't', long)]
+    pub target_type: Option<Vec<TargetType>>,
 }
 
 impl ListTargetArgs {

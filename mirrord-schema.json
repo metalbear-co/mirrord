@@ -130,6 +130,18 @@
         "null"
       ]
     },
+    "skip_extra_build_tools": {
+      "title": "skip_extra_build_tools {#root-skip_build_tools}",
+      "description": "Allows mirrord to skip the specified build tools. Useful when running command lines that build and run the application in a single command.\n\nMust also enable [`skip_build_tools`](#root-skip_build_tools) for this to take an effect.\n\nIt's similar to [`skip_processes`](#root-skip_processes), except that here it also skips SIP patching.\n\nAccepts a single value, or an array of values.\n\n```json { \"skip_extra_build_tools\": [\"bash\", \"node\"] } ```",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "skip_processes": {
       "title": "skip_processes {#root-skip_processes}",
       "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or an array of values.\n\n```json { \"skip_processes\": [\"bash\", \"node\"] } ```",
@@ -1852,7 +1864,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;\n\nUsed to derive `TargetType` via the strum crate",
       "anyOf": [
         {
           "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
