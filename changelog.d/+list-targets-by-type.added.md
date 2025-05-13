@@ -1,1 +1,0 @@
-Add the `-t` argument to the `mirrord ls` command to list targets of a specific type. Also allow target types to be read from env.
