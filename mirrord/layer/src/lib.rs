@@ -195,16 +195,12 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     #[cfg(target_os = "macos")]
     let patch_binaries = config
         .sip_binaries
-        .clone()
+        .as_ref()
         .map(|x| x.to_vec())
         .unwrap_or_default();
 
     #[cfg(target_os = "macos")]
-    let skip_patch_binaries = config
-        .skip_sip
-        .clone()
-        .map(|x| x.to_vec())
-        .unwrap_or_default();
+    let skip_patch_binaries = config.skip_sip.as_ref().map(|x| x.to_vec());
 
     // SIP Patch the process' binary then re-execute it. Needed
     // for https://github.com/metalbear-co/mirrord/issues/1529
@@ -217,7 +213,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             path,
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
-                skip: &skip_patch_binaries,
+                skip: skip_patch_binaries.as_deref(),
             },
         ) {
             let err = exec::execvp(
@@ -506,7 +502,7 @@ fn fetch_env_vars() -> HashMap<String, String> {
 fn sip_only_layer_start(
     mut config: LayerConfig,
     patch_binaries: Vec<String>,
-    skip_patch_binaries: Vec<String>,
+    skip_patch_binaries: Option<Vec<String>>,
 ) {
     use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
 
