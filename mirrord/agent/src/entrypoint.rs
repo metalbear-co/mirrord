@@ -626,12 +626,15 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let leftover_rules = state
         .network_runtime
         .spawn(async move {
-            let ipt = if args.ipv6 {
-                new_ip6tables()
+            let rules_v4 =
+                SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(new_iptables())).await?;
+            let rules_v6 = if args.ipv6 {
+                SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(new_ip6tables())).await?
             } else {
-                new_iptables()
+                vec![]
             };
-            SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(ipt)).await
+
+            Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
@@ -804,20 +807,32 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain(ipv6: bool) -> Result<(), IPTablesError> {
-    let ipt = if ipv6 {
-        IPTablesWrapper::from(new_ip6tables())
-    } else {
-        IPTablesWrapper::from(new_iptables())
+async fn clear_iptable_chain(ipv6_enabled: bool) -> Result<(), IPTablesError> {
+    let v4_result: Result<(), IPTablesError> = try {
+        let ipt = IPTablesWrapper::from(new_iptables());
+        if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+            trace!("No iptables mirrord rules found, skipping iptables cleanup.");
+        } else {
+            let tables = SafeIpTables::load(ipt, false).await?;
+            tables.cleanup().await?
+        }
     };
 
-    if !SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
-        let tables = SafeIpTables::load(ipt, false).await?;
-        tables.cleanup().await
+    let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
+        try {
+            let ipt = IPTablesWrapper::from(new_ip6tables());
+            if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+                trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
+            } else {
+                let tables = SafeIpTables::load(ipt, false).await?;
+                tables.cleanup().await?
+            }
+        }
     } else {
-        trace!("No mirorrd rules found, skipping iptables cleanup.");
         Ok(())
-    }
+    };
+
+    v4_result.and(v6_result)
 }
 
 /// Runs the current binary as a child process,
