@@ -37,7 +37,10 @@ impl HttpVersion {
 
         // We parse only the first line of the request,
         // so we don't have to worry about header edge cases.
-        let buffer = buffer.split_inclusive(|b| *b == b'\n').next().unwrap_or(buffer);
+        let buffer = buffer
+            .split_inclusive(|b| *b == b'\n')
+            .next()
+            .unwrap_or(buffer);
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
         let mut request = httparse::Request::new(&mut empty_headers);
         let result = httparse::ParserConfig::default()
@@ -153,8 +156,14 @@ mod test {
     #[case::extra_spaces(b"GET / asd d HTTP/1.1\r\n\r\n", DetectedHttpVersion::NotHttp)]
     #[case::bad_version_1(b"GET / HTTP/a\r\n\r\n", DetectedHttpVersion::NotHttp)]
     #[case::bad_version_2(b"GET / HTTP/2\r\n\r\n", DetectedHttpVersion::NotHttp)]
-    #[case::multiple_spaces(b"GET   /  HTTP/1.1\r\n\r\n", DetectedHttpVersion::Http(HttpVersion::V1))]
-    #[case::bad_header(b"GET / HTTP/1.1\r\n Host: \r\n\r\n", DetectedHttpVersion::Http(HttpVersion::V1))]
+    #[case::multiple_spaces(
+        b"GET   /  HTTP/1.1\r\n\r\n",
+        DetectedHttpVersion::Http(HttpVersion::V1)
+    )]
+    #[case::bad_header(
+        b"GET / HTTP/1.1\r\n Host: \r\n\r\n",
+        DetectedHttpVersion::Http(HttpVersion::V1)
+    )]
     #[test]
     fn http_detect(#[case] input: &[u8], #[case] expected: DetectedHttpVersion) {
         let detected = HttpVersion::detect(input);
