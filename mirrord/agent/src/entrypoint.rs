@@ -399,7 +399,7 @@ impl ClientConnectionHandler {
                         }
                     }
                 },
-                // poll the sniffer API only when it's available
+                // poll the mirror API only when it's available
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
                 Some(Some(message)) = mirror_message => match message {
