@@ -494,8 +494,8 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
-                if let Some(sniffer_api) = &mut self.tcp_mirror_api {
-                    sniffer_api.handle_client_message(message).await?
+                if let Some(mirror_api) = &mut self.tcp_mirror_api {
+                    mirror_api.handle_client_message(message).await?
                 } else {
                     self.respond(DaemonMessage::Close(
                         "component responsible for mirroring incoming traffic is not running, \
