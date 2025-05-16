@@ -26,7 +26,9 @@ pub struct RedirectedTcp {
 }
 
 impl RedirectedTcp {
-    /// Should be called in the target's Linux network namespace.
+    /// Should be called in the target's Linux network namespace,
+    /// as [`Handle::current()`] is stored in this struct.
+    /// We might need to connect to the original destination in the future.
     pub fn new(io: Box<dyn IncomingIO>, info: ConnectionInfo) -> Self {
         Self {
             io,
