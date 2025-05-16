@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.142.1](https://github.com/metalbear-co/mirrord/tree/3.142.1) - 2025-05-16
+
+
+### Changed
+
+- mirrord-agent is now less strict when parsing intercepted HTTP/1 requests.
+
+
+### Fixed
+
+- Fixed the logic for dirty iptables detection and cleanup in the
+  mirrord-agent.
+
 ## [3.142.0](https://github.com/metalbear-co/mirrord/tree/3.142.0) - 2025-05-12
 
 
