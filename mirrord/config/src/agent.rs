@@ -223,6 +223,7 @@ pub struct AgentConfig {
     /// it uses `eth0`.
     ///
     /// This setting is ignored when `agent.passthrough_mirroring` is enabled.
+    /// With passthrough mirroring, the agent uses all available interfaces.
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
