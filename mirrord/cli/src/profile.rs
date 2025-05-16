@@ -51,6 +51,9 @@ pub enum ProfileError {
         Or the field will be used as a single value for fetchting cluster-wise profile."
     ))]
     InvalidProfileName(String),
+
+    #[error("selected profile is in {profile:?}, but target is in {target:?}.")]
+    NamespaceConflict { target: String, profile: String },
 }
 
 /// Identifier of [`MirrordClusterProfile`] and [`MirrordProfile`].
@@ -176,24 +179,45 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
     }
 }
 
-/// Applies the given [`MirrordClusterProfile`] to the given [`FeatureConfig`].
-fn apply_profile(
-    config: &mut FeatureConfig,
+/// Applies the given profile to the given [`LayerConfig`].
+fn apply_profile<P: Progress>(
+    config: &mut LayerConfig,
     profile: impl ProfileView,
+    profile_identifier: &ProfileIdentifier,
+    subtask: &mut P,
 ) -> Result<(), ProfileError> {
     if let Some((field, _)) = profile.unknown_fields().next() {
         return Err(ProfileError::UnknownField(field.to_string()));
     }
 
+    if let ProfileIdentifier::Namespaced {
+        namespace: profile_ns,
+        profile: _,
+    } = profile_identifier
+    {
+        if let Some(target_ns) = &config.target.namespace {
+            if target_ns != profile_ns {
+                return Err(ProfileError::NamespaceConflict {
+                    target: target_ns.to_string(),
+                    profile: profile_ns.to_string(),
+                });
+            }
+        } else {
+            subtask.info(&format!("setting target namespace to {profile_ns}"));
+            config.target.namespace = Some(profile_ns.to_string());
+        }
+    }
+
     for adjustment in profile.feature_adjustments() {
-        adjustment.apply_to(config)?;
+        adjustment.apply_to(&mut config.feature)?;
     }
 
     Ok(())
 }
 
-/// If the [`LayerConfig::profile`] field specifies a [`MirrordProfile`] to use,
-/// fetches that profile from the cluster and applies it to the config.
+/// If the [`LayerConfig::profile`] field specifies a [`MirrordClusterProfile`] or
+/// [`MirrordProfile`] to use, fetches that profile from the cluster and applies it
+/// to the config.
 ///
 /// Verifies that the fetched profile does not contain any unknown fields or values.
 pub async fn apply_profile_if_configured<P: Progress>(
@@ -214,7 +238,7 @@ pub async fn apply_profile_if_configured<P: Progress>(
             )));
             let mut subtask =
                 progress.subtask(&format!("applying mirrord profile `{profile_identifier}`"));
-            apply_profile(&mut config.feature, profile)?;
+            apply_profile(config, profile, &profile_identifier, &mut subtask)?;
             subtask.success(Some(&format!(
                 "mirrord profile `{profile_identifier}` applied"
             )));
