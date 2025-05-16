@@ -104,6 +104,9 @@ mod main {
     pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
 
+    /// A default list of processes to be skipped for SIP patching.
+    pub static MIRRORD_SIP_DEFAULT_SKIP_LIST: Lazy<&[&str]> = Lazy::new(|| &["git"]);
+
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
     fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
@@ -135,7 +138,7 @@ mod main {
         /// A list of binaries to patch.
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
-        pub skip: &'a [String],
+        pub skip: Option<&'a [String]>,
     }
 
     struct BinaryInfo {
@@ -503,7 +506,19 @@ mod main {
     /// SIP check for binaries.
     fn is_binary_sip(path: &Path, data: &[u8], opts: SipPatchOptions) -> Result<bool> {
         // Skip patching binary if it is in the list of binaries to skip.
-        if opts.skip.iter().any(|x| path.ends_with(x)) {
+        if opts
+            .skip
+            .as_ref()
+            .unwrap_or(
+                &MIRRORD_SIP_DEFAULT_SKIP_LIST
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .iter()
+            .any(|x| path.ends_with(x))
+        {
             trace!("Skipping SIP patch for {:?}", path);
             return Ok(false);
         }
@@ -1020,7 +1035,7 @@ mod main {
                     signed_temp_file_path,
                     SipPatchOptions {
                         patch: &[],
-                        skip: &[signed_temp_file_path.to_string()],
+                        skip: Some(&[signed_temp_file_path.to_string()]),
                     }
                 )
                 .unwrap(),

@@ -311,14 +311,10 @@ impl MirrordExecution {
                     SipPatchOptions {
                         patch: &config
                             .sip_binaries
-                            .clone()
+                            .as_ref()
                             .map(|x| x.to_vec())
                             .unwrap_or_default(),
-                        skip: &config
-                            .skip_sip
-                            .clone()
-                            .map(|x| x.to_vec())
-                            .unwrap_or_default(),
+                        skip: config.skip_sip.as_deref(),
                     },
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this

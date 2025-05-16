@@ -33,12 +33,12 @@ const MAX_ARGC: usize = 256;
 
 pub(crate) static PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
 
-pub(crate) static SKIP_PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
+pub(crate) static SKIP_PATCH_BINARIES: OnceLock<Option<Vec<String>>> = OnceLock::new();
 
 pub(crate) unsafe fn enable_macos_hooks(
     hook_manager: &mut HookManager,
     patch_binaries: Vec<String>,
-    skip_binaries: Vec<String>,
+    skip_binaries: Option<Vec<String>>,
 ) {
     PATCH_BINARIES
         .set(patch_binaries)
@@ -74,7 +74,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         path,
         SipPatchOptions {
             patch: patch_binaries,
-            skip: skip_patch_binaries,
+            skip: skip_patch_binaries.as_ref().map(|x| x.as_slice()),
         },
     ) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
