@@ -158,16 +158,16 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
 
 Our FAQ is available [here](https://mirrord.dev/docs/faq/general/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
-or on [Discord](https://discord.gg/metalbear).
+or on [Discord](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack).
 
 ## Contributing
 
 Contributions are very welcome. Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
-We're available on [Discord](https://discord.gg/metalbear) for any questions.
+We're available on [Discord](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for any questions.
 
 ## Help and Community
 
-Join our [Discord Server](https://discord.gg/metalbear) for questions, support and fun.
+Join our [Discord Server](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for questions, support and fun.
 
 ## Code of Conduct
 
