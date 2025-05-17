@@ -68,7 +68,7 @@ pub async fn mirrord_profile_enforces_stealing(
             },
         };
         let (guard, profile) = ResourceGuard::create(
-            Api::<MirrordClusterProfile>::namespaced(kube_client.clone(), &service.namespace),
+            Api::<MirrordProfile>::namespaced(kube_client.clone(), &service.namespace),
             &profile,
             true,
         )
