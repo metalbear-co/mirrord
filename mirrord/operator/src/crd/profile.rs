@@ -35,18 +35,23 @@ pub struct MirrordClusterProfileSpec {
     pub unknown_fields: HashMap<String, Value>,
 }
 
-/// This custom resource has been superseded by [`MirrordClusterProfileSpec`] and should
-/// no longer be exposed in setup. During the migration period, we support both this and
-/// the new [`MirrordClusterProfileSpec`] custom resource definition.
+/// Custom namespaced resource for storing a reusable mirrord config template.
 ///
-/// Once users have migrated, we plan to re-introduce the kind name `MirrordProfile` in
-/// future releases for namespaced mirrord profile.
+/// Can be selected from the user's mirrord config.
+///
+/// Examle:
+/// ```json
+/// {
+///     "profile": "my-namespace/my-profile"
+/// }
+/// ```
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     // The operator group is handled by the operator, we want profiles to be handled by k8s.
     group = "profiles.mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordProfile"
+    kind = "MirrordProfile",
+    namespaced
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordProfileSpec {
