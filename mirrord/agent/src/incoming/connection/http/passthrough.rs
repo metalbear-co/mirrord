@@ -50,10 +50,19 @@ impl PassThroughTask {
 
     pub async fn run_inner(&mut self, extracted: ExtractedRequest) -> Result<(), ConnError> {
         let version = extracted.parts.version;
+        let uri = extracted.parts.uri.clone();
+        let method = extracted.parts.method.clone();
 
         let mut sender = match self.make_connection(&extracted.parts).await {
             Ok(sender) => sender,
             Err(error) => {
+                tracing::warn!(
+                    error = %Report::new(&error),
+                    %uri, %method, ?version,
+                    info = ?self.info,
+                    "Failed to make an HTTP connection to the original destination",
+                );
+
                 let _ = extracted.response_tx.send(
                     MirrordErrorResponse::new(version, Report::new(&error).pretty(true)).into(),
                 );
@@ -71,6 +80,13 @@ impl PassThroughTask {
         let mut response = match sender.send(request).await {
             Ok(response) => response,
             Err(error) => {
+                tracing::warn!(
+                    error = %Report::new(&error),
+                    %uri, %method, ?version,
+                    info = ?self.info,
+                    "Failed to send an HTTP request to the original destination",
+                );
+
                 let error = ConnError::PassthroughHttpError(error.into());
                 let _ = extracted.response_tx.send(
                     MirrordErrorResponse::new(version, Report::new(&error).pretty(true)).into(),

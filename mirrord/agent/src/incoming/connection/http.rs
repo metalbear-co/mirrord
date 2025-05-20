@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bytes::Bytes;
 use hyper::{
     http::{request, HeaderMap, Method, Uri, Version},
@@ -168,7 +170,17 @@ pub struct StolenHttp {
     pub response_provider: ResponseProvider,
 }
 
+impl fmt::Debug for StolenHttp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StolenHttp")
+            .field("info", &self.info)
+            .field("request_head", &self.request_head)
+            .finish()
+    }
+}
+
 /// Head of a redirected HTTP request.
+#[derive(Debug)]
 pub struct RequestHead {
     pub uri: Uri,
     pub method: Method,

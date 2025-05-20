@@ -1,3 +1,5 @@
+use std::{error::Report, fmt};
+
 use tokio::{
     runtime::Handle,
     sync::{broadcast, mpsc},
@@ -96,6 +98,12 @@ impl RedirectedTcp {
             let destination = match task::Destination::pass_through(&self.info).await {
                 Ok(destination) => destination,
                 Err(error) => {
+                    tracing::warn!(
+                        error = %Report::new(&error),
+                        info = ?self.info,
+                        "Failed to make a passthrough TCP connection to the original destination",
+                    );
+
                     if let Some(tx) = self.copy_tx {
                         let _ = tx.send(IncomingStreamItem::Finished(Err(error)));
                     }
@@ -130,4 +138,12 @@ pub struct StolenTcp {
     /// Dropping this sender will be interpreted as a write shutdown,
     /// and will not terminate the connection right away.
     pub data_tx: mpsc::Sender<Vec<u8>>,
+}
+
+impl fmt::Debug for StolenTcp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StolenTcp")
+            .field("info", &self.info)
+            .finish()
+    }
 }

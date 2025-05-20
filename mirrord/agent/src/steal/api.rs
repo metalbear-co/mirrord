@@ -29,6 +29,7 @@ use mirrord_protocol::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamMap;
+use tracing::Level;
 
 use super::{Command, StealerCommand, StealerMessage};
 use crate::{
@@ -166,6 +167,12 @@ impl TcpStealApi {
         }
     }
 
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(self),
+        fields(client_id = self.client_id),
+        ret, err(level = Level::TRACE),
+    )]
     fn handle_request(&mut self, request: StolenHttp) -> AgentResult<()> {
         let connection_id = self
             .connection_ids_iter
@@ -302,6 +309,12 @@ impl TcpStealApi {
         Ok(())
     }
 
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(self),
+        fields(client_id = self.client_id),
+        ret, err(level = Level::TRACE),
+    )]
     fn handle_connection(&mut self, connection: StolenTcp) -> AgentResult<DaemonTcp> {
         let connection_id = self
             .connection_ids_iter
@@ -347,6 +360,12 @@ impl TcpStealApi {
         Ok(message)
     }
 
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(self),
+        fields(client_id = self.client_id),
+        ret,
+    )]
     fn handle_incoming_item(&mut self, connection_id: ConnectionId, item: IncomingStreamItem) {
         match item {
             IncomingStreamItem::Frame(frame) => {
@@ -467,6 +486,7 @@ impl TcpStealApi {
     }
 
     /// Returns an error only when it fails to parse the HTTP filter contained in the message.
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::TRACE))]
     pub async fn handle_client_message(
         &mut self,
         message: LayerTcpSteal,
