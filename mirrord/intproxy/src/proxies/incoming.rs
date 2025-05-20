@@ -176,10 +176,10 @@ pub struct IncomingProxy {
     metadata_store: MetadataStore,
     /// What HTTP response flavor we produce.
     response_mode: ResponseMode,
-    /// For making TLS connections to the user application.
-    tls_setup: Option<Arc<LocalTlsSetup>>,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
+    /// For connecting to the user application's server with TLS.
+    tls_setup: Option<Arc<LocalTlsSetup>>,
     /// Each mirrored/stolen remote connection is mapped to a [`TcpProxyTask`].
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
@@ -206,11 +206,11 @@ impl IncomingProxy {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
             response_mode: Default::default(),
-            tls_setup: tls_setup.clone(),
             client_store: ClientStore::new_with_timeout(
                 idle_local_http_connection_timeout,
-                tls_setup,
+                tls_setup.clone(),
             ),
+            tls_setup,
             tcp_proxies: Default::default(),
             http_gateways: Default::default(),
             tasks: Default::default(),
@@ -219,8 +219,8 @@ impl IncomingProxy {
 
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
     ///
-    /// If we don't have a [`PortSubscription`](mirrord_intproxy_protocol::PortSubscription) for the
-    /// port, the task is not started. Instead, we respond immediately to the agent.
+    /// If we don't have a [`PortSubscription`] for the port, the task is not started.
+    /// Instead, we respond immediately to the agent.
     #[tracing::instrument(
         level = Level::DEBUG,
         skip(self, message_bus),
@@ -304,8 +304,8 @@ impl IncomingProxy {
 
     /// Handles [`NewTcpConnectionV2`] message from the agent, starting a new [`TcpProxyTask`].
     ///
-    /// If we don't have a [`PortSubscription`](mirrord_intproxy_protocol::PortSubscription) for the
-    /// port, the task is not started. Instead, we respond immediately to the agent.
+    /// If we don't have a [`PortSubscription`] for the port, the task is not started.
+    /// Instead, we respond immediately to the agent.
     #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_new_connection(
         &mut self,

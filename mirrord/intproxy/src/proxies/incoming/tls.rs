@@ -62,7 +62,7 @@ impl LocalTlsSetup {
                         .inspect_err(|_| {
                             tracing::error!(
                                 "Invalid server name was specified for the local TLS delivery. \
-                                    This should be detected during config verification."
+                                This should be detected during config verification."
                             )
                         })
                         .ok()
