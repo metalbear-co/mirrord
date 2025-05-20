@@ -7,7 +7,7 @@ use std::{
 
 use futures::FutureExt;
 use hyper::{Uri, Version};
-use mirrord_protocol::tcp::TrafficTransportType;
+use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -50,8 +50,8 @@ impl fmt::Debug for IdleLocalClient {
 /// 2. HTTP [`Version`]
 /// 3. Whether the client uses TLS
 ///
-/// We ignore the fact that [`TrafficTransportType::Tls::alpn_protocol`] and
-/// [`TrafficTransportType::Tls::server_name`] might be different.
+/// We ignore the fact that [`IncomingTrafficTransportType::Tls::alpn_protocol`] and
+/// [`IncomingTrafficTransportType::Tls::server_name`] might be different.
 /// This is because these parameters are only relevant **before** the connection is upgraded to
 /// HTTP. Since an idle [`LocalHttpClient`] is ready to send HTTP requests, we assume it's safe to
 /// reuse it.
@@ -92,11 +92,11 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        transport: &TrafficTransportType,
+        transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls =
-            matches!(transport, TrafficTransportType::Tls { .. }) && self.tls_setup.is_some();
+        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
+            && self.tls_setup.is_some();
 
         if let Some(ready) = self
             .wait_for_ready(server_addr, version, uses_tls)
@@ -172,14 +172,14 @@ impl ClientStore {
         &self,
         local_server_address: SocketAddr,
         version: Version,
-        transport: &TrafficTransportType,
+        transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let connector_and_name = match (transport, self.tls_setup.as_ref()) {
-            (TrafficTransportType::Tcp, ..) => None,
+            (IncomingTrafficTransportType::Tcp, ..) => None,
             (.., None) => None,
             (
-                TrafficTransportType::Tls {
+                IncomingTrafficTransportType::Tls {
                     alpn_protocol,
                     server_name: original_server_name,
                 },
@@ -292,7 +292,7 @@ mod test {
         Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest, TrafficTransportType};
+    use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
         KeyUsagePurpose,
@@ -302,7 +302,7 @@ mod test {
     use tokio_rustls::TlsAcceptor;
 
     use super::ClientStore;
-    use crate::proxies::incoming::http::StreamingBody;
+    use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]
@@ -329,7 +329,7 @@ mod test {
             .get(
                 addr,
                 Version::HTTP_11,
-                &TrafficTransportType::Tcp,
+                &IncomingTrafficTransportType::Tcp,
                 &"http://some.server.com".parse().unwrap(),
             )
             .await
@@ -412,13 +412,16 @@ mod test {
         let addr = listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            let client_store = ClientStore::new_with_timeout(Duration::ZERO, Default::default());
+            let client_store = ClientStore::new_with_timeout(
+                Duration::ZERO,
+                LocalTlsSetup::from_config(Default::default()),
+            );
 
             let mut client = client_store
                 .make_client(
                     addr,
                     request.internal_request.version,
-                    &TrafficTransportType::Tls {
+                    &IncomingTrafficTransportType::Tls {
                         alpn_protocol: Some(b"h2".into()),
                         server_name: None,
                     },

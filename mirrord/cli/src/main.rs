@@ -32,7 +32,7 @@
 //! the [`LayerConfig`], and checks it with [`LayerConfig::verify`] (which is similar to what's done
 //! in the `mirrord verify-config` command).
 //!
-//! - Tip: [`Progress`] logging might be incovenient sometimes when you want to see normal Rust
+//! - Tip: [`Progress`] logging might be inconvenient sometimes when you want to see normal Rust
 //!   logs, you can disable it with the `MIRRORD_PROGRESS_MODE=off` env var.
 //!
 //! Next, we start the target resolution, and how the target is resolved depends if the

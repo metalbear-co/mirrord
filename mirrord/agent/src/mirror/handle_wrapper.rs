@@ -9,8 +9,9 @@ use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
-        HttpRequestMetadata, InternalHttpBodyNew, InternalHttpRequest, LayerTcp, NewTcpConnection,
-        NewTcpConnectionV2, TcpClose, TcpData, TrafficTransportType, NEW_CONNECTION_V2_VERSION,
+        HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
+        InternalHttpRequest, LayerTcp, NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
+        MODE_AGNOSTIC_HTTP_REQUESTS,
     },
     ConnectionId, DaemonMessage, LogMessage, RequestId,
 };
@@ -65,12 +66,12 @@ impl MirrorHandleWrapper {
         let blocked = tcp.info.tls_connector.is_some()
             && self
                 .protocol_version
-                .matches(&NEW_CONNECTION_V2_VERSION)
+                .matches(&MODE_AGNOSTIC_HTTP_REQUESTS)
                 .not();
         if blocked {
             return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                 "A TCP connection was not mirrored due to mirrord-protocol version requirement: {}",
-                *NEW_CONNECTION_V2_VERSION,
+                *MODE_AGNOSTIC_HTTP_REQUESTS,
             ))));
         }
 
@@ -80,7 +81,7 @@ impl MirrorHandleWrapper {
             .ok_or(AgentError::ExhaustedConnectionId)?;
         self.incoming_streams.insert(id, tcp.stream);
 
-        let new_connection = NewTcpConnection {
+        let new_connection = NewTcpConnectionV1 {
             connection_id: id,
             remote_address: tcp.info.peer_addr.ip(),
             local_address: tcp.info.local_addr.ip(),
@@ -89,16 +90,15 @@ impl MirrorHandleWrapper {
         };
 
         let Some(tls) = tcp.info.tls_connector else {
-            return Ok(DaemonMessage::Tcp(DaemonTcp::NewConnection(new_connection)));
+            return Ok(DaemonMessage::Tcp(DaemonTcp::NewConnectionV1(
+                new_connection,
+            )));
         };
 
         Ok(DaemonMessage::Tcp(DaemonTcp::NewConnectionV2(
             NewTcpConnectionV2 {
                 connection: new_connection,
-                transport: TrafficTransportType::Tls {
-                    alpn_protocol: tls.alpn_protocol().map(From::from),
-                    server_name: tls.server_name().map(|name| name.to_str().into()),
-                },
+                transport: IncomingTrafficTransportType::from(tls),
             },
         )))
     }
@@ -106,12 +106,12 @@ impl MirrorHandleWrapper {
     fn handle_http(&mut self, http: MirroredHttp) -> AgentResult<DaemonMessage> {
         let blocked = self
             .protocol_version
-            .matches(&NEW_CONNECTION_V2_VERSION)
+            .matches(&MODE_AGNOSTIC_HTTP_REQUESTS)
             .not();
         if blocked {
             return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                 "An HTTP request was not mirrored due to mirrord-protocol version requirement: {}",
-                *NEW_CONNECTION_V2_VERSION,
+                *MODE_AGNOSTIC_HTTP_REQUESTS,
             ))));
         }
 
@@ -143,7 +143,7 @@ impl MirrorHandleWrapper {
                     .info
                     .tls_connector
                     .map(From::from)
-                    .unwrap_or(TrafficTransportType::Tcp),
+                    .unwrap_or(IncomingTrafficTransportType::Tcp),
             }),
         )))
     }
@@ -258,7 +258,7 @@ mod test {
         TlsServerVerification,
     };
     use mirrord_protocol::{
-        tcp::{DaemonTcp, NewTcpConnectionV2, TrafficTransportType},
+        tcp::{DaemonTcp, IncomingTrafficTransportType, NewTcpConnectionV2},
         DaemonMessage, LogLevel, LogMessage,
     };
     use pem::{EncodeConfig, LineEnding, Pem};
@@ -421,7 +421,7 @@ mod test {
 
         match mirror.recv().await.unwrap().unwrap() {
             DaemonMessage::Tcp(DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
-                transport: TrafficTransportType::Tls { .. },
+                transport: IncomingTrafficTransportType::Tls { .. },
                 ..
             })) => {}
             other => panic!("unexpected message: {other:?}"),

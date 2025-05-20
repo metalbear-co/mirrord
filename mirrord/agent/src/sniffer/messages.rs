@@ -38,7 +38,7 @@ pub(crate) struct SnifferCommand {
 /// New TCP connection picked up by [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
 pub(crate) struct SniffedConnection {
     /// Parameters of this connection's TCP session.
-    /// Can be used to create [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection).
+    /// Can be used to create [`NewTcpConnectionV1`](mirrord_protocol::tcp::NewTcpConnectionV1).
     pub session_id: TcpSessionDirectionId,
     /// For receiving data from this connection.
     pub data: broadcast::Receiver<Vec<u8>>,

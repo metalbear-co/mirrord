@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct NewTcpConnection {
+pub struct NewTcpConnectionV1 {
     pub connection_id: ConnectionId,
     pub remote_address: IpAddr,
     pub destination_port: Port,
@@ -33,8 +33,8 @@ pub struct NewTcpConnection {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnectionV2 {
-    pub connection: NewTcpConnection,
-    pub transport: TrafficTransportType,
+    pub connection: NewTcpConnectionV1,
+    pub transport: IncomingTrafficTransportType,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
@@ -85,7 +85,7 @@ pub enum LayerTcp {
 /// counterparts ([`LayerTcpSteal`] and [`LayerTcp`]) are different.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonTcp {
-    NewConnection(NewTcpConnection),
+    NewConnectionV1(NewTcpConnectionV1),
     Data(TcpData),
     Close(TcpClose),
     /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
@@ -142,11 +142,11 @@ pub struct ChunkedRequestStartV2 {
     #[bincode(with_serde)]
     pub request: InternalHttpRequest<InternalHttpBodyNew>,
     pub metadata: HttpRequestMetadata,
-    pub transport: TrafficTransportType,
+    pub transport: IncomingTrafficTransportType,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum TrafficTransportType {
+pub enum IncomingTrafficTransportType {
     Tcp,
     Tls {
         alpn_protocol: Option<Vec<u8>>,
@@ -430,12 +430,11 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
-/// Minimal mirrord-protocol version that allows for:
+/// Minimal mirrord-protocol version that allows:
 /// 1. [`DaemonTcp::NewConnectionV2`]
-/// 2. HTTP requests in [`DaemonMessage::Tcp`](crate::codec::DaemonMessage::Tcp)
-/// 3. HTTP requests in [`DaemonMessage::TcpSteal`](crate::codec::DaemonMessage::TcpSteal), when the
-///    port subscription is not filtered.
-pub static NEW_CONNECTION_V2_VERSION: LazyLock<VersionReq> =
+/// 2. Passing HTTP requests in [`DaemonMessage::Tcp`](crate::DaemonMessage::Tcp)
+/// 3. Passing HTTP requests in [`DaemonTcp`] when the client makes an unflitered port subscription
+pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.19.4".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message

@@ -79,7 +79,7 @@ pub enum InProxyTaskError {
     #[error("local HTTP upgrade failed: {0}")]
     Upgrade(#[source] hyper::Error),
     #[error("failed to prepare TLS client configuration: {0}")]
-    Tls(#[from] LocalTlsSetupError),
+    TlsSetup(#[from] LocalTlsSetupError),
 }
 
 impl From<Infallible> for InProxyTaskError {

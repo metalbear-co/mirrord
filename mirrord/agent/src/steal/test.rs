@@ -14,7 +14,7 @@ use mirrord_agent_env::steal_tls::{
     TlsServerVerification,
 };
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnectionV2, StealType, TrafficTransportType},
+    tcp::{DaemonTcp, IncomingTrafficTransportType, NewTcpConnectionV2, StealType},
     DaemonMessage, LogLevel, LogMessage,
 };
 use pem::{EncodeConfig, LineEnding, Pem};
@@ -142,7 +142,7 @@ async fn compat_test_tls_not_supported() {
 
     match steal.recv().await.unwrap() {
         DaemonMessage::TcpSteal(DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
-            transport: TrafficTransportType::Tls { .. },
+            transport: IncomingTrafficTransportType::Tls { .. },
             ..
         })) => {}
         other => panic!("unexpected message: {other:?}"),

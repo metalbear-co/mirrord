@@ -8,6 +8,87 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.142.1](https://github.com/metalbear-co/mirrord/tree/3.142.1) - 2025-05-16
+
+
+### Changed
+
+- mirrord-agent is now less strict when parsing intercepted HTTP/1 requests.
+
+
+### Fixed
+
+- Fixed the logic for dirty iptables detection and cleanup in the
+  mirrord-agent.
+
+## [3.142.0](https://github.com/metalbear-co/mirrord/tree/3.142.0) - 2025-05-12
+
+
+### Added
+
+- Add new `container.override_host_ip` config key to override what address will
+  be used as host addr inside the container.
+  [#3289](https://github.com/metalbear-co/mirrord/issues/3289)
+- Add the `-t` argument to the `mirrord ls` command to list targets of a
+  specific type. Also allow target types to be read from env.
+- Added support for skipping custom build tools via environment variable and
+  `skip_build_tools` in config.
+
+
+### Changed
+
+- Renamed `MirorrdProfile` to `MirrordClusterProfile` and support both.
+  [#mirorrdprofile](https://github.com/metalbear-co/mirrord/issues/mirorrdprofile)
+- Increase timeout of outgoing.rs tests to (hopefully) reduce flakiness.
+  [#2679](https://github.com/metalbear-co/mirrord/issues/2679)
+- In iptables guard, skip iptables cleanup if the child agent process has
+  already done so. [#3220](https://github.com/metalbear-co/mirrord/issues/3220)
+- Improved HTTP detection logic in the mirrord agent.
+  [#3296](https://github.com/metalbear-co/mirrord/issues/3296)
+- Add watch permission for mirrord policies (so the operator can use a
+  reflector and cache policies).
+
+
+### Internal
+
+- Fix the issue running layer integration test on macos aarch64
+  when using pre-built layer lib fat binary.
+  [#3267](https://github.com/metalbear-co/mirrord/issues/3267)
+- Add `x86_64-apple-darwin` and `aarch64-apple-darwin` as targets for
+  cargo-deny check.
+- Adjusted mirrord-protocol in preparation for passthrough mirroring.
+- Improved `listen_ports` integration test to reduce flakes.
+
+## [3.141.0](https://github.com/metalbear-co/mirrord/tree/3.141.0) - 2025-04-28
+
+
+### Added
+
+- Added the option to skip sip patching.
+- Extended the `MirrordKafkaTopicsConsumer` CRD with a `split_ttl` field.
+
+
+### Changed
+
+- Increased the maximum allowed size of `config.feature.fs.readonly_file_buffer`
+  to 15 MB. Added a warning when using size over 1 MB.
+
+
+### Fixed
+
+- Tied SIP patch files to the version of mirrord binary, so that fixes to patching
+  logic will create new files.
+  [#3245](https://github.com/metalbear-co/mirrord/issues/3245)
+- Fixed docs on how to specify multiple binaries.
+  [#3271](https://github.com/metalbear-co/mirrord/issues/3271)
+- Fixed logic for detecting whether the operator supports Kafka splitting
+  without copying the target.
+
+
+### Internal
+
+- Added a verification of case-insensitive matching in the SQS E2E test.
+
 ## [3.140.0](https://github.com/metalbear-co/mirrord/tree/3.140.0) - 2025-04-22
 
 

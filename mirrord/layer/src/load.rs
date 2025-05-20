@@ -83,9 +83,17 @@ impl ExecuteArgs {
         self.exec_name.ends_with(suffix) || self.invoked_as.ends_with(suffix)
     }
 
-    fn is_build_tool(&self) -> bool {
-        BUILD_TOOL_PROCESSES.contains(self.exec_name.as_str())
-            || BUILD_TOOL_PROCESSES.contains(self.invoked_as.as_str())
+    fn is_build_tool(&self, skip_extra_build_tools: Option<&[String]>) -> bool {
+        let mut skip_build_tools = HashSet::<_>::from_iter(
+            skip_extra_build_tools
+                .map(<[_]>::to_vec)
+                .unwrap_or_default(),
+        );
+
+        skip_build_tools.extend(BUILD_TOOL_PROCESSES.iter().map(ToString::to_string));
+
+        skip_build_tools.contains(self.exec_name.as_str())
+            || skip_build_tools.contains(self.invoked_as.as_str())
     }
 
     /// Checks if mirrord-layer should load with this process.
@@ -94,8 +102,13 @@ impl ExecuteArgs {
     ///
     /// Some processes may start other processes (like an IDE launching a program to be debugged),
     /// and we don't want to hook mirrord-layer into those.
-    fn should_load<S: AsRef<str>>(&self, skip_processes: &[S], skip_build_tools: bool) -> bool {
-        if skip_build_tools && self.is_build_tool() {
+    fn should_load<S: AsRef<str>>(
+        &self,
+        skip_processes: &[S],
+        skip_build_tools: bool,
+        skip_extra_build_tools: Option<&[String]>,
+    ) -> bool {
+        if skip_build_tools && self.is_build_tool(skip_extra_build_tools) {
             return false;
         }
 
@@ -123,12 +136,16 @@ impl ExecuteArgs {
     pub fn load_type(&self, config: &LayerConfig) -> LoadType {
         let skip_processes = config.skip_processes.as_deref().unwrap_or(&[]);
 
-        if self.should_load(skip_processes, config.skip_build_tools) {
+        if self.should_load(
+            skip_processes,
+            config.skip_build_tools,
+            config.skip_extra_build_tools.as_deref(),
+        ) {
             trace!("Loading into process: {self}.");
             LoadType::Full
         } else {
             #[cfg(target_os = "macos")]
-            if sip::is_sip_only(self) {
+            if sip::is_sip_only(self, config.skip_extra_build_tools.as_deref()) {
                 trace!("Loading into process: {self}, but only hooking exec/spawn.");
                 return LoadType::SIPOnly;
             }
@@ -168,8 +185,11 @@ mod sip {
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
         LazyLock::new(|| HashSet::from(["sh", "bash", "env", "go", "dlv"]));
 
-    pub fn is_sip_only(given_process: &ExecuteArgs) -> bool {
-        given_process.is_build_tool()
+    pub fn is_sip_only(
+        given_process: &ExecuteArgs,
+        skip_extra_build_tools: Option<&[String]>,
+    ) -> bool {
+        given_process.is_build_tool(skip_extra_build_tools)
             || SIP_ONLY_PROCESSES.contains(given_process.exec_name.as_str())
             || SIP_ONLY_PROCESSES.contains(given_process.invoked_as.as_str())
     }
@@ -196,17 +216,19 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("test", "test", &["foo"], false)]
-    #[case("test", "test", &[], false)]
-    #[case("test", "test", &["foo", "bar", "baz"], false)]
-    #[case("cargo", "cargo", &[], false)]
-    #[case("cargo", "cargo", &["foo"], false)]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], false)]
+    #[case("test", "test", &["foo"], false, Some(vec!["KonradIofMasovia".to_string()]))]
+    #[case("test", "test", &[], false, None)]
+    #[case("test", "test", &["foo", "bar", "baz"], false, Some(vec!["HenryIIthePious".to_string()]))]
+    #[case("cargo", "cargo", &[], false, Some(vec!["BolesławIItheHorned".to_string()]))]
+    #[case("cargo", "cargo", &["foo"], false, Some(vec!["HenrykIVProbus".to_string()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], false, Some(vec!["PrzemysłII".to_string()]))]
+    #[case("test", "test", &[], true, Some(vec!["HenryItheBearded".to_string()]))]
     fn should_load_true(
         #[case] exec_name: &str,
         #[case] invoked_as: &str,
         #[case] skip_processes: &[&str],
         #[case] skip_build_tools: bool,
+        #[case] skip_extra_build_tools: Option<Vec<String>>,
     ) {
         let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
@@ -214,21 +236,27 @@ mod tests {
             args: Vec::new(),
         };
 
-        assert!(executable_name.should_load(skip_processes, skip_build_tools));
+        assert!(executable_name.should_load(
+            skip_processes,
+            skip_build_tools,
+            skip_extra_build_tools.as_deref()
+        ));
     }
 
     #[rstest]
-    #[case("test", "test", &["test"], false)]
-    #[case("test", "test", &["test", "foo", "bar", "baz"], false)]
-    #[case("cargo", "cargo", &[], true)]
-    #[case("cargo", "cargo", &["foo"], true)]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &["ld"], false)]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], true)]
+    #[case("test", "test", &["test"], false, None)]
+    #[case("test", "test", &["test", "foo", "bar", "baz"], false, Some(vec!["KonradIofMasovia".to_string()]))]
+    #[case("cargo", "cargo", &[], true, None)]
+    #[case("cargo", "cargo", &["foo"], true, Some(vec!["HenryItheBearded".to_string()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &["ld"], false, Some(vec!["BolesławIItheHorned".to_string()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], true, None)]
+    #[case("PrzemysłII", "PrzemysłII", &[], true, Some(vec!["PrzemysłII".to_string()]))]
     fn should_load_false(
         #[case] exec_name: &str,
         #[case] invoked_as: &str,
         #[case] skip_processes: &[&str],
         #[case] skip_build_tools: bool,
+        #[case] skip_extra_build_tools: Option<Vec<String>>,
     ) {
         let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
@@ -236,6 +264,10 @@ mod tests {
             args: Vec::new(),
         };
 
-        assert!(!executable_name.should_load(skip_processes, skip_build_tools));
+        assert!(!executable_name.should_load(
+            skip_processes,
+            skip_build_tools,
+            skip_extra_build_tools.as_deref()
+        ));
     }
 }

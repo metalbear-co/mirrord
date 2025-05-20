@@ -8,7 +8,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::http::header::UPGRADE;
 use mirrord_protocol::{
     tcp::{
-        HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_FILTERED_UPGRADE_VERSION, NEW_CONNECTION_V2_VERSION,
+        HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_FILTERED_UPGRADE_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
     },
     LogMessage,
 };
@@ -124,12 +124,12 @@ impl TcpStealerTask {
                 .info()
                 .tls_connector
                 .is_some()
-                .then_some(&*NEW_CONNECTION_V2_VERSION)
+                .then_some(&*MODE_AGNOSTIC_HTTP_REQUESTS)
                 .map(Cow::Borrowed)
                 .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
 
             StolenTraffic::Http(http) => matches!(subscription, PortSubscription::Unfiltered(..))
-                .then_some(&*NEW_CONNECTION_V2_VERSION)
+                .then_some(&*MODE_AGNOSTIC_HTTP_REQUESTS)
                 .or_else(|| {
                     http.info()
                         .tls_connector

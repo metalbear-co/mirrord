@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 mod common;
 
 pub use common::*;
-use mirrord_sip::sip_patch;
+use mirrord_sip::{sip_patch, SipPatchOptions};
 
 /// Verify that mirrord ignores the temp dir with the SIP-patched binaries.
 /// If it does not, it would try to read the script from the remote pod.
@@ -23,7 +23,9 @@ use mirrord_sip::sip_patch;
 async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;
     let executable = application.get_executable().await;
-    let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
+    let executable = sip_patch(&executable, SipPatchOptions::default())
+        .unwrap()
+        .unwrap();
     println!("Using executable: {}", &executable);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

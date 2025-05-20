@@ -228,6 +228,26 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
+    /// ## skip_extra_build_tools {#root-skip_build_tools}
+    ///
+    /// Allows mirrord to skip the specified build tools. Useful when running command lines that
+    /// build and run the application in a single command.
+    ///
+    /// Must also enable [`skip_build_tools`](#root-skip_build_tools) for this to take an effect.
+    ///
+    /// It's similar to [`skip_processes`](#root-skip_processes), except that here it also skips
+    /// SIP patching.
+    ///
+    /// Accepts a single value, or an array of values.
+    ///
+    ///```json
+    /// {
+    ///  "skip_extra_build_tools": ["bash", "node"]
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS")]
+    pub skip_extra_build_tools: Option<VecOrSingle<String>>,
+
     /// ## operator {#root-operator}
     ///
     /// Whether mirrord should use the operator.
@@ -329,6 +349,15 @@ pub struct LayerConfig {
     /// ## experimental {#root-experimental}
     #[config(nested)]
     pub experimental: ExperimentalConfig,
+
+    /// ## skip_sip {#root-skip_sip}
+    ///
+    /// Allows mirrord to skip patching (macOS SIP) unwanted processes.
+    ///
+    /// When patching is skipped, mirrord will no longer be able to load into
+    /// the process and its child processes.
+    #[config(env = "MIRRORD_SKIP_SIP")]
+    pub skip_sip: Option<VecOrSingle<String>>,
 }
 
 impl LayerConfig {
@@ -656,7 +685,7 @@ impl LayerConfig {
             // but the mirrord profile introduced changes that triggered the warnings.
             context.add_warning(format!(
                 "Config verification was done after applying mirrord profile `{profile}`. \
-                You can inspect the profile with `kubectl get mirrordprofile {profile} -o yaml`.",
+                You can inspect the profile with `kubectl get mirrordclusterprofile {profile} -o yaml`.",
             ));
         }
 
@@ -960,6 +989,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
             }),
             skip_processes: None,
+            skip_extra_build_tools: None,
             skip_build_tools: None,
             agent: Some(AgentFileConfig {
                 privileged: None,
@@ -1023,6 +1053,7 @@ mod tests {
             internal_proxy: None,
             use_proxy: None,
             experimental: None,
+            skip_sip: None,
         };
 
         assert_eq!(config, expect);

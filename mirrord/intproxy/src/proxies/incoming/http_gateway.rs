@@ -14,7 +14,8 @@ use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
         ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
-        InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse, TrafficTransportType,
+        IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame,
+        InternalHttpResponse,
     },
 };
 use tokio::time;
@@ -38,11 +39,13 @@ pub struct HttpGatewayTask {
     /// Shared cache of [`LocalHttpClient`](super::http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Determines response variant.
-    response_mode: ResponseMode,
+    ///
+    /// [`None`] if this is a mirrored request and we should discard the response.
+    response_mode: Option<ResponseMode>,
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
     /// How to transport the HTTP request to the server.
-    transport: TrafficTransportType,
+    transport: IncomingTrafficTransportType,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -61,9 +64,9 @@ impl HttpGatewayTask {
     pub fn new(
         request: HttpRequest<StreamingBody>,
         client_store: ClientStore,
-        response_mode: ResponseMode,
+        response_mode: Option<ResponseMode>,
         server_addr: SocketAddr,
-        transport: TrafficTransportType,
+        transport: IncomingTrafficTransportType,
     ) -> Self {
         Self {
             request,
@@ -227,10 +230,10 @@ impl HttpGatewayTask {
             tracing::debug!("Detected an HTTP upgrade");
             hyper::upgrade::on(&mut response)
         });
-        let (parts, body) = response.into_parts();
+        let (parts, mut body) = response.into_parts();
 
         let flow = match self.response_mode {
-            ResponseMode::Basic => {
+            Some(ResponseMode::Basic) => {
                 let start = Instant::now();
                 let body: Vec<u8> = body
                     .collect()
@@ -259,7 +262,7 @@ impl HttpGatewayTask {
 
                 ControlFlow::Continue(())
             }
-            ResponseMode::Framed => {
+            Some(ResponseMode::Framed) => {
                 let start = Instant::now();
                 let body = InternalHttpBody::from_body(body)
                     .await
@@ -285,9 +288,21 @@ impl HttpGatewayTask {
 
                 ControlFlow::Continue(())
             }
-            ResponseMode::Chunked => {
+            Some(ResponseMode::Chunked) => {
                 self.handle_response_chunked(parts, body, message_bus)
                     .await?
+            }
+            None => {
+                let start = Instant::now();
+                while let Some(frame) = body.frame().await {
+                    frame.map_err(LocalHttpError::ReadBodyFailed)?;
+                }
+                tracing::debug!(
+                    ?body,
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "Collected the whole response body",
+                );
+                ControlFlow::Continue(())
             }
         };
 
@@ -374,7 +389,7 @@ impl BackgroundTask for HttpGatewayTask {
 
 #[cfg(test)]
 mod test {
-    use std::{io, pin::Pin, sync::Arc};
+    use std::{io, ops::Not, pin::Pin, sync::Arc};
 
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};
@@ -407,6 +422,7 @@ mod test {
         background_tasks::{BackgroundTasks, TaskUpdate},
         proxies::incoming::{
             tcp_proxy::{LocalTcpConnection, TcpProxyTask},
+            tls::LocalTlsSetup,
             InProxyTaskError,
         },
     };
@@ -538,10 +554,12 @@ mod test {
     /// Verifies that [`HttpGatewayTask`] and [`TcpProxyTask`] together correctly handle HTTP
     /// upgrades.
     #[rstest]
-    #[case::with_tls(true)]
-    #[case::without_tls(false)]
+    #[case::with_tls_mirror(true, false)]
+    #[case::with_tls_steal(true, true)]
+    #[case::without_tls_mirror(false, false)]
+    #[case::without_tls_steal(false, true)]
     #[tokio::test]
-    async fn handles_http_upgrades(#[case] use_tls: bool) {
+    async fn handles_http_upgrades(#[case] use_tls: bool, #[case] is_steal: bool) {
         let _ = rustls::crypto::CryptoProvider::install_default(
             rustls::crypto::aws_lc_rs::default_provider(),
         );
@@ -588,48 +606,53 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
-                ResponseMode::Basic,
+                ClientStore::new_with_timeout(
+                    Duration::from_secs(1),
+                    LocalTlsSetup::from_config(Default::default()),
+                ),
+                is_steal.then_some(ResponseMode::Basic),
                 local_destination,
                 if use_tls {
-                    TrafficTransportType::Tls {
+                    IncomingTrafficTransportType::Tls {
                         alpn_protocol: Some(b"http/1.1".into()),
                         server_name: None,
                     }
                 } else {
-                    TrafficTransportType::Tcp
+                    IncomingTrafficTransportType::Tcp
                 },
             );
             tasks.register(gateway, 0, 8)
         };
 
-        let message = tasks
-            .next()
-            .await
-            .expect("no task result")
-            .1
-            .unwrap_message();
-        match message {
-            InProxyTaskMessage::Http(HttpOut::ResponseBasic(res)) => {
-                assert_eq!(
-                    res.internal_response.status,
-                    StatusCode::SWITCHING_PROTOCOLS
-                );
-                println!("Received response from the gateway: {res:?}");
-                assert!(res
-                    .internal_response
-                    .headers
-                    .get(CONNECTION)
-                    .filter(|v| *v == "upgrade")
-                    .is_some());
-                assert!(res
-                    .internal_response
-                    .headers
-                    .get(UPGRADE)
-                    .filter(|v| *v == TEST_PROTO)
-                    .is_some());
+        if is_steal {
+            let message = tasks
+                .next()
+                .await
+                .expect("no task result")
+                .1
+                .unwrap_message();
+            match message {
+                InProxyTaskMessage::Http(HttpOut::ResponseBasic(res)) => {
+                    assert_eq!(
+                        res.internal_response.status,
+                        StatusCode::SWITCHING_PROTOCOLS
+                    );
+                    println!("Received response from the gateway: {res:?}");
+                    assert!(res
+                        .internal_response
+                        .headers
+                        .get(CONNECTION)
+                        .filter(|v| *v == "upgrade")
+                        .is_some());
+                    assert!(res
+                        .internal_response
+                        .headers
+                        .get(UPGRADE)
+                        .filter(|v| *v == TEST_PROTO)
+                        .is_some());
+                }
+                other => panic!("unexpected task update: {other:?}"),
             }
-            other => panic!("unexpected task update: {other:?}"),
         }
 
         let message = tasks
@@ -652,7 +675,7 @@ mod test {
             TcpProxyTask::new(
                 update.0,
                 LocalTcpConnection::AfterUpgrade(on_upgrade),
-                false,
+                is_steal.not(),
             ),
             1,
             8,
@@ -660,30 +683,39 @@ mod test {
 
         proxy.send(b"test test test".to_vec()).await;
 
-        let message = tasks
-            .next()
-            .await
-            .expect("no task result")
-            .1
-            .unwrap_message();
-        match message {
-            InProxyTaskMessage::Tcp(bytes) => {
-                assert_eq!(bytes, INITIAL_MESSAGE);
+        if is_steal {
+            let message = tasks
+                .next()
+                .await
+                .expect("no task result")
+                .1
+                .unwrap_message();
+            match message {
+                InProxyTaskMessage::Tcp(bytes) => {
+                    assert_eq!(bytes, INITIAL_MESSAGE);
+                }
+                _ => panic!("unexpected task update: {update:?}"),
             }
-            _ => panic!("unexpected task update: {update:?}"),
+
+            let message = tasks
+                .next()
+                .await
+                .expect("no task result")
+                .1
+                .unwrap_message();
+            match message {
+                InProxyTaskMessage::Tcp(bytes) => {
+                    assert_eq!(bytes, b"test test test");
+                }
+                _ => panic!("unexpected task update: {update:?}"),
+            }
         }
 
-        let message = tasks
-            .next()
-            .await
-            .expect("no task result")
-            .1
-            .unwrap_message();
-        match message {
-            InProxyTaskMessage::Tcp(bytes) => {
-                assert_eq!(bytes, b"test test test");
-            }
-            _ => panic!("unexpected task update: {update:?}"),
+        std::mem::drop(proxy);
+        let update = tasks.next().await.expect("not task result");
+        match update.1 {
+            TaskUpdate::Finished(Ok(())) => {}
+            other => panic!("unexpected task update: {other:?}"),
         }
 
         let _ = shutdown_tx.send(true);
@@ -696,11 +728,12 @@ mod test {
     /// [`LayerTcpSteal::HttpResponseChunked`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseChunked)
     /// is streamed.
     #[rstest]
-    #[case::basic(ResponseMode::Basic)]
-    #[case::framed(ResponseMode::Framed)]
-    #[case::chunked(ResponseMode::Chunked)]
+    #[case::basic(Some(ResponseMode::Basic))]
+    #[case::framed(Some(ResponseMode::Framed))]
+    #[case::chunked(Some(ResponseMode::Chunked))]
+    #[case::discard(None)]
     #[tokio::test]
-    async fn produces_correct_response_variant(#[case] response_mode: ResponseMode) {
+    async fn produces_correct_response_variant(#[case] response_mode: Option<ResponseMode>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let semaphore: Arc<Semaphore> = Arc::new(Semaphore::const_new(0));
@@ -758,14 +791,14 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 response_mode,
                 addr,
-                TrafficTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             (),
             8,
         );
 
         match response_mode {
-            ResponseMode::Basic => {
+            Some(ResponseMode::Basic) => {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
@@ -775,7 +808,7 @@ mod test {
                 }
             }
 
-            ResponseMode::Framed => {
+            Some(ResponseMode::Framed) => {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseFramed(response)) => {
@@ -795,7 +828,7 @@ mod test {
                 }
             }
 
-            ResponseMode::Chunked => {
+            Some(ResponseMode::Chunked) => {
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseChunked(ChunkedResponse::Start(
                         response,
@@ -832,6 +865,10 @@ mod test {
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }
+            }
+
+            None => {
+                semaphore.add_permits(2);
             }
         }
 
@@ -907,9 +944,9 @@ mod test {
             HttpGatewayTask::new(
                 request,
                 client_store.clone(),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 addr,
-                TrafficTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             (),
             8,
@@ -982,9 +1019,9 @@ mod test {
             HttpGatewayTask::new(
                 request.clone(),
                 client_store.clone(),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 addr,
-                TrafficTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             0,
             8,
@@ -993,9 +1030,9 @@ mod test {
             HttpGatewayTask::new(
                 request.clone(),
                 client_store.clone(),
-                ResponseMode::Basic,
+                Some(ResponseMode::Basic),
                 addr,
-                TrafficTransportType::Tcp,
+                IncomingTrafficTransportType::Tcp,
             ),
             1,
             8,

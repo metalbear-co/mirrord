@@ -1,7 +1,7 @@
 # Contributing
 
 Before submitting pull request features, please discuss them with us first by opening an issue or a discussion.
-We welcome new/junior/starting developers. Feel free to join to our [Discord channel](https://discord.gg/metalbear) for help and guidance.
+We welcome new/junior/starting developers. Feel free to join to our [Discord channel](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for help and guidance.
 
 If you would like to start working on an issue, please comment on the issue on GitHub, so that we can assign you to that
 issue.
@@ -199,6 +199,13 @@ scripts/build_fat_mac.sh
 And then in order to use that dylib in the tests, run the tests like this:
 ```bash
 MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
+```
+
+On Apple Silicon, set `MIRRORD_MACOS_ARM64_LIBRARY` additionally to use the arm64 layer lib as well:
+```bash
+MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+MIRRORD_MACOS_ARM64_LIBRARY=../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib \
+cargo test -p mirrord-layer
 ```
 
 ### Integration Tests logs and you

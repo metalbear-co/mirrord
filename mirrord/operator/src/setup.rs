@@ -29,7 +29,7 @@ use thiserror::Error;
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
-    profile::MirrordProfile,
+    profile::MirrordClusterProfile,
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -243,7 +243,8 @@ impl OperatorSetup for Operator {
         MirrordClusterTlsStealConfig::crd().to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
-        MirrordProfile::crd().to_writer(&mut writer)?;
+        // expose only the cluster profile and not the legacy profile
+        MirrordClusterProfile::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
@@ -589,7 +590,7 @@ impl OperatorClusterRole {
                 verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
-            // Allow the operator to list+get mirrord policies.
+            // Allow the operator to list+get+watch mirrord policies.
             PolicyRule {
                 // Both namespaced and cluster-wide policies live in the same API group.
                 api_groups: Some(vec![MirrordPolicy::group(&()).into_owned()]),
@@ -597,7 +598,7 @@ impl OperatorClusterRole {
                     MirrordPolicy::plural(&()).into_owned(),
                     MirrordClusterPolicy::plural(&()).into_owned(),
                 ]),
-                verbs: vec!["list".to_owned(), "get".to_owned()],
+                verbs: vec!["list".to_owned(), "get".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
             // Allow for patching replicas and environment variables.

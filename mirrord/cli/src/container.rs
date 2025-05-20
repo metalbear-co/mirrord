@@ -112,6 +112,12 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
             .await?;
     sub_progress.success(None);
 
+    let extproxy_addr = config
+        .container
+        .override_host_ip
+        .map(|host_ip| SocketAddr::new(host_ip, extproxy_addr.port()))
+        .unwrap_or(extproxy_addr);
+
     let sidecar =
         IntproxySidecar::create(config, runtime, extproxy_addr, tls_setup.as_ref()).await?;
 

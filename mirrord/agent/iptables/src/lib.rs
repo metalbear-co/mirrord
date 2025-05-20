@@ -175,7 +175,7 @@ pub struct SafeIpTables<IPT: IPTables + Send + Sync> {
 /// Wrapper for using iptables. This creates a new chain on creation and deletes it on drop.
 /// The way it works is that it adds a chain, then adds a rule to the chain that returns to the
 /// original chain (fallback) and adds a rule in the "PREROUTING" table that jumps to the new chain.
-/// Connections will go then PREROUTING -> OUR_CHAIN -> IF MATCH REDIRECT -> IF NOT MATCH FALLBACK
+/// Connections will then go PREROUTING -> OUR_CHAIN -> IF MATCH REDIRECT -> IF NOT MATCH FALLBACK
 /// -> ORIGINAL_CHAIN
 impl<IPT> SafeIpTables<IPT>
 where
@@ -219,8 +219,7 @@ where
 
     /// List rules from other/ previous mirrord agents that exist on the IP table
     #[tracing::instrument(level = Level::TRACE, skip(ipt) ret, err)]
-    pub async fn list_mirrord_rules(ipt: IPT) -> IPTablesResult<Vec<String>> {
-        let ipt = Arc::new(ipt);
+    pub async fn list_mirrord_rules(ipt: &IPT) -> IPTablesResult<Vec<String>> {
         let rules = ipt.list_table()?;
 
         Ok(rules
@@ -547,7 +546,7 @@ mod tests {
             ])
         });
 
-        let leftover_rules_res = SafeIpTables::list_mirrord_rules(mock).await;
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
         assert_eq!(
             leftover_rules_res.unwrap().len(), 0,
             "Fresh IP table should successfully list table rules and list no existing mirrord rules"
@@ -571,7 +570,7 @@ mod tests {
             ])
         });
 
-        let leftover_rules_res = SafeIpTables::list_mirrord_rules(mock).await;
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
         assert_eq!(
             leftover_rules_res.unwrap().len(), 1,
             "Fresh IP table should successfully list table rules and list one existing mirrord rule"

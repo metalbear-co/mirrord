@@ -19,11 +19,11 @@ use hyper::{
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, ChunkedResponse, DaemonTcp,
-        HttpRequest, HttpRequestMetadata, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
-        InternalHttpBodyNew, InternalHttpRequest, LayerTcpSteal, NewTcpConnection,
-        NewTcpConnectionV2, StealType, TcpClose, TcpData, TrafficTransportType,
+        HttpRequest, HttpRequestMetadata, HttpResponse, IncomingTrafficTransportType,
+        InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew, InternalHttpRequest,
+        LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType, TcpClose, TcpData,
         HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
-        NEW_CONNECTION_V2_VERSION,
+        MODE_AGNOSTIC_HTTP_REQUESTS,
     },
     ConnectionId, DaemonMessage, LogMessage, RequestId,
 };
@@ -214,7 +214,7 @@ impl TcpStealApi {
                     transport: info
                         .tls_connector
                         .map(From::from)
-                        .unwrap_or(TrafficTransportType::Tcp),
+                        .unwrap_or(IncomingTrafficTransportType::Tcp),
                 }),
             ));
 
@@ -324,7 +324,7 @@ impl TcpStealApi {
         );
         self.incoming_streams.insert(connection_id, stream);
 
-        let new_connection = NewTcpConnection {
+        let new_connection = NewTcpConnectionV1 {
             connection_id,
             remote_address: info.peer_addr.ip(),
             destination_port: info.original_destination.port(),
@@ -332,16 +332,16 @@ impl TcpStealApi {
             local_address: info.local_addr.ip(),
         };
 
-        let message = if self.protocol_version.matches(&NEW_CONNECTION_V2_VERSION) {
+        let message = if self.protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) {
             DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
                 connection: new_connection,
                 transport: info
                     .tls_connector
                     .map(From::from)
-                    .unwrap_or(TrafficTransportType::Tcp),
+                    .unwrap_or(IncomingTrafficTransportType::Tcp),
             })
         } else {
-            DaemonTcp::NewConnection(new_connection)
+            DaemonTcp::NewConnectionV1(new_connection)
         };
 
         Ok(message)

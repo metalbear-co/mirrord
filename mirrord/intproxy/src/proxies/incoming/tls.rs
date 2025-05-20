@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{fmt, path::PathBuf, sync::Arc};
 
 use mirrord_config::feature::network::incoming::tls_delivery::{
     LocalTlsDelivery, TlsDeliveryProtocol,
@@ -53,7 +53,7 @@ impl LocalTlsSetup {
         }
     }
 
-    pub fn from_config(config: LocalTlsDelivery) -> Option<Self> {
+    pub fn from_config(config: LocalTlsDelivery) -> Option<Arc<Self>> {
         match config.protocol {
             TlsDeliveryProtocol::Tcp => None,
             TlsDeliveryProtocol::Tls => {
@@ -68,11 +68,11 @@ impl LocalTlsSetup {
                         .ok()
                 });
 
-                Some(LocalTlsSetup::new(
+                Some(Arc::new(Self::new(
                     config.trust_roots,
                     config.server_cert,
                     server_name,
-                ))
+                )))
             }
         }
     }
@@ -142,5 +142,15 @@ impl LocalTlsSetup {
         };
 
         Ok((builder.with_no_client_auth(), server_name))
+    }
+}
+
+impl fmt::Debug for LocalTlsSetup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LocalTlsSetup")
+            .field("trust_roots", &self.trust_roots)
+            .field("server_cert", &self.server_cert)
+            .field("server_name", &self.server_name)
+            .finish()
     }
 }
