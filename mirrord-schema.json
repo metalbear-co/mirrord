@@ -430,7 +430,7 @@
         },
         "network_interface": {
           "title": "agent.network_interface {#agent-network_interface}",
-          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.\n\nThis setting is ignored when `agent.passthrough_mirroring` is enabled.",
+          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.\n\nThis setting is ignored when `agent.passthrough_mirroring` is enabled. With passthrough mirroring, the agent uses all available interfaces.",
           "type": [
             "string",
             "null"

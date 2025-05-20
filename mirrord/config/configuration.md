@@ -346,6 +346,7 @@ The default behavior is try to access the internet and use that interface. If th
 it uses `eth0`.
 
 This setting is ignored when `agent.passthrough_mirroring` is enabled.
+With passthrough mirroring, the agent uses all available interfaces.
 
 ### agent.nftables {#agent-nftables}
 
