@@ -132,6 +132,23 @@ mod steal_tests {
         )]
         application: Application,
     ) {
+        use std::{io::Write, ops::Not};
+
+        struct LogGuard(tempfile::NamedTempFile);
+
+        impl Drop for LogGuard {
+            fn drop(&mut self) {
+                if std::thread::panicking().not() {
+                    return;
+                }
+
+                println!("INTPROXY COMM LOGS:");
+                let _ = std::io::copy(self.0.as_file_mut(), std::io::stdout().lock().by_ref());
+            }
+        }
+
+        let logfile = tempfile::NamedTempFile::new().unwrap();
+
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
@@ -153,9 +170,14 @@ mod steal_tests {
                 &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "true")]),
+                Some(vec![
+                    ("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "true"),
+                    ("MIRRORD_INTPROXY_WTF", logfile.path().to_str().unwrap()),
+                ]),
             )
             .await;
+
+        let _guard = LogGuard(logfile);
 
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")

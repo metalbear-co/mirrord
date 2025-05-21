@@ -204,6 +204,7 @@ impl BackgroundTask for AgentConnection {
                         break Ok(());
                     },
                     Some(msg) => {
+                        log_client(&msg);
                         if let Err(error) = self.send(msg).await {
                             tracing::error!(%error, "failed to send message to the agent");
                             break Err(error);
@@ -216,7 +217,10 @@ impl BackgroundTask for AgentConnection {
                         tracing::error!("failed to receive message from the agent, inner task down");
                         break Err(AgentChannelError);
                     }
-                    Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
+                    Some(msg) => {
+                        log_agent(&msg);
+                        message_bus.send(ProxyMessage::FromAgent(msg)).await
+                    },
                 },
             }
         }
@@ -273,4 +277,34 @@ impl RestartableBackgroundTask for AgentConnection {
             }
         }
     }
+}
+
+fn log_agent(msg: &DaemonMessage) {
+    use std::io::Write;
+
+    let Some(path) = std::env::var_os("MIRRORD_INTPROXY_WTF") else {
+        return;
+    };
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    writeln!(file, "RECEIVED AGENT MESSAGE: {msg:?}").unwrap();
+}
+
+fn log_client(msg: &ClientMessage) {
+    use std::io::Write;
+
+    let Some(path) = std::env::var_os("MIRRORD_INTPROXY_WTF") else {
+        return;
+    };
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    writeln!(file, "SENDING CLIENT MESSAGE: {msg:?}").unwrap();
 }
