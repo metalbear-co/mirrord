@@ -120,7 +120,7 @@ pub async fn extract_requests(
         tracing::warn!(
             %error,
             ?connection_info,
-            "Incoming TCP connection failed",
+            "Incoming HTTP connection failed",
         )
     }
 }

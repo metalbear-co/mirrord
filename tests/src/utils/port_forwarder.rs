@@ -94,15 +94,27 @@ impl PortForwarder {
         let mut tasks = JoinSet::new();
 
         loop {
-            let (mut local_conn, _) = listener.accept().await.unwrap();
+            let (mut local_conn, peer) = listener.accept().await.unwrap();
+            println!("Portforwarder to {pod_name}:{port} accepted a local connection from {peer}");
+
             let api = api.clone();
             let pod_name = pod_name.clone();
 
             tasks.spawn(async move {
-                let mut portforwarder = api.portforward(&pod_name, &[port]).await.unwrap();
+                let mut portforwarder = api
+                    .portforward(&pod_name, &[port])
+                    .await
+                    .inspect_err(|error| {
+                        println!("Portforwarder to {pod_name}:{port} failed to start a new connection for {peer}: {error}")
+                    })
+                    .unwrap();
+
                 let mut pod_conn = portforwarder.take_stream(port).unwrap();
                 tokio::io::copy_bidirectional(&mut local_conn, &mut pod_conn)
                     .await
+                    .inspect_err(|error| {
+                        println!("Portforwarder to {pod_name}:{port} failed to proxy data for {peer}: {error}")
+                    })
                     .unwrap();
                 std::mem::drop(pod_conn);
                 std::mem::drop(local_conn);
