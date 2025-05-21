@@ -14,17 +14,18 @@ use serde::{Deserialize, Serialize};
     status = "MirrordSessionStatus"
 )]
 pub struct MirrordSessionSpec {
+    /// Owner of this session
+    pub owner: MirrordSessionOwner,
+
     /// Session's target
     pub target: Target,
 
+    /// Max duration for this session
     pub max_time: Option<Duration>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordSessionStatus {
-    /// Owner of this session
-    pub owner: MirrordSessionOwner,
-
     /// Start time of this session when actual websocket connection is first created.
     pub start_time: Option<DateTime<Utc>>,
 }
