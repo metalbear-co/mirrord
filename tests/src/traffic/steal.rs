@@ -132,14 +132,22 @@ mod steal_tests {
         )]
         application: Application,
     ) {
-        use std::io::Write;
+        use std::io::BufRead;
 
         struct LogGuard(tempfile::NamedTempFile);
 
         impl Drop for LogGuard {
             fn drop(&mut self) {
                 println!("INTPROXY COMM LOGS:");
-                let _ = std::io::copy(self.0.as_file_mut(), std::io::stdout().lock().by_ref());
+                let mut lines = std::io::BufReader::new(self.0.as_file_mut()).lines();
+                for line in lines.by_ref() {
+                    let Ok(line) = line else {
+                        println!("FAILED TO READ LOG");
+                        return;
+                    };
+
+                    println!("{line}");
+                }
             }
         }
 
