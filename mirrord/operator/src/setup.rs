@@ -30,6 +30,7 @@ use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::MirrordClusterProfile,
+    session::MirrordSession,
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -241,6 +242,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordClusterTlsStealConfig::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordSession::crd().to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         // expose only the cluster profile and not the legacy profile
