@@ -6,6 +6,7 @@ mod error;
 mod iptables;
 mod steal_handle;
 mod task;
+pub mod tls;
 
 use std::{
     future::Future,

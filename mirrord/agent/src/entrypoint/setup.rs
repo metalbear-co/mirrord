@@ -8,9 +8,9 @@ use super::BackgroundTask;
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
-    incoming::{self, RedirectorTask, StealHandle},
+    incoming::{self, tls::StealTlsHandlerStore, RedirectorTask, StealHandle},
     sniffer::{messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{StealTlsHandlerStore, StealerCommand, TcpConnectionStealer},
+    steal::{StealerCommand, TcpConnectionStealer},
     util::{
         path_resolver::InTargetPathResolver,
         remote_runtime::{BgTaskRuntime, IntoStatus},

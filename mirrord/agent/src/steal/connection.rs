@@ -23,13 +23,10 @@ use tokio::sync::mpsc::{error::SendError, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
-use super::{
-    api::StealerMessage, http::HttpResponseFallback, subscriptions::PortSubscription,
-    tls::StealTlsHandlerStore,
-};
+use super::{api::StealerMessage, http::HttpResponseFallback, subscriptions::PortSubscription};
 use crate::{
     error::AgentResult,
-    incoming::{RedirectedConnection, StealHandle},
+    incoming::{tls::StealTlsHandlerStore, RedirectedConnection, StealHandle},
     metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
     steal::{
         connections::{

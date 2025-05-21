@@ -23,13 +23,13 @@ use tokio::{
 use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
-use super::{
-    subscriptions::PortSubscription,
-    tls::{self, error::StealTlsSetupError, StealTlsHandlerStore},
-};
+use super::subscriptions::PortSubscription;
 use crate::{
     http::{detect_http_version, HttpVersion},
-    incoming::RedirectedConnection,
+    incoming::{
+        tls::{self, error::StealTlsSetupError, StealTlsHandlerStore},
+        RedirectedConnection,
+    },
     metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
     steal::connections::filtered::FilteredStealTask,
     util::ClientId,

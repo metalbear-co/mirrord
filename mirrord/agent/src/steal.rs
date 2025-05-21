@@ -11,11 +11,9 @@ mod connection;
 mod connections;
 mod http;
 mod subscriptions;
-mod tls;
 
 pub(crate) use api::{StealerMessage, TcpStealerApi};
 pub(crate) use connection::TcpConnectionStealer;
-pub(crate) use tls::StealTlsHandlerStore;
 
 use self::http::HttpResponseFallback;
 
