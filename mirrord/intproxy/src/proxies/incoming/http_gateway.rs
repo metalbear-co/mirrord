@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
+    error::Report,
     fmt,
     net::SocketAddr,
     ops::ControlFlow,
@@ -93,7 +94,6 @@ impl HttpGatewayTask {
     ) -> Result<ControlFlow<()>, LocalHttpError> {
         let frames = body
             .ready_frames()
-            .map_err(From::from)
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
         if frames.is_last {
@@ -238,7 +238,6 @@ impl HttpGatewayTask {
                 let body: Vec<u8> = body
                     .collect()
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
@@ -267,7 +266,6 @@ impl HttpGatewayTask {
                 let start = Instant::now();
                 let body = InternalHttpBody::from_body(body)
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::ReadBodyFailed)?;
                 tracing::debug!(
                     ?body,
@@ -297,9 +295,7 @@ impl HttpGatewayTask {
             None => {
                 let start = Instant::now();
                 while let Some(frame) = body.frame().await {
-                    frame
-                        .map_err(From::from)
-                        .map_err(LocalHttpError::ReadBodyFailed)?;
+                    frame.map_err(LocalHttpError::ReadBodyFailed)?;
                 }
                 tracing::debug!(
                     ?body,
@@ -357,7 +353,7 @@ impl BackgroundTask for HttpGatewayTask {
                         tracing::warn!(
                             gateway = ?self,
                             failed_attempts = attempt,
-                            %error,
+                            error = %Report::new(&error),
                             "Failed to send an HTTP request",
                         );
 
@@ -367,7 +363,7 @@ impl BackgroundTask for HttpGatewayTask {
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
-                        %error,
+                        error = %Report::new(&error),
                         "Trying again after backoff",
                     );
 
@@ -379,7 +375,7 @@ impl BackgroundTask for HttpGatewayTask {
         };
 
         let response = mirrord_error_response(
-            error,
+            Report::new(error).pretty(true),
             self.request.version(),
             self.request.connection_id,
             self.request.request_id,

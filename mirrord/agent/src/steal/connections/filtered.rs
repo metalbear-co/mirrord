@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap, error::Error, fmt, future::Future, io, marker::PhantomData,
-    net::SocketAddr, ops::Not, pin::Pin,
+    collections::HashMap, error::Report, future::Future, io, marker::PhantomData, net::SocketAddr,
+    ops::Not, pin::Pin,
 };
 
 use bytes::Bytes;
@@ -101,43 +101,19 @@ struct RequestMatchResult {
 }
 
 /// Errors that can occur in the [`FilteringService`] when serving a stolen request.
-///
-/// Has a nice [`fmt::Display`] implementation that shows all sources of [`hyper::Error`]s.
 #[derive(Error, Debug)]
 enum FilteringServiceError {
     /// We failed to connect to the original destination
     /// when handling an unmatched request.
+    #[error("failed to connect to the original destination: {0}")]
     PassThroughConnectError(#[from] io::Error),
     /// We made the connection to the original destination,
     /// but failed to send the unmatched request.
+    #[error("failed to pass the request to its original destination: {0}")]
     PassThroughSendError(#[from] hyper::Error),
     /// The client failed to provide the response to a matched request.
+    #[error("failed to receive a response from the connected mirrord session")]
     ClientResponseErorr,
-}
-
-impl fmt::Display for FilteringServiceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PassThroughConnectError(error) => {
-                write!(f, "failed to connect to the original destination: {error}")
-            }
-            Self::PassThroughSendError(error) => {
-                write!(
-                    f,
-                    "failed to pass the request to its original destination: {error}"
-                )?;
-                let mut source = error.source();
-                while let Some(error) = source {
-                    write!(f, "\n\t{error}")?;
-                    source = error.source();
-                }
-                Ok(())
-            }
-            Self::ClientResponseErorr => {
-                f.write_str("failed to receive a response from the connected mirrord session")
-            }
-        }
-    }
 }
 
 /// Simple [`Service`] implementor that uses [`mpsc`] channels to pass incoming [`Request`]s to a
@@ -165,7 +141,8 @@ impl FilteringService {
     /// Produces a new [`StatusCode::BAD_GATEWAY`] [`Response`] with the given [`Version`] and the
     /// given `error` in body.
     fn bad_gateway(version: Version, error: FilteringServiceError) -> Response<DynamicBody> {
-        let body = format!("mirrord: {error}");
+        let error = Report::new(error).pretty(true);
+        let body = format!("mirrord-agent: {error}\n");
 
         Response::builder()
             .status(StatusCode::BAD_GATEWAY)
