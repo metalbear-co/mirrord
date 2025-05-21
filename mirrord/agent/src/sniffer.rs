@@ -1,3 +1,7 @@
+//! This module contains implementation of TCP mirroring based on packet sniffing via raw socket.
+//!
+//! To be removed when iptables-based mirroring is stable.
+
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,

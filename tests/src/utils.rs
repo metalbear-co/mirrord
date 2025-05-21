@@ -113,14 +113,20 @@ pub async fn send_request(
     let response = client.execute(request).await.unwrap();
 
     let status = response.status();
-    let body = String::from_utf8_lossy(response.bytes().await.unwrap().as_ref()).into_owned();
+    println!("Received a response: {status}");
+
+    let body = response
+        .bytes()
+        .await
+        .map(|bytes| String::from_utf8_lossy(bytes.as_ref()).into_owned());
 
     assert_eq!(
         status,
         StatusCode::OK,
-        "unexpected status, response body: {body}"
+        "unexpected status, response body: {body:?}"
     );
 
+    let body = body.expect("failed to read response body");
     if let Some(expected_response) = expect_response {
         assert_eq!(body, expected_response);
     }

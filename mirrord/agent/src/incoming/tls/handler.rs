@@ -1,6 +1,7 @@
 use std::{fmt, io, net::IpAddr, sync::Arc};
 
 use http::Uri;
+use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::UriExt;
 use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -9,7 +10,7 @@ use tokio_rustls::{client, TlsAcceptor, TlsConnector};
 /// Provides a [`TlsAcceptor`] and a [`PassThroughTlsConnector`] to allow for filtered stealing on
 /// TLS connections.
 #[derive(Clone, Debug)]
-pub struct StealTlsHandler {
+pub struct IncomingTlsHandler {
     /// Constructing [`TlsAcceptor`] from this is cheap.
     ///
     /// We keep the config here for nice [`Debug`](std::fmt::Debug) derive.
@@ -21,7 +22,7 @@ pub struct StealTlsHandler {
     pub(super) client_config: Arc<ClientConfig>,
 }
 
-impl StealTlsHandler {
+impl IncomingTlsHandler {
     /// Returns a [`TlsAcceptor`] that can be used on stolen TCP connections.
     pub fn acceptor(&self) -> TlsAcceptor {
         TlsAcceptor::from(self.server_config.clone())
@@ -116,6 +117,15 @@ impl PassThroughTlsConnector {
             .alpn_protocols
             .first()
             .map(|proto| proto.as_slice())
+    }
+}
+
+impl From<PassThroughTlsConnector> for IncomingTrafficTransportType {
+    fn from(connector: PassThroughTlsConnector) -> Self {
+        Self::Tls {
+            alpn_protocol: connector.alpn_protocol().map(From::from),
+            server_name: connector.server_name.map(|name| name.to_str().into()),
+        }
     }
 }
 

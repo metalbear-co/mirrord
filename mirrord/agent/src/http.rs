@@ -9,6 +9,14 @@ use tokio::{
 };
 use tracing::Level;
 
+mod filter;
+mod sender;
+mod server;
+
+pub use filter::HttpFilter;
+pub use sender::HttpSender;
+pub use server::run_http_server;
+
 use crate::util::rolledback_stream::RolledBackStream;
 
 /// Helper enum for representing HTTP/1.x and HTTP/2, which are handled very differently in some

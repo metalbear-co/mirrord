@@ -12,7 +12,7 @@ use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
-use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
+use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscription, ProxyToLayerMessage,
@@ -198,9 +198,9 @@ impl IncomingProxy {
 
     pub fn new(
         idle_local_http_connection_timeout: Duration,
-        https_delivery: LocalHttpsDelivery,
+        tls_delivery: LocalTlsDelivery,
     ) -> Self {
-        let tls_setup = LocalTlsSetup::from_config(https_delivery);
+        let tls_setup = LocalTlsSetup::from_config(tls_delivery);
 
         Self {
             subscriptions: Default::default(),
@@ -255,7 +255,7 @@ impl IncomingProxy {
 
             if is_steal {
                 let response = http::mirrord_error_response(
-                    "port no longer subscribed with an HTTP filter",
+                    "port no longer subscribed",
                     request.version(),
                     request.connection_id,
                     request.request_id,
@@ -294,6 +294,7 @@ impl IncomingProxy {
             },
             Self::CHANNEL_SIZE,
         );
+
         self.http_gateways
             .get_mut(is_steal)
             .entry(connection_id)
@@ -454,6 +455,7 @@ impl IncomingProxy {
                     .get_mut(is_steal)
                     .get_mut(&connection_id)
                     .and_then(|gateways| gateways.get_mut(&request_id));
+
                 let Some(gateway) = gateway else {
                     tracing::debug!(
                         connection_id,
@@ -555,7 +557,6 @@ impl IncomingProxy {
 
             DaemonTcp::Data(data) => {
                 let tx = self.tcp_proxies.get(is_steal).get(&data.connection_id);
-
                 if let Some(tx) = tx {
                     tx.send(data.bytes).await;
                 } else {
@@ -799,6 +800,7 @@ impl IncomingProxy {
                         tracing::error!(
                             connection_id = id.connection_id,
                             request_id = id.request_id,
+                            is_steal,
                             "HttpGatewayTask panicked",
                         );
 
@@ -827,7 +829,7 @@ impl IncomingProxy {
                     .get(&id.connection_id)
                     .and_then(|gateways| gateways.get(&id.request_id))
                     .is_some();
-                if !exists {
+                if exists.not() {
                     return;
                 }
 
@@ -858,42 +860,51 @@ impl IncomingProxy {
                         tracing::info!(
                             full_headers = ?response.internal_response.headers,
                             ?response,
+                            is_steal,
                             "Received an HTTP response from an HttpGatewayTask",
                         );
 
-                        message_bus
-                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
-                                response,
-                            )))
-                            .await
+                        if is_steal {
+                            message_bus
+                                .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                                    response,
+                                )))
+                                .await
+                        }
                     }
                     HttpOut::ResponseFramed(response) => {
                         tracing::info!(
                             full_headers = ?response.internal_response.headers,
                             ?response,
+                            is_steal,
                             "Received an HTTP response from an HttpGatewayTask",
                         );
 
-                        message_bus
-                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
-                                response,
-                            )))
-                            .await
+                        if is_steal {
+                            message_bus
+                                .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
+                                    response,
+                                )))
+                                .await
+                        }
                     }
                     HttpOut::ResponseChunked(response) => {
                         if let ChunkedResponse::Start(start) = &response {
                             tracing::info!(
                                 full_headers = ?start.internal_response.headers,
                                 response = ?start,
+                                is_steal,
                                 "Received an HTTP response from an HttpGatewayTask",
                             );
                         }
 
-                        message_bus
-                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
-                                response,
-                            )))
-                            .await;
+                        if is_steal {
+                            message_bus
+                                .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                                    response,
+                                )))
+                                .await;
+                        }
                     }
                 }
             }

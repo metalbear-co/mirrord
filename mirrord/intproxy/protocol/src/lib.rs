@@ -193,6 +193,12 @@ pub enum PortSubscription {
     Mirror(Port),
 }
 
+impl PortSubscription {
+    pub fn is_steal(&self) -> bool {
+        matches!(self, Self::Steal(..))
+    }
+}
+
 /// A request to stop proxying incoming connections.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct PortUnsubscribe {

@@ -1,7 +1,13 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf};
+use std::{
+    fmt, io,
+    net::SocketAddr,
+    ops::ControlFlow,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
@@ -204,6 +210,7 @@ impl BackgroundTask for AgentConnection {
                         break Ok(());
                     },
                     Some(msg) => {
+                        log_client(&msg);
                         if let Err(error) = self.send(msg).await {
                             tracing::error!(%error, "failed to send message to the agent");
                             break Err(error);
@@ -216,7 +223,10 @@ impl BackgroundTask for AgentConnection {
                         tracing::error!("failed to receive message from the agent, inner task down");
                         break Err(AgentChannelError);
                     }
-                    Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
+                    Some(msg) => {
+                        log_agent(&msg);
+                        message_bus.send(ProxyMessage::FromAgent(msg)).await
+                    },
                 },
             }
         }
@@ -273,4 +283,34 @@ impl RestartableBackgroundTask for AgentConnection {
             }
         }
     }
+}
+
+fn log_agent(msg: &DaemonMessage) {
+    use std::io::Write;
+
+    let Some(path) = std::env::var_os("MIRRORD_INTPROXY_WTF") else {
+        return;
+    };
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f32();
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(file, "({timestamp}) RECEIVED AGENT MESSAGE: {msg:?}").unwrap();
+}
+
+fn log_client(msg: &ClientMessage) {
+    use std::io::Write;
+
+    let Some(path) = std::env::var_os("MIRRORD_INTPROXY_WTF") else {
+        return;
+    };
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f32();
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(file, "({timestamp}) SENDING CLIENT MESSAGE: {msg:?}").unwrap();
 }

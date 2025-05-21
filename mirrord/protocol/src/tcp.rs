@@ -593,6 +593,16 @@ impl From<Frame<Bytes>> for InternalHttpBodyFrame {
     }
 }
 
+impl From<&Frame<Bytes>> for InternalHttpBodyFrame {
+    fn from(frame: &Frame<Bytes>) -> Self {
+        frame
+            .data_ref()
+            .map(|bytes| Self::Data(bytes.clone().into()))
+            .or_else(|| frame.trailers_ref().cloned().map(Self::Trailers))
+            .expect("malformed frame type")
+    }
+}
+
 impl fmt::Debug for InternalHttpBodyFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

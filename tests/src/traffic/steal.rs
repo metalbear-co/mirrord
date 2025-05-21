@@ -132,6 +132,27 @@ mod steal_tests {
         )]
         application: Application,
     ) {
+        use std::io::BufRead;
+
+        struct LogGuard(tempfile::NamedTempFile);
+
+        impl Drop for LogGuard {
+            fn drop(&mut self) {
+                println!("INTPROXY COMM LOGS:");
+                let mut lines = std::io::BufReader::new(self.0.as_file_mut()).lines();
+                for line in lines.by_ref() {
+                    let Ok(line) = line else {
+                        println!("FAILED TO READ LOG");
+                        return;
+                    };
+
+                    println!("{line}");
+                }
+            }
+        }
+
+        let logfile = tempfile::NamedTempFile::new().unwrap();
+
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
@@ -153,9 +174,14 @@ mod steal_tests {
                 &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "true")]),
+                Some(vec![
+                    ("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "true"),
+                    ("MIRRORD_INTPROXY_WTF", logfile.path().to_str().unwrap()),
+                ]),
             )
             .await;
+
+        let _guard = LogGuard(logfile);
 
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")

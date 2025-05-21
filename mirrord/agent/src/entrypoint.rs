@@ -12,14 +12,13 @@ use std::{
 
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
-use futures::TryFutureExt;
+use futures::{future::OptionFuture, TryFutureExt};
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
     error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -41,13 +40,16 @@ use crate::{
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
+    incoming::MirrorHandle,
     metrics,
+    mirror::{MirrorHandleWrapper, SnifferApiWrapper, TcpMirrorApi},
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
-    steal::{self, StealerCommand, TcpStealerApi},
+    steal::{StealerCommand, TcpStealApi},
     util::{
+        protocol_version::SharedProtocolVersion,
         remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
         ClientId,
     },
@@ -55,7 +57,7 @@ use crate::{
 
 mod setup;
 
-/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
+/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealApi`]s with the background
 /// task.
 const CHANNEL_SIZE: usize = 1024;
 
@@ -219,17 +221,19 @@ struct BackgroundTasks {
     sniffer: BackgroundTask<SnifferCommand>,
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
+    mirror_handle: Option<MirrorHandle>,
 }
 
 struct ClientConnectionHandler {
     id: ClientId,
+    protocol_version: SharedProtocolVersion,
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
     connection: ClientConnection,
     /// [`None`] when targetless.
-    tcp_sniffer_api: Option<TcpSnifferApi>,
+    tcp_mirror_api: Option<Box<dyn TcpMirrorApi>>,
     /// [`None`] when targetless.
-    tcp_stealer_api: Option<TcpStealerApi>,
+    tcp_steal_api: Option<TcpStealApi>,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
@@ -257,9 +261,24 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
-        let tcp_stealer_api =
-            Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
+        let protocol_version = SharedProtocolVersion::default();
+
+        let tcp_mirror_api: Option<Box<dyn TcpMirrorApi>> = match bg_tasks.mirror_handle {
+            Some(mirror_handle) => Some(Box::new(MirrorHandleWrapper::new(
+                mirror_handle,
+                protocol_version.clone(),
+            )) as Box<_>),
+            None => Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection)
+                .await
+                .map(|api| Box::new(SnifferApiWrapper::new(api)) as Box<_>),
+        };
+        let tcp_steal_api = Self::create_stealer_api(
+            id,
+            protocol_version.clone(),
+            bg_tasks.stealer,
+            &mut connection,
+        )
+        .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
@@ -267,10 +286,11 @@ impl ClientConnectionHandler {
 
         let client_handler = Self {
             id,
+            protocol_version,
             file_manager,
             connection,
-            tcp_sniffer_api,
-            tcp_stealer_api,
+            tcp_mirror_api,
+            tcp_steal_api,
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_api,
@@ -313,11 +333,20 @@ impl ClientConnectionHandler {
 
     async fn create_stealer_api(
         id: ClientId,
+        protocol_version: SharedProtocolVersion,
         task: BackgroundTask<StealerCommand>,
         connection: &mut ClientConnection,
-    ) -> AgentResult<Option<TcpStealerApi>> {
+    ) -> AgentResult<Option<TcpStealApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
-            match TcpStealerApi::new(id, stealer_sender, stealer_status, CHANNEL_SIZE).await {
+            match TcpStealApi::new(
+                id,
+                stealer_sender,
+                protocol_version,
+                stealer_status,
+                CHANNEL_SIZE,
+            )
+            .await
+            {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
                     let _ = connection
@@ -349,6 +378,11 @@ impl ClientConnectionHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
+            let mirror_message =
+                OptionFuture::from(self.tcp_mirror_api.as_mut().map(|api| api.recv()));
+            let steal_message =
+                OptionFuture::from(self.tcp_steal_api.as_mut().map(|api| api.recv()));
+
             select! {
                 message = self.connection.receive() => {
                     let Some(message) = message? else {
@@ -365,34 +399,15 @@ impl ClientConnectionHandler {
                         }
                     }
                 },
-                // poll the sniffer API only when it's available
+                // poll the mirror API only when it's available
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
-                message = async {
-                    if let Some(ref mut sniffer_api) = self.tcp_sniffer_api {
-                        sniffer_api.recv().await
-                    } else {
-                        unreachable!()
-                    }
-                }, if self.tcp_sniffer_api.is_some() => match message {
-                    Ok((message, Some(log))) if self.ready_for_logs => {
-                        self.respond(DaemonMessage::LogMessage(log)).await?;
-                        self.respond(DaemonMessage::Tcp(message)).await?;
-                    }
-                    Ok((message, _)) => {
-                        self.respond(DaemonMessage::Tcp(message)).await?;
-                    },
+                Some(Some(message)) = mirror_message => match message {
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
-                message = async {
-                    if let Some(ref mut stealer_api) = self.tcp_stealer_api {
-                        stealer_api.recv().await
-                    } else {
-                        unreachable!()
-                    }
-                }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(StealerMessage::TcpSteal(message)) => self.respond(DaemonMessage::TcpSteal(message)).await?,
-                    Ok(StealerMessage::LogMessage(log)) => self.respond(DaemonMessage::LogMessage(log)).await?,
+                Some(message) = steal_message => match message {
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
@@ -407,10 +422,6 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
                 },
-                // message = self.vpn_api.daemon_message() => match message{
-                //     Ok(message) => self.respond(DaemonMessage::Vpn(message)).await?,
-                //     Err(e) => break e,
-                // },
                 _ = cancellation_token.cancelled() => return Ok(()),
             }
         };
@@ -425,6 +436,10 @@ impl ClientConnectionHandler {
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
+        if self.ready_for_logs.not() && matches!(response, DaemonMessage::LogMessage(..)) {
+            return Ok(());
+        }
+
         self.connection.send(response).await.map_err(Into::into)
     }
 
@@ -479,8 +494,8 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
-                if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
-                    sniffer_api.handle_client_message(message).await?
+                if let Some(mirror_api) = &mut self.tcp_mirror_api {
+                    mirror_api.handle_client_message(message).await?
                 } else {
                     self.respond(DaemonMessage::Close(
                         "component responsible for mirroring incoming traffic is not running, \
@@ -490,8 +505,13 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpSteal(message) => {
-                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api.handle_client_message(message).await?
+                if let Some(tcp_stealer_api) = self.tcp_steal_api.as_mut() {
+                    if let Err(error) = tcp_stealer_api.handle_client_message(message).await {
+                        self.respond(DaemonMessage::Close(format!(
+                            "invalid HTTP filter: {error}"
+                        )))
+                        .await?;
+                    }
                 } else {
                     self.respond(DaemonMessage::Close(
                         "incoming traffic stealing is not available in the targetless mode".into(),
@@ -510,11 +530,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::SwitchProtocolVersion(client_version) => {
                 let settled_version = client_version.min(mirrord_protocol::VERSION.clone());
-                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api
-                        .switch_protocol_version(settled_version.clone())
-                        .await?;
-                }
+                self.protocol_version.replace(settled_version.clone());
 
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(
                     settled_version,
@@ -673,28 +689,32 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let sniffer = if state.container_pid().is_some() {
-        setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
-    } else {
-        BackgroundTask::Disabled
-    };
-    let stealer = match state.container_pid() {
-        None => BackgroundTask::Disabled,
+    let (stealer, sniffer, mirror_handle) = match state.container_pid() {
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(&state.network_runtime).await?;
-            setup::start_stealer(
-                &state.network_runtime,
-                pid,
-                steal_handle,
-                cancellation_token.clone(),
-            )
+            let (steal_handle, mirror_handle) =
+                setup::start_traffic_redirector(&state.network_runtime, pid).await?;
+            let stealer = setup::start_stealer(&state.network_runtime, steal_handle);
+
+            let (sniffer, mirror_handle) = if envs::PASSTHROUGH_MIRRORING.from_env_or_default() {
+                (BackgroundTask::Disabled, Some(mirror_handle))
+            } else {
+                let sniffer =
+                    setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone())
+                        .await;
+                (sniffer, None)
+            };
+
+            (stealer, sniffer, mirror_handle)
         }
+        None => (BackgroundTask::Disabled, BackgroundTask::Disabled, None),
     };
+
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
     let bg_tasks = BackgroundTasks {
         sniffer,
         stealer,
         dns,
+        mirror_handle,
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -776,6 +796,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         sniffer,
         stealer,
         dns,
+        ..
     } = bg_tasks;
 
     tokio::join!(

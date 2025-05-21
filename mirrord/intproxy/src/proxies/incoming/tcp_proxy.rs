@@ -192,7 +192,7 @@ impl BackgroundTask for TcpProxyTask {
                             );
                         }
 
-                        if !self.discard_data {
+                        if self.discard_data.not() {
                             message_bus.send(buf.to_vec()).await;
                         }
 

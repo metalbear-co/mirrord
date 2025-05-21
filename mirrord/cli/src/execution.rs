@@ -269,6 +269,10 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        if let Some(path) = std::env::var_os("MIRRORD_INTPROXY_WTF") {
+            proxy_command.env("MIRRORD_INTPROXY_WTF", path);
+        }
+
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
         })?;
