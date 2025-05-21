@@ -45,15 +45,8 @@ pub enum ProfileError {
     ))]
     ProfileFetchError(KubeApiError),
 
-    #[error("failed to parse mirrord profile name: {0}")]
-    #[diagnostic(help(
-        "Use `<namespace>/<profile>` for namespaced profile. \
-        Or the field will be used as a single value for fetchting cluster-wise profile."
-    ))]
-    InvalidProfileName(String),
-
-    #[error("selected profile is in {profile:?}, but target is in {target:?}.")]
-    NamespaceConflict { target: String, profile: String },
+    #[error("mirrord profile must be cluster-wide or in the same namespace as the target ({0})")]
+    NamespaceConflict(String),
 }
 
 /// Identifier of [`MirrordClusterProfile`] and [`MirrordProfile`].
@@ -77,24 +70,12 @@ impl Display for ProfileIdentifier {
 impl FromStr for ProfileIdentifier {
     type Err = ProfileError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let vals: Vec<_> = s.split('/').collect();
-        match vals.len() {
-            1 => Ok(Self::Cluster(
-                vals.first()
-                    .ok_or(ProfileError::InvalidProfileName(s.to_string()))?
-                    .to_string(),
-            )),
-            2 => Ok(Self::Namespaced {
-                namespace: vals
-                    .first()
-                    .ok_or(ProfileError::InvalidProfileName(s.to_string()))?
-                    .to_string(),
-                profile: vals
-                    .get(1)
-                    .ok_or(ProfileError::InvalidProfileName(s.to_string()))?
-                    .to_string(),
+        match s.split_once('/') {
+            Some((namespace, profile)) => Ok(Self::Namespaced {
+                namespace: namespace.to_string(),
+                profile: profile.to_string(),
             }),
-            _ => Err(ProfileError::InvalidProfileName(s.to_string())),
+            None => Ok(Self::Cluster(s.to_string())),
         }
     }
 }
@@ -104,14 +85,7 @@ enum ProfileFetchResult {
     Namespaced(MirrordProfile),
 }
 
-/// Extension trait for [`MirrordProfile`] and [`MirrordClusterProfile`].
-trait ProfileView {
-    fn feature_adjustments(&self) -> impl Iterator<Item = &FeatureAdjustment>;
-
-    fn unknown_fields(&self) -> impl Iterator<Item = (&String, &serde_json::Value)>;
-}
-
-impl ProfileView for ProfileFetchResult {
+impl ProfileFetchResult {
     fn feature_adjustments(&self) -> impl Iterator<Item = &FeatureAdjustment> {
         match self {
             ProfileFetchResult::Cluster(profile) => profile.spec.feature_adjustments.iter(),
@@ -182,7 +156,7 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
 /// Applies the given profile to the given [`LayerConfig`].
 fn apply_profile<P: Progress>(
     config: &mut LayerConfig,
-    profile: impl ProfileView,
+    profile: &ProfileFetchResult,
     profile_identifier: &ProfileIdentifier,
     subtask: &mut P,
 ) -> Result<(), ProfileError> {
@@ -197,10 +171,7 @@ fn apply_profile<P: Progress>(
     {
         if let Some(target_ns) = &config.target.namespace {
             if target_ns != profile_ns {
-                return Err(ProfileError::NamespaceConflict {
-                    target: target_ns.to_string(),
-                    profile: profile_ns.to_string(),
-                });
+                return Err(ProfileError::NamespaceConflict(target_ns.clone()));
             }
         } else {
             subtask.info(&format!("setting target namespace to {profile_ns}"));
@@ -234,11 +205,11 @@ pub async fn apply_profile_if_configured<P: Progress>(
     match fetch_profile(config, &profile_identifier).await {
         Ok(profile) => {
             subtask.success(Some(&format!(
-                "mirrord cluster profile `{profile_identifier}` fetched"
+                "mirrord profile `{profile_identifier}` fetched"
             )));
             let mut subtask =
                 progress.subtask(&format!("applying mirrord profile `{profile_identifier}`"));
-            apply_profile(config, profile, &profile_identifier, &mut subtask)?;
+            apply_profile(config, &profile, &profile_identifier, &mut subtask)?;
             subtask.success(Some(&format!(
                 "mirrord profile `{profile_identifier}` applied"
             )));
@@ -297,6 +268,20 @@ mod test {
                 profile: "my-profile".to_string()
             }
         );
-        assert!("a/b/c".parse::<ProfileIdentifier>().is_err());
+        assert_eq!(
+            "a/b/c".parse::<ProfileIdentifier>().unwrap(),
+            ProfileIdentifier::Namespaced {
+                namespace: "a".to_string(),
+                profile: "b/c".to_string()
+            }
+        );
+
+        assert_eq!(
+            "/my-profile".parse::<ProfileIdentifier>().unwrap(),
+            ProfileIdentifier::Namespaced {
+                namespace: "".to_string(),
+                profile: "my-profile".to_string()
+            }
+        );
     }
 }
