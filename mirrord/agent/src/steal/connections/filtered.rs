@@ -9,7 +9,7 @@ use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
     body::Incoming,
     client::conn::{http1, http2},
-    http::{Request, StatusCode},
+    http::{request::Parts, Request, StatusCode},
     service::Service,
     upgrade::{OnUpgrade, Upgraded},
     Response,
@@ -516,23 +516,23 @@ where
     #[tracing::instrument(
         level = Level::TRACE,
         name = "match_request_with_filter",
-        skip(self, request),
+        skip(self, parts),
         fields(
-            request_path = request.uri().path(),
-            request_headers = ?request.headers(),
+            request_path = parts.uri.path(),
+            request_headers = ?parts.headers,
             filters = ?self.filters,
         )
         ret,
     )]
-    fn match_request<B>(&self, request: &mut Request<B>) -> RequestMatchResult {
+    fn match_request(&self, parts: &mut Parts) -> RequestMatchResult {
         let protocol_version_req = self
             .original_destination
             .connector()
             .is_some()
             .then_some(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
             .or_else(|| {
-                request
-                    .headers()
+                parts
+                    .headers
                     .contains_key(UPGRADE)
                     .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
             });
@@ -541,7 +541,7 @@ where
             .filters
             .iter()
             // Check if the client's filter matches the request.
-            .filter(|entry| entry.value().0.matches(request))
+            .filter(|entry| entry.value().0.matches(parts))
             // Check neither the client nor us has closed the subscription
             .filter(|entry| self.subscribed.get(entry.key()).copied().unwrap_or(true))
             // Check if the client can handle the request.
@@ -655,24 +655,25 @@ where
     )]
     async fn handle_request(
         &mut self,
-        mut request: ExtractedRequest,
+        request: ExtractedRequest,
         tx: &Sender<ConnectionMessageOut>,
     ) -> Result<(), ConnectionTaskError> {
+        let (mut parts, body) = request.request.into_parts();
         let RequestMatchResult {
             protocol_version_req,
             clients_matched,
             clients_below_version_req,
-        } = self.match_request(&mut request.request);
+        } = self.match_request(&mut parts);
         let Some((&client_id, other_client_ids)) = clients_matched.split_first() else {
             let _ = request.response_tx.send(RequestHandling::LetThrough {
-                unchanged: request.request,
+                unchanged: Request::from_parts(parts, body),
             });
 
             return Ok(());
         };
 
-        let request_uri = request.request.uri().to_owned();
-        let request_headers = request.request.headers().to_owned();
+        let request_uri = parts.uri.clone();
+        let request_headers = parts.headers.clone();
 
         if self.subscribed.insert(client_id, true).is_none() {
             // First time this client will receive a request from this connection.
@@ -697,7 +698,7 @@ where
         tx.send(ConnectionMessageOut::Request {
             client_id,
             connection_id: self.connection_id,
-            request: request.request,
+            request: Request::from_parts(parts, body),
             id,
             metadata: HttpRequestMetadata::V1 {
                 destination: self.original_destination.address(),
@@ -975,8 +976,8 @@ mod test {
 
     use super::*;
     use crate::{
+        http::filter::HttpFilter,
         incoming::tls::{self, StealTlsHandlerStore},
-        steal::http::HttpFilter,
         util::path_resolver::InTargetPathResolver,
     };
 

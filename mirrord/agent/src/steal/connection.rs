@@ -26,13 +26,13 @@ use tracing::Level;
 use super::{api::StealerMessage, http::HttpResponseFallback, subscriptions::PortSubscription};
 use crate::{
     error::AgentResult,
+    http::filter::HttpFilter,
     incoming::{tls::StealTlsHandlerStore, RedirectedConnection, StealHandle},
     metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
     steal::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
         },
-        http::HttpFilter,
         subscriptions::PortSubscriptions,
         Command, StealerCommand,
     },
