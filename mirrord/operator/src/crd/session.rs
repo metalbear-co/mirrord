@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 #[kube(
     group = "mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordSession",
-    status = "MirrordSessionStatus"
+    kind = "MirrordSession"
 )]
 pub struct MirrordSessionSpec {
     /// Owner of this session
@@ -20,14 +19,11 @@ pub struct MirrordSessionSpec {
     /// Session's target
     pub target: Target,
 
+    /// Start time of this session when actual websocket connection is first created.
+    pub start_time: DateTime<Utc>,
+
     /// Max duration for this session
     pub max_time: Option<Duration>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordSessionStatus {
-    /// Start time of this session when actual websocket connection is first created.
-    pub start_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
