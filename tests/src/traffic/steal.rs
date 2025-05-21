@@ -132,16 +132,12 @@ mod steal_tests {
         )]
         application: Application,
     ) {
-        use std::{io::Write, ops::Not};
+        use std::io::Write;
 
         struct LogGuard(tempfile::NamedTempFile);
 
         impl Drop for LogGuard {
             fn drop(&mut self) {
-                if std::thread::panicking().not() {
-                    return;
-                }
-
                 println!("INTPROXY COMM LOGS:");
                 let _ = std::io::copy(self.0.as_file_mut(), std::io::stdout().lock().by_ref());
             }
