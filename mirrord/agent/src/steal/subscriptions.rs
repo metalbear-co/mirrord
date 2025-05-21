@@ -7,8 +7,8 @@ use std::{
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use mirrord_protocol::{Port, RemoteResult, ResponseError};
 
-use super::http::HttpFilter;
 use crate::{
+    http::filter::HttpFilter,
     incoming::{RedirectedConnection, RedirectorTaskError, StealHandle},
     metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
     util::{protocol_version::ClientProtocolVersion, ClientId},
@@ -258,11 +258,9 @@ mod test {
     use mirrord_protocol::ResponseError;
 
     use crate::{
+        http::filter::HttpFilter,
         incoming::{test::DummyRedirector, RedirectorTask},
-        steal::{
-            http::HttpFilter,
-            subscriptions::{PortSubscription, PortSubscriptions},
-        },
+        steal::subscriptions::{PortSubscription, PortSubscriptions},
         util::ClientId,
     };
 

@@ -11,6 +11,8 @@ use tracing::Level;
 
 use crate::util::rolledback_stream::RolledBackStream;
 
+pub mod filter;
+
 /// Helper enum for representing HTTP/1.x and HTTP/2, which are handled very differently in some
 /// parts of the code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

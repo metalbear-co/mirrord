@@ -1,11 +1,12 @@
 use fancy_regex::Regex;
-use hyper::Request;
+use hyper::http::request::Parts;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
 #[derive(Debug, Clone)]
 pub enum HttpFilter {
     /// Header based filter.
+    ///
     /// This [`Regex`] should be used against each header after transforming it to `k: v` format.
     Header(Regex),
     /// Path based filter.
@@ -43,86 +44,69 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
 }
 
 impl HttpFilter {
-    /// Checks whether the given [`Request`] matches this filter.
-    #[tracing::instrument(level = Level::TRACE, skip(request), ret(level = "DEBUG"))]
-    pub fn matches<T>(&self, request: &mut Request<T>) -> bool {
+    /// Checks whether the given request [`Parts`] match this filter.
+    #[tracing::instrument(level = Level::DEBUG, skip(parts), ret)]
+    pub fn matches(&self, parts: &mut Parts) -> bool {
         match self {
             Self::Header(filter) => {
-                let headers = match request.extensions().get::<NormalizedHeaders>() {
-                    Some(cached) => cached,
-                    None => {
-                        let normalized = request
-                            .headers()
-                            .iter()
-                            .filter_map(|(header_name, header_value)| {
-                                header_value
-                                    .to_str()
-                                    .ok()
-                                    .map(|header_value| format!("{header_name}: {header_value}"))
-                            })
-                            .collect::<Vec<_>>();
+                let headers = parts.extensions.get_or_insert_with(|| {
+                    let normalized = parts
+                        .headers
+                        .iter()
+                        .filter_map(|(header_name, header_value)| {
+                            header_value
+                                .to_str()
+                                .ok()
+                                .map(|header_value| format!("{header_name}: {header_value}"))
+                        })
+                        .collect::<Vec<_>>();
 
-                        request
-                            .extensions_mut()
-                            .insert(NormalizedHeaders(normalized));
-                        request
-                            .extensions()
-                            .get()
-                            .expect("extension was just inserted")
-                    }
-                };
+                    NormalizedHeaders(normalized)
+                });
 
                 headers.has_match(filter)
             }
 
-            Self::Path(filter) => request
-                .uri()
-                .clone()
-                .into_parts()
-                .path_and_query
-                .as_ref()
-                .map(|path_and_query| {
-                    // For backward compatability, we first match path then we match path and query
-                    // together and return true if any of them matches
-                    let path = path_and_query.path();
-                    let matched = filter
-                        .is_match(path)
-                        .inspect_err(|error| {
-                            tracing::error!(path, ?error, "Error while matching path");
-                        })
-                        .unwrap_or(false);
-                    if matched {
-                        return true;
-                    }
+            Self::Path(filter) => parts.uri.path_and_query().is_some_and(|path_and_query| {
+                // For backward compatability, we first match path then we match path and query
+                // together and return true if any of them matches
+                let path = path_and_query.path();
+                let matched = filter
+                    .is_match(path)
+                    .inspect_err(|error| {
+                        tracing::error!(path, ?error, "Error while matching path");
+                    })
+                    .unwrap_or(false);
+                if matched {
+                    return true;
+                }
 
-                    let path = path_and_query.as_str();
-                    filter
-                        .is_match(path)
-                        .inspect_err(|error| {
-                            tracing::error!(path, ?error, "Error while matching path+query");
-                        })
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false),
+                let path = path_and_query.as_str();
+                filter
+                    .is_match(path)
+                    .inspect_err(|error| {
+                        tracing::error!(path, ?error, "Error while matching path+query");
+                    })
+                    .unwrap_or(false)
+            }),
 
-            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(request)),
+            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(parts)),
             Self::Composite {
                 all: false,
                 filters,
-            } => filters.iter().any(|f| f.matches(request)),
+            } => filters.iter().any(|f| f.matches(parts)),
         }
     }
 }
 
 /// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
-/// [`HttpFilter::Header`]). Computed and cached in [`Request::extensions`] the first time
-/// [`HttpFilter::matches`] is called on the [`Request`].
+/// [`HttpFilter::Header`]). Computed and cached in [`Parts::extensions`] the first time
+/// [`HttpFilter::matches`] is called on [`Parts`].
 #[derive(Clone, Debug)]
 struct NormalizedHeaders(Vec<String>);
 
 impl NormalizedHeaders {
     /// Checks whether any header in this set matches the given [`Regex`].
-    #[tracing::instrument(level = Level::TRACE, ret)]
     fn has_match(&self, regex: &Regex) -> bool {
         self.0.iter().any(|header| {
             regex
@@ -137,10 +121,12 @@ impl NormalizedHeaders {
 
 #[cfg(test)]
 mod test {
+    use std::ops::Not;
+
     use hyper::Request;
     use mirrord_protocol::tcp::{self, Filter};
 
-    use crate::steal::http::HttpFilter;
+    use super::HttpFilter;
 
     #[test]
     fn matching_all_filter() {
@@ -157,7 +143,9 @@ mod test {
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "a-bazillion")
             .body(())
-            .unwrap();
+            .unwrap()
+            .into_parts()
+            .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
         assert!(filter.matches(&mut input));
 
@@ -166,8 +154,10 @@ mod test {
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
-            .unwrap();
-        assert!(!filter.matches(&mut input));
+            .unwrap()
+            .into_parts()
+            .0;
+        assert!(filter.matches(&mut input).not());
     }
 
     #[test]
@@ -187,7 +177,9 @@ mod test {
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
-            .unwrap();
+            .unwrap()
+            .into_parts()
+            .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
         assert!(filter.matches(&mut input));
 
@@ -196,7 +188,9 @@ mod test {
             .uri("https://www.balconia.gov/api/path/to/v3")
             .header("brass-key", "nothin")
             .body(())
-            .unwrap();
+            .unwrap()
+            .into_parts()
+            .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
         assert!(!filter.matches(&mut input));
     }
