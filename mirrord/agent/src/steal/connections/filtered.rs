@@ -573,14 +573,12 @@ where
                     return true;
                 };
 
-                entry.value().1.as_ref().is_some_and(|v| {
-                    if req.matches(v) {
-                        true
-                    } else {
-                        clients_below_version_req.push(*entry.key());
-                        false
-                    }
-                })
+                if entry.value().1.matches(req) {
+                    true
+                } else {
+                    clients_below_version_req.push(*entry.key());
+                    false
+                }
             })
             .map(|entry| *entry.key())
             .collect();
@@ -1214,7 +1212,7 @@ mod test {
                     client_id,
                     (
                         HttpFilter::Header(format!("x-client: {client_id}").parse().unwrap()),
-                        Some("1.19.0".parse().unwrap()),
+                        "1.19.0".parse().unwrap(),
                     ),
                 );
             }
@@ -1245,10 +1243,12 @@ mod test {
             is_upgrade: bool,
         ) -> Request<DynamicBody> {
             for client in clients {
-                let client_version = client.version.unwrap_or("1.19.0").parse().unwrap();
                 let filter = (
                     HttpFilter::Header("x-subscription: ABCD".parse().unwrap()),
-                    Some(client_version),
+                    client
+                        .version
+                        .map(|v| v.parse().unwrap())
+                        .unwrap_or_default(),
                 );
                 self.filters.insert(client.id, filter);
             }
@@ -2088,7 +2088,7 @@ mod test {
             0,
             (
                 HttpFilter::Header("x-capture: true".parse().unwrap()),
-                Some("1.19.0".parse().unwrap()),
+                "1.19.0".parse().unwrap(),
             ),
         );
 
