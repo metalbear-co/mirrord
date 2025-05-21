@@ -113,7 +113,7 @@ enum FilteringServiceError {
     PassThroughSendError(#[from] hyper::Error),
     /// The client failed to provide the response to a matched request.
     #[error("failed to receive a response from the connected mirrord session")]
-    ClientResponseErorr,
+    ClientResponseError,
 }
 
 /// Simple [`Service`] implementor that uses [`mpsc`] channels to pass incoming [`Request`]s to a
@@ -340,7 +340,7 @@ impl FilteringService {
                     .await;
                 response
             }
-            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponseErorr),
+            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponseError),
         };
 
         Ok(response)
