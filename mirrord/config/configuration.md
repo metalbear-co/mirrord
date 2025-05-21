@@ -1753,6 +1753,11 @@ Allows mirrord to skip patching (macOS SIP) unwanted processes.
 When patching is skipped, mirrord will no longer be able to load into
 the process and its child processes.
 
+Defaults to `{ "skip_sip": "git" }`
+
+When specified, the given value will replace the default list rather than
+being added to.
+
 ## target {#root-target}
 
 Specifies the target and namespace to target.
