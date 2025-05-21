@@ -4,7 +4,7 @@ use http::Uri;
 use mirrord_tls_util::MaybeTls;
 use tokio::net::TcpStream;
 
-use crate::steal::tls::handler::PassThroughTlsConnector;
+use crate::incoming::tls::handler::PassThroughTlsConnector;
 
 /// Original destination of a stolen HTTPS request.
 ///

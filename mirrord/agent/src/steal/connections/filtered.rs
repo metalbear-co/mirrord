@@ -975,7 +975,8 @@ mod test {
 
     use super::*;
     use crate::{
-        steal::{http::HttpFilter, tls, StealTlsHandlerStore},
+        incoming::tls::{self, StealTlsHandlerStore},
+        steal::http::HttpFilter,
         util::path_resolver::InTargetPathResolver,
     };
 
