@@ -288,7 +288,6 @@ fn log_agent(msg: &DaemonMessage) {
 
     let mut file = std::fs::OpenOptions::new()
         .append(true)
-        .write(true)
         .open(path)
         .unwrap();
     writeln!(file, "RECEIVED AGENT MESSAGE: {msg:?}").unwrap();
@@ -303,7 +302,6 @@ fn log_client(msg: &ClientMessage) {
 
     let mut file = std::fs::OpenOptions::new()
         .append(true)
-        .write(true)
         .open(path)
         .unwrap();
     writeln!(file, "SENDING CLIENT MESSAGE: {msg:?}").unwrap();
