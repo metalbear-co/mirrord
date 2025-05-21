@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
-use mirrord_config::target::Target;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,9 +14,6 @@ use serde::{Deserialize, Serialize};
 pub struct MirrordSessionSpec {
     /// Owner of this session
     pub owner: MirrordSessionOwner,
-
-    /// Session's target
-    pub target: Target,
 
     /// Start time of this session when actual websocket connection is first created.
     pub start_time: DateTime<Utc>,
