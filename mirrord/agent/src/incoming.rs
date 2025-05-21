@@ -9,13 +9,13 @@ mod task;
 pub mod tls;
 
 use std::{
+    fmt,
     future::Future,
     io,
     net::{IpAddr, SocketAddr},
 };
 
 use composed::ComposedRedirector;
-pub use connection::RedirectedConnection;
 pub use error::RedirectorTaskError;
 use iptables::IpTablesRedirector;
 pub use steal_handle::StealHandle;
@@ -66,6 +66,15 @@ pub struct Redirected {
     ///
     /// Note that this address might be different than the local address of [`Self::stream`].
     destination: SocketAddr,
+}
+
+impl fmt::Debug for Redirected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Redirected")
+            .field("source", &self.source)
+            .field("destination", &self.destination)
+            .finish()
+    }
 }
 
 /// Creates a [`ComposedRedirector`] based on [`IpTablesRedirector`]s.
