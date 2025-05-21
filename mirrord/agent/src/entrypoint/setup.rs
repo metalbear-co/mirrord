@@ -20,16 +20,22 @@ use crate::{
 /// Starts a [`RedirectorTask`] on the given `runtime`.
 ///
 /// Returns the [`StealHandle`] that can be used to steal incoming traffic.
-pub(super) async fn start_traffic_redirector(runtime: &BgTaskRuntime) -> AgentResult<StealHandle> {
+pub(super) async fn start_traffic_redirector(
+    runtime: &BgTaskRuntime,
+    target_pid: u64,
+) -> AgentResult<StealHandle> {
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let support_ipv6 = envs::IPV6_SUPPORT.from_env_or_default();
+    let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
+    let tls_handler_store =
+        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
     let (task, handle) = runtime
         .spawn(async move {
             incoming::create_iptables_redirector(flush_connections, &pod_ips, support_ipv6)
                 .await
-                .map(RedirectorTask::new)
+                .map(|redirector| RedirectorTask::new(redirector, tls_handler_store))
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
