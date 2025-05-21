@@ -1,7 +1,7 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf};
+use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
@@ -286,11 +286,12 @@ fn log_agent(msg: &DaemonMessage) {
         return;
     };
 
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f32();
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .open(path)
         .unwrap();
-    writeln!(file, "RECEIVED AGENT MESSAGE: {msg:?}").unwrap();
+    writeln!(file, "({timestamp}) RECEIVED AGENT MESSAGE: {msg:?}").unwrap();
 }
 
 fn log_client(msg: &ClientMessage) {
@@ -300,9 +301,10 @@ fn log_client(msg: &ClientMessage) {
         return;
     };
 
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f32();
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .open(path)
         .unwrap();
-    writeln!(file, "SENDING CLIENT MESSAGE: {msg:?}").unwrap();
+    writeln!(file, "({timestamp}) SENDING CLIENT MESSAGE: {msg:?}").unwrap();
 }
