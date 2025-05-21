@@ -106,14 +106,14 @@ enum FilteringServiceError {
     /// We failed to connect to the original destination
     /// when handling an unmatched request.
     #[error("failed to connect to the original destination: {0}")]
-    PassThroughConnectError(#[from] io::Error),
+    PassThroughConnect(#[from] io::Error),
     /// We made the connection to the original destination,
     /// but failed to send the unmatched request.
     #[error("failed to pass the request to its original destination: {0}")]
-    PassThroughSendError(#[from] hyper::Error),
+    PassThroughSend(#[from] hyper::Error),
     /// The client failed to provide the response to a matched request.
     #[error("failed to receive a response from the connected mirrord session")]
-    ClientResponseError,
+    ClientResponse,
 }
 
 /// Simple [`Service`] implementor that uses [`mpsc`] channels to pass incoming [`Request`]s to a
@@ -182,7 +182,7 @@ impl FilteringService {
                 tokio::spawn(async move {
                     if let Err(error) = connection.await {
                         tracing::error!(
-                            error = %FilteringServiceError::PassThroughSendError(error),
+                            error = %FilteringServiceError::PassThroughSend(error),
                             "Connection with the original destination failed",
                         );
                     }
@@ -208,7 +208,7 @@ impl FilteringService {
                 tokio::spawn(async move {
                     if let Err(error) = connection.with_upgrades().await {
                         tracing::error!(
-                            error = %FilteringServiceError::PassThroughSendError(error),
+                            error = %FilteringServiceError::PassThroughSend(error),
                             "Connection with the original destination failed",
                         );
                     }
@@ -340,7 +340,7 @@ impl FilteringService {
                     .await;
                 response
             }
-            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponseError),
+            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponse),
         };
 
         Ok(response)
