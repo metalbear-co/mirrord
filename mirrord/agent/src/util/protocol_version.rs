@@ -10,18 +10,19 @@ use std::sync::{Arc, Mutex};
 /// This is the last version that did not support version negotiation.
 /// See [reference](https://github.com/metalbear-co/mirrord/commit/56da9828ad2553e6c5a11124c5d65f4d4b00e6e6#diff-3c754d6cce3c1b7f4856fc34e66df5e6d8850138dd1273be60f87420bc064f73).
 ///
-/// Thanks to having a default value, we can still safely match agains [`semver::VersionReq::STAR`].
+/// Thanks to having a default value, we can still safely match against
+/// [`semver::VersionReq::STAR`].
 ///
 /// # Note
 ///
 /// This could be implemeted nicely with [arc-swap](https://docs.rs/arc-swap/latest/arc_swap/),
-/// but this struct alone it is not worth the extra dependency.
+/// but this struct alone is not worth the extra dependency.
 #[derive(Clone, Debug)]
 pub struct ClientProtocolVersion(Arc<Mutex<semver::Version>>);
 
 impl Default for ClientProtocolVersion {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(semver::Version::new(1, 0, 0))))
+        Self(Arc::new(Mutex::new(semver::Version::new(1, 2, 2))))
     }
 }
 
