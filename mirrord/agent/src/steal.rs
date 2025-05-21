@@ -4,7 +4,7 @@ use mirrord_protocol::{
 };
 use tokio::sync::mpsc::Sender;
 
-use crate::util::ClientId;
+use crate::util::{protocol_version::ClientProtocolVersion, ClientId};
 
 mod api;
 mod connection;
@@ -27,7 +27,7 @@ use self::http::HttpResponseFallback;
 enum Command {
     /// Contains the channel that's used by the stealer worker to respond back to the agent
     /// (stealer -> agent -> layer).
-    NewClient(Sender<StealerMessage>),
+    NewClient(Sender<StealerMessage>, ClientProtocolVersion),
 
     /// A layer wants to subscribe to this [`Port`].
     ///
@@ -54,8 +54,6 @@ enum Command {
     ///
     /// Should be forwarded back to the connection it was stolen from.
     HttpResponse(HttpResponseFallback),
-
-    SwitchProtocolVersion(semver::Version),
 }
 
 /// Association between a client (identified by the `client_id`) and a [`Command`].
