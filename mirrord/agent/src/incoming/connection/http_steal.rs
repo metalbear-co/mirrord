@@ -94,13 +94,14 @@ impl StealTask {
         while stealer_writes || peer_writes {
             tokio::select! {
                 result = data_rx.recv(), if stealer_writes => match result {
-                    Some(data) => {
-                        upgraded.write_all(&data).await.map_err(ConnError::UpgradedError)?;
-                    }
-                    None => {
+                    Some(data) if data.is_empty() => {
                         stealer_writes = false;
                         upgraded.shutdown().await.map_err(ConnError::UpgradedError)?;
                     }
+                    Some(data) => {
+                        upgraded.write_all(&data).await.map_err(ConnError::UpgradedError)?;
+                    }
+                    None => return Err(StealerDropped.into()),
                 },
 
                 result = upgraded.read_buf(&mut buffer), if peer_writes => {

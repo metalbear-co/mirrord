@@ -542,4 +542,16 @@ impl SimpleStore {
             server_config,
         }
     }
+
+    pub fn connector(&self, alpn_protocol: Option<&str>) -> TlsConnector {
+        let mut client_config = self.client_config.clone();
+        if let Some(alpn) = alpn_protocol {
+            client_config.alpn_protocols = vec![alpn.as_bytes().to_vec()];
+        }
+        TlsConnector::from(Arc::new(client_config))
+    }
+
+    pub fn acceptor(&self) -> TlsAcceptor {
+        TlsAcceptor::from(Arc::new(self.server_config.clone()))
+    }
 }

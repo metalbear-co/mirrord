@@ -46,6 +46,11 @@ use crate::{
 /// There is an API instance for each connected agent client.
 /// All API instances send commands to the task through a single shared channel.
 /// However, each API instance has its own channel for receiving messages from the task.
+///
+/// # Note
+///
+/// In order to enable deprecation of old [`mirrord_protocol`] message variants,
+/// this API should **always** produce the latest variants that can be handled by the client.
 pub struct TcpStealerApi {
     /// Identifies the client owning of this API.
     client_id: ClientId,

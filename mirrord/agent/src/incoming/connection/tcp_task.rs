@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::incoming::{
     connection::{util::StealerSender, ConnectionInfo, IncomingIO, IncomingStreamItem},
-    error::ConnError,
+    error::{ConnError, StealerDropped},
 };
 
 /// Background task responsible for handling IO on redirected TCP connections.
@@ -44,14 +44,11 @@ impl TcpTask {
 
                     if read_buf.is_empty() {
                         source_writes = false;
-
                         self.destination.shutdown().await?;
-
                         continue;
                     }
 
                     self.destination.send(&read_buf).await?;
-
                     read_buf.clear();
                 },
 
@@ -148,7 +145,7 @@ impl Destination {
             }
 
             Self::StealingClient { data_rx, .. } => {
-                let data = data_rx.recv().await.unwrap_or_default();
+                let data = data_rx.recv().await.ok_or(StealerDropped)?;
 
                 Ok(Cow::Owned(data))
             }
