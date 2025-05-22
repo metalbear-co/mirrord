@@ -37,7 +37,6 @@ libc.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"] }
 null-terminated = { version = "0.3", default-features = false }
 num-traits = "0.2"
-objc2-core-foundation = "0.3"
 rand.workspace = true
 regex.workspace = true
 socket2.workspace = true
@@ -52,6 +51,7 @@ syscalls = { version = "0.6", features = ["full"] }
 mirrord-sip = { path = "../sip" }
 
 exec.workspace = true
+objc2-core-foundation = "0.3"
 resolv-conf = "0.7"
 
 [dev-dependencies]
