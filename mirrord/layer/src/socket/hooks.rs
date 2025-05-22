@@ -487,6 +487,7 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
     }
 }
 
+#[cfg(target_os = "macos")]
 #[allow(non_snake_case)]
 #[hook_guard_fn]
 unsafe extern "C-unwind" fn CFNetworkCopySystemProxySettings_detour(
