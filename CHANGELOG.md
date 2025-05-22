@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.142.2](https://github.com/metalbear-co/mirrord/tree/3.142.2) - 2025-05-22
+
+
+### Added
+
+- Added a link to Slack to error messages and documentation.
+
+
+### Changed
+
+- When mirrord sends an error response to a stolen request, the request body
+  now indicates whether the error comes from the agent or from the internal
+  proxy.
+
+
+### Fixed
+
+- Added `experimental.ignore_system_proxy_config` flag to disable any system
+  proxy from affecting the running app.
+  [#3329](https://github.com/metalbear-co/mirrord/issues/3329)
+
+
+### Internal
+
+- Client's `mirrord-protocol` version is now stored in one place and shared
+  across agent's tasks.
+
 ## [3.142.1](https://github.com/metalbear-co/mirrord/tree/3.142.1) - 2025-05-16
 
 
