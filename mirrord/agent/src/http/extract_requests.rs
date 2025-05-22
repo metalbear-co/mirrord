@@ -81,6 +81,9 @@ where
 }
 
 /// A [`Stream`] of HTTP requests extracted from an HTTP connection.
+///
+/// **Important:** this stream has to be polled with [`Stream::poll_next`] for the underlying HTTP
+/// connection to make any progress.
 pub struct ExtractedRequests<IO>
 where
     IO: 'static,
@@ -212,5 +215,113 @@ impl Service<Request<Incoming>> for InnerService {
             Ok(response)
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use futures::StreamExt;
+    use http_body_util::{BodyExt, Empty};
+    use hyper::{http::StatusCode, Request, Response};
+    use hyper_util::rt::TokioIo;
+    use rstest::rstest;
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::Notify,
+    };
+
+    use crate::http::{extract_requests::ExtractedRequests, sender::HttpSender, HttpVersion};
+
+    /// Verifies that [`ExtractedRequests`] works correctly
+    /// and can be gracefully shut down.
+    #[rstest]
+    #[tokio::test]
+    async fn basic_extract_requests(
+        #[values(HttpVersion::V1, HttpVersion::V2)] version: HttpVersion,
+    ) {
+        let notify = Arc::new(Notify::new());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+        let addr = listener.local_addr().unwrap();
+        let notify_cloned = notify.clone();
+        let client = tokio::spawn(async move {
+            let stream = TcpStream::connect(addr).await.unwrap();
+            let mut sender = HttpSender::new(TokioIo::new(stream), version)
+                .await
+                .unwrap();
+            for _ in 0..2 {
+                let response = sender
+                    .send(Request::new(Empty::<Bytes>::new()))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                assert!(body.is_empty());
+            }
+
+            notify_cloned.notified().await;
+            sender
+                .send(Request::new(Empty::<Bytes>::new()))
+                .await
+                .unwrap_err();
+        });
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut requests = ExtractedRequests::new(TokioIo::new(stream), version);
+
+        let request = requests.next().await.unwrap().unwrap();
+        let _ = request.response_tx.send(Response::new(
+            Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed(),
+        ));
+
+        let request = requests.next().await.unwrap().unwrap();
+        let _ = request.response_tx.send(Response::new(
+            Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed(),
+        ));
+
+        requests.graceful_shutdown();
+        notify.notify_one();
+
+        let request = requests.next().await;
+        assert!(request.is_none());
+
+        client.await.unwrap();
+    }
+
+    /// Verifies that [`ExtractedRequests`] automatically provide a 502 response
+    /// when the response sender is dropped.
+    #[rstest]
+    #[tokio::test]
+    async fn extract_requests_dropped_response(
+        #[values(HttpVersion::V1, HttpVersion::V2)] version: HttpVersion,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let stream = TcpStream::connect(addr).await.unwrap();
+            let mut sender = HttpSender::new(TokioIo::new(stream), version)
+                .await
+                .unwrap();
+            let response = sender
+                .send(Request::new(Empty::<Bytes>::new()))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        });
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut requests = ExtractedRequests::new(TokioIo::new(stream), version);
+
+        let request = requests.next().await.unwrap().unwrap();
+        std::mem::drop(request);
+
+        let request = requests.next().await;
+        assert!(request.is_none());
+
+        client.await.unwrap();
     }
 }
