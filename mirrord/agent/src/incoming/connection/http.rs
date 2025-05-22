@@ -1,6 +1,7 @@
 use std::fmt;
 
 use hyper::http::{request, HeaderMap, Method, Uri, Version};
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
@@ -10,7 +11,7 @@ use tokio::{
 use super::{
     http_passthrough::PassThroughTask,
     http_steal::{StealTask, UpgradeDataRx},
-    ConnectionInfo, IncomingStream,
+    ConnectionInfo, IncomingIO, IncomingStream,
 };
 use crate::http::extract_requests::{BoxResponse, ExtractedRequest};
 
@@ -19,7 +20,7 @@ use crate::http::extract_requests::{BoxResponse, ExtractedRequest};
 /// No data is received nor sent via for this request until the connection task
 /// is started with either [`Self::steal`] or [`Self::pass_through`].
 pub struct RedirectedHttp {
-    request: ExtractedRequest,
+    request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
     info: ConnectionInfo,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
     ///
@@ -33,7 +34,10 @@ impl RedirectedHttp {
     /// Should be called in the target's Linux network namespace,
     /// as [`Handle::current()`] is stored in this struct.
     /// We might need to connect to the original destination in the future.
-    pub fn new(info: ConnectionInfo, request: ExtractedRequest) -> Self {
+    pub fn new(
+        info: ConnectionInfo,
+        request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+    ) -> Self {
         Self {
             request,
             info,
@@ -77,7 +81,7 @@ impl RedirectedHttp {
 
         let task = StealTask {
             body_tail: self.request.body_tail,
-            on_upgrade: self.request.on_upgrade,
+            on_upgrade: self.request.upgrade,
             upgrade_rx,
             tx: tx.into(),
         };

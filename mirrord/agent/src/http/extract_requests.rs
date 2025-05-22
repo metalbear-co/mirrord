@@ -1,6 +1,8 @@
-use core::fmt;
 use std::{
+    error::Report,
+    fmt,
     future::Future,
+    marker::PhantomData,
     ops::Not,
     pin::Pin,
     task::{Context, Poll},
@@ -8,10 +10,10 @@ use std::{
 
 use bytes::Bytes;
 use futures::{future::Either, FutureExt, Stream};
-use http::request::Parts;
 use http_body_util::combinators::BoxBody;
 use hyper::{
     body::{Frame, Incoming},
+    http::request::Parts,
     server::conn::{http1, http2},
     service::Service,
     upgrade::OnUpgrade,
@@ -26,14 +28,18 @@ use super::{error::MirrordErrorResponse, HttpVersion};
 /// [`Response`] type used by [`ExtractedRequest`].
 pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;
 
-/// An HTTP request extracted from a redirected incoming connection
+/// An HTTP request extracted from an HTTP connection
 /// with [`ExtractedRequests`].
-pub struct ExtractedRequest {
+pub struct ExtractedRequest<IO> {
+    /// Parts of the request.
     pub parts: Parts,
+    /// First frames of the request body.
     pub body_head: Vec<Frame<Bytes>>,
+    /// Rest of the request body frames (if any).
     pub body_tail: Option<Incoming>,
-    pub on_upgrade: OnUpgrade,
-    /// Can be used send the response back to the remote HTTP client.
+    /// An HTTP upgrade extracted from the request.
+    pub upgrade: HttpUpgrade<IO>,
+    /// Channel for sending the response back to the HTTP client.
     ///
     /// Try not to drop it without providing a meaningful error response
     /// ([`MirrordErrorResponse`]).
@@ -41,24 +47,50 @@ pub struct ExtractedRequest {
     pub response_tx: oneshot::Sender<BoxResponse>,
 }
 
-impl fmt::Debug for ExtractedRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<IO> fmt::Debug for ExtractedRequest<IO> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExtractedRequest")
             .field("parts", &self.parts)
-            .field("ready_frames", &self.body_head.len())
-            .field("body_finished", &self.body_tail.is_none())
+            .field("body_head", &self.body_head)
+            .field("has_more_body", &self.body_tail.is_some())
             .finish()
     }
 }
 
-pub struct ExtractedRequests<IO> {
-    request_rx: mpsc::Receiver<ExtractedRequest>,
-    connection: Option<
-        Either<
-            http1::UpgradeableConnection<IO, InnerService>,
-            http2::Connection<IO, InnerService, TokioExecutor>,
-        >,
-    >,
+/// Wrapper over [`OnUpgrade`], that provides type safe downcasting.
+///
+/// Implements [`Future`].
+pub struct HttpUpgrade<IO> {
+    pub upgrade: OnUpgrade,
+    _io_type: PhantomData<fn() -> IO>,
+}
+
+impl<IO> Future for HttpUpgrade<IO>
+where
+    IO: 'static + hyper::rt::Read + hyper::rt::Write + Unpin,
+{
+    type Output = hyper::Result<(IO, Bytes)>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let upgraded = std::task::ready!(Pin::new(&mut this.upgrade).poll(cx));
+        match upgraded {
+            Ok(upgrade) => {
+                let parts = upgrade.downcast::<IO>().expect("io type is known");
+                Poll::Ready(Ok((parts.io, parts.read_buf)))
+            }
+            Err(error) => Poll::Ready(Err(error)),
+        }
+    }
+}
+
+/// A [`Stream`] of HTTP requests extracted from an HTTP connection.
+pub struct ExtractedRequests<IO>
+where
+    IO: 'static,
+{
+    request_rx: mpsc::Receiver<(Request<Incoming>, oneshot::Sender<BoxResponse>)>,
+    connection: Option<Either<ConnV1<IO>, ConnV2<IO>>>,
 }
 
 impl<IO> ExtractedRequests<IO>
@@ -104,24 +136,50 @@ impl<IO> Stream for ExtractedRequests<IO>
 where
     IO: 'static + hyper::rt::Read + hyper::rt::Write + Unpin + Send,
 {
-    type Item = hyper::Result<ExtractedRequest>;
+    type Item = hyper::Result<ExtractedRequest<IO>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if let Poll::Ready(Some(request)) = this.request_rx.poll_recv(cx) {
-            return Poll::Ready(Some(Ok(request)));
+        loop {
+            if let Poll::Ready(Some((mut request, response_tx))) = this.request_rx.poll_recv(cx) {
+                let upgrade = hyper::upgrade::on(&mut request);
+                let (parts, mut body) = request.into_parts();
+                let Frames { frames, is_last } = match body.ready_frames() {
+                    Ok(frames) => frames,
+                    Err(error) => {
+                        let _ = response_tx.send(
+                            MirrordErrorResponse::new(parts.version, Report::new(error)).into(),
+                        );
+                        continue;
+                    }
+                };
+
+                break Poll::Ready(Some(Ok(ExtractedRequest {
+                    parts,
+                    body_head: frames,
+                    body_tail: is_last.not().then_some(body),
+                    upgrade: HttpUpgrade {
+                        upgrade,
+                        _io_type: Default::default(),
+                    },
+                    response_tx,
+                })));
+            }
+
+            let Some(connection) = this.connection.as_mut() else {
+                break Poll::Ready(None);
+            };
+
+            let result = std::task::ready!(connection.poll_unpin(cx)).err().map(Err);
+            this.connection = None;
+            break Poll::Ready(result);
         }
-
-        let Some(connection) = this.connection.as_mut() else {
-            return Poll::Ready(None);
-        };
-
-        let result = std::task::ready!(connection.poll_unpin(cx)).err().map(Err);
-        this.connection = None;
-        Poll::Ready(result)
     }
 }
+
+type ConnV1<IO> = http1::UpgradeableConnection<IO, InnerService>;
+type ConnV2<IO> = http2::Connection<IO, InnerService, TokioExecutor>;
 
 /// Implementation of [`Service`] that sends [`Request`]s through the inner [`mpsc::Sender`]
 /// and returns responses produced somewhere else.
@@ -131,7 +189,7 @@ where
 /// Used internally by [`ExtractedRequests`].
 #[derive(Clone)]
 struct InnerService {
-    request_tx: mpsc::Sender<ExtractedRequest>,
+    request_tx: mpsc::Sender<(Request<Incoming>, oneshot::Sender<BoxResponse>)>,
 }
 
 impl Service<Request<Incoming>> for InnerService {
@@ -139,37 +197,20 @@ impl Service<Request<Incoming>> for InnerService {
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn call(&self, mut request: Request<Incoming>) -> Self::Future {
+    fn call(&self, request: Request<Incoming>) -> Self::Future {
         let this = self.clone();
 
         async move {
             let (response_tx, response_rx) = oneshot::channel();
             let version = request.version();
-            let on_upgrade = hyper::upgrade::on(&mut request);
-            let (parts, mut body) = request.into_parts();
-            let Frames { frames, is_last } = body.ready_frames()?;
-            let body_head = frames;
-            let body_tail = is_last.not().then_some(body);
 
-            let message = ExtractedRequest {
-                parts,
-                body_head,
-                body_tail,
-                on_upgrade,
-                response_tx,
-            };
-
-            if this.request_tx.send(message).await.is_err() {
-                return Ok(MirrordErrorResponse::new(
-                    version,
-                    "redirector task is exiting, request dropped",
-                )
-                .into());
+            if this.request_tx.send((request, response_tx)).await.is_err() {
+                return Ok(MirrordErrorResponse::new(version, "the connection was dropped").into());
             }
 
             let response = match response_rx.await {
                 Ok(response) => response,
-                Err(..) => MirrordErrorResponse::new(version, "request dropped").into(),
+                Err(..) => MirrordErrorResponse::new(version, "the request was dropped").into(),
             };
 
             Ok(response)
