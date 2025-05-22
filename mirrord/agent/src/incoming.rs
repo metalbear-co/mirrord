@@ -16,9 +16,14 @@ use std::{
 };
 
 use composed::ComposedRedirector;
+pub use connection::{
+    http::{ResponseProvider, StolenHttp},
+    tcp::StolenTcp,
+    IncomingStream, IncomingStreamItem,
+};
 pub use error::RedirectorTaskError;
 use iptables::IpTablesRedirector;
-pub use steal_handle::StealHandle;
+pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::RedirectorTask;
 use tokio::net::TcpStream;
 

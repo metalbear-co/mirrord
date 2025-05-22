@@ -1,21 +1,18 @@
-use mirrord_protocol::{
-    tcp::{StealType, TcpData},
-    ConnectionId, Port,
-};
+use mirrord_protocol::{LogMessage, Port};
 use tokio::sync::mpsc::Sender;
 
-use crate::util::{protocol_version::ClientProtocolVersion, ClientId};
+use crate::{
+    http::filter::HttpFilter,
+    incoming::{StolenHttp, StolenTcp},
+    util::{protocol_version::ClientProtocolVersion, ClientId},
+};
 
 mod api;
-mod connection;
-mod connections;
-mod http;
 mod subscriptions;
+mod task;
 
-pub(crate) use api::{StealerMessage, TcpStealerApi};
-pub(crate) use connection::TcpConnectionStealer;
-
-use self::http::HttpResponseFallback;
+pub use api::TcpStealerApi;
+pub use task::TcpStealerTask;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///
@@ -23,45 +20,34 @@ use self::http::HttpResponseFallback;
 /// work.
 #[derive(Debug)]
 enum Command {
-    /// Contains the channel that's used by the stealer worker to respond back to the agent
-    /// (stealer -> agent -> layer).
+    /// Contains a channel that will be used by the [`TcpStealerTask`] to send messages to
+    /// [`TcpStealerApi`].
     NewClient(Sender<StealerMessage>, ClientProtocolVersion),
 
-    /// A layer wants to subscribe to this [`Port`].
+    /// The layer wants to subscribe to this [`Port`].
     ///
-    /// The agent starts stealing traffic on this [`Port`].
-    PortSubscribe(StealType),
+    /// The agent starts stealing traffic from this [`Port`].
+    PortSubscribe(Port, Option<HttpFilter>),
 
-    /// A layer wants to unsubscribe from this [`Port`].
+    /// The layer wants to unsubscribe from this [`Port`].
     ///
     /// The agent stops stealing traffic from this [`Port`].
     PortUnsubscribe(Port),
-
-    /// Unsubscribes the layer from the connection.
-    ///
-    /// The agent stops sending incoming traffic.
-    ConnectionUnsubscribe(ConnectionId),
-
-    /// There is new data in the direction going from the local process to the end-user (Going
-    /// via the layer and the agent  local-process -> layer --> agent --> end-user).
-    ///
-    /// Agent forwards this data to the other side of original connection.
-    ResponseData(TcpData),
-
-    /// Response from local app to stolen HTTP request.
-    ///
-    /// Should be forwarded back to the connection it was stolen from.
-    HttpResponse(HttpResponseFallback),
 }
 
-/// Association between a client (identified by the `client_id`) and a [`Command`].
-///
-/// The (agent -> worker) channel uses this, instead of naked [`Command`]s when communicating.
+/// Sent from [`TcpStealerApi`]s to the [`TcpStealerTask`].`
 #[derive(Debug)]
 pub struct StealerCommand {
     /// Identifies which layer instance is sending the [`Command`].
     client_id: ClientId,
-
-    /// The command message sent from (layer -> agent) to be handled by the stealer worker.
+    /// The actual command for the task.
     command: Command,
+}
+
+/// Sent from the [`TcpStealerTask`] to the [`TcpStealerApi`]s.
+enum StealerMessage {
+    StolenTcp(StolenTcp),
+    StolenHttp(StolenHttp),
+    Log(LogMessage),
+    PortSubscribed(Port),
 }

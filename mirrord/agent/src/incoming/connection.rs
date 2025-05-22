@@ -190,6 +190,14 @@ impl Stream for IncomingStream {
     }
 }
 
+impl fmt::Debug for IncomingStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IncomingStream")
+            .field("exhausted", &self.rx.is_none())
+            .finish()
+    }
+}
+
 /// Update from a redirected TCP connection or an HTTP request.
 #[derive(Debug)]
 pub enum IncomingStreamItem {
