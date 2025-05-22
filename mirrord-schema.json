@@ -876,6 +876,14 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "ignore_system_proxy_config": {
+          "title": "_experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}",
+          "description": "Disables any system wide proxy configuration for affecting the running application.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "DEPRECATED, WILL BE REMOVED",

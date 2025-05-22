@@ -518,6 +518,10 @@ the request is delivered).
 
 Defaults to 3000ms.
 
+### _experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}
+
+Disables any system wide proxy configuration for affecting the running application.
+
 ### _experimental_ readlink {#experimental-readlink}
 
 DEPRECATED, WILL BE REMOVED
