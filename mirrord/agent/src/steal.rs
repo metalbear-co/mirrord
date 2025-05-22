@@ -10,6 +10,8 @@ use crate::{
 mod api;
 mod subscriptions;
 mod task;
+#[cfg(test)]
+mod test;
 
 pub use api::TcpStealerApi;
 pub use task::TcpStealerTask;

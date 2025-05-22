@@ -458,9 +458,9 @@ async fn agent_connects_with_original_params() {
 
 pub struct SimpleStore {
     _certs_dir: TempDir,
-    store: StealTlsHandlerStore,
-    client_config: ClientConfig,
-    server_config: ServerConfig,
+    pub store: StealTlsHandlerStore,
+    pub client_config: ClientConfig,
+    pub server_config: ServerConfig,
 }
 
 impl SimpleStore {

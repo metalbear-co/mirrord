@@ -57,8 +57,14 @@ impl<IO> fmt::Debug for ExtractedRequest<IO> {
 ///
 /// Implements [`Future`].
 pub struct HttpUpgrade<IO> {
-    pub upgrade: OnUpgrade,
+    upgrade: OnUpgrade,
     _io_type: PhantomData<fn() -> IO>,
+}
+
+impl<IO> HttpUpgrade<IO> {
+    pub fn into_inner(self) -> OnUpgrade {
+        self.upgrade
+    }
 }
 
 impl<IO> Future for HttpUpgrade<IO>

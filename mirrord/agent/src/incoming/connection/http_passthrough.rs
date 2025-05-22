@@ -1,15 +1,8 @@
-use std::{
-    error::Report,
-    pin::Pin,
-    task::{Context, Poll},
-    vec,
-};
+use std::error::Report;
 
-use bytes::Bytes;
 use futures::TryFutureExt;
 use http_body_util::combinators::BoxBody;
 use hyper::{
-    body::{Body, Frame, Incoming},
     http::{request, StatusCode, Version},
     Request,
 };
@@ -20,8 +13,8 @@ use tokio::net::TcpStream;
 use super::{ConnectionInfo, IncomingIO};
 use crate::{
     http::{
-        error::MirrordErrorResponse, extract_requests::ExtractedRequest, sender::HttpSender,
-        HttpVersion,
+        body::RolledBackBody, error::MirrordErrorResponse, extract_requests::ExtractedRequest,
+        sender::HttpSender, HttpVersion,
     },
     incoming::error::ConnError,
 };
@@ -64,7 +57,7 @@ impl PassThroughTask {
             }
         };
 
-        let body = PassThroughBody {
+        let body = RolledBackBody {
             head: extracted.body_head.into_iter(),
             tail: extracted.body_tail,
         };
@@ -97,7 +90,7 @@ impl PassThroughTask {
                 .map_ok(TokioIo::new)
                 .map_err(ConnError::PassthroughHttpError),
             incoming_upgrade
-                .upgrade
+                .into_inner()
                 .map_ok(TokioIo::new)
                 .map_err(ConnError::IncomingHttpError),
         )?;
@@ -113,7 +106,7 @@ impl PassThroughTask {
     async fn make_connection(
         &self,
         extracted: &request::Parts,
-    ) -> Result<HttpSender<PassThroughBody>, ConnError> {
+    ) -> Result<HttpSender<RolledBackBody>, ConnError> {
         let stream = TcpStream::connect(self.info.pass_through_address())
             .await
             .map_err(ConnError::TcpConnectError)?;
@@ -141,36 +134,5 @@ impl PassThroughTask {
         HttpSender::new(TokioIo::new(stream), version)
             .await
             .map_err(ConnError::PassthroughHttpError)
-    }
-}
-
-/// [`Body`] type used when passing the redirected [`Request`] to its original destination.
-///
-/// Contains some first frames that were eagerly read,
-/// and the optional rest of the body.
-struct PassThroughBody {
-    head: vec::IntoIter<Frame<Bytes>>,
-    tail: Option<Incoming>,
-}
-
-impl Body for PassThroughBody {
-    type Data = Bytes;
-    type Error = hyper::Error;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let this = self.get_mut();
-
-        if let Some(frame) = this.head.next() {
-            return Poll::Ready(Some(Ok(frame)));
-        }
-
-        let Some(tail) = this.tail.as_mut() else {
-            return Poll::Ready(None);
-        };
-
-        Pin::new(tail).poll_frame(cx)
     }
 }
