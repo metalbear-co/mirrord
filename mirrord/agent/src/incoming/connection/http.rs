@@ -13,7 +13,7 @@ use super::{
     http_steal::{StealTask, UpgradeDataRx},
     ConnectionInfo, IncomingIO, IncomingStream,
 };
-use crate::http::extract_requests::{BoxResponse, ExtractedRequest};
+use crate::http::{extract_requests::ExtractedRequest, BoxResponse};
 
 /// A redirected HTTP request.
 ///

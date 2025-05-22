@@ -10,23 +10,19 @@ use std::{
 
 use bytes::Bytes;
 use futures::{future::Either, FutureExt, Stream};
-use http_body_util::combinators::BoxBody;
 use hyper::{
     body::{Frame, Incoming},
     http::request::Parts,
     server::conn::{http1, http2},
     service::Service,
     upgrade::OnUpgrade,
-    Error, Request, Response,
+    Error, Request,
 };
 use hyper_util::rt::TokioExecutor;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
-use super::{error::MirrordErrorResponse, HttpVersion};
-
-/// [`Response`] type used by [`ExtractedRequest`].
-pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;
+use super::{error::MirrordErrorResponse, BoxResponse, HttpVersion};
 
 /// An HTTP request extracted from an HTTP connection
 /// with [`ExtractedRequests`].

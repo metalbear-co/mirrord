@@ -2,8 +2,10 @@ use std::fmt;
 
 use axum::response::Response;
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full};
 use hyper::http::{StatusCode, Version};
+
+use super::BoxResponse;
 
 /// HTTP response produced by the agent when it fails to serve a redirected request.
 ///
@@ -22,7 +24,7 @@ impl MirrordErrorResponse {
     }
 }
 
-impl From<MirrordErrorResponse> for Response<BoxBody<Bytes, hyper::Error>> {
+impl From<MirrordErrorResponse> for BoxResponse {
     fn from(value: MirrordErrorResponse) -> Self {
         Response::builder()
             .status(StatusCode::BAD_GATEWAY)
