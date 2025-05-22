@@ -30,7 +30,7 @@ where
         match version {
             HttpVersion::V1 => {
                 let (sender, conn) = http1::handshake(io).await?;
-                tokio::spawn(conn);
+                tokio::spawn(conn.with_upgrades());
                 Ok(Self::V1(sender))
             }
             HttpVersion::V2 => {

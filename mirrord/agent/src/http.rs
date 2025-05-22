@@ -13,6 +13,7 @@ use tracing::Level;
 
 use crate::util::rolledback_stream::RolledBackStream;
 
+pub mod body;
 pub mod error;
 pub mod extract_requests;
 pub mod filter;

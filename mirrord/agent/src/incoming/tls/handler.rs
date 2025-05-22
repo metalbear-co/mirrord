@@ -5,7 +5,7 @@ use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::UriExt;
 use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::{client, TlsAcceptor, TlsConnector};
+use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 
 /// Provides a [`TlsAcceptor`] and a [`PassThroughTlsConnector`] to allow for filtered stealing on
 /// TLS connections.
@@ -80,7 +80,7 @@ impl PassThroughTlsConnector {
         server_ip: IpAddr,
         request_uri: Option<&Uri>,
         stream: IO,
-    ) -> io::Result<Box<client::TlsStream<IO>>>
+    ) -> io::Result<Box<TlsStream<IO>>>
     where
         IO: AsyncRead + AsyncWrite + Unpin,
     {
@@ -105,6 +105,7 @@ impl PassThroughTlsConnector {
                     "Failed to make a TLS connection to the original destination.",
                 );
             })
+            .map(TlsStream::Client)
             .map(Box::new)
     }
 
