@@ -59,7 +59,6 @@ hyper = { workspace = true, features = ["full"] }
 hyper-util.workspace = true
 httparse = "1"
 fancy-regex = { workspace = true }
-dashmap = { version = "6" }
 oci-spec = "0.7.0"
 tonic = "0.12"
 tower.workspace = true

@@ -103,6 +103,15 @@ impl RedirectedHttp {
     }
 }
 
+impl fmt::Debug for RedirectedHttp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedirectedHttp")
+            .field("info", &self.info)
+            .field("request", &self.request)
+            .finish()
+    }
+}
+
 /// Steal handle to a redirected HTTP request.
 pub struct StolenHttp {
     pub info: ConnectionInfo,

@@ -1,25 +1,25 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
+    fmt,
     ops::Not,
-    sync::{atomic::Ordering, Arc},
+    sync::atomic::Ordering,
 };
-
-use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
-use mirrord_protocol::{Port, RemoteResult, ResponseError};
 
 use crate::{
     http::filter::HttpFilter,
-    incoming::{RedirectedConnection, RedirectorTaskError, StealHandle},
+    incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
     metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
-    util::{protocol_version::ClientProtocolVersion, ClientId},
+    util::ClientId,
 };
 
 /// Set of active port subscriptions.
+///
+/// Responsible for managing port redirections and steal port subscription metrics.
 pub struct PortSubscriptions {
     /// Used to request port redirections and fetch redirected connections.
     handle: StealHandle,
     /// Maps ports to active subscriptions.
-    subscriptions: HashMap<Port, PortSubscription>,
+    subscriptions: HashMap<u16, PortSubscription>,
 }
 
 impl Drop for PortSubscriptions {
@@ -40,17 +40,23 @@ impl Drop for PortSubscriptions {
     }
 }
 
+impl fmt::Debug for PortSubscriptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PortSubscriptions")
+            .field("subscriptions", &self.subscriptions)
+            .finish()
+    }
+}
+
 impl PortSubscriptions {
     /// Create an empty instance of this struct.
     ///
-    /// # Params
-    ///
-    /// * `handle` - will be used to enforce connection stealing according to the state of this set.
-    /// * `initial_capacity` - initial capacity for the inner (port -> subscription) mapping.
-    pub fn new(handle: StealHandle, initial_capacity: usize) -> Self {
+    /// The given [`StealHandle`] will be used to enforce connection stealing according to the state
+    /// of this set.
+    pub fn new(handle: StealHandle) -> Self {
         Self {
             handle,
-            subscriptions: HashMap::with_capacity(initial_capacity),
+            subscriptions: Default::default(),
         }
     }
 
@@ -61,50 +67,39 @@ impl PortSubscriptions {
     /// * A single client may have only one subscription for the given port
     /// * A single port may have only one unfiltered subscription
     ///
+    /// When a new subscription clashes with an existing one, the old one is replaced.
+    ///
     /// # Params
     ///
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the port to steal from
-    /// * `client_protocol_version` - version of client's [`mirrord_protocol`], [`None`] if the
-    ///   version has not been negotiated yet
     /// * `filter` - optional [`HttpFilter`]
     pub async fn add(
         &mut self,
         client_id: ClientId,
-        port: Port,
-        client_protocol_version: ClientProtocolVersion,
+        port: u16,
         filter: Option<HttpFilter>,
-    ) -> Result<RemoteResult<Port>, RedirectorTaskError> {
-        let filtered = filter.is_some();
+    ) -> Result<(), RedirectorTaskError> {
+        let metric = if filter.is_some() {
+            &STEAL_FILTERED_PORT_SUBSCRIPTION
+        } else {
+            &STEAL_UNFILTERED_PORT_SUBSCRIPTION
+        };
 
         match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => {
-                if e.get_mut()
-                    .try_extend(client_id, client_protocol_version, filter)
-                    .not()
-                {
-                    return Ok(Err(ResponseError::PortAlreadyStolen(port)));
-                }
+                e.get_mut().merge(client_id, filter);
             }
 
             Entry::Vacant(e) => {
                 self.handle.steal(port).await?;
-
-                e.insert(PortSubscription::new(
-                    client_id,
-                    client_protocol_version,
-                    filter,
-                ));
+                e.insert(PortSubscription::new(client_id, filter));
             }
         };
 
-        if filtered {
-            STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
-        } else {
-            STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
-        }
+        metric.fetch_add(1, Ordering::Relaxed);
 
-        Ok(Ok(port))
+        Ok(())
     }
 
     /// Remove a subscription from this set, if it exists.
@@ -113,7 +108,7 @@ impl PortSubscriptions {
     ///
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the subscription port
-    pub fn remove(&mut self, client_id: ClientId, port: Port) {
+    pub fn remove(&mut self, client_id: ClientId, port: u16) {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
             return;
         };
@@ -175,32 +170,31 @@ impl PortSubscriptions {
             });
     }
 
-    /// Wait until there's a new redirected connection.
-    pub async fn next_connection(
+    /// Wait until there's new stolen traffic available.
+    pub async fn next(
         &mut self,
-    ) -> Result<(RedirectedConnection, PortSubscription), RedirectorTaskError> {
+    ) -> Option<Result<(StolenTraffic, &PortSubscription), RedirectorTaskError>> {
         loop {
-            let conn = self.handle.next().await.transpose()?;
-
-            let Some(conn) = conn else {
-                break std::future::pending().await;
+            let traffic = match self.handle.next().await? {
+                Ok(traffic) => traffic,
+                Err(err) => return Some(Err(err)),
             };
 
-            if let Some(subscription) = self.subscriptions.get(&conn.destination().port()) {
-                break Ok((conn, subscription.clone()));
+            let port = traffic.info().original_destination.port();
+            if let Some(subscription) = self.subscriptions.get(&port) {
+                break Some(Ok((traffic, subscription)));
             }
+
+            tracing::warn!(
+                ?traffic,
+                "Received stolen traffic for a port that is no longer stolen, dropping",
+            );
         }
     }
 }
 
-/// Maps id of the client to their active [`HttpFilter`] and their negotiated [`mirrord_protocol`]
-/// version, if any.
-///
-/// [`mirrord_protocol`] version affects which stolen requests can be handled by the client.
-pub type Filters = Arc<DashMap<ClientId, (HttpFilter, ClientProtocolVersion)>>;
-
 /// Steal subscription for a port.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PortSubscription {
     /// No filter, incoming connections are stolen whole on behalf of the client.
     ///
@@ -210,53 +204,33 @@ pub enum PortSubscription {
     /// filter owner).
     ///
     /// Can be shared by multiple clients.
-    Filtered(Filters),
+    Filtered(HashMap<ClientId, HttpFilter>),
 }
 
 impl PortSubscription {
     /// Create a new instance. Variant is picked based on the optional `filter`.
-    fn new(
-        client_id: ClientId,
-        client_protocol_version: ClientProtocolVersion,
-        filter: Option<HttpFilter>,
-    ) -> Self {
+    fn new(client_id: ClientId, filter: Option<HttpFilter>) -> Self {
         match filter {
-            Some(filter) => Self::Filtered(Arc::new(DashMap::from_iter([(
-                client_id,
-                (filter, client_protocol_version),
-            )]))),
+            Some(filter) => Self::Filtered(HashMap::from_iter([(client_id, filter)])),
             None => Self::Unfiltered(client_id),
         }
     }
 
-    /// Try extending this subscription with a new subscription request.
-    /// Return whether extension was successful.
-    fn try_extend(
-        &mut self,
-        client_id: ClientId,
-        client_protocol_version: ClientProtocolVersion,
-        filter: Option<HttpFilter>,
-    ) -> bool {
-        match (self, filter) {
-            (_, None) => false,
-
-            (Self::Unfiltered(..), _) => false,
-
-            (Self::Filtered(filters), Some(filter)) => match filters.entry(client_id) {
-                DashMapEntry::Occupied(..) => false,
-                DashMapEntry::Vacant(e) => {
-                    e.insert((filter, client_protocol_version));
-                    true
-                }
-            },
+    /// Merge this subscription with a new one.
+    fn merge(&mut self, client_id: ClientId, mut filter: Option<HttpFilter>) {
+        if let Self::Filtered(filters) = self {
+            if let Some(filter) = filter.take() {
+                filters.insert(client_id, filter);
+                return;
+            }
         }
+
+        *self = Self::new(client_id, filter);
     }
 }
 
 #[cfg(test)]
 mod test {
-    use mirrord_protocol::ResponseError;
-
     use crate::{
         http::filter::HttpFilter,
         incoming::{test::DummyRedirector, RedirectorTask},
@@ -281,161 +255,35 @@ mod test {
     #[tokio::test]
     async fn multiple_subscriptions_one_port() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle) = RedirectorTask::new(redirector);
+        let (redirector_task, steal_handle) = RedirectorTask::new(redirector, Default::default());
         tokio::spawn(redirector_task.run());
-        let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
+        let mut subscriptions = PortSubscriptions::new(steal_handle);
 
         // Adding unfiltered subscription.
+        subscriptions.add(0, 80, None).await.unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
+        assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
+
+        // Another client's subscription should overwrite.
+        subscriptions.add(1, 80, None).await.unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
+        assert!(matches!(sub, PortSubscription::Unfiltered(1)), "{sub:?}");
+
+        // Same client's next subscription should overwrite.
         subscriptions
-            .add(0, 80, Default::default(), None)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-
-        // Same client cannot subscribe again (unfiltered).
-        assert_eq!(
-            subscriptions
-                .add(0, 80, Default::default(), None)
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-
-        // Same client cannot subscribe again (filtered).
-        assert_eq!(
-            subscriptions
-                .add(0, 80, Default::default(), Some(dummy_filter()))
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-
-        // Another client cannot subscribe (unfiltered).
-        assert_eq!(
-            subscriptions
-                .add(1, 80, Default::default(), None)
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-
-        // Another client cannot subscribe (filtered).
-        assert_eq!(
-            subscriptions
-                .add(1, 80, Default::default(), Some(dummy_filter()))
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-
-        // Removing unfiltered subscription.
-        subscriptions.remove(0, 80);
-
-        // Checking if all is cleaned up.
-        state
-            .wait_for(|state| state.has_redirections([]))
+            .add(1, 80, Some(dummy_filter()))
             .await
             .unwrap();
-        let sub = subscriptions.subscriptions.get(&80);
-        assert!(sub.is_none(), "{sub:?}");
-
-        // Adding filtered subscription.
-        subscriptions
-            .add(0, 80, Default::default(), Some(dummy_filter()))
-            .await
-            .unwrap()
-            .unwrap();
         assert!(state.borrow().has_redirections([80]));
         let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
-            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
+            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1 && sub.has_client(1)),
             "{sub:?}"
         );
 
-        // Same client cannot subscribe again (unfiltered).
-        assert_eq!(
-            subscriptions
-                .add(0, 80, Default::default(), None)
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(
-            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
-            "{sub:?}"
-        );
-
-        // Same client cannot subscribe again (filtered).
-        assert_eq!(
-            subscriptions
-                .add(0, 80, Default::default(), Some(dummy_filter()))
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(
-            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
-            "{sub:?}"
-        );
-
-        // Another client cannot subscribe (unfiltered).
-        assert_eq!(
-            subscriptions
-                .add(1, 80, Default::default(), None)
-                .await
-                .unwrap(),
-            Err(ResponseError::PortAlreadyStolen(80)),
-        );
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(
-            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
-            "{sub:?}"
-        );
-
-        // Another client can subscribe (filtered).
-        subscriptions
-            .add(1, 80, Default::default(), Some(dummy_filter()))
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(state.borrow().has_redirections([80]));
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(
-            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 2),
-            "{sub:?}"
-        );
-
-        // Removing first subscription.
-        subscriptions.remove(0, 80);
-
-        // Checking if the second subscription still exists.
-        let sub = subscriptions.subscriptions.get(&80).unwrap();
-        assert!(
-            matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
-            "{sub:?}"
-        );
-
-        // Removing second subscription.
+        // Removing the subscription.
         subscriptions.remove(1, 80);
 
         // Checking if all is cleaned up.
@@ -450,22 +298,17 @@ mod test {
     #[tokio::test]
     async fn multiple_subscriptions_multiple_ports() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle) = RedirectorTask::new(redirector);
+        let (redirector_task, steal_handle) = RedirectorTask::new(redirector, Default::default());
         tokio::spawn(redirector_task.run());
-        let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
+        let mut subscriptions = PortSubscriptions::new(steal_handle);
 
         // Adding unfiltered subscription for port 80.
-        subscriptions
-            .add(0, 80, Default::default(), None)
-            .await
-            .unwrap()
-            .unwrap();
+        subscriptions.add(0, 80, None).await.unwrap();
 
         // Adding filtered subscription for port 81.
         subscriptions
-            .add(1, 81, Default::default(), Some(dummy_filter()))
+            .add(1, 81, Some(dummy_filter()))
             .await
-            .unwrap()
             .unwrap();
 
         // Checking state.
@@ -485,7 +328,6 @@ mod test {
         subscriptions.remove(1, 81);
 
         // Checking if all is cleaned up.
-        // check_redirector!(subscriptions.redirector);
         state
             .wait_for(|state| state.has_redirections([]))
             .await
@@ -499,22 +341,17 @@ mod test {
     #[tokio::test]
     async fn remove_all_from_client() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle) = RedirectorTask::new(redirector);
+        let (redirector_task, steal_handle) = RedirectorTask::new(redirector, Default::default());
         tokio::spawn(redirector_task.run());
-        let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
+        let mut subscriptions = PortSubscriptions::new(steal_handle);
 
         // Adding unfiltered subscription for port 80.
-        subscriptions
-            .add(0, 80, Default::default(), None)
-            .await
-            .unwrap()
-            .unwrap();
+        subscriptions.add(0, 80, None).await.unwrap();
 
         // Adding filtered subscription for port 81.
         subscriptions
-            .add(0, 81, Default::default(), Some(dummy_filter()))
+            .add(0, 81, Some(dummy_filter()))
             .await
-            .unwrap()
             .unwrap();
 
         // Checking state.

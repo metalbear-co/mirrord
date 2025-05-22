@@ -1,6 +1,7 @@
 use std::{fmt, io, net::IpAddr, sync::Arc};
 
 use http::Uri;
+use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::UriExt;
 use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -116,6 +117,15 @@ impl PassThroughTlsConnector {
             .alpn_protocols
             .first()
             .map(|proto| proto.as_slice())
+    }
+}
+
+impl From<PassThroughTlsConnector> for IncomingTrafficTransportType {
+    fn from(value: PassThroughTlsConnector) -> Self {
+        Self::Tls {
+            alpn_protocol: value.alpn_protocol().map(Vec::from),
+            server_name: value.server_name().map(|name| name.to_str().into_owned()),
+        }
     }
 }
 

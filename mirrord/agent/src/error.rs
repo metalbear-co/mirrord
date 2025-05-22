@@ -45,6 +45,9 @@ pub(crate) enum AgentError {
     #[error("Exhausted possible identifiers for incoming connections.")]
     ExhaustedConnectionId,
 
+    #[error("Failed to parse the given HTTP filter: {0}")]
+    InvalidHttpFilter(#[from] fancy_regex::Error),
+
     #[error("Timeout on accepting first client connection")]
     FirstConnectionTimeout,
 

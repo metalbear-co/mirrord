@@ -92,6 +92,14 @@ impl RedirectedTcp {
     }
 }
 
+impl fmt::Debug for RedirectedTcp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedirectedTcp")
+            .field("info", &self.info)
+            .finish()
+    }
+}
+
 /// Steal handle to a redirected connection.
 pub struct StolenTcp {
     pub info: ConnectionInfo,

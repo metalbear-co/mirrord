@@ -1,5 +1,3 @@
-use std::ops::Not;
-
 use mirrord_agent_env::envs;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -10,7 +8,7 @@ use crate::{
     error::{AgentError, AgentResult},
     incoming::{self, tls::StealTlsHandlerStore, RedirectorTask, StealHandle},
     sniffer::{messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{StealerCommand, TcpConnectionStealer},
+    steal::{StealerCommand, TcpStealerTask},
     util::{
         path_resolver::InTargetPathResolver,
         remote_runtime::{BgTaskRuntime, IntoStatus},
@@ -93,21 +91,12 @@ pub(super) async fn start_sniffer(
 
 pub(super) fn start_stealer(
     runtime: &BgTaskRuntime,
-    target_pid: u64,
     steal_handle: StealHandle,
-    cancellation_token: CancellationToken,
 ) -> BackgroundTask<StealerCommand> {
     let (command_tx, command_rx) = mpsc::channel::<StealerCommand>(1000);
 
-    let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
-    let tls_handler_store = tls_steal_config.is_empty().not().then(|| {
-        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid))
-    });
     let task_status = runtime
-        .spawn(
-            TcpConnectionStealer::new(command_rx, steal_handle, tls_handler_store)
-                .start(cancellation_token),
-        )
+        .spawn(TcpStealerTask::new(command_rx, steal_handle).run())
         .into_status("TcpStealerTask");
 
     BackgroundTask::Running(task_status, command_tx)

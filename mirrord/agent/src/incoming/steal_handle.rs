@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 
 use super::{
-    connection::{http::RedirectedHttp, tcp::RedirectedTcp},
+    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo},
     error::RedirectorTaskError,
     task::{StealRequest, TaskError},
 };
@@ -86,9 +86,19 @@ impl StealHandle {
     }
 }
 
+#[derive(Debug)]
 pub enum StolenTraffic {
     Tcp(RedirectedTcp),
     Http(RedirectedHttp),
+}
+
+impl StolenTraffic {
+    pub fn info(&self) -> &ConnectionInfo {
+        match self {
+            StolenTraffic::Tcp(conn) => conn.info(),
+            StolenTraffic::Http(conn) => conn.info(),
+        }
+    }
 }
 
 impl fmt::Debug for StealHandle {

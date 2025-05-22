@@ -19,7 +19,6 @@ use mirrord_agent_iptables::{
     error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -46,7 +45,7 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
-    steal::{self, StealerCommand, TcpStealerApi},
+    steal::{StealerCommand, TcpStealerApi},
     util::{
         protocol_version::ClientProtocolVersion,
         remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
@@ -55,10 +54,6 @@ use crate::{
 };
 
 mod setup;
-
-/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
-/// task.
-const CHANNEL_SIZE: usize = 1024;
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
 /// when dirty iptables are detected.
@@ -329,15 +324,7 @@ impl ClientConnectionHandler {
         connection: &mut ClientConnection,
     ) -> AgentResult<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
-            match TcpStealerApi::new(
-                id,
-                protocol_version,
-                stealer_sender,
-                stealer_status,
-                CHANNEL_SIZE,
-            )
-            .await
-            {
+            match TcpStealerApi::new(id, protocol_version, stealer_sender, stealer_status).await {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
                     let _ = connection
@@ -411,8 +398,7 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(StealerMessage::TcpSteal(message)) => self.respond(DaemonMessage::TcpSteal(message)).await?,
-                    Ok(StealerMessage::LogMessage(log)) => self.respond(DaemonMessage::LogMessage(log)).await?,
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
@@ -510,13 +496,21 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpSteal(message) => {
-                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api.handle_client_message(message).await?
+                let error = if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
+                    tcp_stealer_api
+                        .handle_client_message(message)
+                        .await
+                        .err()
+                        .map(|error| error.to_string())
                 } else {
-                    self.respond(DaemonMessage::Close(
-                        "incoming traffic stealing is not available in the targetless mode".into(),
-                    ))
-                    .await?;
+                    Some(
+                        "incoming traffic stealing is not available in the targetless mode"
+                            .to_string(),
+                    )
+                };
+
+                if let Some(error) = error {
+                    self.respond(DaemonMessage::Close(error)).await?;
                 }
             }
             ClientMessage::Close => {
@@ -699,12 +693,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         None => BackgroundTask::Disabled,
         Some(pid) => {
             let steal_handle = setup::start_traffic_redirector(&state.network_runtime, pid).await?;
-            setup::start_stealer(
-                &state.network_runtime,
-                pid,
-                steal_handle,
-                cancellation_token.clone(),
-            )
+            setup::start_stealer(&state.network_runtime, steal_handle)
         }
     };
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
