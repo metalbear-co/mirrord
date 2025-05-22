@@ -25,7 +25,7 @@ pub mod mode;
 ///
 /// Changes file operations behavior based on user configuration.
 ///
-/// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
+/// See the file operations [reference](https://metalbear.co/mirrord/docs/reference/fileops/)
 /// for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup
 /// mirrord file operations.
 ///
