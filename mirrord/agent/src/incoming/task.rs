@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
-    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo, MaybeHttp},
+    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo, IncomingIO, MaybeHttp},
     error::RedirectorTaskError,
     steal_handle::{StealHandle, StolenTraffic},
     tls::StealTlsHandlerStore,
@@ -118,7 +118,7 @@ where
         let source = conn.source;
         let destination = conn.destination;
 
-        if self.ports.get(&conn.destination.port()).is_none() {
+        if self.ports.contains_key(&conn.destination.port()).not() {
             tracing::warn!(
                 %source,
                 %destination,
@@ -169,9 +169,8 @@ where
 
         let tx = self.internal_tx.clone();
         let token = state.http_shutdown.clone();
+        let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
         tokio::spawn(async move {
-            let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
-
             loop {
                 let result = tokio::select! {
                     result = requests.next() => result,
@@ -181,27 +180,40 @@ where
                     },
                 };
 
-                match result {
+                let request = match result {
                     None => break,
-                    Some(Ok(request)) => {
-                        let _ = tx
-                            .send(InternalMessage::Request(request, conn.info.clone()))
-                            .await;
-                    }
+                    Some(Ok(request)) => request,
                     Some(Err(error)) => {
                         tracing::warn!(
                             error = %Report::new(error),
                             connection = ?conn.info,
                             "Redirected HTTP connection failed",
-                        )
+                        );
+                        break;
                     }
+                };
+
+                if tx
+                    .send(InternalMessage::Request(request, conn.info.clone()))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        info = ?conn.info,
+                        "Redirected HTTP request dropped",
+                    );
+                    break;
                 }
             }
         });
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_stolen_request(&self, request: ExtractedRequest, info: ConnectionInfo) {
+    async fn handle_stolen_request(
+        &self,
+        request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+        info: ConnectionInfo,
+    ) {
         let Some(state) = self.ports.get(&info.original_destination.port()) else {
             tracing::warn!(
                 ?request,
@@ -356,7 +368,10 @@ impl fmt::Debug for TaskError {
 enum InternalMessage {
     DeadChannel(u16),
     ConnInitialized(MaybeHttp),
-    Request(ExtractedRequest, ConnectionInfo),
+    Request(
+        ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+        ConnectionInfo,
+    ),
 }
 
 /// State of a single port in the [`RedirectorTask`].

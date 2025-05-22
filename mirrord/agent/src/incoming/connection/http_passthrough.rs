@@ -17,7 +17,7 @@ use hyper_util::rt::TokioIo;
 use mirrord_tls_util::MaybeTls;
 use tokio::net::TcpStream;
 
-use super::ConnectionInfo;
+use super::{ConnectionInfo, IncomingIO};
 use crate::{
     http::{
         error::MirrordErrorResponse, extract_requests::ExtractedRequest, sender::HttpSender,
@@ -34,7 +34,7 @@ pub struct PassThroughTask {
 
 impl PassThroughTask {
     /// Runs this task until the request is finished.
-    pub async fn run(self, extracted: ExtractedRequest) {
+    pub async fn run(self, extracted: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>) {
         let uri = extracted.parts.uri.clone();
         let method = extracted.parts.method.clone();
 
@@ -48,7 +48,10 @@ impl PassThroughTask {
         }
     }
 
-    async fn run_inner(&self, extracted: ExtractedRequest) -> Result<(), ConnError> {
+    async fn run_inner(
+        &self,
+        extracted: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+    ) -> Result<(), ConnError> {
         let version = extracted.parts.version;
 
         let mut sender = match self.make_connection(&extracted.parts).await {
@@ -65,7 +68,7 @@ impl PassThroughTask {
             head: extracted.body_head.into_iter(),
             tail: extracted.body_tail,
         };
-        let incoming_upgrade = extracted.on_upgrade;
+        let incoming_upgrade = extracted.upgrade;
         let mut response = match sender
             .send(Request::from_parts(extracted.parts, body))
             .await
@@ -92,10 +95,11 @@ impl PassThroughTask {
         let (mut outgoing, mut incoming) = tokio::try_join!(
             outgoing_upgrade
                 .map_ok(TokioIo::new)
-                .map_err(|error| ConnError::PassthroughHttpError(error.into())),
+                .map_err(ConnError::PassthroughHttpError),
             incoming_upgrade
+                .upgrade
                 .map_ok(TokioIo::new)
-                .map_err(|error| ConnError::IncomingHttpError(error.into())),
+                .map_err(ConnError::IncomingHttpError),
         )?;
 
         tokio::io::copy_bidirectional(&mut outgoing, &mut incoming)

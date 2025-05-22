@@ -2,7 +2,7 @@ use std::ops::Not;
 
 use bytes::BytesMut;
 use http_body_util::BodyExt;
-use hyper::{body::Incoming, upgrade::OnUpgrade};
+use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -10,9 +10,12 @@ use tokio::{
 };
 
 use super::IncomingStreamItem;
-use crate::incoming::{
-    connection::{util::StealerSender, IncomingIO},
-    error::{ConnError, StealerDropped},
+use crate::{
+    http::extract_requests::HttpUpgrade,
+    incoming::{
+        connection::{util::StealerSender, IncomingIO},
+        error::{ConnError, StealerDropped},
+    },
 };
 
 pub type UpgradeDataRx = mpsc::Receiver<Vec<u8>>;
@@ -22,9 +25,7 @@ pub struct StealTask {
     /// Frames that we need to send to the stealing client.
     pub body_tail: Option<Incoming>,
     /// Extracted from the original request.
-    ///
-    /// **Important**: the exact type is `expect`ed to be `TokioIo<Box<dyn IncomingIO>>`.
-    pub on_upgrade: OnUpgrade,
+    pub on_upgrade: HttpUpgrade<TokioIo<Box<dyn IncomingIO>>>,
     /// Channel we use to receive an HTTP upgrade from the stealing client.
     pub upgrade_rx: oneshot::Receiver<Option<UpgradeDataRx>>,
     /// Channel we use to send data to the stealing client.
@@ -74,21 +75,17 @@ impl StealTask {
             Err(..) => return Err(StealerDropped.into()),
         };
 
-        let upgraded = (&mut self.on_upgrade)
+        let (upgraded, read_buf) = (&mut self.on_upgrade)
             .await
             .map_err(ConnError::IncomingHttpError)?;
 
-        let parts_upgraded = upgraded
-            .downcast::<TokioIo<Box<dyn IncomingIO>>>()
-            .expect("io type is known");
-
-        if parts_upgraded.read_buf.is_empty().not() {
+        if read_buf.is_empty().not() {
             self.tx
-                .send(IncomingStreamItem::Data(parts_upgraded.read_buf.into()))
+                .send(IncomingStreamItem::Data(read_buf.into()))
                 .await?;
         }
 
-        let mut upgraded = parts_upgraded.io.into_inner();
+        let mut upgraded = upgraded.into_inner();
         let mut buffer = BytesMut::with_capacity(64 * 1024);
 
         let mut stealer_writes = true;
