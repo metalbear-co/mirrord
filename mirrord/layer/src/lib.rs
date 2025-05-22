@@ -200,11 +200,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .unwrap_or_default();
 
     #[cfg(target_os = "macos")]
-    let skip_patch_binaries = config
-        .skip_sip
-        .clone()
-        .map(|x| x.to_vec())
-        .unwrap_or_default();
+    let skip_patch_binaries = config.skip_sip.to_vec();
 
     // SIP Patch the process' binary then re-execute it. Needed
     // for https://github.com/metalbear-co/mirrord/issues/1529
