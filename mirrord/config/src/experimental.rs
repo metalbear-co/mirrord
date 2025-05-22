@@ -82,6 +82,12 @@ pub struct ExperimentalConfig {
     /// Defaults to 3000ms.
     #[config(default = 3000)]
     pub idle_local_http_connection_timeout: u64,
+
+    /// ### _experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}
+    ///
+    /// Disables any system wide proxy configuration for affecting the running application.
+    #[config(default = false)]
+    pub ignore_system_proxy_config: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
