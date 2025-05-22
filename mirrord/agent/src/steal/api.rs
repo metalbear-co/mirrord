@@ -75,7 +75,7 @@ pub struct TcpStealerApi {
 }
 
 impl TcpStealerApi {
-    /// Size of the [`mpsc`](tokio::sync::mpsc) channel connecting this API
+    /// Size of the [`mpsc`] channel connecting this API
     /// with the background task.
     const CHANNEL_SIZE: usize = 64;
 

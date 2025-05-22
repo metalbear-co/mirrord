@@ -74,7 +74,7 @@ impl PassThroughTlsConnector {
     /// 2. Request URI (if have a request)
     /// 3. Original destination ip
     ///
-    /// Returns the [`client::TlsStream`] boxed, as its size exceeds 1kb.
+    /// Returns the [`TlsStream`] boxed, as its size exceeds 1kb.
     pub async fn connect<IO>(
         &self,
         server_ip: IpAddr,
