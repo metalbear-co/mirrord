@@ -4,7 +4,7 @@ use http::Uri;
 use mirrord_tls_util::UriExt;
 use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::{client, TlsAcceptor, TlsConnector};
+use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 
 /// Provides a [`TlsAcceptor`] and a [`PassThroughTlsConnector`] to allow for filtered stealing on
 /// TLS connections.
@@ -73,13 +73,13 @@ impl PassThroughTlsConnector {
     /// 2. Request URI (if have a request)
     /// 3. Original destination ip
     ///
-    /// Returns the [`client::TlsStream`] boxed, as its size exceeds 1kb.
+    /// Returns the [`TlsStream`] boxed, as its size exceeds 1kb.
     pub async fn connect<IO>(
         &self,
         server_ip: IpAddr,
         request_uri: Option<&Uri>,
         stream: IO,
-    ) -> io::Result<Box<client::TlsStream<IO>>>
+    ) -> io::Result<Box<TlsStream<IO>>>
     where
         IO: AsyncRead + AsyncWrite + Unpin,
     {
@@ -104,6 +104,7 @@ impl PassThroughTlsConnector {
                     "Failed to make a TLS connection to the original destination.",
                 );
             })
+            .map(TlsStream::Client)
             .map(Box::new)
     }
 
