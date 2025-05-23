@@ -505,11 +505,21 @@ impl LayerConfig {
             }
         }
 
-        self.feature
-            .network
-            .incoming
-            .https_delivery
-            .verify(context)?;
+        match (
+            &self.feature.network.incoming.https_delivery,
+            &self.feature.network.incoming.tls_delivery,
+        ) {
+            (Some(..), Some(..)) => {
+                return Err(ConfigError::Conflict(
+                    "Cannot use both `feature.network.incoming.https_delivery` \
+                    and `feature.network.incoming.tls_delivery` at the same time"
+                        .to_string(),
+                ));
+            }
+            (Some(config), ..) => config.verify(context)?,
+            (.., Some(config)) => config.verify(context)?,
+            (None, None) => {}
+        }
 
         if !self.feature.copy_target.enabled
             && self
@@ -1015,6 +1025,7 @@ mod tests {
                             on_concurrent_steal: None,
                             ports: None,
                             https_delivery: Default::default(),
+                            tls_delivery: Default::default(),
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
