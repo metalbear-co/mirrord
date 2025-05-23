@@ -10,12 +10,15 @@ use hyper::body::{Body, Frame, Incoming};
 
 /// [`Body`] that consist of some first [`Frame`]s that were already received,
 /// and the optional rest of the body.
-pub struct RolledBackBody {
+pub struct RolledBackBody<B = Incoming> {
     pub head: vec::IntoIter<Frame<Bytes>>,
-    pub tail: Option<Incoming>,
+    pub tail: Option<B>,
 }
 
-impl Body for RolledBackBody {
+impl<B> Body for RolledBackBody<B>
+where
+    B: Body<Data = Bytes, Error = hyper::Error> + Unpin,
+{
     type Data = Bytes;
     type Error = hyper::Error;
 

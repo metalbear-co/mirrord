@@ -17,7 +17,7 @@ use std::{
 
 use composed::ComposedRedirector;
 pub use connection::{
-    http::{ResponseProvider, StolenHttp},
+    http::{ResponseBodyProvider, ResponseProvider, StolenHttp},
     tcp::StolenTcp,
     IncomingStream, IncomingStreamItem,
 };

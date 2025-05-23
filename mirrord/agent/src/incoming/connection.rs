@@ -207,7 +207,7 @@ pub enum IncomingStreamItem {
     NoMoreFrames,
     /// Data after an HTTP upgrade.
     Data(Vec<u8>),
-    /// Data after an HTTP upgrade finished.
+    /// No more data after an HTTP upgrade.
     NoMoreData,
     /// Connection/request finished.
     Finished(Result<(), ConnError>),

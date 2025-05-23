@@ -11,10 +11,8 @@ use std::{
 
 use bytes::Bytes;
 use futures::StreamExt;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
     body::{Body, Frame},
-    http::StatusCode,
     Response,
 };
 use mirrord_protocol::{
@@ -36,7 +34,10 @@ use super::{Command, StealerCommand, StealerMessage};
 use crate::{
     error::AgentResult,
     http::filter::HttpFilter,
-    incoming::{IncomingStream, IncomingStreamItem, ResponseProvider, StolenHttp, StolenTcp},
+    incoming::{
+        IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider, StolenHttp,
+        StolenTcp,
+    },
     util::{protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus, ClientId},
     AgentError,
 };
@@ -138,10 +139,10 @@ impl TcpStealerApi {
         }
     }
 
-    fn send_response(
+    async fn send_response(
         &mut self,
-        response: HttpResponse<BoxBody<Bytes, hyper::Error>>,
-        frame_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+        response: HttpResponse<Vec<InternalHttpBodyFrame>>,
+        body_finished: bool,
     ) {
         if response.request_id != Self::REQUEST_ID {
             return;
@@ -153,19 +154,24 @@ impl TcpStealerApi {
             return;
         };
 
-        let mut hyper_response = Response::new(response.internal_response.body);
+        let mut hyper_response = Response::new(());
         *hyper_response.status_mut() = response.internal_response.status;
         *hyper_response.headers_mut() = response.internal_response.headers;
         *hyper_response.version_mut() = response.internal_response.version;
+        let (parts, _) = hyper_response.into_parts();
 
-        if hyper_response.status() == StatusCode::SWITCHING_PROTOCOLS {
-            let data_sender = response_tx.send_with_upgrade(hyper_response);
-            connection.data_tx.replace(data_sender);
-        } else {
-            response_tx.send(hyper_response);
+        let body_sender = response_tx.send(parts);
+
+        for frame in response.internal_response.body {
+            body_sender.send_frame(frame.into()).await;
         }
 
-        connection.response_frame_tx = frame_tx;
+        if body_finished {
+            let data_tx = body_sender.finish();
+            connection.data_tx = data_tx;
+        } else {
+            connection.response_body_tx.replace(body_sender);
+        }
     }
 
     /// Returns a [`DaemonMessage`] to be sent to the client.
@@ -223,7 +229,7 @@ impl TcpStealerApi {
                     data_tx: None,
                     request_in_progress: None,
                     response_tx: Some(response_provider),
-                    response_frame_tx: None,
+                    response_body_tx: None,
                 });
         self.incoming_streams.insert(connection_id, stream);
 
@@ -251,7 +257,10 @@ impl TcpStealerApi {
                     },
                     transport: info
                         .tls_connector
-                        .map(From::from)
+                        .map(|tls| IncomingTrafficTransportType::Tls {
+                            server_name: tls.server_name().map(|s| s.to_str().into_owned()),
+                            alpn_protocol: tls.alpn_protocol().map(Vec::from),
+                        })
                         .unwrap_or(IncomingTrafficTransportType::Tcp),
                 }),
             ));
@@ -354,7 +363,7 @@ impl TcpStealerApi {
                 data_tx: Some(data_tx),
                 request_in_progress: None,
                 response_tx: None,
-                response_frame_tx: None,
+                response_body_tx: None,
             },
         );
         self.incoming_streams.insert(connection_id, stream);
@@ -372,7 +381,10 @@ impl TcpStealerApi {
                 connection: new_connection,
                 transport: info
                     .tls_connector
-                    .map(From::from)
+                    .map(|tls| IncomingTrafficTransportType::Tls {
+                        server_name: tls.server_name().map(|s| s.to_str().into_owned()),
+                        alpn_protocol: tls.alpn_protocol().map(Vec::from),
+                    })
                     .unwrap_or(IncomingTrafficTransportType::Tcp),
             })
         } else {
@@ -529,29 +541,17 @@ impl TcpStealerApi {
             }
 
             LayerTcpSteal::HttpResponse(response) => {
-                let response = response.map_body(|body| {
-                    BoxBody::new(Full::new(Bytes::from_owner(body)).map_err(|_| unreachable!()))
-                });
-                self.send_response(response, None);
+                let response = response.map_body(|body| vec![InternalHttpBodyFrame::Data(body)]);
+                self.send_response(response, true).await;
             }
 
             LayerTcpSteal::HttpResponseFramed(response) => {
-                let response =
-                    response.map_body(|body| BoxBody::new(body.map_err(|_| unreachable!())));
-                self.send_response(response, None);
+                let response = response.map_body(|body| body.0.into_iter().collect());
+                self.send_response(response, true).await;
             }
 
             LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(response)) => {
-                let (frame_tx, frame_rx) = mpsc::channel(8);
-                let response = response.map_body(|body| {
-                    let body = ResponseBody {
-                        head: body.into_iter(),
-                        rx: frame_rx,
-                    };
-                    BoxBody::new(body.map_err(|_| unreachable!()))
-                });
-
-                self.send_response(response, Some(frame_tx));
+                self.send_response(response, false).await;
             }
 
             LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(body)) => {
@@ -568,18 +568,19 @@ impl TcpStealerApi {
                 let Some(connection) = self.connections.get_mut(&connection_id) else {
                     return Ok(());
                 };
-                let Some(frame_tx) = connection.response_frame_tx.as_mut() else {
+                let Some(frame_tx) = connection.response_body_tx.take() else {
                     return Ok(());
                 };
 
                 for frame in frames {
-                    if frame_tx.send(frame).await.is_err() {
-                        break;
-                    }
+                    frame_tx.send_frame(frame.into()).await;
                 }
 
                 if is_last {
-                    connection.response_frame_tx = None;
+                    let data_tx = frame_tx.finish();
+                    connection.data_tx = data_tx;
+                } else {
+                    connection.response_body_tx.replace(frame_tx);
                 }
             }
 
@@ -657,7 +658,7 @@ struct IncomingConnection {
     /// For sending the HTTP response body frames.
     ///
     /// (only for HTTP requests)
-    response_frame_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+    response_body_tx: Option<ResponseBodyProvider>,
 }
 
 fn frames_to_legacy<I: IntoIterator<Item = InternalHttpBodyFrame>>(frames: I) -> Vec<u8> {
