@@ -103,11 +103,11 @@ impl fmt::Debug for RedirectedTcp {
 /// Steal handle to a redirected connection.
 pub struct StolenTcp {
     pub info: ConnectionInfo,
+    /// Dropping this stream will be interpreted as dropping the connection.
     pub stream: IncomingStream,
     /// Can be used to send data to the peer.
     ///
-    /// Sending 0 bytes will be interpreted as a read shutdown.
-    /// Dropping this sender will be interpreted as closing the connection.
+    /// Dropping this sender will be interpreted as a write shutdown.
     pub data_tx: mpsc::Sender<Vec<u8>>,
 }
 
