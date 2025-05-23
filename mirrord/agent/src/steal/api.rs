@@ -123,7 +123,8 @@ impl TcpStealerApi {
         })
     }
 
-    /// Send `command` to stealer, with the client id of the client that is using this API instance.
+    /// Send the `command` to the stealer task,
+    /// with the client id of the client that is using this API instance.
     async fn send_command(&mut self, command: Command) -> AgentResult<()> {
         let command = StealerCommand {
             client_id: self.client_id,
@@ -514,14 +515,17 @@ impl TcpStealerApi {
             }
 
             LayerTcpSteal::Data(data) => {
-                let data_tx = self
-                    .connections
-                    .get(&data.connection_id)
-                    .and_then(|connection| connection.data_tx.as_ref());
+                let connection = self.connections.get_mut(&data.connection_id);
 
-                if let Some(data_tx) = data_tx {
-                    let _ = data_tx.send(data.bytes).await;
+                let Some(connection) = connection else {
+                    return Ok(());
                 };
+
+                if data.bytes.is_empty() {
+                    connection.data_tx = None;
+                } else if let Some(data_tx) = connection.data_tx.as_ref() {
+                    let _ = data_tx.send(data.bytes).await;
+                }
             }
 
             LayerTcpSteal::HttpResponse(response) => {
