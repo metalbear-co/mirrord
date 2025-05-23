@@ -1,19 +1,27 @@
 use std::fmt;
 
-use hyper::http::{request, HeaderMap, Method, Uri, Version};
+use bytes::Bytes;
+use futures::StreamExt;
+use http_body_util::{combinators::BoxBody, StreamBody};
+use hyper::{
+    body::Frame,
+    http::{request, response, HeaderMap, Method, StatusCode, Uri, Version},
+    Response,
+};
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
     sync::{mpsc, oneshot},
 };
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
     http_passthrough::PassThroughTask,
     http_steal::{StealTask, UpgradeDataRx},
     ConnectionInfo, IncomingIO, IncomingStream,
 };
-use crate::http::{extract_requests::ExtractedRequest, BoxResponse};
+use crate::http::{body::RolledBackBody, extract_requests::ExtractedRequest, BoxResponse};
 
 /// A redirected HTTP request.
 ///
@@ -145,30 +153,54 @@ pub struct RequestHead {
     pub body_finished: bool,
 }
 
-/// Can be used to by a stealing client to send an HTTP response for a stolen HTTP request.
+/// Can be used by a stealing client to send an HTTP response for a stolen HTTP request.
 pub struct ResponseProvider {
     response_tx: oneshot::Sender<BoxResponse>,
     upgrade_tx: oneshot::Sender<Option<UpgradeDataRx>>,
 }
 
 impl ResponseProvider {
-    /// Sends the response, notifying the request task that there is no HTTP upgrade.
-    pub fn send(self, response: BoxResponse) {
+    /// Sends the response to the original HTTP client.
+    ///
+    /// Returns a [`ResponseBodyProvider`].
+    pub fn send(self, parts: response::Parts) -> ResponseBodyProvider {
+        let has_upgrade = parts.status == StatusCode::SWITCHING_PROTOCOLS;
+        let (frame_tx, frame_rx) = mpsc::channel::<Frame<Bytes>>(8);
+        let body = RolledBackBody {
+            head: Default::default(),
+            tail: Some(StreamBody::new(ReceiverStream::new(frame_rx).map(Ok))),
+        };
+
+        let response = Response::from_parts(parts, BoxBody::new(body));
         let _ = self.response_tx.send(response);
-        let _ = self.upgrade_tx.send(None);
+
+        ResponseBodyProvider {
+            has_upgrade,
+            upgrade_tx: self.upgrade_tx,
+            frame_tx,
+        }
+    }
+}
+
+/// Can be used by a stealing client to send HTTP response body frames.
+pub struct ResponseBodyProvider {
+    has_upgrade: bool,
+    upgrade_tx: oneshot::Sender<Option<UpgradeDataRx>>,
+    frame_tx: mpsc::Sender<Frame<Bytes>>,
+}
+
+impl ResponseBodyProvider {
+    pub async fn send_frame(&self, frame: Frame<Bytes>) {
+        let _ = self.frame_tx.send(frame).await;
     }
 
-    /// Sends the response, notifying the request task that it should expect an HTTP upgrade.
+    /// Signals that the response body is finished.
     ///
-    /// Returns an [`mpsc::Sender`] that can be used to send raw data to the peer.
-    /// Dropping this sender will be interpreted as a write shutdown,
-    /// and will not terminate the connection right away.
-    pub fn send_with_upgrade(self, response: BoxResponse) -> mpsc::Sender<Vec<u8>> {
-        let (data_tx, data_rx) = mpsc::channel(8);
-
-        let _ = self.response_tx.send(response);
-        let _ = self.upgrade_tx.send(Some(data_rx));
-
+    /// Returns an optional channel to send data after an HTTP upgrade.
+    /// Dropping this channel will be interpreted as a write shutdown.
+    pub fn finish(self) -> Option<mpsc::Sender<Vec<u8>>> {
+        let (data_tx, data_rx) = self.has_upgrade.then(|| mpsc::channel(8)).unzip();
+        let _ = self.upgrade_tx.send(data_rx);
         data_tx
     }
 }

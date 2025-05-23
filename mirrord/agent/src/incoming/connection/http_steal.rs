@@ -20,13 +20,16 @@ use crate::{
 
 pub type UpgradeDataRx = mpsc::Receiver<Vec<u8>>;
 
-/// Background task responsible for handling IO on stolen HTTP request.
+/// Background task responsible for handling IO on a stolen HTTP request.
 pub struct StealTask {
     /// Frames that we need to send to the stealing client.
     pub body_tail: Option<Incoming>,
     /// Extracted from the original request.
     pub on_upgrade: HttpUpgrade<TokioIo<Box<dyn IncomingIO>>>,
-    /// Channel we use to receive an HTTP upgrade from the stealing client.
+    /// Channel we use to receive an optional HTTP upgrade from the stealing client.
+    ///
+    /// When a value is received on this channel, this task assumes that the HTTP exchange is
+    /// finished.
     pub upgrade_rx: oneshot::Receiver<Option<UpgradeDataRx>>,
     /// Channel we use to send data to the stealing client.
     pub tx: StealerSender<IncomingStreamItem>,
@@ -94,14 +97,13 @@ impl StealTask {
         while stealer_writes || peer_writes {
             tokio::select! {
                 result = data_rx.recv(), if stealer_writes => match result {
-                    Some(data) if data.is_empty() => {
-                        stealer_writes = false;
-                        upgraded.shutdown().await.map_err(ConnError::UpgradedError)?;
-                    }
                     Some(data) => {
                         upgraded.write_all(&data).await.map_err(ConnError::UpgradedError)?;
                     }
-                    None => return Err(StealerDropped.into()),
+                    None => {
+                        stealer_writes = false;
+                        upgraded.shutdown().await.map_err(ConnError::UpgradedError)?;
+                    }
                 },
 
                 result = upgraded.read_buf(&mut buffer), if peer_writes => {
