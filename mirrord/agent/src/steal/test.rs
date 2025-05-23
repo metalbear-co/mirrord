@@ -387,8 +387,7 @@ async fn multiple_filtered_subscriptions(
                 StealType::FilteredHttpEx(
                     setup.original_server.local_addr().unwrap().port(),
                     HttpFilter::Header(
-                        Filter::new(format!("{}: {id}", TestRequest::USER_ID_HEADER).into())
-                            .unwrap(),
+                        Filter::new(format!("{}: {id}", TestRequest::USER_ID_HEADER)).unwrap(),
                     ),
                 ),
                 setup.stealer_status.clone(),
