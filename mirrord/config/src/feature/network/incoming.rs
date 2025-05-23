@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 
 use bimap::BiMap;
-use https_delivery::LocalHttpsDelivery;
+use https_delivery::LocalTlsDelivery;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
@@ -135,6 +135,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
                 https_delivery: advanced.https_delivery,
+                tls_delivery: advanced.tls_delivery,
             },
         };
 
@@ -310,10 +311,14 @@ pub struct IncomingAdvancedFileConfig {
 
     /// ### https_delivery
     ///
-    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// DEPRECATED: use `tls_delivery` instead.
+    pub https_delivery: Option<LocalTlsDelivery>,
+
+    /// #### tls_delivery
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
-    #[serde(default)]
-    pub https_delivery: LocalHttpsDelivery,
+    pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -481,10 +486,14 @@ pub struct IncomingConfig {
 
     /// #### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
     ///
-    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// DEPRECATED: use `tls_delivery` instead.
+    pub https_delivery: Option<LocalTlsDelivery>,
+
+    /// #### feature.network.incoming.tls_delivery {#feature-network-incoming-tls_delivery}
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
-    #[serde(default)]
-    pub https_delivery: LocalHttpsDelivery,
+    pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
 impl IncomingConfig {
