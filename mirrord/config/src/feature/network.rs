@@ -19,7 +19,7 @@ pub mod outgoing;
 
 /// Controls mirrord network operations.
 ///
-/// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
+/// See the network traffic [reference](https://metalbear.co/mirrord/docs/reference/traffic/)
 /// for more details.
 ///
 /// ```json
