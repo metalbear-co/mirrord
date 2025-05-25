@@ -237,14 +237,16 @@ pub async fn create_queue_registry_resource(
                     "e2e-test-queue1".to_string(),
                     SplitQueue::Sqs(SqsQueueDetails {
                         name_source: QueueNameSource::EnvVar(QUEUE_NAME_ENV_VAR1.to_string()),
-                        ..Default::default()
+                        tags: None,
+                        fallback_name: None,
                     }),
                 ),
                 (
                     "e2e-test-queue2".to_string(),
                     SplitQueue::Sqs(SqsQueueDetails {
                         name_source: QueueNameSource::EnvVar(QUEUE2_URL_ENV_VAR.to_string()),
-                        ..Default::default()
+                        tags: None,
+                        fallback_name: None,
                     }),
                 ),
             ]),

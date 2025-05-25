@@ -349,7 +349,7 @@ pub enum QueueNameSource {
     EnvVar(String),
 }
 
-#[derive(Clone, Debug, Deserialize, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
 pub struct SqsQueueDetails {
     /// Where the application gets the queue name from. Will be used to read messages from that
