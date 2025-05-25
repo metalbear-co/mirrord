@@ -357,6 +357,9 @@ pub struct SqsQueueDetails {
     /// this queue, applications will get a modified name from that source.
     pub name_source: QueueNameSource,
 
+    /// Fallback queue name, if name source isn't set or not available.
+    pub fallback_name: Option<String>,
+
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
     /// original queue. In case of a collision, the temporary queue will get the value from the
