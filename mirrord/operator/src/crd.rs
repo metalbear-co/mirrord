@@ -357,7 +357,7 @@ pub struct SqsQueueDetails {
     /// this queue, applications will get a modified name from that source.
     pub name_source: QueueNameSource,
 
-    /// Fallback queue name, if name source isn't set or not available.
+    /// Fallback queue name, if the source specified in `nameSource` is not present on the target.
     /// If the configured source is not present and the fallback is used - the configured source will be used
     /// to make the target use the temporary queue.
     /// For example, if `nameSource` is `envVar: MEME_QUEUE_NAME`, but `MEME_QUEUE_NAME` is not
