@@ -76,16 +76,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Introduced new error handling for critical internal proxy failures, 
-  ensuring the state is marked as broken and propagated to layers. 
-  Added related mechanisms to send meaningful failure messages to layers 
-  whenever the proxy's internal state is compromised. Includes a test 
-  validating this behavior.
-  [#3161](https://github.com/metalbear-co/mirrord/issues/3161)
-
-
-### Added
-
 - Added a link to Slack to error messages and documentation.
 
 
