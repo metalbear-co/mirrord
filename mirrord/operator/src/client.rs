@@ -556,32 +556,37 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let is_empty_deployment = target.empty_deployment();
-        let do_copy_target = layer_config.feature.copy_target.enabled
-            || is_empty_deployment
-            || layer_config.feature.split_queues.sqs().next().is_some()
-            || (layer_config.feature.split_queues.kafka().next().is_some()
-                && self
-                    .operator()
-                    .spec
-                    .require_feature(NewOperatorFeature::KafkaQueueSplittingDirect)
-                    .is_err());
+        let (do_copy_target, reason) = if layer_config.feature.copy_target.enabled {
+            (true, None)
+        } else if target.empty_deployment() {
+            (true, Some("empty deployment"))
+        } else if layer_config.feature.split_queues.sqs().next().is_some() {
+            (true, Some("SQS splitting"))
+        } else if layer_config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingDirect)
+                .is_err()
+        {
+            (true, Some("Kafka splitting"))
+        } else {
+            (false, None)
+        };
+
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("copying target");
-            if layer_config.feature.copy_target.enabled.not() {
-                if is_empty_deployment.not() {
-                    copy_subtask.info("Creating a target copy for queue-splitting (even though `copy_target` was not explicitly set).")
-                } else {
-                    copy_subtask.info("Creating a target copy for empty deployment (even thought `copy_target` was not explicitly set).")
-                }
+            if let Some(reason) = reason {
+                copy_subtask.info(&format!(
+                    "Creating a target copy for {reason} (even though `copy_target` was not explicitly set)."
+                ));
             }
             let (copied, reused) = self.copy_target(layer_config, true).await?;
-            let message = if reused {
+            copy_subtask.success(Some(if reused {
                 "target copy reused"
             } else {
                 "target copied"
-            };
-            copy_subtask.success(Some(message));
+            }));
 
             let id = copied
                 .status
@@ -641,14 +646,8 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let use_proxy = self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::ProxyApi);
-
             let params = ConnectParams::new(layer_config);
-            let connect_url = Self::target_connect_url(use_proxy, &target, &params);
+            let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
 
             (session, false)
@@ -690,6 +689,9 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection { session, tx, rx })
     }
 
+    /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
+    ///
+    /// If `id` is not passed, a random one is generated.
     fn make_operator_session(
         &self,
         id: Option<&str>,
