@@ -853,20 +853,23 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         if allow_reuse {
-            let existing_copy_targets = copy_target_api
+            let existing = copy_target_api
                 .list(&ListParams::default())
                 .await
                 .map_err(|error| OperatorApiError::KubeError {
                     error,
                     operation: OperatorOperation::CopyingTarget,
-                })?;
-            let found = existing_copy_targets.items.into_iter().find(|copy_target| {
-                copy_target.spec == copy_target_spec
-                    && copy_target.status.as_ref().is_some_and(|status| {
-                        status.creator_session.user_id.as_ref() == Some(&user_id)
-                    })
-            });
-            if let Some(copy_target) = found {
+                })?
+                .items
+                .into_iter()
+                .find(|copy_target| {
+                    copy_target.spec == copy_target_spec
+                        && copy_target.status.as_ref().is_some_and(|status| {
+                            status.creator_session.user_id.as_ref() == Some(&user_id)
+                        })
+                });
+
+            if let Some(copy_target) = existing {
                 tracing::debug!(?copy_target, "reusing copy_target");
                 return Ok((copy_target, true));
             }
