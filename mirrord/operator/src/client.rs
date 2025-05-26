@@ -16,7 +16,7 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target, LayerConfig};
+use mirrord_config::{target::Target, LayerConfig};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -566,43 +566,16 @@ impl OperatorApi<PreparedClientCert> {
                     .spec
                     .require_feature(NewOperatorFeature::KafkaQueueSplittingDirect)
                     .is_err());
-        let (connect_url, session_id, reused_copy) = if do_copy_target {
+        let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("copying target");
-
             if layer_config.feature.copy_target.enabled.not() {
                 if is_empty_deployment.not() {
                     copy_subtask.info("Creating a target copy for queue-splitting (even though `copy_target` was not explicitly set).")
                 } else {
-                    copy_subtask.info("Creating a target copy for deployment (even thought `copy_target` was not explicitly set).")
+                    copy_subtask.info("Creating a target copy for empty deployment (even thought `copy_target` was not explicitly set).")
                 }
             }
-
-            // We do not validate the `target` here, it's up to the operator.
-            let target = layer_config
-                .target
-                .path
-                .clone()
-                .unwrap_or(Target::Targetless);
-            let scale_down = layer_config.feature.copy_target.scale_down;
-            let namespace = layer_config
-                .target
-                .namespace
-                .as_deref()
-                .unwrap_or(self.client.default_namespace());
-            let (copied, reused) = self
-                .copy_target(
-                    target,
-                    scale_down,
-                    namespace,
-                    layer_config
-                        .feature
-                        .split_queues
-                        .is_set()
-                        .then(|| layer_config.feature.split_queues.clone()),
-                    true,
-                )
-                .await?;
-
+            let (copied, reused) = self.copy_target(layer_config, true).await?;
             let message = if reused {
                 "target copy reused"
             } else {
@@ -610,17 +583,18 @@ impl OperatorApi<PreparedClientCert> {
             };
             copy_subtask.success(Some(message));
 
-            (
-                Self::copy_target_connect_url(
-                    &copied,
-                    use_proxy_api,
-                    layer_config.profile.as_deref(),
-                ),
-                copied
-                    .status
-                    .and_then(|copy_crd| copy_crd.creator_session.id),
-                reused,
-            )
+            let id = copied
+                .status
+                .as_ref()
+                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            let connect_url = Self::copy_target_connect_url(
+                &copied,
+                use_proxy_api,
+                layer_config.profile.as_deref(),
+            );
+            let session = self.make_operator_session(id, connect_url)?;
+
+            (session, reused)
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
@@ -674,16 +648,11 @@ impl OperatorApi<PreparedClientCert> {
                 .contains(&NewOperatorFeature::ProxyApi);
 
             let params = ConnectParams::new(layer_config);
+            let connect_url = Self::target_connect_url(use_proxy, &target, &params);
+            let session = self.make_operator_session(None, connect_url)?;
 
-            (
-                Self::target_connect_url(use_proxy, &target, &params),
-                None,
-                false,
-            )
+            (session, false)
         };
-
-        tracing::debug!("connect_url {connect_url:?}");
-        let session = self.make_operator_session(session_id.as_deref(), connect_url)?;
 
         let mut connection_subtask = progress.subtask("connecting to the target");
         let (tx, rx) = match Self::connect_target(&self.client, &session).await {
@@ -696,33 +665,7 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 let mut copy_subtask = progress.subtask("copied target is gone, force copying");
-
-                // We do not validate the `target` here, it's up to the operator.
-                let target = layer_config
-                    .target
-                    .path
-                    .clone()
-                    .unwrap_or(Target::Targetless);
-                let scale_down = layer_config.feature.copy_target.scale_down;
-                let namespace = layer_config
-                    .target
-                    .namespace
-                    .as_deref()
-                    .unwrap_or(self.client.default_namespace());
-                let (copied, _) = self
-                    .copy_target(
-                        target,
-                        scale_down,
-                        namespace,
-                        layer_config
-                            .feature
-                            .split_queues
-                            .is_set()
-                            .then(|| layer_config.feature.split_queues.clone()),
-                        false,
-                    )
-                    .await?;
-
+                let (copied, _) = self.copy_target(layer_config, false).await?;
                 copy_subtask.success(Some("target copied"));
 
                 let connect_url = Self::copy_target_connect_url(
@@ -732,10 +675,9 @@ impl OperatorApi<PreparedClientCert> {
                 );
                 let session_id = copied
                     .status
-                    .and_then(|copy_crd| copy_crd.creator_session.id);
-
-                tracing::debug!("connect_url {connect_url:?}");
-                let session = self.make_operator_session(session_id.as_deref(), connect_url)?;
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+                let session = self.make_operator_session(session_id, connect_url)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
                 let connection = Self::connect_target(&self.client, &session).await?;
@@ -855,8 +797,13 @@ impl OperatorApi<PreparedClientCert> {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }
 
-    /// Creates a new or reuses existing [`CopyTargetCrd`] resource using the operator.
-    /// If new this should create a new dummy pod out of the given [`Target`].
+    /// Creates a new or optionally reuses an existing [`CopyTargetCrd`] resource using the
+    /// operator.
+    ///
+    /// If new, this should create a new dummy pod out of the [`Target`] specified in the given
+    /// [`LayerConfig`].
+    ///
+    /// Reuse mechanism can be enabled by setting `allow_reuse` to `true`.
     ///
     /// # Returns
     ///
@@ -867,15 +814,30 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    #[tracing::instrument(level = "trace", err)]
+    #[tracing::instrument(level = Level::TRACE, skip(layer_config), err, ret)]
     async fn copy_target(
         &self,
-        target: Target,
-        scale_down: bool,
-        namespace: &str,
-        split_queues: Option<SplitQueuesConfig>,
+        layer_config: &LayerConfig,
         allow_reuse: bool,
     ) -> OperatorApiResult<(CopyTargetCrd, bool)> {
+        // We do not validate the `target` here, it's up to the operator.
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let scale_down = layer_config.feature.copy_target.scale_down;
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+        let split_queues = layer_config
+            .feature
+            .split_queues
+            .is_set()
+            .then(|| layer_config.feature.split_queues.clone());
+
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
