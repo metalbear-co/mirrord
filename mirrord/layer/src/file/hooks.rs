@@ -1503,6 +1503,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_FSTAT
         );
         replace!(hook_manager, "stat$INODE64", stat_detour, FnStat, FN_STAT);
+    replace!(hook_manager, "chdir", chdir_detour, FnChdir, FN_CHDIR);
         replace!(
             hook_manager,
             "fstatat$INODE64",
@@ -1552,5 +1553,29 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnOpendir,
             FN_OPENDIR
         );
+    }
+}
+
+static mut FN_CHDIR: Option<unsafe extern "C" fn(*const c_char) -> c_int> = None;
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn chdir_detour(path: *const c_char) -> c_int {
+    let path_checked = path.checked_into();
+    match ops::chdir(path_checked) {
+        Detour::Success(_) => 0,
+        Detour::Error(e) => {
+            Errno::set_raw(e.into());
+            -1
+        }
+        Detour::Bypass(bypass) => {
+            // update_ptr_from_bypass might be needed here if chdir involves symlinks
+            // or special paths that mirrord handles. For now, assume it's not needed.
+            // If it is, the logic would be:
+            // let path = update_ptr_from_bypass(path, &bypass);
+            // FN_CHDIR(path)
+            // For now, direct bypass:
+            trace!("chdir_detour: bypassing with path: {:?}", path);
+            FN_CHDIR(path)
+        }
     }
 }

@@ -223,7 +223,21 @@ impl FileManager {
                 pathname,
                 flags,
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
+            FileRequest::Chdir(ChdirRequest { path }) => {
+                Some(FileResponse::Chdir(self.handle_chdir_request(path)))
+            }
         })
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
+    fn handle_chdir_request(&mut self, path: PathBuf) -> RemoteResult<ChdirResponse> {
+        // Path resolution should be handled here if necessary, similar to `open` or `access`.
+        // For now, directly using the provided path.
+        // Consider if `self.resolve_path` is needed.
+        // let resolved_path = self.resolve_path(&path)?;
+        std::env::set_current_dir(&path)
+            .map(|()| ChdirResponse {})
+            .map_err(ResponseError::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]

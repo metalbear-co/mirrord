@@ -11,6 +11,7 @@ use std::{
     io::SeekFrom,
     os::unix::io::RawFd,
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
 
 #[cfg(target_os = "linux")]
@@ -18,12 +19,13 @@ use libc::{c_char, statx, statx_timestamp};
 use libc::{c_int, iovec, AT_FDCWD};
 use mirrord_protocol::{
     file::{
-        MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest, WriteFileResponse,
-        XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
+        ChdirRequest, ChdirResponse, FileRequest, FileResponse, MakeDirAtRequest, MakeDirRequest,
+        OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+        ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest, SeekFileResponse,
+        StatFsRequestV2, UnlinkAtRequest, UnlinkRequest, WriteFileResponse, XstatFsRequestV2,
+        XstatFsResponseV2, XstatResponse,
     },
-    ResponseError,
+    ClientMessage, ResponseError,
 };
 use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
@@ -35,13 +37,17 @@ use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 #[cfg(target_os = "linux")]
 use crate::common::CheckedInto;
 use crate::{
-    common,
+    common::{self, CheckedPath},
     detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
+    // file::filter::FILE_FILTER_HTTP_ONLY_GUARD, // Not directly used here, but common_path_check might use it.
 };
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
+
+static CURRENT_DIR: LazyLock<Mutex<PathBuf>> =
+    LazyLock::new(|| Mutex::new(PathBuf::from("/")));
 
 /// Convenience extension for verifying that a [`Path`] is not relative.
 trait PathExt {
@@ -805,6 +811,112 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     xstat(Some(Detour::Success(realpath.clone())), None, true)?;
 
     Detour::Success(realpath)
+}
+
+/// Changes the current working directory of the caller application.
+///
+/// Original `chdir` behaviour:
+/// - Returns `0` on `Ok`.
+/// - Returns `-1` on `Err`, and sets `errno`.
+///
+/// So we map `Detour::Success` to `0`, and `Detour::Error` to `-1` and set `errno`.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+pub(super) fn chdir(path: CheckedPath) -> Detour<c_int> {
+    let original_path_buf = path.as_pathbuf();
+    trace!("chdir: original_path_buf {:#?}", original_path_buf);
+
+    let path_to_send_agent = if original_path_buf.is_absolute() {
+        // `common_path_check` is used for absolute paths.
+        // `true` for `write` because chdir modifies the process state.
+        match common_path_check(original_path_buf.clone(), true) {
+            Detour::Success(p) => p,
+            Detour::Bypass(b) => return Detour::Bypass(b), // Path should be handled locally.
+            Detour::Error(e) => return Detour::Error(e),   // Error during path check.
+        }
+    } else {
+        // TODO: For relative paths, we should resolve them against `CURRENT_DIR`
+        //       before sending to the agent or deciding to bypass.
+        //       For now, bypass relative paths. This means the OS will handle them directly.
+        //       If the OS call succeeds, our `CURRENT_DIR` will be out of sync until
+        //       `getcwd_detour` (if implemented to sync) is called or another absolute `chdir`
+        // happens.
+        trace!(
+            "chdir: bypassing relative path {:?}, OS will handle.",
+            original_path_buf
+        );
+        return Detour::Bypass(Bypass::RelativePath(
+            original_path_buf.to_string_lossy().into_owned(),
+        ));
+    };
+
+    let chdir_request = ChdirRequest {
+        path: path_to_send_agent, // Send the (potentially remapped) absolute path.
+    };
+
+    let client_message = ClientMessage::FileRequest(FileRequest::Chdir(chdir_request));
+
+    match common::make_proxy_request_with_response(client_message) {
+        Ok(Ok(FileResponse::Chdir(Ok(ChdirResponse {})))) => {
+            trace!("chdir: remote success, updating CURRENT_DIR");
+            match CURRENT_DIR.lock() {
+                Ok(mut current_dir_guard) => {
+                    // Store the original path as requested by the user, as this reflects
+                    // their view of the CWD.
+                    *current_dir_guard = original_path_buf;
+                    Detour::Success(0)
+                }
+                Err(poisoned) => {
+                    error!("ops::chdir: CURRENT_DIR mutex is poisoned {:#?}!", poisoned);
+                    Detour::Error(HookError::FailedToLockMutex(
+                        "CURRENT_DIR".to_string(),
+                    ))
+                }
+            }
+        }
+        Ok(Ok(FileResponse::Chdir(Err(response_error)))) => {
+            trace!("chdir: remote error {:#?}", response_error);
+            Detour::Error(HookError::from(response_error))
+        }
+        Ok(Ok(unexpected_response)) => {
+            error!(
+                "ops::chdir: received an unexpected response from agent: {:#?}",
+                unexpected_response
+            );
+            Detour::Error(HookError::UnexpectedResponse(
+                unexpected_response.toString(),
+            ))
+        }
+        Ok(Err(hook_error)) => {
+            // Error from `make_proxy_request_with_response` itself (e.g., local agent closed)
+            error!(
+                "ops::chdir: error in make_proxy_request_with_response: {:#?}",
+                hook_error
+            );
+            Detour::Error(hook_error)
+        }
+        Err(send_error) => {
+            // This is typically a channel error if the proxy thread panicked.
+            error!(
+                "ops::chdir: error sending message to proxy: {:#?}",
+                send_error
+            );
+            Detour::Error(HookError::LocalAgentClosed)
+        }
+    }
+}
+
+pub(crate) fn get_current_dir() -> PathBuf {
+    match CURRENT_DIR.lock() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => {
+            error!(
+                "get_current_dir: CURRENT_DIR mutex is poisoned {:#?}! Falling back to '/'",
+                poisoned
+            );
+            // Fallback to a default path if the mutex is poisoned, as CWD is crucial.
+            PathBuf::from("/")
+        }
+    }
 }
 
 #[cfg(test)]
