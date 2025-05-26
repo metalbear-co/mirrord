@@ -692,6 +692,7 @@ impl OperatorApi<PreparedClientCert> {
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
     ///
     /// If `id` is not passed, a random one is generated.
+    #[tracing::instrument(level = Level::DEBUG, err, ret)]
     fn make_operator_session(
         &self,
         id: Option<&str>,
