@@ -16,7 +16,7 @@
 //! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
 //! remote context.
 //!
-//! Check out the [Introduction](https://mirrord.dev/docs/overview/introduction/) guide to learn
+//! Check out the [Introduction](https://metalbear.co/mirrord/docs/overview/introduction/) guide to learn
 //! more about mirrord.
 //!
 //! ## How it works
@@ -61,7 +61,7 @@
 //!
 //! The functions we intercept are controlled via the `mirrord-config` crate, check its
 //! documentation for more details, or
-//! [Configuration](https://mirrord.dev/docs/reference/configuration/) for usage information.
+//! [Configuration](https://metalbear.co/mirrord/docs/reference/configuration/) for usage information.
 
 extern crate alloc;
 extern crate core;
