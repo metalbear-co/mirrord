@@ -19,17 +19,33 @@ use crate::{
 #[error("agent sent an unexpected message: {0:?}")]
 pub struct UnexpectedAgentMessage(pub DaemonMessage);
 
+/// Convenience error type for internal errors. Used to wrap all internal errors.
+///
 #[derive(Error, Debug)]
-pub enum IntProxyError {
-    #[error("waiting for the first layer connection timed out")]
-    ConnectionAcceptTimeout,
+pub(crate) enum InternalProxyError {
+    #[error("critical proxy error : {0}")]
+    Critical(IntProxyError),
+    #[error("manageable error: {0}")]
+    Manageable(ProxyManagedError),
+}
+
+impl<I : Into<ProxyManagedError>> From<I> for InternalProxyError {
+    fn from(err: I) -> Self {
+        InternalProxyError::Manageable(err.into())   
+    }
+}
+
+/// This kind of error causes a partial failure of the proxy, meaning that for these errors does
+/// exist a failover strategy, so in case of incurring of this error, the proxy change behavior,
+/// according to [`crate::FailoverStrategy`]
+///
+#[derive(Error, Debug)]
+pub(crate) enum ProxyManagedError {
     #[error("accepting layer connection failed: {0}")]
     ConnectionAccept(io::Error),
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
-
-    #[error("connecting with agent failed: {0}")]
-    AgentConnection(#[from] AgentConnectionError),
+    
     #[error("agent closed connection with error: {0}")]
     AgentFailed(String),
     #[error(transparent)]
@@ -56,6 +72,17 @@ pub enum IntProxyError {
     IncomingProxy(#[from] IncomingProxyError),
     #[error("files proxy failed: {0}")]
     FilesProxy(#[from] FilesProxyError),
+}
+
+/// This kind of error causes a total failure of the proxy, meaning that for these errors doesn't
+/// exist a failover strategy, so facing this error the proxy stops working.
+///
+#[derive(Error, Debug)]
+pub enum IntProxyError {
+    #[error("connecting with agent failed: {0}")]
+    AgentConnection(#[from] AgentConnectionError),
+    #[error("waiting for the first layer connection timed out")]
+    ConnectionAcceptTimeout,
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;
