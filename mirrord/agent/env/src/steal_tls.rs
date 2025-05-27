@@ -102,8 +102,8 @@ pub struct AgentServerConfig {
 /// Configures how mirrord-agent authenticates itself and the server when making TLS connections to
 /// the original destination (which is the TLS server running in the target container).
 ///
-/// The agent makes TLS connections to the original destination when passing through unmatched HTTPS
-/// requests.
+/// The agent makes TLS connections to the original destination
+/// when passing through unmatched TLS traffic.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -132,7 +132,7 @@ pub struct StealPortTlsConfig {
     /// Configures how mirrord-agent authenticates itself and the server when acting as a TLS
     /// client.
     ///
-    /// mirrord-agent acts as a TLS client when passing unmatched requests to their original
+    /// mirrord-agent acts as a TLS client when passing unmatched traffic to its original
     /// destination.
     pub agent_as_client: AgentClientConfig,
 }
