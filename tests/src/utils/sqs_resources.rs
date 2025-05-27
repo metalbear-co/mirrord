@@ -238,6 +238,7 @@ pub async fn create_queue_registry_resource(
                     SplitQueue::Sqs(SqsQueueDetails {
                         name_source: QueueNameSource::EnvVar(QUEUE_NAME_ENV_VAR1.to_string()),
                         tags: None,
+                        fallback_name: None,
                     }),
                 ),
                 (
@@ -245,6 +246,7 @@ pub async fn create_queue_registry_resource(
                     SplitQueue::Sqs(SqsQueueDetails {
                         name_source: QueueNameSource::EnvVar(QUEUE2_URL_ENV_VAR.to_string()),
                         tags: None,
+                        fallback_name: None,
                     }),
                 ),
             ]),
