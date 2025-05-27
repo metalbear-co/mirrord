@@ -55,7 +55,7 @@ body:
       label: mirrord intproxy logs
       description: |
         If possible, reproduce the bug and attach the relevant `mirrord-intproxy` logs.
-        You can enable them by setting [`internal_proxy.log_level`](https://mirrord.dev/docs/reference/configuration/#internal_proxy-log_level) to `mirrord=trace` in your mirrord config.
+        You can enable them by setting [`internal_proxy.log_level`](https://metalbear.co/mirrord/docs/reference/configuration/#internal_proxy-log_level) to `mirrord=trace` in your mirrord config.
         By default, `mirrord-intproxy` logs are dumped to a file in the `/tmp` directory (complete path looks like `/tmp/mirrord-intproxy-1727386366-5rqqf2x.log`).
         You can override logs destination in the `internal_proxy.log_destination` mirrord config entry.
       render: shell
