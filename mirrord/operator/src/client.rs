@@ -559,13 +559,20 @@ impl OperatorApi<PreparedClientCert> {
         let is_empty_deployment = target.empty_deployment();
         let do_copy_target = layer_config.feature.copy_target.enabled
             || is_empty_deployment
-            || layer_config.feature.split_queues.sqs().next().is_some()
+            || (layer_config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not())
             || (layer_config.feature.split_queues.kafka().next().is_some()
                 && self
-                    .operator()
+                    .operator
                     .spec
-                    .require_feature(NewOperatorFeature::KafkaQueueSplittingDirect)
-                    .is_err());
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not());
         let (connect_url, session_id) = if do_copy_target {
             let mut copy_subtask = progress.subtask("copying target");
 
@@ -658,6 +665,13 @@ impl OperatorApi<PreparedClientCert> {
                         stolen_probes.join(", "),
                     ));
                 }
+            }
+
+            // Add double check
+            if layer_config.feature.split_queues.sqs().next().is_some() {
+                self.operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::SqsQueueSplittingDirect)?;
             }
 
             let use_proxy = self
@@ -762,8 +776,9 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
-            // Kafka splits are passed in the request body.
+            // Kafka and SQS splits are passed in the request body.
             kafka_splits: Default::default(),
+            sqs_splits: Default::default(),
         };
 
         if use_proxy {
@@ -937,6 +952,7 @@ mod test {
         ConcurrentSteal::Abort,
         None,
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -955,6 +971,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
@@ -975,6 +992,7 @@ mod test {
         ConcurrentSteal::Abort,
         None,
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -993,6 +1011,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
@@ -1013,6 +1032,7 @@ mod test {
         ConcurrentSteal::Abort,
         Some("no-steal"),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1031,6 +1051,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped"
     )]
@@ -1057,8 +1078,36 @@ mod test {
                 ("header-2".to_string(), "filter-2".to_string()),
             ]),
         )]),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
+    )]
+    #[case::deployment_container_proxy_sqs_splits(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        HashMap::from([(
+            "topic-id",
+            BTreeMap::from([
+                ("header-1".to_string(), "filter-1".to_string()),
+                ("header-2".to_string(), "filter-2".to_string()),
+            ]),
+        )]),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
     #[test]
     fn target_connect_url(
@@ -1067,9 +1116,15 @@ mod test {
         #[case] concurrent_steal: ConcurrentSteal,
         #[case] profile: Option<&str>,
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
+        #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
+        let sqs_splits = sqs_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
@@ -1079,6 +1134,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            sqs_splits,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

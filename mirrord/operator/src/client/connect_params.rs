@@ -19,8 +19,12 @@ pub struct ConnectParams<'a> {
     /// Selected mirrord profile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<&'a str>,
-    #[serde(with = "kafka_splits_serde")]
+
+    #[serde(with = "queue_splits_serde")]
     pub kafka_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(with = "queue_splits_serde")]
+    pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -30,28 +34,29 @@ impl<'a> ConnectParams<'a> {
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
+            sqs_splits: config.feature.split_queues.sqs().collect(),
         }
     }
 }
 
-mod kafka_splits_serde {
+mod queue_splits_serde {
     use std::collections::{BTreeMap, HashMap};
 
     use serde::Serializer;
 
     pub fn serialize<S>(
-        kafka_splits: &HashMap<&str, &BTreeMap<String, String>>,
+        queue_splits: &HashMap<&str, &BTreeMap<String, String>>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        if kafka_splits.is_empty() {
+        if queue_splits.is_empty() {
             return serializer.serialize_none();
         }
 
         let as_json =
-            serde_json::to_string(kafka_splits).expect("serialization to memory should not fail");
+            serde_json::to_string(queue_splits).expect("serialization to memory should not fail");
         serializer.serialize_str(as_json.as_str())
     }
 }
