@@ -591,7 +591,7 @@ impl OperatorApi<PreparedClientCert> {
             }
             let (copied, reused) = self.copy_target(layer_config, true).await?;
             copy_subtask.success(Some(if reused {
-                "target copy reused"
+                "found target copy to reuse"
             } else {
                 "target copied"
             }));
@@ -662,16 +662,17 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx) = match Self::connect_target(&self.client, &session).await {
-            Ok(connection) => {
+        let (tx, rx, session) = match Self::connect_target(&self.client, &session).await {
+            Ok((tx, rx)) => {
                 connection_subtask.success(Some("connected to the target"));
-                connection
+                (tx, rx, session)
             }
             Err(OperatorApiError::KubeError {
                 error: kube::Error::Api(response),
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
-                let mut copy_subtask = progress.subtask("copied target is gone, force copying");
+                connection_subtask.failure(Some("copied target is gone"));
+                let mut copy_subtask = progress.subtask("copying target");
                 let (copied, _) = self.copy_target(layer_config, false).await?;
                 copy_subtask.success(Some("target copied"));
 
@@ -687,9 +688,9 @@ impl OperatorApi<PreparedClientCert> {
                 let session = self.make_operator_session(session_id, connect_url)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
-                let connection = Self::connect_target(&self.client, &session).await?;
+                let (tx, rx) = Self::connect_target(&self.client, &session).await?;
                 connection_subtask.success(Some("connected to the target"));
-                connection
+                (tx, rx, session)
             }
             Err(error) => return Err(error),
         };
