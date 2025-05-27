@@ -350,7 +350,16 @@ pub struct CopyTargetStatus {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // EnvVar -> envVar in yaml.
 pub enum QueueNameSource {
+    /// Name of an environment variable.
+    ///
+    /// References a single environment variable that contains the queue name.
+    /// Only this one queue will be split.
     EnvVar(String),
+    /// Regex pattern for environment variable name.
+    ///
+    /// References multiple environment variables that can contain names of multiple queues.
+    /// All found queues will be split.
+    RegexPattern(String),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
