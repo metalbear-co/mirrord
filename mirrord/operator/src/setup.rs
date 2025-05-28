@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, convert::Infallible, io::Write, str::FromStr, s
 
 use k8s_openapi::{
     api::{
+        admissionregistration::v1::MutatingWebhookConfiguration,
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
             ConfigMap, Container, ContainerPort, EnvVar, HTTPGetAction, Namespace,
@@ -722,6 +723,17 @@ impl OperatorClusterRole {
                     api_groups: Some(vec![ConfigMap::group(&()).into_owned()]),
                     resources: Some(vec![ConfigMap::plural(&()).into_owned()]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
+                // For creating MutatingWebhooks for changing pods in an ArgoCD-compatible way.
+                PolicyRule {
+                    api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
+                    resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
+                    verbs: vec![
+                        "create".to_owned(),
+                        "delete".to_owned(),
+                        "deletecollection".to_owned(),
+                    ],
                     ..Default::default()
                 },
             ]);
