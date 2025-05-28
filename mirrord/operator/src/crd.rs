@@ -372,29 +372,9 @@ pub struct SqsQueueDetails {
     /// queue name source to override the source it uses on its absence.
     pub fallback_name: Option<String>,
 
-    /// Optional JSON path ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html))
-    /// to be used when reading the queue name(s) from the `name_source`.
-    ///
-    /// If not given, the queue name will be read directly from the source.
-    /// If given, the source will be parsed to a JSON object, and the queue name(s) will be
-    /// read from it using the JSON path. Selection by the JSON path must return a non-empty array
-    /// of strings.
-    ///
-    /// Note that this JSON path applies to `fallback_name` as well.
-    ///
-    /// For example, if the source is a JSON object like:
-    /// ```json
-    /// {
-    ///   "incoming_meme": {
-    ///     "queue_name": "IncomingMemeQueue"
-    ///   },
-    ///   "incoming_gif": {
-    ///     "queue_name": "IncomingGifQueue.fifo"
-    ///   }
-    /// }
-    /// ```
-    /// you can use the JSON path `$.*.queue_name` to read the names of both queues.
-    pub name_json_path: Option<String>,
+    /// If set, the value read from `name_source` or `fallback_name`
+    /// will be parsed as a JSON map. The values in this map will be used as queue names.
+    pub names_from_json_map: Option<bool>,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
