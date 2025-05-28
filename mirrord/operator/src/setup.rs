@@ -733,6 +733,7 @@ impl OperatorClusterRole {
                         "create".to_owned(),
                         "delete".to_owned(),
                         "deletecollection".to_owned(),
+                        "watch".to_owned(),
                     ],
                     ..Default::default()
                 },
