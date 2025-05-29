@@ -47,7 +47,7 @@ pub(super) async fn start_sniffer(
 ) -> BackgroundTask<SnifferCommand> {
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
-    let packet_buffer_size = envs::MIRROR_BUFFER_SIZE::from_env_or_default();
+    let packet_buffer_size = envs::MIRROR_BUFFER_SIZE.from_env_or_default();
     let sniffer = runtime
         .spawn(TcpConnectionSniffer::new(
             command_rx,

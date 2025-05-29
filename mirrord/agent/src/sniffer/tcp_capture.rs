@@ -57,7 +57,7 @@ impl RawSocketTcpCapture {
 
         let mut capture = RawCapture::from_interface_name(&interface)?;
         if let Some(size) = packet_buffer_size {
-            capture.set_buffer_size(size)?;
+            capture.set_buffer_size(size);
         }
         capture.set_filter(rawsocket::filter::build_drop_always())?;
         capture
