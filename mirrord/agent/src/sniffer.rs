@@ -163,8 +163,10 @@ impl TcpConnectionSniffer<RawSocketTcpCapture> {
         command_rx: Receiver<SnifferCommand>,
         network_interface: Option<String>,
         is_mesh: bool,
+        packet_buffer_size: Option<usize>,
     ) -> AgentResult<Self> {
-        let tcp_capture = RawSocketTcpCapture::new(network_interface, is_mesh).await?;
+        let tcp_capture =
+            RawSocketTcpCapture::new(network_interface, is_mesh, packet_buffer_size).await?;
 
         Ok(Self {
             command_rx,
