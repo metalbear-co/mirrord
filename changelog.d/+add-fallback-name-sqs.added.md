@@ -1,1 +1,0 @@
-Add fallback_name to MirrordWorkloadQueueRegistry CRD
