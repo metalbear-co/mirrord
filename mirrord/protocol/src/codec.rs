@@ -100,6 +100,7 @@ pub enum FileRequest {
 
     /// Same as StatFs, but results in the V2 response.
     StatFsV2(StatFsRequestV2),
+    Chdir(ChdirRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -167,6 +168,7 @@ pub enum FileResponse {
     RemoveDir(RemoteResult<()>),
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
+    Chdir(RemoteResult<ChdirResponse>),
 }
 
 /// `-agent` --> `-layer` messages.
