@@ -47,10 +47,15 @@ pub(super) async fn start_sniffer(
 ) -> BackgroundTask<SnifferCommand> {
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
-    let packet_buffer_size = envs::MIRROR_BUFFER_SIZE.try_from_env().unwrap_or_else(| err | {
-        tracing::warn!(%err, "Failed to read MIRRORD_AGENT_MIRROR_BUFFER_SIZE, using default value");
-        None
-    });
+    let packet_buffer_size = envs::MIRROR_BUFFER_SIZE
+        .try_from_env()
+        .unwrap_or_else(|err| {
+            tracing::warn!(
+                ?err,
+                "Failed to read MIRRORD_AGENT_MIRROR_BUFFER_SIZE, using default value"
+            );
+            None
+        });
 
     let sniffer = runtime
         .spawn(TcpConnectionSniffer::new(
