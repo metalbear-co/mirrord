@@ -33,12 +33,10 @@ use mirrord_operator::{
     },
     setup::OPERATOR_NAME,
 };
-use rstest::fixture;
 
 use super::{port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
-    kube_client, kube_service::KubeService, resource_guard::ResourceGuard,
-    services::service_with_env,
+    kube_service::KubeService, resource_guard::ResourceGuard, services::service_with_env,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -46,6 +44,9 @@ const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 
 /// Name of the environment variable that holds the name of the second SQS queue to read from.
 const QUEUE2_URL_ENV_VAR: &str = "SQS_TEST_Q2_URL";
+
+/// Regex pattern that matches both [`QUEUE_NAME_ENV_VAR1`] and [`QUEUE2_URL_ENV_VAR`].
+const BOTH_QUEUES_REGEX_PATTERN: &str = "SQS_TEST_Q.+";
 
 /// Name of the environment variable that holds the name of the first SQS queue the deployed
 /// application will write to.
@@ -226,32 +227,48 @@ pub async fn create_queue_registry_resource(
     kube_client: &Client,
     namespace: &str,
     deployment_name: &str,
+    use_regex: bool,
 ) {
     println!("Creating MirrordWorkloadQueueRegistry resource");
+
+    let queues = if use_regex {
+        BTreeMap::from([(
+            "e2e-test-queues".to_string(),
+            SplitQueue::Sqs(SqsQueueDetails {
+                name_source: QueueNameSource::RegexPattern(BOTH_QUEUES_REGEX_PATTERN.to_string()),
+                tags: None,
+                fallback_name: None,
+                names_from_json_map: None,
+            }),
+        )])
+    } else {
+        BTreeMap::from([
+            (
+                "e2e-test-queue1".to_string(),
+                SplitQueue::Sqs(SqsQueueDetails {
+                    name_source: QueueNameSource::EnvVar(QUEUE_NAME_ENV_VAR1.to_string()),
+                    tags: None,
+                    fallback_name: None,
+                    names_from_json_map: None,
+                }),
+            ),
+            (
+                "e2e-test-queue2".to_string(),
+                SplitQueue::Sqs(SqsQueueDetails {
+                    name_source: QueueNameSource::EnvVar(QUEUE2_URL_ENV_VAR.to_string()),
+                    tags: None,
+                    fallback_name: None,
+                    names_from_json_map: None,
+                }),
+            ),
+        ])
+    };
+
     let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client.clone(), namespace);
     let queue_registry = MirrordWorkloadQueueRegistry::new(
         QUEUE_REGISTRY_RESOURCE_NAME,
         MirrordWorkloadQueueRegistrySpec {
-            queues: BTreeMap::from([
-                (
-                    "e2e-test-queue1".to_string(),
-                    SplitQueue::Sqs(SqsQueueDetails {
-                        name_source: QueueNameSource::EnvVar(QUEUE_NAME_ENV_VAR1.to_string()),
-                        tags: None,
-                        fallback_name: None,
-                        names_from_json_map: None,
-                    }),
-                ),
-                (
-                    "e2e-test-queue2".to_string(),
-                    SplitQueue::Sqs(SqsQueueDetails {
-                        name_source: QueueNameSource::EnvVar(QUEUE2_URL_ENV_VAR.to_string()),
-                        tags: None,
-                        fallback_name: None,
-                        names_from_json_map: None,
-                    }),
-                ),
-            ]),
+            queues,
             consumer: QueueConsumer {
                 name: deployment_name.to_string(),
                 container: None,
@@ -586,9 +603,7 @@ pub async fn await_registry_status(kube_client: Client, namespace: &str) {
 /// - Start a task that waits for 2 SQS Sessions to be ready.
 /// - Deploy a consumer service in a new guarded namespace with a partially random name.
 /// - Create a `MirrordWorkloadQueueRegistry` resource in the test's namespace.
-#[fixture]
-pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
-    let kube_client = kube_client.await;
+pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTestResources {
     let mut guards = Vec::new();
     let localstack_portforwarder =
         if let Some(localstack) = get_localstack_service(&kube_client).await {
@@ -611,7 +626,13 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
     let k8s_service =
         sqs_consumer_service(&kube_client, &queue1, &queue2, &echo_queue1, &echo_queue2).await;
 
-    create_queue_registry_resource(&kube_client, &k8s_service.namespace, &k8s_service.name).await;
+    create_queue_registry_resource(
+        &kube_client,
+        &k8s_service.namespace,
+        &k8s_service.name,
+        use_regex,
+    )
+    .await;
 
     SqsTestResources {
         kube_client,

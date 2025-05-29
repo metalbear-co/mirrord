@@ -3,20 +3,66 @@
 //! Test queue splitting features with an operator.
 
 use core::time::Duration;
-use std::{collections::HashSet, path::Path};
+use std::collections::HashSet;
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
 use rstest::*;
+use tempfile::NamedTempFile;
 
 use crate::utils::{
     application::Application,
-    config_dir,
+    kube_client,
     process::TestProcess,
     sqs_resources::{
         await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
-        QueueInfo, SqsTestResources,
+        QueueInfo,
     },
 };
+
+/// Produces a mirrord config file for an application run in the [`two_users`] test.
+fn get_config(with_regex: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
+    let mut config = NamedTempFile::with_suffix(".json").unwrap();
+
+    let content = if with_regex {
+        serde_json::json!({
+            "operator": true,
+            "feature": {
+                "split_queues": {
+                    "e2e-test-queue1": {
+                        "queue_type": "SQS",
+                        "message_filter": {
+                            attribute: pattern,
+                        },
+                    },
+                    "e2e-test-queue2": {
+                        "queue_type": "SQS",
+                        "message_filter": {
+                            attribute: pattern,
+                        },
+                    },
+                },
+            }
+        })
+    } else {
+        serde_json::json!({
+            "operator": true,
+            "feature": {
+                "split_queues": {
+                    "e2e-test-queues": {
+                        "queue_type": "SQS",
+                        "message_filter": {
+                            attribute: pattern,
+                        },
+                    },
+                },
+            }
+        })
+    };
+
+    serde_json::to_writer_pretty(config.as_file_mut(), &content).unwrap();
+
+    config
+}
 
 /// Verify that the test process printed all the expected messages, and none other.
 ///
@@ -154,14 +200,17 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
+#[case::with_regex(true)]
+#[case::without_regex(false)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
-pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
-    let sqs_test_resources = sqs_test_resources.await;
+pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: bool) {
+    let kube_client = kube_client.await;
+    let sqs_test_resources = sqs_test_resources(kube_client, with_regex).await;
     let application = Application::RustSqs;
 
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("sqs_queue_splitting_a.json");
+    let config_a = get_config(with_regex, ("client", "^a$"));
+    let config_b = get_config(with_regex, ("client", "^b$"));
 
     println!("Starting first mirrord client");
     let mut client_a = application
@@ -169,12 +218,12 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
             &sqs_test_resources.deployment_target(),
             Some(sqs_test_resources.namespace()),
             None,
-            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+            Some(vec![(
+                "MIRRORD_CONFIG_FILE",
+                config_a.path().to_str().unwrap(),
+            )]),
         )
         .await;
-
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("sqs_queue_splitting_b.json");
 
     tokio::time::timeout(
         Duration::from_secs(30),
@@ -195,7 +244,10 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
             &sqs_test_resources.deployment_target(),
             Some(sqs_test_resources.namespace()),
             None,
-            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+            Some(vec![(
+                "MIRRORD_CONFIG_FILE",
+                config_b.path().to_str().unwrap(),
+            )]),
         )
         .await;
 
