@@ -100,9 +100,8 @@ impl SqsTestResources {
             .count()
     }
 
-    /// Wait for all the temp queues created by the SQS operator for queues from this test instance
-    /// to be deleted.
-    /// Waiting for `secs` seconds.
+    /// Wait for all the temp queues created by the SQS operator
+    /// for this test instance to be deleted.
     pub async fn wait_for_temp_queue_deletion(&self) {
         loop {
             if self.count_temp_queues().await == 0 {
