@@ -6,6 +6,8 @@ use core::time::Duration;
 use std::collections::HashSet;
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
+use k8s_openapi::api::core::v1::Pod;
+use kube::Api;
 use rstest::*;
 use tempfile::NamedTempFile;
 
@@ -17,6 +19,7 @@ use crate::utils::{
         await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
         QueueInfo,
     },
+    watch::Watcher,
 };
 
 /// Produces a mirrord config file for an application run in the [`two_users`] test.
@@ -192,11 +195,14 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 }
 
 /// Run 2 local applications with mirrord that both consume messages from the same 2 queues.
+///
 /// Use different message filters in their mirrord configurations.
 /// Send messages to both queues, with different values of the "client" message attribute, so that
 /// they reach the different clients (or the deployed application).
+///
 /// The local applications print the message they received to stdout, so read their output and
 /// verify each of the local applications gets the messages it is supposed to get.
+///
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
@@ -206,7 +212,7 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 #[timeout(Duration::from_secs(360))]
 pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: bool) {
     let kube_client = kube_client.await;
-    let sqs_test_resources = sqs_test_resources(kube_client, with_regex).await;
+    let sqs_test_resources = sqs_test_resources(kube_client.clone(), with_regex).await;
     let application = Application::RustSqs;
 
     let config_a = get_config(with_regex, ("client", "^a$"));
@@ -225,18 +231,30 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
         )
         .await;
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
+    tokio::time::timeout(Duration::from_secs(30), async {
         await_registry_status(
             sqs_test_resources.kube_client.clone(),
             sqs_test_resources.namespace(),
-        ),
-    )
+        )
+        .await;
+
+        Watcher::new(
+            Api::<Pod>::namespaced(kube_client.clone(), sqs_test_resources.namespace()),
+            Default::default(),
+            |pods| {
+                pods.values().all(|pod| {
+                    let Some(status) = &pod.status else {
+                        return false;
+                    };
+                    status.phase.as_deref() == Some("Running")
+                })
+            },
+        )
+        .run()
+        .await;
+    })
     .await
     .unwrap();
-
-    // TODO make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(20)).await;
 
     println!("Starting second mirrord client");
     let mut client_b = application
@@ -320,5 +338,5 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
     client_a.child.kill().await.unwrap();
     client_b.child.kill().await.unwrap();
 
-    sqs_test_resources.wait_for_temp_queue_deletion(30).await;
+    sqs_test_resources.wait_for_temp_queue_deletion().await;
 }
