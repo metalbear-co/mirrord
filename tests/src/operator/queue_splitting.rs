@@ -28,13 +28,7 @@ fn get_config(with_regex: bool, (attribute, pattern): (&str, &str)) -> NamedTemp
             "operator": true,
             "feature": {
                 "split_queues": {
-                    "e2e-test-queue1": {
-                        "queue_type": "SQS",
-                        "message_filter": {
-                            attribute: pattern,
-                        },
-                    },
-                    "e2e-test-queue2": {
+                    "e2e-test-queues": {
                         "queue_type": "SQS",
                         "message_filter": {
                             attribute: pattern,
@@ -48,7 +42,13 @@ fn get_config(with_regex: bool, (attribute, pattern): (&str, &str)) -> NamedTemp
             "operator": true,
             "feature": {
                 "split_queues": {
-                    "e2e-test-queues": {
+                    "e2e-test-queue1": {
+                        "queue_type": "SQS",
+                        "message_filter": {
+                            attribute: pattern,
+                        },
+                    },
+                    "e2e-test-queue2": {
                         "queue_type": "SQS",
                         "message_filter": {
                             attribute: pattern,
