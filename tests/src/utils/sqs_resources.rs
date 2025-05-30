@@ -116,7 +116,7 @@ impl SqsTestResources {
 const AWS_ENDPOINT_ENV: &str = "AWS_ENDPOINT_URL";
 
 /// Required to build an SQS client.
-const AWS_CREDS_ENVS: &[&'static str] = &[
+const AWS_CREDS_ENVS: &[&str] = &[
     AWS_ENDPOINT_ENV,
     "AWS_REGION",
     "AWS_SECRET_ACCESS_KEY",
