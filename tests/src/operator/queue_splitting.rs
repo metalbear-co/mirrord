@@ -256,6 +256,9 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
     .await
     .unwrap();
 
+    // TODO make this unnecessary.
+    tokio::time::sleep(Duration::from_secs(20)).await;
+
     println!("Starting second mirrord client");
     let mut client_b = application
         .run(
