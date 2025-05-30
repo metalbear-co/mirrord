@@ -380,7 +380,7 @@ pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTest
         let localstack = get_localstack_service(&kube_client).await.unwrap();
         let localstack_portforwarder =
             PortForwarder::new_for_service(kube_client.clone(), &localstack, 4566).await;
-        *aws_endpoint_url = format!("http://localhost:{}", localstack_portforwarder.address());
+        *aws_endpoint_url = format!("http://{}", localstack_portforwarder.address());
         Some(localstack_portforwarder)
     } else {
         None
