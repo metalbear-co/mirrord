@@ -833,7 +833,10 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .unwrap_or(true);
 
     if check_version {
-        if let Ok(client) = reqwest::Client::builder().build() {
+        if let Ok(client) = reqwest::Client::builder()
+            .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
+            .build()
+        {
             if let Ok(result) = client
                 .get(format!(
                     "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
