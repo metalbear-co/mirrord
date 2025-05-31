@@ -373,9 +373,10 @@ pub async fn await_registry_status(kube_client: Client, namespace: &str) {
 pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTestResources {
     let mut guards = Vec::new();
 
-    let mut aws_creds = fetch_aws_creds(kube_client.clone()).await;
+    let aws_creds = fetch_aws_creds(kube_client.clone()).await;
+    let mut local_aws_creds = aws_creds.clone();
 
-    let aws_endpoint_url = aws_creds.get_mut(AWS_ENDPOINT_ENV).unwrap();
+    let aws_endpoint_url = local_aws_creds.get_mut(AWS_ENDPOINT_ENV).unwrap();
     let localstack_portforwarder = if aws_endpoint_url.contains("localstack.svc.cluster") {
         let localstack = get_localstack_service(&kube_client).await.unwrap();
         let localstack_portforwarder =
@@ -386,7 +387,7 @@ pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTest
         None
     };
 
-    let sqs_client = get_sqs_client(aws_creds.clone()).await;
+    let sqs_client = get_sqs_client(local_aws_creds).await;
 
     let (queue1, echo_queue1) =
         random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
