@@ -278,6 +278,7 @@ use semver::Version;
 use tracing::{error, info, warn};
 use which::which;
 
+mod browser;
 mod config;
 mod connection;
 mod container;
@@ -361,6 +362,10 @@ where
     let path = CString::new(binary_path.as_os_str().as_bytes())?;
 
     sub_progress.success(Some("ready to launch process"));
+
+    if config.experimental.browser_extension_config {
+        browser::init_browser_extension(&config.feature.network, progress);
+    }
 
     // Print config details for the user
     let mut sub_progress_config = progress.subtask("config summary");
