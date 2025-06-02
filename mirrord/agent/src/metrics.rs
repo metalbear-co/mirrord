@@ -37,18 +37,9 @@ pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::n
 
 pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static REDIRECTED_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
-
-/// Follows `MatchedHttpRequest` that is being processed.
-///
-/// - incremented: `MatchedHttpRequest::new`;
-/// - decremented: In a few places, ideally it gets a `-1` count whenever we sent a
-///   `Command::HttpResponse`, which means that this request has been fulfilled, but we also reset
-///   it to the amount of response channels in `TcpStealerApi::handle_client_message` when a failure
-///   happens.
-pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static REDIRECTED_REQUESTS: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
@@ -85,9 +76,8 @@ struct Metrics {
     mirror_connection_subscription: IntGauge,
     steal_filtered_port_subscription: IntGauge,
     steal_unfiltered_port_subscription: IntGauge,
-    steal_filtered_connection_subscription: IntGauge,
-    steal_unfiltered_connection_subscription: IntGauge,
-    http_request_in_progress_count: IntGauge,
+    redirected_connections: IntGauge,
+    redirected_requests: IntGauge,
     tcp_outgoing_connection: IntGauge,
     udp_outgoing_connection: IntGauge,
 }
@@ -155,26 +145,18 @@ impl Metrics {
             IntGauge::with_opts(opts).expect("Valid at initialization!")
         };
 
-        let steal_filtered_connection_subscription = {
+        let redirected_connections = {
             let opts = Opts::new(
-                "mirrord_agent_steal_connection_subscription_count",
-                "amount of filtered connections in steal mode in mirrord-agent",
+                "mirrord_agent_redirected_connections_count",
+                "amount of incoming TCP connections currently redirected by mirrord-agent",
             );
             IntGauge::with_opts(opts).expect("Valid at initialization!")
         };
 
-        let steal_unfiltered_connection_subscription = {
+        let redirected_requests = {
             let opts = Opts::new(
-                "mirrord_agent_steal_unfiltered_connection_subscription_count",
-                "amount of unfiltered connections in steal mode in mirrord-agent",
-            );
-            IntGauge::with_opts(opts).expect("Valid at initialization!")
-        };
-
-        let http_request_in_progress_count = {
-            let opts = Opts::new(
-                "mirrord_agent_http_request_in_progress_count",
-                "amount of in-progress http requests in the mirrord-agent",
+                "mirrord_agent_redirected_requests_count",
+                "amount of incoming HTTP requests currently redirected by mirrord-agent",
             );
             IntGauge::with_opts(opts).expect("Valid at initialization!")
         };
@@ -217,13 +199,10 @@ impl Metrics {
             .register(Box::new(steal_unfiltered_port_subscription.clone()))
             .expect("Register must be valid at initialization!");
         registry
-            .register(Box::new(steal_filtered_connection_subscription.clone()))
+            .register(Box::new(redirected_connections.clone()))
             .expect("Register must be valid at initialization!");
         registry
-            .register(Box::new(steal_unfiltered_connection_subscription.clone()))
-            .expect("Register must be valid at initialization!");
-        registry
-            .register(Box::new(http_request_in_progress_count.clone()))
+            .register(Box::new(redirected_requests.clone()))
             .expect("Register must be valid at initialization!");
         registry
             .register(Box::new(tcp_outgoing_connection.clone()))
@@ -241,9 +220,8 @@ impl Metrics {
             mirror_connection_subscription,
             steal_filtered_port_subscription,
             steal_unfiltered_port_subscription,
-            steal_filtered_connection_subscription,
-            steal_unfiltered_connection_subscription,
-            http_request_in_progress_count,
+            redirected_connections,
+            redirected_requests,
             tcp_outgoing_connection,
             udp_outgoing_connection,
         }
@@ -264,9 +242,8 @@ impl Metrics {
             mirror_connection_subscription,
             steal_filtered_port_subscription,
             steal_unfiltered_port_subscription,
-            steal_filtered_connection_subscription,
-            steal_unfiltered_connection_subscription,
-            http_request_in_progress_count,
+            redirected_connections,
+            redirected_requests,
             tcp_outgoing_connection,
             udp_outgoing_connection,
         } = self;
@@ -278,11 +255,8 @@ impl Metrics {
         mirror_connection_subscription.set(MIRROR_CONNECTION_SUBSCRIPTION.load_as_i64());
         steal_filtered_port_subscription.set(STEAL_FILTERED_PORT_SUBSCRIPTION.load_as_i64());
         steal_unfiltered_port_subscription.set(STEAL_UNFILTERED_PORT_SUBSCRIPTION.load_as_i64());
-        steal_filtered_connection_subscription
-            .set(STEAL_FILTERED_CONNECTION_SUBSCRIPTION.load_as_i64());
-        steal_unfiltered_connection_subscription
-            .set(STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.load_as_i64());
-        http_request_in_progress_count.set(HTTP_REQUEST_IN_PROGRESS_COUNT.load_as_i64());
+        redirected_connections.set(REDIRECTED_CONNECTIONS.load_as_i64());
+        redirected_requests.set(REDIRECTED_REQUESTS.load_as_i64());
         tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load_as_i64());
         udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load_as_i64());
 
@@ -341,6 +315,25 @@ pub(crate) async fn start_metrics(
         })?;
 
     Ok(())
+}
+
+/// Allows for managing metrics in a RAII fashion.
+pub struct MetricGuard {
+    metric: &'static AtomicUsize,
+}
+
+impl MetricGuard {
+    pub fn new(metric: &'static AtomicUsize) -> Self {
+        metric.fetch_add(1, Ordering::Relaxed);
+
+        Self { metric }
+    }
+}
+
+impl Drop for MetricGuard {
+    fn drop(&mut self) {
+        self.metric.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]

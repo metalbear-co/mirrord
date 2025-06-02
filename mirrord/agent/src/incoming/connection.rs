@@ -1,11 +1,12 @@
 use std::{
-    fmt,
+    fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 
+use actix_codec::ReadBuf;
 use futures::Stream;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
@@ -18,7 +19,10 @@ use super::{
     tls::{self, handler::PassThroughTlsConnector, StealTlsHandlerStore},
     Redirected,
 };
-use crate::http::HttpVersion;
+use crate::{
+    http::HttpVersion,
+    metrics::{MetricGuard, REDIRECTED_CONNECTIONS},
+};
 
 pub mod http;
 mod http_passthrough;
@@ -74,7 +78,75 @@ pub trait IncomingIO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
 impl<T> IncomingIO for T where T: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
+/// Wrapper over an incoming IO stream.
+///
+/// Automatically updates the [`REDIRECTED_CONNECTIONS`] metric with an internal [`MetricGuard`].
+/// Transparently implements [`AsyncRead`] and [`AsyncWrite`].
+struct IncomingIoWrapper<T> {
+    io: T,
+    _metric_guard: MetricGuard,
+}
+
+impl<T> AsyncRead for IncomingIoWrapper<T>
+where
+    T: AsyncRead + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.io).poll_read(cx, buf)
+    }
+}
+
+impl<T> AsyncWrite for IncomingIoWrapper<T>
+where
+    T: AsyncWrite + Unpin,
+{
+    fn is_write_vectored(&self) -> bool {
+        self.io.is_write_vectored()
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.io).poll_shutdown(cx)
+    }
+
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.io).poll_write(cx, buf)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<Result<usize, io::Error>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.io).poll_write_vectored(cx, bufs)
+    }
+}
+
 /// A redirected connection that passed the HTTP detection.
+///
+/// # Metrics
+///
+/// This type handles managing the [`REDIRECTED_CONNECTIONS`] metric,
+/// you don't need to do it manually.
+///
+/// The metric is incremented in [`MaybeHttp::detect`] and decremented on [`MaybeHttp::stream`]
+/// drop.
 pub struct MaybeHttp {
     pub info: ConnectionInfo,
     pub http_version: Option<HttpVersion>,
@@ -91,6 +163,8 @@ impl MaybeHttp {
         redirected: Redirected,
         tls_handlers: &StealTlsHandlerStore,
     ) -> Result<Self, HttpDetectError> {
+        let metric_guard = MetricGuard::new(&REDIRECTED_CONNECTIONS);
+
         let original_destination = redirected.destination;
         let peer_addr = redirected.source;
         let local_addr = redirected
@@ -106,7 +180,10 @@ impl MaybeHttp {
                     .map_err(HttpDetectError::HttpDetect)?;
 
             return Ok(Self {
-                stream: Box::new(stream),
+                stream: Box::new(IncomingIoWrapper {
+                    io: stream,
+                    _metric_guard: metric_guard,
+                }),
                 http_version,
                 info: ConnectionInfo {
                     original_destination,
@@ -128,13 +205,25 @@ impl MaybeHttp {
             Some(tls::HTTP_2_ALPN_NAME) => (Box::new(stream), Some(HttpVersion::V2)),
             Some(tls::HTTP_1_1_ALPN_NAME) => (Box::new(stream), Some(HttpVersion::V1)),
             Some(tls::HTTP_1_0_ALPN_NAME) => (Box::new(stream), Some(HttpVersion::V1)),
-            Some(..) => (Box::new(stream), None),
+            Some(..) => (
+                Box::new(IncomingIoWrapper {
+                    io: stream,
+                    _metric_guard: metric_guard,
+                }),
+                None,
+            ),
             None => {
                 let (stream, http_version) =
                     crate::http::detect_http_version(stream, Self::HTTP_DETECTION_TIMEOUT)
                         .await
                         .map_err(HttpDetectError::HttpDetect)?;
-                (Box::new(stream), http_version)
+                (
+                    Box::new(IncomingIoWrapper {
+                        io: stream,
+                        _metric_guard: metric_guard,
+                    }),
+                    http_version,
+                )
             }
         };
 

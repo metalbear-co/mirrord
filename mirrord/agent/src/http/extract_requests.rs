@@ -10,19 +10,21 @@ use std::{
 
 use bytes::Bytes;
 use futures::{future::Either, FutureExt, Stream};
+use http_body_util::combinators::BoxBody;
 use hyper::{
-    body::{Frame, Incoming},
+    body::{Body, Frame, Incoming, SizeHint},
     http::request::Parts,
     server::conn::{http1, http2},
     service::Service,
     upgrade::OnUpgrade,
-    Error, Request,
+    Error, Request, Response,
 };
 use hyper_util::rt::TokioExecutor;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
 use super::{error::MirrordErrorResponse, BoxResponse, HttpVersion};
+use crate::metrics::{MetricGuard, REDIRECTED_REQUESTS};
 
 /// An HTTP request extracted from an HTTP connection
 /// with [`ExtractedRequests`].
@@ -90,6 +92,14 @@ where
 ///
 /// **Important:** this stream has to be polled with [`Stream::poll_next`] for the underlying HTTP
 /// connection to make any progress.
+///
+/// # Metrics
+///
+/// This type handles managing the [`REDIRECTED_REQUESTS`] metric,
+/// you don't need to do it manually.
+///
+/// The metric is incremented when a new request is extracted, and decremented when hyper finishes
+/// processing the response.
 pub struct ExtractedRequests<IO>
 where
     IO: 'static,
@@ -198,7 +208,7 @@ struct InnerService {
 }
 
 impl Service<Request<Incoming>> for InnerService {
-    type Response = BoxResponse;
+    type Response = Response<MetricGuardedBody>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -206,11 +216,21 @@ impl Service<Request<Incoming>> for InnerService {
         let this = self.clone();
 
         async move {
+            let metric_guard = MetricGuard::new(&REDIRECTED_REQUESTS);
+
             let (response_tx, response_rx) = oneshot::channel();
             let version = request.version();
 
             if this.request_tx.send((request, response_tx)).await.is_err() {
-                return Ok(MirrordErrorResponse::new(version, "the connection was dropped").into());
+                let response = BoxResponse::from(MirrordErrorResponse::new(
+                    version,
+                    "the connection was dropped",
+                ));
+                let response = response.map(|body| MetricGuardedBody {
+                    body,
+                    _metric_guard: metric_guard,
+                });
+                return Ok(response);
             }
 
             let response = match response_rx.await {
@@ -218,9 +238,41 @@ impl Service<Request<Incoming>> for InnerService {
                 Err(..) => MirrordErrorResponse::new(version, "the request was dropped").into(),
             };
 
+            let response = response.map(|body| MetricGuardedBody {
+                body,
+                _metric_guard: metric_guard,
+            });
+
             Ok(response)
         }
         .boxed()
+    }
+}
+
+/// Should decrement the [`REDIRECTED_REQUESTS`] metric when hyper finally drops it.
+struct MetricGuardedBody {
+    body: BoxBody<Bytes, hyper::Error>,
+    _metric_guard: MetricGuard,
+}
+
+impl Body for MetricGuardedBody {
+    type Data = Bytes;
+    type Error = hyper::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.body).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
     }
 }
 
