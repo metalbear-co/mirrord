@@ -516,7 +516,14 @@ impl LayerConfig {
                         .to_string(),
                 ));
             }
-            (Some(config), ..) => config.verify(context)?,
+            (Some(config), ..) => {
+                context.add_warning(
+                    "`feature.network.incoming.https_delivery` is deprecated, \
+                    use `feature.network.incoming.tls_delivery` instead."
+                        .into(),
+                );
+                config.verify(context)?
+            }
             (.., Some(config)) => config.verify(context)?,
             (None, None) => {}
         }

@@ -1,11 +1,11 @@
 use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 
 use bimap::BiMap;
-use https_delivery::LocalTlsDelivery;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
 use thiserror::Error;
+use tls_delivery::LocalTlsDelivery;
 
 use crate::{
     config::{
@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub mod http_filter;
-pub mod https_delivery;
+pub mod tls_delivery;
 
 use http_filter::*;
 

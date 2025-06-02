@@ -1,6 +1,6 @@
 use std::{fmt, path::PathBuf, sync::Arc};
 
-use mirrord_config::feature::network::incoming::https_delivery::{
+use mirrord_config::feature::network::incoming::tls_delivery::{
     LocalTlsDelivery, TlsDeliveryProtocol,
 };
 use mirrord_tls_util::{
