@@ -1,4 +1,7 @@
 contact_links:
-  - name: 👋 Chat
+  - name: 👋 Discord Chat
     url: https://discord.gg/metalbear
     about: Talk with us in our Discord server.
+  - name: 👋 Slack Chat
+    url: https://metalbear.co/slack
+    about: Talk with us in our Slack channel.

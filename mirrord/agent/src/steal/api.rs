@@ -63,6 +63,7 @@ impl TcpStealerApi {
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(crate) async fn new(
         client_id: ClientId,
+        protocol_version: ClientProtocolVersion,
         command_tx: Sender<StealerCommand>,
         task_status: BgTaskStatus,
         channel_size: usize,
@@ -72,7 +73,7 @@ impl TcpStealerApi {
         let init_result = command_tx
             .send(StealerCommand {
                 client_id,
-                command: Command::NewClient(daemon_tx),
+                command: Command::NewClient(daemon_tx, protocol_version),
             })
             .await;
         if init_result.is_err() {
@@ -170,14 +171,6 @@ impl TcpStealerApi {
         response: HttpResponseFallback,
     ) -> AgentResult<()> {
         self.send_command(Command::HttpResponse(response)).await
-    }
-
-    pub(crate) async fn switch_protocol_version(
-        &mut self,
-        version: semver::Version,
-    ) -> AgentResult<()> {
-        self.send_command(Command::SwitchProtocolVersion(version))
-            .await
     }
 
     pub(crate) async fn handle_client_message(

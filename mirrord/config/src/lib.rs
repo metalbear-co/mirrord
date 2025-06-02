@@ -357,8 +357,13 @@ pub struct LayerConfig {
     ///
     /// When patching is skipped, mirrord will no longer be able to load into
     /// the process and its child processes.
-    #[config(env = "MIRRORD_SKIP_SIP")]
-    pub skip_sip: Option<VecOrSingle<String>>,
+    ///
+    /// Defaults to `{ "skip_sip": "git" }`
+    ///
+    /// When specified, the given value will replace the default list rather than
+    /// being added to.
+    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
+    pub skip_sip: VecOrSingle<String>,
 }
 
 impl LayerConfig {

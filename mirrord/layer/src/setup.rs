@@ -158,11 +158,7 @@ impl LayerSetup {
 
     #[cfg(target_os = "macos")]
     pub fn skip_patch_binaries(&self) -> Vec<String> {
-        self.config
-            .skip_sip
-            .as_deref()
-            .map(<[_]>::to_vec)
-            .unwrap_or_default()
+        self.config.skip_sip.to_vec()
     }
 
     pub fn is_debugger_port(&self, addr: &SocketAddr) -> bool {

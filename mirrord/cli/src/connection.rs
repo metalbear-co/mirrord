@@ -230,7 +230,7 @@ where
                 let mut actions = HashSet::new();
                 actions.insert(IdeAction::Link {
                     label: "Get started (read the docs)".to_string(),
-                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
+                    link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
                 });
                 actions.insert(IdeAction::Link {
                     label: "Try it now".to_string(),
@@ -243,7 +243,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
@@ -260,7 +260,7 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Get started (read the docs)".to_string(),
-                link: "https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
+                link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
             });
             actions.insert(IdeAction::Link {
                 label: "Try it now".to_string(),
@@ -273,6 +273,6 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
 }

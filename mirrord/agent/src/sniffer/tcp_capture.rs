@@ -36,7 +36,11 @@ impl RawSocketTcpCapture {
     ///
     /// Returned instance initially uses a BPF filter that drops every packet.
     #[tracing::instrument(level = Level::DEBUG, err)]
-    pub async fn new(network_interface: Option<String>, is_mesh: bool) -> AgentResult<Self> {
+    pub async fn new(
+        network_interface: Option<String>,
+        is_mesh: bool,
+        packet_buffer_size: Option<usize>,
+    ) -> AgentResult<Self> {
         // Priority is whatever the user set as an option to mirrord, then we check if we're in a
         // mesh to use `lo` interface, otherwise we try to get the appropriate interface.
         let interface = match network_interface.or_else(|| is_mesh.then(|| "lo".to_string())) {
@@ -51,7 +55,10 @@ impl RawSocketTcpCapture {
             "Resolved raw capture interface"
         );
 
-        let capture = RawCapture::from_interface_name(&interface)?;
+        let mut capture = RawCapture::from_interface_name(&interface)?;
+        if let Some(size) = packet_buffer_size {
+            capture.set_buffer_size(size);
+        }
         capture.set_filter(rawsocket::filter::build_drop_always())?;
         capture
             .ignore_outgoing()
@@ -130,7 +137,14 @@ impl TcpCapture for RawSocketTcpCapture {
 
     async fn next(&mut self) -> io::Result<(TcpSessionDirectionId, TcpPacketData)> {
         loop {
-            let raw = self.inner.next().await?;
+            let raw = match self.inner.next().await {
+                Ok(raw) => raw,
+                Err(e) if e.kind() == io::ErrorKind::OutOfMemory => {
+                    tracing::warn!("Out of memory error while reading raw packet, continuing...");
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
 
             if let Some(tcp) = Self::get_tcp_packet(raw) {
                 break Ok(tcp);

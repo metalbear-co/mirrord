@@ -277,6 +277,7 @@ pub enum NewOperatorFeature {
     KafkaQueueSplitting,
     LayerReconnect,
     KafkaQueueSplittingDirect,
+    SqsQueueSplittingDirect,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -295,6 +296,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::LayerReconnect => "layer reconnect",
             NewOperatorFeature::KafkaQueueSplittingDirect => {
                 "Kafka queue splitting without copy target"
+            }
+            NewOperatorFeature::SqsQueueSplittingDirect => {
+                "SQS queue splitting without copy target"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };
@@ -346,7 +350,16 @@ pub struct CopyTargetStatus {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // EnvVar -> envVar in yaml.
 pub enum QueueNameSource {
+    /// Name of an environment variable.
+    ///
+    /// References a single environment variable that contains the queue name.
+    /// Only this one queue will be split.
     EnvVar(String),
+    /// Regex pattern for environment variable name.
+    ///
+    /// References multiple environment variables that can contain names of multiple queues.
+    /// All found queues will be split.
+    RegexPattern(String),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -356,6 +369,21 @@ pub struct SqsQueueDetails {
     /// queue and distribute them to the output queues. When running with mirrord and splitting
     /// this queue, applications will get a modified name from that source.
     pub name_source: QueueNameSource,
+
+    /// Fallback queue name, if the source specified in `nameSource` is not present on the target.
+    /// If the configured source is not present and the fallback is used - the configured source
+    /// will be used to make the target use the temporary queue.
+    /// For example, if `nameSource` is `envVar: MEME_QUEUE_NAME`, but `MEME_QUEUE_NAME` is not
+    /// present in the target, and `IncomingMemeQueue.fifo` was set as a fallback queue name, then
+    /// the target will be modified to include the environment variable `MEME_QUEUE_NAME`, with the
+    /// name of the temporary queue as a value.
+    /// Setting a fallback name only makes sense if the target application indeed uses the defined
+    /// queue name source to override the source it uses on its absence.
+    pub fallback_name: Option<String>,
+
+    /// If set, the value read from `name_source` or `fallback_name`
+    /// will be parsed as a JSON map. The values in this map will be used as queue names.
+    pub names_from_json_map: Option<bool>,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
