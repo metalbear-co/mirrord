@@ -12,10 +12,7 @@ use tokio::{
 use super::IncomingStreamItem;
 use crate::{
     http::extract_requests::HttpUpgrade,
-    incoming::{
-        connection::{util::StealerSender, IncomingIO},
-        error::{ConnError, StealerDropped},
-    },
+    incoming::{connection::IncomingIO, error::ConnError},
 };
 
 pub type UpgradeDataRx = mpsc::Receiver<Vec<u8>>;
@@ -32,7 +29,7 @@ pub struct StealTask {
     /// finished.
     pub upgrade_rx: oneshot::Receiver<Option<UpgradeDataRx>>,
     /// Channel we use to send data to the stealing client.
-    pub tx: StealerSender<IncomingStreamItem>,
+    pub tx: mpsc::Sender<IncomingStreamItem>,
 }
 
 impl StealTask {
@@ -62,10 +59,14 @@ impl StealTask {
 
             self.tx
                 .send(IncomingStreamItem::Frame(frame.into()))
-                .await?;
+                .await
+                .map_err(|_| ConnError::StealerDropped)?;
         }
 
-        self.tx.send(IncomingStreamItem::NoMoreFrames).await?;
+        self.tx
+            .send(IncomingStreamItem::NoMoreFrames)
+            .await
+            .map_err(|_| ConnError::StealerDropped)?;
 
         Ok(())
     }
@@ -75,7 +76,7 @@ impl StealTask {
         let mut data_rx = match (&mut self.upgrade_rx).await {
             Ok(Some(data_rx)) => data_rx,
             Ok(None) => return Ok(()),
-            Err(..) => return Err(StealerDropped.into()),
+            Err(..) => return Err(ConnError::StealerDropped),
         };
 
         let (upgraded, read_buf) = (&mut self.on_upgrade)
@@ -85,7 +86,8 @@ impl StealTask {
         if read_buf.is_empty().not() {
             self.tx
                 .send(IncomingStreamItem::Data(read_buf.into()))
-                .await?;
+                .await
+                .map_err(|_| ConnError::StealerDropped)?;
         }
 
         let mut upgraded = upgraded.into_inner();
@@ -111,9 +113,9 @@ impl StealTask {
 
                     if buffer.is_empty() {
                         peer_writes = false;
-                        self.tx.send(IncomingStreamItem::NoMoreData).await?;
+                        self.tx.send(IncomingStreamItem::NoMoreData).await.map_err(|_| ConnError::StealerDropped)?;
                     } else {
-                        self.tx.send(IncomingStreamItem::Data(buffer.to_vec())).await?;
+                        self.tx.send(IncomingStreamItem::Data(buffer.to_vec())).await.map_err(|_| ConnError::StealerDropped)?;
                         buffer.clear();
                     }
                 },

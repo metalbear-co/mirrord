@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use crate::incoming::{
-    connection::{util::StealerSender, ConnectionInfo, IncomingIO, IncomingStreamItem},
+    connection::{ConnectionInfo, IncomingIO, IncomingStreamItem},
     error::ConnError,
 };
 
@@ -87,7 +87,7 @@ pub enum Destination {
         buffer: BytesMut,
     },
     StealingClient {
-        data_tx: StealerSender<IncomingStreamItem>,
+        data_tx: mpsc::Sender<IncomingStreamItem>,
         data_rx: mpsc::Receiver<Vec<u8>>,
     },
 }
@@ -128,7 +128,7 @@ impl Destination {
             Self::StealingClient { data_tx, .. } => data_tx
                 .send(IncomingStreamItem::Data(data.into()))
                 .await
-                .map_err(From::from),
+                .map_err(|_| ConnError::StealerDropped),
         }
     }
 
@@ -160,7 +160,7 @@ impl Destination {
             Self::StealingClient { data_tx, .. } => data_tx
                 .send(IncomingStreamItem::NoMoreData)
                 .await
-                .map_err(From::from),
+                .map_err(|_| ConnError::StealerDropped),
         }
     }
 }

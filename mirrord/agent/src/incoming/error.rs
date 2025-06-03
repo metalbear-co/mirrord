@@ -32,10 +32,6 @@ pub enum HttpDetectError {
     TlsAccept(#[source] io::Error),
 }
 
-#[derive(Error, Debug, Clone, Copy)]
-#[error("stealing client dropped the connection/request")]
-pub struct StealerDropped;
-
 /// Errors that can occur when handling a redirected incoming connection.
 #[derive(Error, Debug)]
 pub enum ConnError {
@@ -53,8 +49,8 @@ pub enum ConnError {
     PassthroughHttpError(#[source] hyper::Error),
     #[error("upgraded HTTP connection failed: {0}")]
     UpgradedError(#[source] io::Error),
-    #[error(transparent)]
-    StealerDropped(#[from] StealerDropped),
+    #[error("stealing client dropped the connection/request")]
+    StealerDropped,
     #[error("connection task was dropped")]
     Dropped,
 }

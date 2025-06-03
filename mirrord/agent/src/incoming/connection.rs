@@ -29,7 +29,6 @@ mod http_passthrough;
 mod http_steal;
 pub mod tcp;
 mod tcp_task;
-mod util;
 
 /// Redirected connection info.
 #[derive(Clone, Debug)]
