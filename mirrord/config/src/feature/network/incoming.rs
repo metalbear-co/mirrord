@@ -24,7 +24,7 @@ use http_filter::*;
 ///
 /// Controls the incoming TCP traffic feature.
 ///
-/// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
+/// See the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more
 /// details.
 ///
 /// Incoming traffic supports 2 modes of operation:
@@ -346,7 +346,7 @@ where
 
 /// Controls the incoming TCP traffic feature.
 ///
-/// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
+/// See the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more
 /// details.
 ///
 /// Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:

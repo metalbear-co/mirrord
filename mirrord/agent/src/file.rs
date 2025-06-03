@@ -876,7 +876,7 @@ impl FileManager {
             .get_dir_stream(fd)?
             .take(amount)
             .map(DirEntryInternal::try_from)
-            .try_collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, _>>()
             .map(|dir_entries| ReadDirBatchResponse { fd, dir_entries })?;
 
         Ok(result)

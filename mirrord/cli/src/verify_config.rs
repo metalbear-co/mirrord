@@ -6,11 +6,10 @@ use error::CliResult;
 use futures::TryFutureExt;
 use mirrord_config::{
     config::ConfigContext,
-    feature::FeatureConfig,
     target::{
         cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
         replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
-        stateful_set::StatefulSetTarget, Target, TargetConfig,
+        stateful_set::StatefulSetTarget, Target, TargetConfig, TargetType,
     },
     LayerConfig,
 };
@@ -98,66 +97,6 @@ impl From<TargetConfig> for VerifiedTargetConfig {
         Self {
             path: value.path.map(Into::into),
             namespace: value.namespace,
-        }
-    }
-}
-
-/// Corresponds to variants of [`Target`].
-#[derive(Serialize, PartialEq, Eq, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-enum TargetType {
-    Targetless,
-    Pod,
-    Deployment,
-    Rollout,
-    Job,
-    CronJob,
-    StatefulSet,
-    Service,
-    ReplicaSet,
-}
-
-impl core::fmt::Display for TargetType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let stringifed = match self {
-            TargetType::Targetless => "targetless",
-            TargetType::Pod => "pod",
-            TargetType::Deployment => "deployment",
-            TargetType::Rollout => "rollout",
-            TargetType::Job => "job",
-            TargetType::CronJob => "cronjob",
-            TargetType::StatefulSet => "statefulset",
-            TargetType::Service => "service",
-            TargetType::ReplicaSet => "replicaset",
-        };
-
-        f.write_str(stringifed)
-    }
-}
-
-impl TargetType {
-    fn all() -> impl Iterator<Item = Self> {
-        [
-            Self::Targetless,
-            Self::Pod,
-            Self::Deployment,
-            Self::Rollout,
-            Self::Job,
-            Self::CronJob,
-            Self::StatefulSet,
-            Self::Service,
-            Self::ReplicaSet,
-        ]
-        .into_iter()
-    }
-
-    fn compatible_with(&self, config: &FeatureConfig) -> bool {
-        match self {
-            Self::Targetless | Self::Rollout => !config.copy_target.enabled,
-            Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
-            Self::Job | Self::CronJob => config.copy_target.enabled,
-            Self::Service => !config.copy_target.enabled,
-            Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
         }
     }
 }

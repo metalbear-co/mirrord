@@ -22,7 +22,7 @@ It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
 ## Usage
 
 To generate the `configuration.md` that you see in the 
-[docs page](https://mirrord.dev/docs/reference/configuration/) we use the `medschool` tool as such:
+[docs page](https://metalbear.co/mirrord/docs/reference/configuration/) we use the `medschool` tool as such:
 
 ```sh
 cargo run -p medschool -- --input ./mirrord/config/src --output ./mirrord/config/configuration.md
@@ -31,5 +31,5 @@ cargo run -p medschool -- --input ./mirrord/config/src --output ./mirrord/config
 You can also use the `--prepend` arg to include a file at the start of the generated markdown file. 
 
 ```sh
-cargo run -p medschool -- --prepend ./header.txt --input ./mirrord/config/src --output [path to mirrord.dev docs page]
+cargo run -p medschool -- --prepend ./header.txt --input ./mirrord/config/src --output [path to metalbear.co/mirrord docs page]
 ```

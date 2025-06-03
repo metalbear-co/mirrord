@@ -16,6 +16,33 @@ use serde_json::Value;
 /// This feature should not be used in order to prevent malicious actions.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
+    group = "profiles.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordClusterProfile"
+)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterProfileSpec {
+    /// A list of adjustments to be made in the user's feature config.
+    ///
+    /// The adjustments are applied in order.
+    pub feature_adjustments: Vec<FeatureAdjustment>,
+
+    /// For future compatibility.
+    ///
+    /// The CLI should error when the profile contains unknown fields.
+    #[schemars(skip)]
+    #[serde(flatten, skip_serializing)]
+    pub unknown_fields: HashMap<String, Value>,
+}
+
+/// This custom resource has been superseded by [`MirrordClusterProfileSpec`] and should
+/// no longer be exposed in setup. During the migration period, we support both this and
+/// the new [`MirrordClusterProfileSpec`] custom resource definition.
+///
+/// Once users have migrated, we plan to re-introduce the kind name `MirrordProfile` in
+/// future releases for namespaced mirrord profile.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
     // The operator group is handled by the operator, we want profiles to be handled by k8s.
     group = "profiles.mirrord.metalbear.co",
     version = "v1alpha",

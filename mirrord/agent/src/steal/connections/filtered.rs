@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap, error::Error, fmt, future::Future, io, marker::PhantomData,
-    net::SocketAddr, ops::Not, pin::Pin,
+    collections::HashMap, error::Report, future::Future, io, marker::PhantomData, net::SocketAddr,
+    ops::Not, pin::Pin,
 };
 
 use bytes::Bytes;
@@ -101,43 +101,19 @@ struct RequestMatchResult {
 }
 
 /// Errors that can occur in the [`FilteringService`] when serving a stolen request.
-///
-/// Has a nice [`fmt::Display`] implementation that shows all sources of [`hyper::Error`]s.
 #[derive(Error, Debug)]
 enum FilteringServiceError {
     /// We failed to connect to the original destination
     /// when handling an unmatched request.
-    PassThroughConnectError(#[from] io::Error),
+    #[error("failed to connect to the original destination: {0}")]
+    PassThroughConnect(#[from] io::Error),
     /// We made the connection to the original destination,
     /// but failed to send the unmatched request.
-    PassThroughSendError(#[from] hyper::Error),
+    #[error("failed to pass the request to its original destination: {0}")]
+    PassThroughSend(#[from] hyper::Error),
     /// The client failed to provide the response to a matched request.
-    ClientResponseErorr,
-}
-
-impl fmt::Display for FilteringServiceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PassThroughConnectError(error) => {
-                write!(f, "failed to connect to the original destination: {error}")
-            }
-            Self::PassThroughSendError(error) => {
-                write!(
-                    f,
-                    "failed to pass the request to its original destination: {error}"
-                )?;
-                let mut source = error.source();
-                while let Some(error) = source {
-                    write!(f, "\n\t{error}")?;
-                    source = error.source();
-                }
-                Ok(())
-            }
-            Self::ClientResponseErorr => {
-                f.write_str("failed to receive a response from the connected mirrord session")
-            }
-        }
-    }
+    #[error("failed to receive a response from the connected mirrord session")]
+    ClientResponse,
 }
 
 /// Simple [`Service`] implementor that uses [`mpsc`] channels to pass incoming [`Request`]s to a
@@ -165,7 +141,8 @@ impl FilteringService {
     /// Produces a new [`StatusCode::BAD_GATEWAY`] [`Response`] with the given [`Version`] and the
     /// given `error` in body.
     fn bad_gateway(version: Version, error: FilteringServiceError) -> Response<DynamicBody> {
-        let body = format!("mirrord: {error}");
+        let error = Report::new(error).pretty(true);
+        let body = format!("mirrord-agent: {error}\n");
 
         Response::builder()
             .status(StatusCode::BAD_GATEWAY)
@@ -205,7 +182,7 @@ impl FilteringService {
                 tokio::spawn(async move {
                     if let Err(error) = connection.await {
                         tracing::error!(
-                            error = %FilteringServiceError::PassThroughSendError(error),
+                            error = %FilteringServiceError::PassThroughSend(error),
                             "Connection with the original destination failed",
                         );
                     }
@@ -231,7 +208,7 @@ impl FilteringService {
                 tokio::spawn(async move {
                     if let Err(error) = connection.with_upgrades().await {
                         tracing::error!(
-                            error = %FilteringServiceError::PassThroughSendError(error),
+                            error = %FilteringServiceError::PassThroughSend(error),
                             "Connection with the original destination failed",
                         );
                     }
@@ -363,7 +340,7 @@ impl FilteringService {
                     .await;
                 response
             }
-            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponseErorr),
+            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponse),
         };
 
         Ok(response)
@@ -573,14 +550,12 @@ where
                     return true;
                 };
 
-                entry.value().1.as_ref().is_some_and(|v| {
-                    if req.matches(v) {
-                        true
-                    } else {
-                        clients_below_version_req.push(*entry.key());
-                        false
-                    }
-                })
+                if entry.value().1.matches(req) {
+                    true
+                } else {
+                    clients_below_version_req.push(*entry.key());
+                    false
+                }
             })
             .map(|entry| *entry.key())
             .collect();
@@ -1214,7 +1189,7 @@ mod test {
                     client_id,
                     (
                         HttpFilter::Header(format!("x-client: {client_id}").parse().unwrap()),
-                        Some("1.19.0".parse().unwrap()),
+                        "1.19.0".parse().unwrap(),
                     ),
                 );
             }
@@ -1245,10 +1220,12 @@ mod test {
             is_upgrade: bool,
         ) -> Request<DynamicBody> {
             for client in clients {
-                let client_version = client.version.unwrap_or("1.19.0").parse().unwrap();
                 let filter = (
                     HttpFilter::Header("x-subscription: ABCD".parse().unwrap()),
-                    Some(client_version),
+                    client
+                        .version
+                        .map(|v| v.parse().unwrap())
+                        .unwrap_or_default(),
                 );
                 self.filters.insert(client.id, filter);
             }
@@ -2088,7 +2065,7 @@ mod test {
             0,
             (
                 HttpFilter::Header("x-capture: true".parse().unwrap()),
-                Some("1.19.0".parse().unwrap()),
+                "1.19.0".parse().unwrap(),
             ),
         );
 

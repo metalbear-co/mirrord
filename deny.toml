@@ -34,6 +34,7 @@ allow = [
     "WTFPL",
     "wxWindows",
     "Zlib",
+    "CDLA-Permissive-2.0",
 ]
 
 [[licenses.clarify]]

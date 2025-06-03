@@ -16,7 +16,7 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target, LayerConfig};
+use mirrord_config::{target::Target, LayerConfig};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -556,64 +556,58 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let is_empty_deployment = target.empty_deployment();
-        let do_copy_target = layer_config.feature.copy_target.enabled
-            || is_empty_deployment
-            || layer_config.feature.split_queues.sqs().next().is_some()
-            || (layer_config.feature.split_queues.kafka().next().is_some()
-                && self
-                    .operator()
-                    .spec
-                    .require_feature(NewOperatorFeature::KafkaQueueSplittingDirect)
-                    .is_err());
-        let (connect_url, session_id) = if do_copy_target {
+        let (do_copy_target, reason) = if layer_config.feature.copy_target.enabled {
+            (true, None)
+        } else if target.empty_deployment() {
+            (true, Some("empty deployment"))
+        } else if layer_config.feature.split_queues.sqs().next().is_some()
+            && self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                .not()
+        {
+            (true, Some("SQS splitting"))
+        } else if layer_config.feature.split_queues.kafka().next().is_some()
+            && self
+                .operator()
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                .not()
+        {
+            (true, Some("Kafka splitting"))
+        } else {
+            (false, None)
+        };
+
+        let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("copying target");
-
-            if layer_config.feature.copy_target.enabled.not() {
-                if is_empty_deployment.not() {
-                    copy_subtask.info("Creating a copy-target for queue-splitting (even though copy_target was not explicitly set).")
-                } else {
-                    copy_subtask.info("Creating a copy-target for deployment (even thought copy_target was not explicitly set).")
-                }
+            if let Some(reason) = reason {
+                copy_subtask.info(&format!(
+                    "Creating a target copy for {reason} (even though `copy_target` was not explicitly set)."
+                ));
             }
+            let (copied, reused) = self.copy_target(layer_config, true).await?;
+            copy_subtask.success(Some(if reused {
+                "found target copy to reuse"
+            } else {
+                "target copied"
+            }));
 
-            // We do not validate the `target` here, it's up to the operator.
-            let target = layer_config
-                .target
-                .path
-                .clone()
-                .unwrap_or(Target::Targetless);
-            let scale_down = layer_config.feature.copy_target.scale_down;
-            let namespace = layer_config
-                .target
-                .namespace
-                .as_deref()
-                .unwrap_or(self.client.default_namespace());
-            let copied = self
-                .copy_target(
-                    target,
-                    scale_down,
-                    namespace,
-                    layer_config
-                        .feature
-                        .split_queues
-                        .is_set()
-                        .then(|| layer_config.feature.split_queues.clone()),
-                )
-                .await?;
+            let id = copied
+                .status
+                .as_ref()
+                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            let connect_url = Self::copy_target_connect_url(
+                &copied,
+                use_proxy_api,
+                layer_config.profile.as_deref(),
+            );
+            let session = self.make_operator_session(id, connect_url)?;
 
-            copy_subtask.success(Some("target copied"));
-
-            (
-                Self::copy_target_connect_url(
-                    &copied,
-                    use_proxy_api,
-                    layer_config.profile.as_deref(),
-                ),
-                copied
-                    .status
-                    .and_then(|copy_crd| copy_crd.creator_session.id),
-            )
+            (session, reused)
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
@@ -660,49 +654,83 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let use_proxy = self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::ProxyApi);
-
             let params = ConnectParams::new(layer_config);
+            let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
+            let session = self.make_operator_session(None, connect_url)?;
 
-            (Self::target_connect_url(use_proxy, &target, &params), None)
+            (session, false)
         };
 
-        tracing::debug!("connect_url {connect_url:?}");
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let (tx, rx, session) = match Self::connect_target(&self.client, &session).await {
+            Ok((tx, rx)) => {
+                connection_subtask.success(Some("connected to the target"));
+                (tx, rx, session)
+            }
+            Err(OperatorApiError::KubeError {
+                error: kube::Error::Api(response),
+                operation: OperatorOperation::WebsocketConnection,
+            }) if response.code == 404 && reused_copy => {
+                connection_subtask.failure(Some("copied target is gone"));
+                let mut copy_subtask = progress.subtask("copying target");
+                let (copied, _) = self.copy_target(layer_config, false).await?;
+                copy_subtask.success(Some("target copied"));
 
+                let connect_url = Self::copy_target_connect_url(
+                    &copied,
+                    use_proxy_api,
+                    layer_config.profile.as_deref(),
+                );
+                let session_id = copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+                let session = self.make_operator_session(session_id, connect_url)?;
+
+                let mut connection_subtask = progress.subtask("connecting to the target");
+                let (tx, rx) = Self::connect_target(&self.client, &session).await?;
+                connection_subtask.success(Some("connected to the target"));
+                (tx, rx, session)
+            }
+            Err(error) => return Err(error),
+        };
+
+        Ok(OperatorSessionConnection { session, tx, rx })
+    }
+
+    /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
+    ///
+    /// If `id` is not passed, a random one is generated.
+    #[tracing::instrument(level = Level::DEBUG, err, ret)]
+    fn make_operator_session(
+        &self,
+        id: Option<&str>,
+        connect_url: String,
+    ) -> OperatorApiResult<OperatorSession> {
+        let id = id
+            .map(|id| u64::from_str_radix(id, 16))
+            .transpose()?
+            .unwrap_or_else(rand::random);
+        let operator_protocol_version = self
+            .operator
+            .spec
+            .protocol_version
+            .as_ref()
+            .and_then(|version| version.parse().ok());
         let allow_reconnect = self
             .operator
             .spec
             .supported_features()
             .contains(&NewOperatorFeature::LayerReconnect);
 
-        let session = OperatorSession {
-            // Re-use the `session_id` generated from the `CopyTargetCrd`, or random if
-            // this is not a copy target session.
-            id: session_id
-                .map(|id| u64::from_str_radix(&id, 16))
-                .transpose()?
-                .unwrap_or_else(rand::random),
+        Ok(OperatorSession {
+            id,
             connect_url,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
-            operator_protocol_version: self
-                .operator
-                .spec
-                .protocol_version
-                .as_ref()
-                .and_then(|version| version.parse().ok()),
+            operator_protocol_version,
             allow_reconnect,
-        };
-
-        let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx) = Self::connect_target(&self.client, &session).await?;
-        connection_subtask.success(Some("connected to the target"));
-
-        Ok(OperatorSessionConnection { session, tx, rx })
+        })
     }
 
     /// Produces the URL for making a connection request to the operator.
@@ -762,8 +790,9 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
-            // Kafka splits are passed in the request body.
+            // Kafka and SQS splits are passed in the request body.
             kafka_splits: Default::default(),
+            sqs_splits: Default::default(),
         };
 
         if use_proxy {
@@ -781,34 +810,50 @@ impl OperatorApi<PreparedClientCert> {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }
 
-    /// Creates a new or reuses existing [`CopyTargetCrd`] resource using the operator.
-    /// If new this should create a new dummy pod out of the given [`Target`].
+    /// Creates a new or optionally reuses an existing [`CopyTargetCrd`] resource using the
+    /// operator.
+    ///
+    /// If new, this should create a new dummy pod out of the [`Target`] specified in the given
+    /// [`LayerConfig`].
+    ///
+    /// Reuse mechanism can be enabled by setting `allow_reuse` to `true`.
+    ///
+    /// # Returns
+    ///
+    /// * The created or reused [`CopyTargetCrd`]
+    /// * Whether the [`CopyTargetCrd`] was reused
     ///
     /// # Note
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    #[tracing::instrument(level = "trace", err)]
+    #[tracing::instrument(level = Level::TRACE, skip(layer_config), err, ret)]
     async fn copy_target(
         &self,
-        target: Target,
-        scale_down: bool,
-        namespace: &str,
-        split_queues: Option<SplitQueuesConfig>,
-    ) -> OperatorApiResult<CopyTargetCrd> {
+        layer_config: &LayerConfig,
+        allow_reuse: bool,
+    ) -> OperatorApiResult<(CopyTargetCrd, bool)> {
+        // We do not validate the `target` here, it's up to the operator.
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let scale_down = layer_config.feature.copy_target.scale_down;
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+        let split_queues = layer_config
+            .feature
+            .split_queues
+            .is_set()
+            .then(|| layer_config.feature.split_queues.clone());
+
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
-
-        let existing_copy_targets =
-            copy_target_api
-                .list(&ListParams::default())
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::CopyingTarget,
-                })?;
-
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
             target,
@@ -817,17 +862,27 @@ impl OperatorApi<PreparedClientCert> {
             split_queues,
         };
 
-        if let Some(copy_target) = existing_copy_targets.items.into_iter().find(|copy_target| {
-            copy_target.spec == copy_target_spec
-                && copy_target
-                    .status
-                    .as_ref()
-                    .map(|status| status.creator_session.user_id.as_ref() == Some(&user_id))
-                    .unwrap_or(false)
-        }) {
-            tracing::debug!(?copy_target, "reusing copy_target");
+        if allow_reuse {
+            let existing = copy_target_api
+                .list(&ListParams::default())
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: OperatorOperation::CopyingTarget,
+                })?
+                .items
+                .into_iter()
+                .find(|copy_target| {
+                    copy_target.spec == copy_target_spec
+                        && copy_target.status.as_ref().is_some_and(|status| {
+                            status.creator_session.user_id.as_ref() == Some(&user_id)
+                        })
+                });
 
-            return Ok(copy_target);
+            if let Some(copy_target) = existing {
+                tracing::debug!(?copy_target, "reusing copy_target");
+                return Ok((copy_target, true));
+            }
         }
 
         copy_target_api
@@ -840,6 +895,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::CopyingTarget,
             })
+            .map(|copied| (copied, false))
     }
 
     /// Connects to the target, reusing the given [`OperatorSession`].
@@ -937,6 +993,7 @@ mod test {
         ConcurrentSteal::Abort,
         None,
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -955,6 +1012,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
@@ -975,6 +1033,7 @@ mod test {
         ConcurrentSteal::Abort,
         None,
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -993,6 +1052,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
@@ -1013,6 +1073,7 @@ mod test {
         ConcurrentSteal::Abort,
         Some("no-steal"),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1031,6 +1092,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped"
     )]
@@ -1057,8 +1119,36 @@ mod test {
                 ("header-2".to_string(), "filter-2".to_string()),
             ]),
         )]),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
+    )]
+    #[case::deployment_container_proxy_sqs_splits(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        HashMap::from([(
+            "topic-id",
+            BTreeMap::from([
+                ("header-1".to_string(), "filter-1".to_string()),
+                ("header-2".to_string(), "filter-2".to_string()),
+            ]),
+        )]),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
     #[test]
     fn target_connect_url(
@@ -1067,9 +1157,15 @@ mod test {
         #[case] concurrent_steal: ConcurrentSteal,
         #[case] profile: Option<&str>,
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
+        #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
+        let sqs_splits = sqs_splits
             .iter()
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
@@ -1079,6 +1175,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            sqs_splits,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

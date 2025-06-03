@@ -48,6 +48,7 @@ use crate::{
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{self, StealerCommand, TcpStealerApi},
     util::{
+        protocol_version::ClientProtocolVersion,
         remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
         ClientId,
     },
@@ -236,6 +237,8 @@ struct ClientConnectionHandler {
     state: State,
     /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
     ready_for_logs: bool,
+    /// Client's version of [`mirrord_protocol`].
+    protocol_version: ClientProtocolVersion,
 }
 
 impl Drop for ClientConnectionHandler {
@@ -253,13 +256,20 @@ impl ClientConnectionHandler {
         bg_tasks: BackgroundTasks,
         state: State,
     ) -> AgentResult<Self> {
+        let protocol_version = ClientProtocolVersion::default();
+
         let pid = state.container_pid();
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
         let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
-        let tcp_stealer_api =
-            Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
+        let tcp_stealer_api = Self::create_stealer_api(
+            id,
+            protocol_version.clone(),
+            bg_tasks.stealer,
+            &mut connection,
+        )
+        .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
@@ -276,6 +286,7 @@ impl ClientConnectionHandler {
             dns_api,
             state,
             ready_for_logs: false,
+            protocol_version,
         };
 
         CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -313,11 +324,20 @@ impl ClientConnectionHandler {
 
     async fn create_stealer_api(
         id: ClientId,
+        protocol_version: ClientProtocolVersion,
         task: BackgroundTask<StealerCommand>,
         connection: &mut ClientConnection,
     ) -> AgentResult<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
-            match TcpStealerApi::new(id, stealer_sender, stealer_status, CHANNEL_SIZE).await {
+            match TcpStealerApi::new(
+                id,
+                protocol_version,
+                stealer_sender,
+                stealer_status,
+                CHANNEL_SIZE,
+            )
+            .await
+            {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
                     let _ = connection
@@ -509,12 +529,9 @@ impl ClientConnectionHandler {
                 .await?;
             }
             ClientMessage::SwitchProtocolVersion(client_version) => {
-                let settled_version = client_version.min(mirrord_protocol::VERSION.clone());
-                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api
-                        .switch_protocol_version(settled_version.clone())
-                        .await?;
-                }
+                let settled_version = (&*mirrord_protocol::VERSION).min(&client_version).clone();
+
+                self.protocol_version.replace(client_version);
 
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(
                     settled_version,
@@ -626,12 +643,15 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let leftover_rules = state
         .network_runtime
         .spawn(async move {
-            let ipt = if args.ipv6 {
-                new_ip6tables()
+            let rules_v4 =
+                SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(new_iptables())).await?;
+            let rules_v6 = if args.ipv6 {
+                SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(new_ip6tables())).await?
             } else {
-                new_iptables()
+                vec![]
             };
-            SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(ipt)).await
+
+            Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
@@ -804,20 +824,32 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain(ipv6: bool) -> Result<(), IPTablesError> {
-    let ipt = if ipv6 {
-        IPTablesWrapper::from(new_ip6tables())
-    } else {
-        IPTablesWrapper::from(new_iptables())
+async fn clear_iptable_chain(ipv6_enabled: bool) -> Result<(), IPTablesError> {
+    let v4_result: Result<(), IPTablesError> = try {
+        let ipt = IPTablesWrapper::from(new_iptables());
+        if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+            trace!("No iptables mirrord rules found, skipping iptables cleanup.");
+        } else {
+            let tables = SafeIpTables::load(ipt, false).await?;
+            tables.cleanup().await?
+        }
     };
 
-    if !SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
-        let tables = SafeIpTables::load(ipt, false).await?;
-        tables.cleanup().await
+    let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
+        try {
+            let ipt = IPTablesWrapper::from(new_ip6tables());
+            if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
+                trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
+            } else {
+                let tables = SafeIpTables::load(ipt, false).await?;
+                tables.cleanup().await?
+            }
+        }
     } else {
-        trace!("No mirorrd rules found, skipping iptables cleanup.");
         Ok(())
-    }
+    };
+
+    v4_result.and(v6_result)
 }
 
 /// Runs the current binary as a child process,

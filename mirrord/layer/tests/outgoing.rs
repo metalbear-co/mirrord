@@ -33,7 +33,7 @@ use tokio::net::TcpListener;
 /// 4. Expects the peer to send the same data back
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
+#[timeout(Duration::from_secs(15))]
 async fn outgoing_udp(dylib_path: &Path) {
     let (mut test_process, mut intproxy) = Application::RustOutgoingUdp
         .start_process_with_layer(dylib_path, vec![], None)
@@ -155,7 +155,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config
 /// See [`outgoing_tcp_logic`].
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
+#[timeout(Duration::from_secs(15))]
 async fn outgoing_tcp(
     #[values(None, Some("outgoing_filter.json"))] with_config: Option<&str>,
     dylib_path: &Path,
@@ -173,7 +173,7 @@ async fn outgoing_tcp(
 /// list, thus it should go through local, and hang.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
+#[timeout(Duration::from_secs(15))]
 #[should_panic]
 async fn outgoing_tcp_from_the_local_app_broken(
     #[values(

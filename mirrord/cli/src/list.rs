@@ -4,7 +4,7 @@ use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{config::ConfigContext, target::TargetType, LayerConfig};
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
@@ -15,6 +15,10 @@ use serde::{ser::SerializeSeq, Serialize, Serializer};
 use tracing::Level;
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
+
+/// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
+/// Primarily used by the plugins when the user picks a target to fetch fewer targets at once.
+const LS_TARGET_TYPES_ENV: &str = "MIRRORD_LS_TARGET_TYPES";
 
 /// A mirrord target found in the cluster.
 #[derive(Serialize)]
@@ -66,7 +70,11 @@ impl FoundTargets {
     /// 1. returned [`FoundTargets`] will contain info about namespaces available in the cluster;
     /// 2. only deployment, rollout, and pod targets will be fetched.
     #[tracing::instrument(level = Level::DEBUG, skip(config), name = "resolve_targets", err)]
-    async fn resolve(config: LayerConfig, rich_output: bool) -> CliResult<Self> {
+    async fn resolve(
+        config: LayerConfig,
+        rich_output: bool,
+        target_types: Option<Vec<TargetType>>,
+    ) -> CliResult<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
@@ -107,15 +115,33 @@ impl FoundTargets {
 
         let (targets, namespaces) = tokio::try_join!(
             async {
-                let paths = match operator_api {
-                    None if config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
+                let paths = match (operator_api, target_types) {
+                    (None, _) if config.operator == Some(true) => {
+                        Err(CliError::OperatorNotInstalled)
+                    }
 
-                    Some(api)
+                    (Some(api), None)
                         if !rich_output
                             && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
                                 .matches(&api.operator().spec.operator_version) =>
                     {
                         seeker.all().await.map_err(|error| {
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        })
+                    }
+
+                    (Some(api), Some(target_types))
+                        if !rich_output
+                            && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
+                                .matches(&api.operator().spec.operator_version) =>
+                    {
+                        seeker.filtered(target_types, true).await.map_err(|error| {
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        })
+                    }
+
+                    (None, Some(target_types)) => {
+                        seeker.filtered(target_types, false).await.map_err(|error| {
                             CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
                         })
                     }
@@ -219,7 +245,21 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         util::remove_proxy_env();
     }
 
-    let targets = FoundTargets::resolve(layer_config, rich_output).await?;
+    let target_types = if let Some(target_type) = args.target_type {
+        Some(target_type)
+    } else {
+        match std::env::var(LS_TARGET_TYPES_ENV)
+            .ok()
+            .map(|val| serde_json::from_str::<Vec<TargetType>>(val.as_ref()))
+            .transpose()?
+            .unwrap_or_default()
+        {
+            vec if vec.is_empty() => None,
+            vec => Some(vec),
+        }
+    };
+
+    let targets = FoundTargets::resolve(layer_config, rich_output, target_types).await?;
 
     match args.output {
         Format::Json => {

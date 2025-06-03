@@ -487,6 +487,14 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
     }
 }
 
+#[cfg(target_os = "macos")]
+#[allow(non_snake_case)]
+#[hook_guard_fn]
+unsafe extern "C-unwind" fn CFNetworkCopySystemProxySettings_detour(
+) -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFDictionary>> {
+    None
+}
+
 pub(crate) unsafe fn enable_socket_hooks(
     hook_manager: &mut HookManager,
     enabled_remote_dns: bool,
@@ -640,6 +648,15 @@ pub(crate) unsafe fn enable_socket_hooks(
                 FnDns_configuration_free,
                 FN_DNS_CONFIGURATION_FREE
             );
+            if experimental.ignore_system_proxy_config {
+                replace!(
+                    hook_manager,
+                    "CFNetworkCopySystemProxySettings",
+                    CFNetworkCopySystemProxySettings_detour,
+                    FnCFNetworkCopySystemProxySettings,
+                    FN_CFNETWORKCOPYSYSTEMPROXYSETTINGS
+                )
+            }
         }
     }
 

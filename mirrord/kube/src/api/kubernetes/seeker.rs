@@ -10,6 +10,7 @@ use k8s_openapi::{
     ClusterResourceScope, Metadata, NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Resource};
+use mirrord_config::target::TargetType;
 use serde::de::{self, DeserializeOwned};
 
 use crate::{
@@ -70,6 +71,59 @@ impl KubeResourceSeeker<'_> {
             .chain(replicasets)
             .chain(pods)
             .collect())
+    }
+
+    /// Returns the targets of the specified resource type(s), as long as the operator is active or
+    /// no given types require the operator.
+    pub async fn filtered(
+        &self,
+        resource_types: Vec<TargetType>,
+        operator_active: bool,
+    ) -> Result<Vec<String>> {
+        Ok(futures::future::try_join_all(
+            resource_types
+                .into_iter()
+                .map(|resource_type| self.filtered_single(resource_type, operator_active)),
+        )
+        .await?
+        .concat())
+    }
+
+    /// Returns the targets of a single specified resource type, as long as either:
+    /// 1. The resource type doesn't require the operator
+    /// 2. The operator is being used
+    async fn filtered_single(
+        &self,
+        resource_type: TargetType,
+        operator_active: bool,
+    ) -> Result<Vec<String>> {
+        match resource_type {
+            TargetType::Deployment if operator_active => {
+                self.simple_list_resource::<Deployment>("deployment").await
+            }
+            TargetType::Deployment => self.deployments().await,
+            TargetType::Pod => self.pods().await,
+            TargetType::Rollout => self.simple_list_resource::<Rollout>("rollout").await,
+            TargetType::Job if operator_active => self.simple_list_resource::<Job>("job").await,
+            TargetType::CronJob if operator_active => {
+                self.simple_list_resource::<CronJob>("cronjob").await
+            }
+            TargetType::StatefulSet if operator_active => {
+                self.simple_list_resource::<StatefulSet>("statefulset")
+                    .await
+            }
+            TargetType::Service if operator_active => {
+                self.simple_list_resource::<Service>("service").await
+            }
+            TargetType::ReplicaSet if operator_active => {
+                self.simple_list_resource::<ReplicaSet>("replicaset").await
+            }
+            TargetType::Targetless => Err(KubeApiError::InvalidTargetType(resource_type)),
+            resource_type if !operator_active => {
+                Err(KubeApiError::TargetTypeRequiresOperator(resource_type))
+            }
+            resource_type => Err(KubeApiError::InvalidTargetTypeBug(resource_type)),
+        }
     }
 
     /// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
