@@ -5,7 +5,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::{Body, Frame, Incoming};
 
 /// [`Body`] that consist of some first [`Frame`]s that were already received,
@@ -37,11 +36,5 @@ where
         };
 
         Pin::new(tail).poll_frame(cx)
-    }
-}
-
-impl From<RolledBackBody> for BoxBody<Bytes, hyper::Error> {
-    fn from(value: RolledBackBody) -> Self {
-        value.map_err(|_| unreachable!()).boxed()
     }
 }

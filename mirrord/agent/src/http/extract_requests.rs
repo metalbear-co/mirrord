@@ -249,7 +249,10 @@ impl Service<Request<Incoming>> for InnerService {
     }
 }
 
-/// Should decrement the [`REDIRECTED_REQUESTS`] metric when hyper finally drops it.
+/// Used for responses returned from [`InnerService`].
+///
+/// Holds a [`MetricGuard`], so the [`REDIRECTED_REQUESTS`] metric stays bumped until
+/// hyper finishes processing the response.
 struct MetricGuardedBody {
     body: BoxBody<Bytes, hyper::Error>,
     _metric_guard: MetricGuard,
