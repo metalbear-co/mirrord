@@ -34,7 +34,7 @@ pub enum ProfileError {
     #[diagnostic(help(
         "Verify that the profile exists \
         and its name is spelled correctly in your mirrord config. \
-        For cluster-wise profile, use `kubectl get mirrordclusterprofiles <profile-name>`. \
+        For cluster-wide profile, use `kubectl get mirrordclusterprofiles <profile-name>`. \
         For namespaced profile, use `kubectl get mirrordprofiles <profile-name> -n <namespace>`."
     ))]
     ProfileNotFound,

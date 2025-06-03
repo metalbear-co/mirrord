@@ -16,44 +16,21 @@ use crate::utils::{
 };
 
 #[rstest]
+#[case::namespaced(true)]
+#[case::clusterwide(false)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(120))]
 pub async fn mirrord_profile_enforces_stealing(
     #[future] kube_client: kube::Client,
     #[future] basic_service: KubeService,
+    #[case] namespaced_profile: bool,
 ) {
     let kube_client = kube_client.await;
     let service = basic_service.await;
     let deployed_at = Instant::now();
     let target_path = service.pod_container_target();
 
-    let (_profile_guard, cluster_profile_name) = {
-        let profile = MirrordClusterProfile {
-            metadata: ObjectMeta {
-                // Service name is randomized, so there should be no conflict.
-                name: Some(format!("test-profile-{}", service.name)),
-                ..Default::default()
-            },
-            spec: MirrordClusterProfileSpec {
-                feature_adjustments: vec![FeatureAdjustment {
-                    change: FeatureChange::IncomingSteal,
-                    unknown_fields: Default::default(),
-                }],
-                unknown_fields: Default::default(),
-            },
-        };
-        let (guard, profile) = ResourceGuard::create(
-            Api::<MirrordClusterProfile>::all(kube_client.clone()),
-            &profile,
-            true,
-        )
-        .await
-        .unwrap();
-
-        (guard, profile.metadata.name.unwrap())
-    };
-
-    let (_profile_guard, namespaced_profile_name) = {
+    let (_profile_guard, profile_name) = if namespaced_profile {
         let profile = MirrordProfile {
             metadata: ObjectMeta {
                 // Service name is randomized, so there should be no conflict.
@@ -70,6 +47,30 @@ pub async fn mirrord_profile_enforces_stealing(
         };
         let (guard, profile) = ResourceGuard::create(
             Api::<MirrordProfile>::namespaced(kube_client.clone(), &service.namespace),
+            &profile,
+            true,
+        )
+        .await
+        .unwrap();
+
+        (guard, profile.metadata.name.unwrap())
+    } else {
+        let profile = MirrordClusterProfile {
+            metadata: ObjectMeta {
+                // Service name is randomized, so there should be no conflict.
+                name: Some(format!("test-profile-{}", service.name)),
+                ..Default::default()
+            },
+            spec: MirrordClusterProfileSpec {
+                feature_adjustments: vec![FeatureAdjustment {
+                    change: FeatureChange::IncomingSteal,
+                    unknown_fields: Default::default(),
+                }],
+                unknown_fields: Default::default(),
+            },
+        };
+        let (guard, profile) = ResourceGuard::create(
+            Api::<MirrordClusterProfile>::all(kube_client.clone()),
             &profile,
             true,
         )
@@ -134,11 +135,17 @@ pub async fn mirrord_profile_enforces_stealing(
         .await; // verify that the local app received the request as well
     std::mem::drop(test_process); // kill the app
 
-    // With the cluster-wise profile, the local application should steal the traffic.
+    // With the cluster-wide or namespaced profile, the local application should steal the traffic.
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
-    let config = serde_json::json!({
-        "profile": cluster_profile_name,
-    });
+    let config = if namespaced_profile {
+        serde_json::json!({
+            "profile": format!("{}/{}", &service.namespace, profile_name),
+        })
+    } else {
+        serde_json::json!({
+            "profile": profile_name,
+        })
+    };
     serde_json::to_writer_pretty(config_file.as_file_mut(), &config).unwrap();
     let test_process = Application::PythonFlaskHTTP
         .run(
@@ -165,60 +172,31 @@ pub async fn mirrord_profile_enforces_stealing(
     );
     std::mem::drop(test_process); // kill the app
 
-    // With the namespaced profile, the local application should steal the traffic.
-    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
-    let config = serde_json::json!({
-        "profile": format!("{}/{}", &service.namespace, namespaced_profile_name),
-    });
-    serde_json::to_writer_pretty(config_file.as_file_mut(), &config).unwrap();
-    let test_process = Application::PythonFlaskHTTP
-        .run(
-            &target_path,
-            Some(&service.namespace),
-            Some(vec!["-f", config_file.path().to_str().unwrap()]),
-            None,
-        )
-        .await;
-    test_process
-        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-        .await;
-    let response = reqwest::get(&service_url)
-        .await
-        .unwrap()
-        .bytes()
-        .await
-        .unwrap();
-    assert_eq!(
-        response.as_ref(),
-        b"GET",
-        "expected response from the local app, got: {}",
-        String::from_utf8_lossy(response.as_ref())
-    );
-    std::mem::drop(test_process); // kill the app
-
-    // when target namespace is not set,
-    // we should automatically use the profile namespace
-    let test_process = Application::PythonFlaskHTTP
-        .run(
-            &target_path,
-            None,
-            Some(vec!["-f", config_file.path().to_str().unwrap()]),
-            None,
-        )
-        .await;
-    test_process
-        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-        .await;
-    let response = reqwest::get(&service_url)
-        .await
-        .unwrap()
-        .bytes()
-        .await
-        .unwrap();
-    assert_eq!(
-        response.as_ref(),
-        b"GET",
-        "expected response from the local app, got: {}",
-        String::from_utf8_lossy(response.as_ref())
-    );
+    if namespaced_profile {
+        // when target namespace is not set,
+        // we should automatically use the namespaced profile's namespace
+        let test_process = Application::PythonFlaskHTTP
+            .run(
+                &target_path,
+                None,
+                Some(vec!["-f", config_file.path().to_str().unwrap()]),
+                None,
+            )
+            .await;
+        test_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+        let response = reqwest::get(&service_url)
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.as_ref(),
+            b"GET",
+            "expected response from the local app, got: {}",
+            String::from_utf8_lossy(response.as_ref())
+        );
+    }
 }
