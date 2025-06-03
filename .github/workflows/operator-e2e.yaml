@@ -2,9 +2,7 @@ name: Operator E2E Test
 
 on:
   pull_request:
-    types: [synchronize]
-  pull_request_review:
-    types: [submitted]
+    types: [closed]
   workflow_dispatch:
     inputs:
       mirrord_commit:
@@ -25,10 +23,11 @@ jobs:
   trigger-operator-e2e:
     runs-on: ubuntu-latest
     # Only run if:
-    # 1. PR is approved
-    # 2. Manually triggered
+    # 1. Manually triggered
+    # 2. PR is merged (not just closed)
     if: |
-      github.event_name == 'workflow_dispatch' || github.event.review.state == 'approved'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     steps:
       - name: Trigger operator E2E workflow
         uses: metalbear-co/repository-dispatch@main
