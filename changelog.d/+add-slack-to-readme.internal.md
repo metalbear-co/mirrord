@@ -1,0 +1,1 @@
+Add a badge for the community Slack to README
