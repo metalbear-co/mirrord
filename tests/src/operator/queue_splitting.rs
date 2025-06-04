@@ -23,10 +23,10 @@ use crate::utils::{
 };
 
 /// Produces a mirrord config file for an application run in the [`two_users`] test.
-fn get_config(with_regex: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
+fn get_config(single_queue_id: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
     let mut config = NamedTempFile::with_suffix(".json").unwrap();
 
-    let content = if with_regex {
+    let content = if single_queue_id {
         serde_json::json!({
             "operator": true,
             "feature": {
@@ -206,17 +206,23 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
-#[case::with_regex(true)]
-#[case::without_regex(false)]
+#[case::with_regex_without_fallback_json(true, false)]
+#[case::without_regex_without_fallback_json(false, false)]
+#[case::without_regex_with_fallback_json(false, true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
-pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: bool) {
+pub async fn two_users(
+    #[future] kube_client: kube::Client,
+    #[case] with_regex: bool,
+    #[case] with_fallback_json: bool,
+) {
     let kube_client = kube_client.await;
-    let sqs_test_resources = sqs_test_resources(kube_client.clone(), with_regex).await;
+    let sqs_test_resources =
+        sqs_test_resources(kube_client.clone(), with_regex, with_fallback_json).await;
     let application = Application::RustSqs;
 
-    let config_a = get_config(with_regex, ("client", "^a$"));
-    let config_b = get_config(with_regex, ("client", "^b$"));
+    let config_a = get_config(with_regex || with_fallback_json, ("client", "^a$"));
+    let config_b = get_config(with_regex || with_fallback_json, ("client", "^b$"));
 
     println!("Starting first mirrord client");
     let mut client_a = application
