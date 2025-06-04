@@ -474,7 +474,11 @@ impl ReversePortForwarder {
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 idle_local_http_connection_timeout,
-                network_config.https_delivery.clone(),
+                network_config
+                    .tls_delivery
+                    .clone()
+                    .or_else(|| network_config.https_delivery.clone())
+                    .unwrap_or_default(),
             ),
             (),
             512,
