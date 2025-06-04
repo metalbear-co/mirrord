@@ -23,10 +23,10 @@ use crate::utils::{
 };
 
 /// Produces a mirrord config file for an application run in the [`two_users`] test.
-fn get_config(with_regex: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
+fn get_config(single_queue_id: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
     let mut config = NamedTempFile::with_suffix(".json").unwrap();
 
-    let content = if with_regex {
+    let content = if single_queue_id {
         serde_json::json!({
             "operator": true,
             "feature": {
@@ -221,8 +221,8 @@ pub async fn two_users(
         sqs_test_resources(kube_client.clone(), with_regex, with_fallback_json).await;
     let application = Application::RustSqs;
 
-    let config_a = get_config(with_regex, ("client", "^a$"));
-    let config_b = get_config(with_regex, ("client", "^b$"));
+    let config_a = get_config(with_regex || with_fallback_json, ("client", "^a$"));
+    let config_b = get_config(with_regex || with_fallback_json, ("client", "^b$"));
 
     println!("Starting first mirrord client");
     let mut client_a = application
