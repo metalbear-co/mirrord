@@ -206,13 +206,19 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
-#[case::with_regex(true)]
-#[case::without_regex(false)]
+#[case::with_regex_without_fallback_json(true, false)]
+#[case::without_regex_without_fallback_json(false, false)]
+#[case::without_regex_with_fallback_json(false, true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
-pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: bool) {
+pub async fn two_users(
+    #[future] kube_client: kube::Client,
+    #[case] with_regex: bool,
+    #[case] with_fallback_json: bool,
+) {
     let kube_client = kube_client.await;
-    let sqs_test_resources = sqs_test_resources(kube_client.clone(), with_regex).await;
+    let sqs_test_resources =
+        sqs_test_resources(kube_client.clone(), with_regex, with_fallback_json).await;
     let application = Application::RustSqs;
 
     let config_a = get_config(with_regex, ("client", "^a$"));
