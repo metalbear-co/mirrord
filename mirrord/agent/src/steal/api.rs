@@ -647,7 +647,7 @@ struct IncomingConnection {
     /// If the client's [`mirrord_protocol`] version does not support
     /// [`DaemonTcp::HttpRequestChunked`], we must gather the incoming body frames here.
     ///
-    /// When we've read the full bobdy, we send the full request in one of the legacy types.
+    /// When we've read the full body, we send the full request in one of the legacy types.
     ///
     /// (only for HTTP requests)
     request_in_progress: Option<HttpRequest<InternalHttpBody>>,
