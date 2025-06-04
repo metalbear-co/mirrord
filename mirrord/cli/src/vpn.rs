@@ -47,7 +47,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
 
     let mut sub_progress = progress.subtask("create agent");
 
-    let (_, connection) = create_and_connect(&config, &mut sub_progress, &mut analytics)
+    let (_, connection) = create_and_connect(&mut config, &mut sub_progress, &mut analytics)
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 

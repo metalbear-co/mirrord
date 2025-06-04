@@ -194,7 +194,12 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
     // this is a bit weird but it makes more sense configured ports are the remote port
     // and not the local, so the check is done on the mapped port
     // see https://github.com/metalbear-co/mirrord/issues/2397
-    let not_a_filtered_port = !config.http_filter.ports.contains(&mapped_port);
+    let not_a_filtered_port = config
+        .http_filter
+        .ports
+        .as_ref()
+        .is_some_and(|filter_ports| filter_ports.contains(&mapped_port))
+        .not();
 
     let not_stolen_with_filter = !http_filter_used || not_a_filtered_port;
 
