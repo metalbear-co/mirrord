@@ -263,8 +263,8 @@ pub async fn create_queue_registry_resource(
                 tags: None,
                 fallback_name: Some(
                     serde_json::json!({
-                        QUEUE1_NAME_KEY: queue1.name.clone(),
-                        QUEUE2_URL_KEY: queue2.url.clone()
+                        QUEUE1_NAME_KEY: &queue1.name,
+                        QUEUE2_URL_KEY: &queue2.url
                     })
                     .to_string(),
                 ),
@@ -384,7 +384,7 @@ async fn sqs_consumer_service(
             },
             ForwardingConfig {
                 from: SqsQueueEnv {
-                    var_name: QUEUE_JSON_ENV_VAR.into(),
+                    var_name: QUEUE_JSON_ENV_VAR.to_string(),
                     is_url: true,
                     json_key: Some(QUEUE2_URL_KEY.to_string()),
                 },
@@ -395,10 +395,25 @@ async fn sqs_consumer_service(
                 },
             },
         ];
-        let config_str = serde_json::to_string(&test_service_config).unwrap();
-        vec![(CONFIGURATION_ENV_NAME.to_string(), config_str)]
+        let test_service_config_string = serde_json::to_string(&test_service_config).unwrap();
+
+        let json_for_deployed_app = serde_json::json!({
+            QUEUE1_NAME_KEY: queue1.name,
+            QUEUE2_URL_KEY: queue2.url
+        });
+
+        [
+            (
+                QUEUE_JSON_ENV_VAR.to_string(),
+                serde_json::to_string(&json_for_deployed_app).unwrap(),
+            ),
+            (
+                CONFIGURATION_ENV_NAME.to_string(),
+                test_service_config_string,
+            ),
+        ]
     } else {
-        vec![
+        [
             (QUEUE_NAME_ENV_VAR1.into(), queue1.name.clone()),
             (QUEUE2_URL_ENV_VAR.into(), queue2.url.clone()),
         ]
