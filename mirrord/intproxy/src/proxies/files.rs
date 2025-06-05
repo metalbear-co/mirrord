@@ -1185,9 +1185,9 @@ mod tests {
     use super::{FilesProxy, FilesProxyMessage};
     use crate::{
         background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
-        error::IntProxyError,
         main_tasks::{MainTaskId, ProxyMessage, ToLayer},
     };
+    use crate::error::InternalProxyError;
 
     /// Sets up a [`TaskSender`] and [`BackgroundTasks`] for a functioning [`FilesProxy`].
     ///
@@ -1199,9 +1199,9 @@ mod tests {
         file_buffer_size: u64,
     ) -> (
         TaskSender<FilesProxy>,
-        BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
     ) {
-        let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
+        let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError> =
             Default::default();
 
         let proxy = tasks.register(
@@ -1220,7 +1220,7 @@ mod tests {
     /// Convenience for opening a dir.
     async fn prepare_dir(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
     ) {
         let request = FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 0xdad });
         proxy
@@ -1368,7 +1368,7 @@ mod tests {
     /// Helper function for opening a file in a running [`FilesProxy`].
     async fn open_file(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
         readonly: bool,
     ) -> u64 {
         let message_id = rand::random();
@@ -1414,7 +1414,7 @@ mod tests {
 
     async fn make_read_request(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
         remote_fd: u64,
         buffer_size: u64,
         start_from: Option<u64>,
@@ -1441,7 +1441,7 @@ mod tests {
 
     async fn respond_to_read_request(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
         data: Vec<u8>,
         limited: bool,
     ) -> ProxyMessage {
@@ -1461,7 +1461,7 @@ mod tests {
 
     async fn respond_to_read_request_with_err(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
         error: ResponseError,
         limited: bool,
     ) -> ProxyMessage {
