@@ -47,10 +47,7 @@ where
 
         #[cfg(target_os = "linux")]
         {
-            Command::new("google-chrome")
-                .arg(init_url)
-                .status()
-                .map(|_| ())
+            Command::new("google-chrome").arg(url).status().map(|_| ())
         }
     }
     if is_chrome_installed() {
