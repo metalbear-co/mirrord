@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{process::Command, sync::LazyLock};
 
 use base64::engine::{general_purpose::STANDARD, Engine};
 use mirrord_config::feature::network::NetworkConfig;
@@ -6,7 +6,9 @@ use mirrord_progress::Progress;
 use serde::Serialize;
 
 // Permanent ID once extension is published
-const MIRRORD_CHROME_EXTENSION_ID: &str = "ejpgopblebjoiepjnhngaffejlaggogm";
+static MIRRORD_CHROME_EXTENSION_ID: LazyLock<&str> = LazyLock::new(|| {
+    option_env!("MIRRORD_CHROME_EXTENSION_ID").unwrap_or("ejpgopblebjoiepjnhngaffejlaggogm")
+});
 
 pub(crate) fn init_browser_extension<P>(network_config: &NetworkConfig, progress: &P)
 where
@@ -26,8 +28,8 @@ fn extension_init_url(config: &NetworkConfig) -> Option<String> {
         header_filter: config.incoming.http_filter.header_filter.clone()?,
     };
     Some(format!(
-        "chrome-extension://{extension_id}/config.html?payload={payload}",
-        extension_id = MIRRORD_CHROME_EXTENSION_ID,
+        "chrome-extension://{extension_id}/pages/config.html?payload={payload}",
+        extension_id = *MIRRORD_CHROME_EXTENSION_ID,
         payload = payload.encode()?,
     ))
 }
@@ -47,10 +49,7 @@ where
 
         #[cfg(target_os = "linux")]
         {
-            Command::new("google-chrome")
-                .arg(init_url)
-                .status()
-                .map(|_| ())
+            Command::new("google-chrome").arg(url).status().map(|_| ())
         }
     }
     if is_chrome_installed() {
