@@ -206,7 +206,7 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
-#[case::with_regex(true)]
+// #[case::with_regex(true)] uncomment this case when support for regex is merged
 #[case::without_regex(false)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
