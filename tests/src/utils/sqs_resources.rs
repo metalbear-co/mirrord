@@ -113,14 +113,16 @@ impl SqsTestResources {
 }
 
 const AWS_ENDPOINT_ENV: &str = "AWS_ENDPOINT_URL";
+const AWS_REGION_ENV: &str = "AWS_REGION";
+const AWS_SECRET_ACCESS_KEY_ENV: &str = "AWS_SECRET_ACCESS_KEY";
+const AWS_ACCESS_KEY_ID_ENV: &str = "AWS_ACCESS_KEY_ID";
 
 /// Required to build an SQS client.
 const AWS_CREDS_ENVS: &[&str] = &[
     AWS_ENDPOINT_ENV,
-    "AWS_REGION",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_KEY",
+    AWS_REGION_ENV,
+    AWS_SECRET_ACCESS_KEY_ENV,
+    AWS_ACCESS_KEY_ID_ENV,
 ];
 
 /// A credential provider that makes the SQS SDK use localstack.
@@ -151,11 +153,11 @@ impl ProvideCredentials for TestCredentialsProvider {
 async fn get_sqs_client(mut env: HashMap<String, String>) -> aws_sdk_sqs::Client {
     let config = aws_config::from_env()
         .empty_test_environment()
-        .region(Region::new(env.remove("AWS_REGION").unwrap()))
+        .region(Region::new(env.remove(AWS_REGION_ENV).unwrap()))
         .endpoint_url(env.remove(AWS_ENDPOINT_ENV).unwrap())
         .credentials_provider(TestCredentialsProvider {
-            secret_access_key: env.remove("AWS_SECRET_ACCESS_KEY").unwrap(),
-            access_key_id: env.remove("AWS_ACCESS_KEY_ID").unwrap(),
+            secret_access_key: env.remove(AWS_SECRET_ACCESS_KEY_ENV).unwrap(),
+            access_key_id: env.remove(AWS_ACCESS_KEY_ID_ENV).unwrap(),
         });
 
     let config = config.load().await;
