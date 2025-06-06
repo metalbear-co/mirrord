@@ -22,7 +22,7 @@ where
     pub fn create(inner: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
         inner.create_chain(&chain_name)?;
 
-        // Start with 1 because the chain will allways have atleast `-A <chain name>` as a rule
+        // Start with 1 because the chain will always have at least `-A <chain name>` as a rule
         let chain_size = AtomicI32::from(1);
 
         Ok(IPTableChain {

@@ -70,3 +70,6 @@ pub const EPHEMERAL_TARGET_CONTAINER_ID: CheckedEnv<String> =
 
 pub const MIRROR_BUFFER_SIZE: CheckedEnv<usize> =
     CheckedEnv::new("MIRRORD_AGENT_MIRROR_BUFFER_SIZE");
+
+/// Exclude agent's port from service mesh sidecar proxy.
+pub const EXCLUDE_FROM_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXCLUDE_FROM_MESH");

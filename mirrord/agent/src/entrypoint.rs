@@ -16,7 +16,8 @@ use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
+    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, MeshExclusion,
+    SafeIpTables, IPTABLE_EXCLUDE_FROM_MESH,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;
@@ -658,7 +659,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
     if !leftover_rules.is_empty() {
-        tracing::error!(
+        error!(
             leftover_rules = ?leftover_rules,
             "Detected dirty iptables. Either some other mirrord agent is running \
             or the previous agent failed to clean up before exit. \
@@ -688,6 +689,30 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                     cancellation_token.cancel();
                 })
         });
+    }
+
+    // Exclude the agent's communication port from service mesh proxy if running
+    // in an ephemeral container and the target is in a service mesh.
+    // Remove the env/flag when stabilizing this feature.
+    if envs::EXCLUDE_FROM_MESH.from_env_or_default()
+        && envs::IN_SERVICE_MESH.from_env_or_default()
+        && state.ephemeral
+    {
+        let iptables = if args.ipv6 {
+            IPTablesWrapper::from(new_ip6tables())
+        } else {
+            IPTablesWrapper::from(new_iptables())
+        };
+        let _ = state
+            .network_runtime
+            .spawn(async move {
+                let mesh_exclusion =
+                    MeshExclusion::create(Arc::new(iptables), IPTABLE_EXCLUDE_FROM_MESH)?;
+                mesh_exclusion.add_exclusion(args.communicate_port)?;
+            })
+            .await
+            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
     }
 
     let sniffer = if state.container_pid().is_some() {
