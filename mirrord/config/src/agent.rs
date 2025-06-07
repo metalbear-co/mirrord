@@ -66,7 +66,8 @@ impl fmt::Display for LinuxCapability {
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "flush_connections": false
+///     "flush_connections": false,
+///     "exclude_from_mesh": false
 ///   }
 /// }
 /// ```
@@ -382,6 +383,13 @@ pub struct AgentConfig {
     /// }
     /// ```
     pub metrics: Option<SocketAddr>,
+
+    /// ### agent.exclude_from_mesh {#agent-exclude_from_mesh}
+    ///
+    /// When running the agent as an ephemeral container, use this option to exclude
+    /// the agent's port from the service mesh sidecar proxy.
+    #[config(default = false)]
+    pub exclude_from_mesh: bool,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

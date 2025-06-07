@@ -220,6 +220,11 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             env.push(envs::EPHEMERAL_TARGET_CONTAINER_ID.as_k8s_spec(&runtime_data.container_id));
         }
 
+        // Exclude the agent from sidecar proxy of the target
+        if self.agent.exclude_from_mesh {
+            env.push(envs::EXCLUDE_FROM_MESH.as_k8s_spec(&true));
+        }
+
         KubeEphemeralContainer {
             name: params.name.clone(),
             image: Some(agent.image().to_string()),

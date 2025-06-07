@@ -1,0 +1,1 @@
+Added an option to exclude agent's communication port from sidecar proxy if the target is in a service mesh.

@@ -25,11 +25,15 @@ mod prerouting;
 mod redirect;
 mod standard;
 
+pub use mesh::MeshExclusion;
+
 pub const IPTABLE_PREROUTING: &str = "MIRRORD_INPUT";
 
 pub const IPTABLE_MESH: &str = "MIRRORD_OUTPUT";
 
 pub const IPTABLE_STANDARD: &str = "MIRRORD_STANDARD";
+
+pub const IPTABLE_EXCLUDE_FROM_MESH: &str = "MIRRORD_EXCLUDE_FROM_MESH";
 
 pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
     std::fs::read_to_string("/proc/sys/net/ipv4/conf/all/route_localnet")
