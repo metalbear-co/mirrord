@@ -703,12 +703,13 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         } else {
             IPTablesWrapper::from(new_iptables())
         };
-        let _ = state
+        state
             .network_runtime
             .spawn(async move {
                 let mesh_exclusion =
                     MeshExclusion::create(Arc::new(iptables), IPTABLE_EXCLUDE_FROM_MESH)?;
                 mesh_exclusion.add_exclusion(args.communicate_port)?;
+                Ok::<_, IPTablesError>(())
             })
             .await
             .map_err(|error| AgentError::IPTablesSetupError(error.into()))?

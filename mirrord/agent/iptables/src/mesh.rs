@@ -6,8 +6,7 @@ use mirrord_agent_env::{envs, mesh::MeshVendor};
 
 use crate::{
     chain::IPTableChain, error::IPTablesResult, output::OutputRedirect,
-    prerouting::PreroutingRedirect, redirect::Redirect, IPTables, IPTABLE_EXCLUDE_FROM_MESH,
-    IPTABLE_MESH,
+    prerouting::PreroutingRedirect, redirect::Redirect, IPTables, IPTABLE_MESH,
 };
 
 pub mod istio;
