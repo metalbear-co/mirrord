@@ -5,10 +5,11 @@ use fancy_regex::Regex;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 
 use crate::{
-    chain::IPTableChain, error::IPTablesResult, output::OutputRedirect,
-    prerouting::PreroutingRedirect, redirect::Redirect, IPTables, IPTABLE_MESH,
+    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect,
+    redirect::Redirect, IPTables, IPTABLE_MESH,
 };
 
+pub mod exclusion;
 pub mod istio;
 
 static MULTIPORT_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
@@ -189,43 +190,6 @@ impl MeshVendorExt for MeshVendor {
             MeshVendor::Kuma => Some(&TCP_SKIP_PORTS_LOOKUP_REGEX),
             MeshVendor::IstioCni => None,
         }
-    }
-}
-
-/// Type used for excluding certain ports from the service mesh proxy.
-pub struct MeshExclusion<IPT: IPTables> {
-    managed: IPTableChain<IPT>,
-}
-
-impl<IPT> MeshExclusion<IPT>
-where
-    IPT: IPTables,
-{
-    const PREROUTING: &'static str = "PREROUTING";
-    const OUTPUT: &'static str = "OUTPUT";
-
-    /// Create a new `chain` and mount it.
-    pub fn create(ipt: Arc<IPT>, chain: &str) -> IPTablesResult<Self> {
-        let managed = IPTableChain::create(ipt.clone(), chain.to_string())?;
-
-        // mount the managed chain to inbound and outbound entry points.
-        ipt.add_rule(Self::PREROUTING, &format!("-j {}", chain))?;
-        ipt.add_rule(Self::OUTPUT, &format!("-j {}", chain))?;
-        Ok(Self { managed })
-    }
-
-    pub fn add_exclusion(&self, port: u16) -> IPTablesResult<()> {
-        self.managed.add_rule(&Self::accept_port_rule(port))?;
-        Ok(())
-    }
-
-    pub fn remove_exclusion(&self, port: u16) -> IPTablesResult<()> {
-        self.managed.remove_rule(&Self::accept_port_rule(port))?;
-        Ok(())
-    }
-
-    fn accept_port_rule(port: u16) -> String {
-        format!("-p tcp --dport {} -j ACCEPT", port)
     }
 }
 

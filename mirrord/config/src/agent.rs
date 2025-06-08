@@ -388,7 +388,7 @@ pub struct AgentConfig {
     ///
     /// When running the agent as an ephemeral container, use this option to exclude
     /// the agent's port from the service mesh sidecar proxy.
-    #[config(default = false)]
+    #[config(env = "MIRRORD_AGENT_EXCLUDE_FROM_MESH", default = false)]
     pub exclude_from_mesh: bool,
 
     /// <!--${internal}-->

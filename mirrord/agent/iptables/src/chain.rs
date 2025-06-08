@@ -59,11 +59,14 @@ where
         &self.inner
     }
 
-    pub fn add_rule(&self, rule: &str) -> IPTablesResult<i32> {
+    pub fn add_rule<R>(&self, rule: R) -> IPTablesResult<i32>
+    where
+        R: AsRef<str>,
+    {
         self.inner
             .insert_rule(
                 &self.chain_name,
-                rule,
+                rule.as_ref(),
                 self.chain_size.fetch_add(1, Ordering::Relaxed),
             )
             .map(|_| self.chain_size.load(Ordering::Relaxed))
@@ -72,8 +75,11 @@ where
             })
     }
 
-    pub fn remove_rule(&self, rule: &str) -> IPTablesResult<()> {
-        self.inner.remove_rule(&self.chain_name, rule)?;
+    pub fn remove_rule<R>(&self, rule: R) -> IPTablesResult<()>
+    where
+        R: AsRef<str>,
+    {
+        self.inner.remove_rule(&self.chain_name, rule.as_ref())?;
 
         self.chain_size.fetch_sub(1, Ordering::Relaxed);
 

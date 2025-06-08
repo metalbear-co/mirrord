@@ -10,7 +10,7 @@ use tracing::{warn, Level};
 use crate::{
     error::IPTablesResult,
     flush_connections::FlushConnections,
-    mesh::{istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
+    mesh::{exclusion::WithMeshExclusion, istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
     prerouting::PreroutingRedirect,
     redirect::Redirect,
     standard::StandardRedirect,
@@ -25,7 +25,7 @@ mod prerouting;
 mod redirect;
 mod standard;
 
-pub use mesh::MeshExclusion;
+pub use mesh::exclusion::MeshExclusion;
 
 pub const IPTABLE_PREROUTING: &str = "MIRRORD_INPUT";
 
@@ -169,6 +169,7 @@ enum Redirects<IPT: IPTables + Send + Sync> {
     Mesh(MeshRedirect<IPT>),
     FlushConnections(FlushConnections<Redirects<IPT>>),
     PrerouteFallback(PreroutingRedirect<IPT>),
+    WithMeshExclusion(WithMeshExclusion<IPT, Redirects<IPT>>),
 }
 
 /// Wrapper struct for IPTables so it flushes on drop.
@@ -190,6 +191,7 @@ where
         flush_connections: bool,
         pod_ips: Option<&str>,
         ipv6: bool,
+        with_mesh_exclusion: bool,
     ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
@@ -216,6 +218,11 @@ where
             redirect = Redirects::FlushConnections(FlushConnections::create(Box::new(redirect))?)
         }
 
+        if with_mesh_exclusion {
+            redirect =
+                Redirects::WithMeshExclusion(WithMeshExclusion::create(ipt, Box::new(redirect))?)
+        }
+
         redirect.mount_entrypoint().await?;
 
         Ok(Self { redirect })
@@ -236,7 +243,11 @@ where
             .collect())
     }
 
-    pub async fn load(ipt: IPT, flush_connections: bool) -> IPTablesResult<Self> {
+    pub async fn load(
+        ipt: IPT,
+        flush_connections: bool,
+        with_mesh_exclusion: bool,
+    ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
@@ -257,6 +268,11 @@ where
 
         if flush_connections {
             redirect = Redirects::FlushConnections(FlushConnections::load(Box::new(redirect))?)
+        }
+
+        if with_mesh_exclusion {
+            redirect =
+                Redirects::WithMeshExclusion(WithMeshExclusion::load(ipt, Box::new(redirect))?)
         }
 
         Ok(Self { redirect })
@@ -290,6 +306,13 @@ where
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub async fn cleanup(&self) -> IPTablesResult<()> {
         self.redirect.unmount_entrypoint().await
+    }
+
+    pub fn exclusion(&self) -> Option<&MeshExclusion<IPT>> {
+        match &self.redirect {
+            Redirects::WithMeshExclusion(redirect) => Some(redirect.exclusion()),
+            _ => None,
+        }
     }
 }
 
@@ -390,7 +413,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None, false)
+        let ipt = SafeIpTables::create(mock, false, None, false, false)
             .await
             .expect("Create Failed");
 
@@ -523,7 +546,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None, false)
+        let ipt = SafeIpTables::create(mock, false, None, false, false)
             .await
             .expect("Create Failed");
 
