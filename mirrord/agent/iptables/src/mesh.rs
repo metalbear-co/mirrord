@@ -36,7 +36,7 @@ where
         let prerouting = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
-            prerouting.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
+            prerouting.add_rule(format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
         let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
