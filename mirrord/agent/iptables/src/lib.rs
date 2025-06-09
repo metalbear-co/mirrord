@@ -236,9 +236,14 @@ where
         Ok(rules
             .into_iter()
             .filter(|rule| {
-                [IPTABLE_PREROUTING, IPTABLE_MESH, IPTABLE_STANDARD]
-                    .iter()
-                    .any(|chain| rule.contains(*chain))
+                [
+                    IPTABLE_PREROUTING,
+                    IPTABLE_MESH,
+                    IPTABLE_STANDARD,
+                    IPTABLE_EXCLUDE_FROM_MESH,
+                ]
+                .iter()
+                .any(|chain| rule.contains(*chain))
             })
             .collect())
     }

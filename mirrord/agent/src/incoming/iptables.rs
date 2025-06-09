@@ -36,7 +36,7 @@ pub struct IpTablesRedirector {
     flush_connections: bool,
     /// If this redirector is for IPv6 traffic.
     ipv6: bool,
-
+    /// Should exclude agent port in iptables
     with_mesh_exclusion: Option<u16>,
 }
 
@@ -116,8 +116,12 @@ impl IpTablesRedirector {
 impl PortRedirector for IpTablesRedirector {
     type Error = IPTablesError;
 
-    fn initialize(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
-        self.init_iptables()
+    async fn initialize(&mut self) -> Result<(), Self::Error> {
+        if self.iptables.is_none() {
+            self.init_iptables().await?;
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(level = Level::DEBUG, err, ret)]
