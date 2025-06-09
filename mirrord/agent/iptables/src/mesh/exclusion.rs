@@ -156,6 +156,22 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_add_rule()
+            .with(
+                eq(IPTABLE_EXCLUDE_FROM_MESH),
+                eq("-p tcp --dport 1337 -j ACCEPT"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                eq(IPTABLE_EXCLUDE_FROM_MESH),
+                eq("-p tcp --dport 1337 -j ACCEPT"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
         mock.expect_remove_rule()
             .with(
                 eq("PREROUTING"),
@@ -173,6 +189,10 @@ mod tests {
             MeshExclusion::create(mock.into(), IPTABLE_EXCLUDE_FROM_MESH).expect("Create Failed");
 
         assert!(exclusion.mount_entrypoint().is_ok());
+
+        assert!(exclusion.add_exclusion(1337).is_ok());
+
+        assert!(exclusion.remove_exclusion(1337).is_ok());
 
         assert!(exclusion.unmount_entrypoint().is_ok());
     }
