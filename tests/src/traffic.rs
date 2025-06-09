@@ -268,6 +268,8 @@ mod traffic_tests {
         let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
         assert_eq!(logs.unwrap(), ""); // Assert that the target service did not get the message.
 
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
             node_command,
@@ -369,6 +371,8 @@ mod traffic_tests {
         assert!(!res.success()); // Should fail because local process cannot reach service.
         let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
         assert_eq!(logs.unwrap(), "");
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
         // Create remote filter file with service name so we can test DNS outgoing filter.
         let mut remote_config_file = tempfile::Builder::new()
