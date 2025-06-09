@@ -149,7 +149,7 @@ impl PortRedirector for IpTablesRedirector {
 
     #[tracing::instrument(level = Level::DEBUG, err, ret)]
     async fn cleanup(&mut self) -> Result<(), Self::Error> {
-        if let Some(iptables) = self.iptables.as_ref() {
+        if let Some(iptables) = self.iptables.take() {
             if let Some((exclusion, port)) = iptables.exclusion().zip(self.with_mesh_exclusion) {
                 if let Err(error) = exclusion.remove_exclusion(port) {
                     tracing::error!(
