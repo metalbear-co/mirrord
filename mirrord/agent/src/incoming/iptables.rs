@@ -1,6 +1,5 @@
 use std::{
     fmt,
-    future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
 };
