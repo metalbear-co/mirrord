@@ -1,5 +1,6 @@
 use std::{
     fmt,
+    future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
 };
@@ -19,7 +20,7 @@ use super::{PortRedirector, Redirected};
 /// and an iptables/ip6tables wrapper to set rules that send traffic to that listener.
 pub struct IpTablesRedirector {
     /// For altering iptables/ip6tables rules.
-    iptables: SafeIpTables<IPTablesWrapper>,
+    iptables: Option<SafeIpTables<IPTablesWrapper>>,
     /// Port of [`Self::listener`](Self::listener).
     ///
     /// Kept as a field, so that we don't have to call [`TcpListener::local_addr`]
@@ -70,9 +71,19 @@ impl IpTablesRedirector {
             .collect::<Vec<_>>()
             .join(",");
 
-        let pod_ips = pod_ips.is_empty().not().then_some(pod_ips);
+        Ok(Self {
+            iptables: None,
+            redirect_to: listener_addr,
+            listener,
+            pod_ips: pod_ips.is_empty().not().then_some(pod_ips),
+            flush_connections,
+            ipv6,
+            with_mesh_exclusion,
+        })
+    }
 
-        let iptables = if ipv6 {
+    pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
+        let iptables = if self.ipv6 {
             mirrord_agent_iptables::new_ip6tables()
         } else {
             mirrord_agent_iptables::new_iptables()
@@ -80,14 +91,14 @@ impl IpTablesRedirector {
 
         let iptables = SafeIpTables::create(
             iptables.into(),
-            flush_connections,
-            pod_ips.as_deref(),
-            ipv6,
-            with_mesh_exclusion.is_some(),
+            self.flush_connections,
+            self.pod_ips.as_deref(),
+            self.ipv6,
+            self.with_mesh_exclusion.is_some(),
         )
         .await?;
 
-        if let Some((exclusion, port)) = iptables.exclusion().zip(with_mesh_exclusion) {
+        if let Some((exclusion, port)) = iptables.exclusion().zip(self.with_mesh_exclusion) {
             if let Err(error) = exclusion.add_exclusion(port) {
                 tracing::error!(
                     %error,
@@ -96,47 +107,57 @@ impl IpTablesRedirector {
             };
         }
 
-        Ok(Self {
-            iptables,
-            redirect_to: listener_addr,
-            listener,
-            pod_ips,
-            flush_connections,
-            ipv6,
-            with_mesh_exclusion,
-        })
+        self.iptables = Some(iptables);
+
+        Ok(())
     }
 }
 
 impl PortRedirector for IpTablesRedirector {
     type Error = IPTablesError;
 
+    fn initialize(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        self.init_iptables()
+    }
+
     #[tracing::instrument(level = Level::DEBUG, err, ret)]
     async fn add_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-        self.iptables
-            .add_redirect(from_port, self.redirect_to)
-            .await
+        if self.iptables.is_none() {
+            self.init_iptables().await?;
+        }
+
+        if let Some(iptables) = self.iptables.as_ref() {
+            iptables.add_redirect(from_port, self.redirect_to).await?;
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(level = Level::DEBUG, err, ret)]
     async fn remove_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-        self.iptables
-            .remove_redirect(from_port, self.redirect_to)
-            .await
+        if let Some(iptables) = self.iptables.as_ref() {
+            iptables
+                .remove_redirect(from_port, self.redirect_to)
+                .await?;
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(level = Level::DEBUG, err, ret)]
     async fn cleanup(&mut self) -> Result<(), Self::Error> {
-        if let Some((exclusion, port)) = self.iptables.exclusion().zip(self.with_mesh_exclusion) {
-            if let Err(error) = exclusion.remove_exclusion(port) {
-                tracing::error!(
-                    %error,
-                    "Failed to add exclusion to redirector",
-                )
-            };
-        }
+        if let Some(iptables) = self.iptables.as_ref() {
+            if let Some((exclusion, port)) = iptables.exclusion().zip(self.with_mesh_exclusion) {
+                if let Err(error) = exclusion.remove_exclusion(port) {
+                    tracing::error!(
+                        %error,
+                        "Failed to add exclusion to redirector",
+                    )
+                };
+            }
 
-        self.iptables.cleanup().await?;
+            iptables.cleanup().await?;
+        }
 
         Ok(())
     }

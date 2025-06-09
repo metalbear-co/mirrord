@@ -25,6 +25,10 @@ use tokio::net::TcpStream;
 pub trait PortRedirector {
     type Error: Sized;
 
+    fn initialize(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        std::future::ready(Ok(()))
+    }
+
     /// Start redirecting connections from the given port.
     ///
     /// # Note
