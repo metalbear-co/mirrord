@@ -130,3 +130,50 @@ where
             .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mockall::predicate::eq;
+
+    use super::*;
+    use crate::MockIPTables;
+
+    #[test]
+    fn default() {
+        let mut mock = MockIPTables::new();
+
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let exclusion =
+            MeshExclusion::create(mock.into(), IPTABLE_EXCLUDE_FROM_MESH).expect("Create Failed");
+
+        assert!(exclusion.mount_entrypoint().is_ok());
+
+        assert!(exclusion.unmount_entrypoint().is_ok());
+    }
+}

@@ -320,7 +320,10 @@ where
 mod tests {
     use mockall::predicate::{eq, str};
 
-    use crate::{MockIPTables, SafeIpTables, IPTABLE_MESH, IPTABLE_PREROUTING, IPTABLE_STANDARD};
+    use crate::{
+        MockIPTables, SafeIpTables, IPTABLE_EXCLUDE_FROM_MESH, IPTABLE_MESH, IPTABLE_PREROUTING,
+        IPTABLE_STANDARD,
+    };
 
     #[tokio::test]
     async fn default() {
@@ -547,6 +550,135 @@ mod tests {
             .returning(|_| Ok(()));
 
         let ipt = SafeIpTables::create(mock, false, None, false, false)
+            .await
+            .expect("Create Failed");
+
+        assert!(ipt.add_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.remove_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.cleanup().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn with_mesh_exclusion() {
+        let mut mock = MockIPTables::new();
+
+        mock.expect_list_rules()
+            .with(eq("OUTPUT"))
+            .returning(|_| Ok(vec![]));
+
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_PREROUTING))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq(IPTABLE_PREROUTING),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_STANDARD))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq(IPTABLE_STANDARD),
+                str::starts_with("-m owner --gid-owner"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq(IPTABLE_STANDARD),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(2),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_add_rule()
+            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_add_rule()
+            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_STANDARD)))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                eq(IPTABLE_PREROUTING),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                eq(IPTABLE_STANDARD),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                eq("PREROUTING"),
+                eq(format!("-j {}", IPTABLE_EXCLUDE_FROM_MESH)),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("PREROUTING"), eq(format!("-j {}", IPTABLE_PREROUTING)))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("OUTPUT"), eq(format!("-j {}", IPTABLE_STANDARD)))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_EXCLUDE_FROM_MESH))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_PREROUTING))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_STANDARD))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let ipt = SafeIpTables::create(mock, false, None, false, true)
             .await
             .expect("Create Failed");
 
