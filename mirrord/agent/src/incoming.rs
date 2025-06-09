@@ -9,6 +9,7 @@ mod task;
 
 use std::{
     future::Future,
+    io,
     net::{IpAddr, SocketAddr},
 };
 
@@ -16,7 +17,6 @@ use composed::ComposedRedirector;
 pub use connection::RedirectedConnection;
 pub use error::RedirectorTaskError;
 use iptables::IpTablesRedirector;
-use mirrord_agent_iptables::error::IPTablesError;
 pub use steal_handle::StealHandle;
 pub use task::RedirectorTask;
 use tokio::net::TcpStream;
@@ -86,7 +86,7 @@ pub async fn create_iptables_redirector(
     pod_ips: &[IpAddr],
     support_ipv6: bool,
     with_mesh_exclusion: Option<u16>,
-) -> Result<ComposedRedirector<IpTablesRedirector>, IPTablesError> {
+) -> io::Result<ComposedRedirector<IpTablesRedirector>> {
     let ipv4 = IpTablesRedirector::create(flush_connections, pod_ips, false, with_mesh_exclusion)
         .await
         .inspect_err(|error| {

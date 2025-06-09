@@ -1,5 +1,5 @@
 use std::{
-    fmt,
+    fmt, io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
 };
@@ -54,7 +54,7 @@ impl IpTablesRedirector {
         pod_ips: &[IpAddr],
         ipv6: bool,
         with_mesh_exclusion: Option<u16>,
-    ) -> Result<Self, IPTablesError> {
+    ) -> io::Result<Self> {
         let listener_addr = if ipv6 {
             SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
         } else {
