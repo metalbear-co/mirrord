@@ -10,7 +10,11 @@ use tracing::{warn, Level};
 use crate::{
     error::IPTablesResult,
     flush_connections::FlushConnections,
-    mesh::{exclusion::WithMeshExclusion, istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
+    mesh::{
+        exclusion::{MeshExclusion, WithMeshExclusion},
+        istio::AmbientRedirect,
+        MeshRedirect, MeshVendorExt,
+    },
     prerouting::PreroutingRedirect,
     redirect::Redirect,
     standard::StandardRedirect,
@@ -24,8 +28,6 @@ mod output;
 mod prerouting;
 mod redirect;
 mod standard;
-
-pub use mesh::exclusion::MeshExclusion;
 
 pub const IPTABLE_PREROUTING: &str = "MIRRORD_INPUT";
 
