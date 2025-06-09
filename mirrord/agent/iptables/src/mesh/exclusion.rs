@@ -106,6 +106,8 @@ where
 {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
+        // Should mount the internal iptables because exclusion inserts itself as first rule and
+        // this may also happen here so exclusion should mount second
         self.inner.mount_entrypoint().await?;
 
         self.exclusion.mount_entrypoint()

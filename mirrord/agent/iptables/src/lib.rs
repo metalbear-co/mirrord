@@ -220,6 +220,7 @@ where
             redirect = Redirects::FlushConnections(FlushConnections::create(Box::new(redirect))?)
         }
 
+        // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
             redirect =
                 Redirects::WithMeshExclusion(WithMeshExclusion::create(ipt, Box::new(redirect))?)
@@ -277,6 +278,7 @@ where
             redirect = Redirects::FlushConnections(FlushConnections::load(Box::new(redirect))?)
         }
 
+        // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
             redirect =
                 Redirects::WithMeshExclusion(WithMeshExclusion::load(ipt, Box::new(redirect))?)
