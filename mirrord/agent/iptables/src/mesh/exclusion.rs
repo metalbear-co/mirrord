@@ -156,13 +156,14 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        mock.expect_add_rule()
+        mock.expect_insert_rule()
             .with(
                 eq(IPTABLE_EXCLUDE_FROM_MESH),
                 eq("-p tcp --dport 1337 -j ACCEPT"),
+                eq(1),
             )
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
