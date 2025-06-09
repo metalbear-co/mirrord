@@ -112,7 +112,7 @@ pub async fn create_iptables_redirector(
             redirectors.extend(ipv6.transpose().ok().flatten());
             redirectors
         }
-        (Err(error), None | Some(Err(..))) => return Err(error.into()),
+        (Err(error), None | Some(Err(..))) => return Err(error),
         (Err(..), Some(Ok(ipv6))) => vec![ipv6],
     };
 
