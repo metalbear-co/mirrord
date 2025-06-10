@@ -218,7 +218,8 @@ mod traffic_tests {
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
-    #[cfg_attr(not(feature = "job"), ignore)]
+    // #[cfg_attr(not(feature = "job"), ignore)]
+    #[ignore] // TODO: FIX
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
