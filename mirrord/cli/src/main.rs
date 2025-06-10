@@ -301,7 +301,7 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 async fn exec_process<P>(
-    config: LayerConfig,
+    mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
     progress: &P,
@@ -313,7 +313,7 @@ where
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     let execution_info = MirrordExecution::start_internal(
-        &config,
+        &mut config,
         #[cfg(target_os = "macos")]
         Some(&args.binary),
         &mut sub_progress,
@@ -691,7 +691,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     result?;
 
     let (connection_info, connection) =
-        create_and_connect(&config, &mut progress, &mut analytics).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
@@ -833,7 +833,10 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .unwrap_or(true);
 
     if check_version {
-        if let Ok(client) = reqwest::Client::builder().build() {
+        if let Ok(client) = reqwest::Client::builder()
+            .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
+            .build()
+        {
             if let Ok(result) = client
                 .get(format!(
                     "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
