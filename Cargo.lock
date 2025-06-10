@@ -6244,6 +6244,7 @@ version = "0.1.0"
 dependencies = [
  "aws-config",
  "aws-sdk-sqs",
+ "serde_json",
  "tokio",
 ]
 
