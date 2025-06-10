@@ -33,6 +33,14 @@ where
 {
     type Error = R::Error;
 
+    async fn initialize(&mut self) -> Result<(), Self::Error> {
+        for redirector in &mut self.redirectors {
+            redirector.initialize().await?;
+        }
+
+        Ok(())
+    }
+
     /// Called in order on all inner redirectors.
     ///
     /// Stops at the first error.
