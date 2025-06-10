@@ -129,13 +129,13 @@ impl FailoverStrategy {
                 self.layers.insert(new_layer.id, tx);
             }
             ProxyMessage::FromLayer(FromLayer{ message: msg @ LayerToProxyMessage::Incoming(_) , ..})  => {
-                tracing::info!("proxy in failover mode, ignored msg {:?}", msg);
+                tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");            
             }
             ProxyMessage::FromLayer(FromLayer{ layer_id , ..}) => {
                 self.update_layer_on_error(layer_id).await;
             }
             msg =>{
-                tracing::info!("proxy in failover mode, ignored msg {:?}", msg);
+                tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");
             }
         }
     }
