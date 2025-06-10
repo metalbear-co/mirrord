@@ -116,7 +116,8 @@ impl PortRedirector for IpTablesRedirector {
     type Error = IPTablesError;
 
     async fn initialize(&mut self) -> Result<(), Self::Error> {
-        if self.iptables.is_none() {
+        // create itpabels guard only if used for exclusion.
+        if self.iptables.is_none() && self.with_mesh_exclusion.is_some() {
             self.init_iptables().await?;
         }
 
