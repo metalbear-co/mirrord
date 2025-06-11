@@ -9,7 +9,7 @@ use crate::{
     main_tasks::{MainTaskId, ProxyMessage},
     IntProxy,
 };
-use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage};
+use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProxyToLayerMessage};
 use std::{collections::HashMap, time::Duration};
 use tokio::time;
 
@@ -17,7 +17,7 @@ pub(super) struct FailoverStrategy {
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
     layer_initializer: TaskSender<LayerInitializer>,
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
-    pending_layers: Vec<LayerId>,
+    pending_layers: Vec<(LayerId, MessageId)>,
     any_connection_accepted: bool,
     fail_cause: ProxyManagedError,
 }
@@ -50,8 +50,8 @@ impl FailoverStrategy {
     ) -> Result<(), IntProxyError> {
         let mut failover = self;
 
-        while let Some(layer_id) = failover.pending_layers.pop(){
-            failover.update_layer_on_error(layer_id).await;
+        while let Some((layer_id, msg_id)) = failover.pending_layers.pop(){
+            failover.update_layer_on_error(layer_id, msg_id).await;
         }
 
         loop {
@@ -131,8 +131,8 @@ impl FailoverStrategy {
             ProxyMessage::FromLayer(FromLayer{ message: msg @ LayerToProxyMessage::Incoming(_) , ..})  => {
                 tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");            
             }
-            ProxyMessage::FromLayer(FromLayer{ layer_id , ..}) => {
-                self.update_layer_on_error(layer_id).await;
+            ProxyMessage::FromLayer(FromLayer{ message_id, layer_id , ..}) => {
+                self.update_layer_on_error(layer_id, message_id).await;
             }
             msg =>{
                 tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");
@@ -140,10 +140,10 @@ impl FailoverStrategy {
         }
     }
     
-    async fn update_layer_on_error(&self, layer_id: LayerId) {
+    async fn update_layer_on_error(&self, layer_id: LayerId, message_id: MessageId) {
         if let Some(layer) = self.layers.get(&layer_id) {
             layer.send(LocalMessage{
-                message_id: rand::random(),
+                message_id,
                 inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
             }).await;
         } else {

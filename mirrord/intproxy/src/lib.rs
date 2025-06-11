@@ -13,7 +13,7 @@ use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
-use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
+use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage, MessageId};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
@@ -87,8 +87,8 @@ pub struct IntProxy {
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
     task_txs: TaskTxs,
     
-    /// this set holds the ids of current layer involved in an exchange with proxy
-    pending_layers: HashSet<LayerId>,
+    /// this set holds the ids of current layer and msg involved in an exchange with proxy
+    pending_layers: HashSet<(LayerId, MessageId)>,
 
     /// [`mirrord_protocol`] version negotiated with the agent.
     protocol_version: Option<Version>,
@@ -328,8 +328,8 @@ impl IntProxy {
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
             ProxyMessage::FromLayer(msg) => {
-                if !matches!(msg.message, LayerToProxyMessage::Incoming(_) ) { 
-                    self.pending_layers.insert(msg.layer_id); 
+                if !matches!(msg.message, LayerToProxyMessage::Incoming(_) ) {
+                    self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
                 self.handle_layer_message(msg).await?
             },
@@ -340,7 +340,7 @@ impl IntProxy {
                     message_id,
                     layer_id,
                 } = msg;
-                self.pending_layers.remove(&layer_id);
+                self.pending_layers.remove(&(layer_id, message_id));
                 if let Some(tx) = self.task_txs.layers.get(&layer_id) {
                     tx.send(LocalMessage {
                         message_id,
