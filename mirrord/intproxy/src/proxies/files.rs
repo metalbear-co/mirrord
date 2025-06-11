@@ -1185,9 +1185,9 @@ mod tests {
     use super::{FilesProxy, FilesProxyMessage};
     use crate::{
         background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
+        error::ProxyRuntimeError,
         main_tasks::{MainTaskId, ProxyMessage, ToLayer},
     };
-    use crate::error::ProxyRuntimeError;
 
     /// Sets up a [`TaskSender`] and [`BackgroundTasks`] for a functioning [`FilesProxy`].
     ///

@@ -1,16 +1,18 @@
-use crate::background_tasks::TaskError;
-use crate::main_tasks::FromLayer;
+use std::{collections::HashMap, time::Duration};
+
+use mirrord_intproxy_protocol::{
+    LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProxyToLayerMessage,
+};
+use tokio::time;
+
 use crate::{
-    background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
-    error::{ProxyStartupError, ProxyRuntimeError},
+    background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
+    error::{ProxyRuntimeError, ProxyStartupError},
     layer_conn::LayerConnection,
     layer_initializer::LayerInitializer,
-    main_tasks::{MainTaskId, ProxyMessage},
+    main_tasks::{FromLayer, MainTaskId, ProxyMessage},
     IntProxy,
 };
-use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProxyToLayerMessage};
-use std::{collections::HashMap, time::Duration};
-use tokio::time;
 
 pub(super) struct FailoverStrategy {
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
@@ -31,7 +33,6 @@ impl FailoverStrategy {
     }
 
     pub fn from_failed_proxy(failed_proxy: IntProxy, error: ProxyRuntimeError) -> Self {
-        
         FailoverStrategy {
             background_tasks: failed_proxy.background_tasks,
             layer_initializer: failed_proxy.task_txs._layer_initializer,
@@ -49,7 +50,7 @@ impl FailoverStrategy {
     ) -> Result<(), ProxyStartupError> {
         let mut failover = self;
 
-        while let Some((layer_id, msg_id)) = failover.pending_layers.pop(){
+        while let Some((layer_id, msg_id)) = failover.pending_layers.pop() {
             failover.update_layer_on_error(layer_id, msg_id).await;
         }
 
@@ -91,7 +92,7 @@ impl FailoverStrategy {
     }
 
     async fn handle_task_update(
-        & mut self,
+        &mut self,
         task_id: MainTaskId,
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) {
@@ -115,8 +116,8 @@ impl FailoverStrategy {
             (_, TaskUpdate::Message(msg)) => self.handle(msg).await,
         }
     }
-    
-    async fn handle(&mut self, msg: ProxyMessage){
+
+    async fn handle(&mut self, msg: ProxyMessage) {
         match msg {
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
@@ -127,27 +128,38 @@ impl FailoverStrategy {
                 );
                 self.layers.insert(new_layer.id, tx);
             }
-            ProxyMessage::FromLayer(FromLayer{ message: msg @ LayerToProxyMessage::Incoming(_) , ..})  => {
-                tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");            
+            ProxyMessage::FromLayer(FromLayer {
+                message: msg @ LayerToProxyMessage::Incoming(_),
+                ..
+            }) => {
+                tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");
             }
-            ProxyMessage::FromLayer(FromLayer{ message_id, layer_id , ..}) => {
+            ProxyMessage::FromLayer(FromLayer {
+                message_id,
+                layer_id,
+                ..
+            }) => {
                 self.update_layer_on_error(layer_id, message_id).await;
             }
-            msg =>{
+            msg => {
                 tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");
             }
         }
     }
-    
+
     async fn update_layer_on_error(&self, layer_id: LayerId, message_id: MessageId) {
         if let Some(layer) = self.layers.get(&layer_id) {
-            layer.send(LocalMessage{
-                message_id,
-                inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
-            }).await;
+            layer
+                .send(LocalMessage {
+                    message_id,
+                    inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
+                })
+                .await;
         } else {
-            tracing::warn!("Layer {:?} not found, but it was waiting for proxy to respond!", layer_id);
+            tracing::warn!(
+                "Layer {:?} not found, but it was waiting for proxy to respond!",
+                layer_id
+            );
         }
     }
-    
 }

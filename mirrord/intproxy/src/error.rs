@@ -1,4 +1,3 @@
-
 use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
 use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, ResponseError};
 use thiserror::Error;
@@ -19,7 +18,6 @@ use crate::{
 pub struct UnexpectedAgentMessage(pub DaemonMessage);
 
 /// Convenience error type for internal errors. Used to wrap all internal errors.
-///
 #[derive(Error, Debug)]
 pub(crate) enum InternalProxyError {
     #[error("critical proxy error : {0}")]
@@ -31,12 +29,11 @@ pub(crate) enum InternalProxyError {
 /// This kind of error causes a partial failure of the proxy, meaning that for these errors does
 /// exist a failover strategy, so in case of incurring of this error, the proxy change behavior,
 /// according to [`crate::FailoverStrategy`]
-///
 #[derive(Error, Debug)]
 pub(crate) enum ProxyRuntimeError {
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
-    
+
     #[error("agent closed connection with error: {0}")]
     AgentFailed(String),
     #[error(transparent)]
@@ -67,7 +64,6 @@ pub(crate) enum ProxyRuntimeError {
 
 /// This kind of error causes a total failure of the proxy, meaning that for these errors doesn't
 /// exist a failover strategy, so facing this error the proxy stops working.
-///
 #[derive(Error, Debug)]
 pub enum ProxyStartupError {
     #[error("connecting with agent failed: {0}")]

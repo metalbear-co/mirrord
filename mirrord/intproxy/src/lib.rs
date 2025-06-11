@@ -3,10 +3,10 @@
 #![deny(unused_crate_dependencies)]
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     time::Duration,
 };
-use std::collections::HashSet;
+
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use error::UnexpectedAgentMessage;
 use layer_conn::LayerConnection;
@@ -32,11 +32,10 @@ use tokio::{
 use crate::{
     agent_conn::AgentConnection,
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
-    error::{ProxyStartupError, InternalProxyError},
+    error::{InternalProxyError, ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
 };
-use crate::error::ProxyRuntimeError;
 
 pub mod agent_conn;
 pub mod background_tasks;
@@ -50,7 +49,7 @@ pub mod proxies;
 mod remote_resources;
 mod request_queue;
 
-/// Convenience type that defines the type of failure the proxy can encounter. In the case of 
+/// Convenience type that defines the type of failure the proxy can encounter. In the case of
 /// [`ProxyFailure::Startup`] the proxy immediately shut down, returning the encountered error.
 /// In the case of [`ProxyFailure::Runtime`] a [`FailoverStrategy`] is instantiated to replace the
 /// normal Proxy workflow.
@@ -86,7 +85,7 @@ pub struct IntProxy {
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     task_txs: TaskTxs,
-    
+
     /// this set holds the ids of current layer and msg involved in an exchange with proxy
     pending_layers: HashSet<(LayerId, MessageId)>,
 
@@ -193,11 +192,11 @@ impl IntProxy {
         !self.task_txs.layers.is_empty()
     }
 
-    /// Runs the main event loop till a failure or success happens, if the failure is manageable, it 
+    /// Runs the main event loop till a failure or success happens, if the failure is manageable, it
     /// goes in failover state starting to update every layer with the error content on every new or
     /// pending task. In failover state it continues to accept connection from layers
     /// Expects to accept the first layer connection within the given `first_timeout`.
-    /// Exits after `idle_timeout` when there are no more layer connections. 
+    /// Exits after `idle_timeout` when there are no more layer connections.
     pub async fn run(
         self,
         first_timeout: Duration,
@@ -207,7 +206,10 @@ impl IntProxy {
             Ok(()) => Ok(()),
             Err(ProxyFailure::Startup(error)) => Err(error),
             Err(ProxyFailure::Runtime(failover_strategy)) => {
-                tracing::warn!("Managed exception {}, proxy is entering in failover state...", failover_strategy.fail_cause());
+                tracing::warn!(
+                    "Managed exception {}, proxy is entering in failover state...",
+                    failover_strategy.fail_cause()
+                );
                 failover_strategy.run(idle_timeout, idle_timeout).await
             }
         }
@@ -229,7 +231,7 @@ impl IntProxy {
             .await;
 
         let mut proxy = self;
-        
+
         loop {
             tokio::select! {
                 Some((task_id, task_update)) = proxy.background_tasks.next() => {
@@ -328,11 +330,11 @@ impl IntProxy {
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
             ProxyMessage::FromLayer(msg) => {
-                if !matches!(msg.message, LayerToProxyMessage::Incoming(_) ) {
+                if !matches!(msg.message, LayerToProxyMessage::Incoming(_)) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
                 self.handle_layer_message(msg).await?
-            },
+            }
             ProxyMessage::ToAgent(msg) => self.task_txs.agent.send(msg).await,
             ProxyMessage::ToLayer(msg) => {
                 let ToLayer {
@@ -520,7 +522,7 @@ impl IntProxy {
     }
 
     /// Routes a message from the layer to the correct background task.
-    async fn handle_layer_message(& mut self, message: FromLayer) -> Result<(), ProxyRuntimeError> {
+    async fn handle_layer_message(&mut self, message: FromLayer) -> Result<(), ProxyRuntimeError> {
         let FromLayer {
             message_id,
             layer_id,
