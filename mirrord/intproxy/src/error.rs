@@ -35,9 +35,6 @@ pub(crate) enum InternalProxyError {
 ///
 #[derive(Error, Debug)]
 pub(crate) enum ProxyRuntimeError {
-    #[error("accepting layer connection failed: {0}")]
-    ConnectionAccept(io::Error),
-    
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
     
