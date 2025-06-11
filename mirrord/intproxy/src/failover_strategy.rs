@@ -1,9 +1,8 @@
 use crate::background_tasks::TaskError;
-use crate::error::InternalProxyError;
 use crate::main_tasks::FromLayer;
 use crate::{
     background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
-    error::{IntProxyError, ProxyManagedError},
+    error::{ProxyStartupError, ProxyRuntimeError},
     layer_conn::LayerConnection,
     layer_initializer::LayerInitializer,
     main_tasks::{MainTaskId, ProxyMessage},
@@ -14,16 +13,16 @@ use std::{collections::HashMap, time::Duration};
 use tokio::time;
 
 pub(super) struct FailoverStrategy {
-    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
+    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     layer_initializer: TaskSender<LayerInitializer>,
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     pending_layers: Vec<(LayerId, MessageId)>,
     any_connection_accepted: bool,
-    fail_cause: ProxyManagedError,
+    fail_cause: ProxyRuntimeError,
 }
 
 impl FailoverStrategy {
-    pub fn fail_cause(&self) -> &ProxyManagedError {
+    pub fn fail_cause(&self) -> &ProxyRuntimeError {
         &self.fail_cause
     }
 
@@ -31,7 +30,7 @@ impl FailoverStrategy {
         !self.layers.is_empty()
     }
 
-    pub fn from_failed_proxy(failed_proxy: IntProxy, error: ProxyManagedError) -> Self {
+    pub fn from_failed_proxy(failed_proxy: IntProxy, error: ProxyRuntimeError) -> Self {
         
         FailoverStrategy {
             background_tasks: failed_proxy.background_tasks,
@@ -47,7 +46,7 @@ impl FailoverStrategy {
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
-    ) -> Result<(), IntProxyError> {
+    ) -> Result<(), ProxyStartupError> {
         let mut failover = self;
 
         while let Some((layer_id, msg_id)) = failover.pending_layers.pop(){
@@ -65,7 +64,7 @@ impl FailoverStrategy {
                     failover.handle_task_update(task_id, task_update).await;
                 }
                 _ = time::sleep(first_timeout), if !failover.any_connection_accepted => {
-                    Err(IntProxyError::ConnectionAcceptTimeout)?;
+                    Err(ProxyStartupError::ConnectionAcceptTimeout)?;
                 },
                 _ = time::sleep(idle_timeout), if failover.any_connection_accepted && !failover.has_layer_connections() => {
                     tracing::info!("Reached the idle timeout with no active layer connections");
@@ -94,7 +93,7 @@ impl FailoverStrategy {
     async fn handle_task_update(
         & mut self,
         task_id: MainTaskId,
-        update: TaskUpdate<ProxyMessage, InternalProxyError>,
+        update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) {
         match (task_id, update) {
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(Ok(()))) => {

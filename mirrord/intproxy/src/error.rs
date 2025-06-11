@@ -24,15 +24,9 @@ pub struct UnexpectedAgentMessage(pub DaemonMessage);
 #[derive(Error, Debug)]
 pub(crate) enum InternalProxyError {
     #[error("critical proxy error : {0}")]
-    Critical(IntProxyError),
+    Startup(#[from] ProxyStartupError),
     #[error("manageable error: {0}")]
-    Manageable(ProxyManagedError),
-}
-
-impl<I : Into<ProxyManagedError>> From<I> for InternalProxyError {
-    fn from(err: I) -> Self {
-        InternalProxyError::Manageable(err.into())   
-    }
+    Runtime(#[from] ProxyRuntimeError),
 }
 
 /// This kind of error causes a partial failure of the proxy, meaning that for these errors does
@@ -40,9 +34,10 @@ impl<I : Into<ProxyManagedError>> From<I> for InternalProxyError {
 /// according to [`crate::FailoverStrategy`]
 ///
 #[derive(Error, Debug)]
-pub(crate) enum ProxyManagedError {
+pub(crate) enum ProxyRuntimeError {
     #[error("accepting layer connection failed: {0}")]
     ConnectionAccept(io::Error),
+    
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
     
@@ -78,14 +73,12 @@ pub(crate) enum ProxyManagedError {
 /// exist a failover strategy, so facing this error the proxy stops working.
 ///
 #[derive(Error, Debug)]
-pub enum IntProxyError {
+pub enum ProxyStartupError {
     #[error("connecting with agent failed: {0}")]
     AgentConnection(#[from] AgentConnectionError),
     #[error("waiting for the first layer connection timed out")]
     ConnectionAcceptTimeout,
 }
-
-pub type Result<T> = core::result::Result<T, IntProxyError>;
 
 pub fn agent_lost_io_error() -> ResponseError {
     ResponseError::RemoteIO(RemoteIOError {

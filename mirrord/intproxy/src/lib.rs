@@ -32,11 +32,11 @@ use tokio::{
 use crate::{
     agent_conn::AgentConnection,
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
-    error::{IntProxyError, InternalProxyError},
+    error::{ProxyStartupError, InternalProxyError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
 };
-use crate::error::ProxyManagedError;
+use crate::error::ProxyRuntimeError;
 
 pub mod agent_conn;
 pub mod background_tasks;
@@ -51,17 +51,17 @@ mod remote_resources;
 mod request_queue;
 
 /// Convenience type that defines the type of failure the proxy can encounter. In the case of 
-/// [`ProxyFailure::Critical`] the proxy immediately shut down, returning the encountered error. 
-/// In the case of [`ProxyFailure::Managed`] a [`FailoverStrategy`] is instantiated to replace the 
+/// [`ProxyFailure::Startup`] the proxy immediately shut down, returning the encountered error.
+/// In the case of [`ProxyFailure::Runtime`] a [`FailoverStrategy`] is instantiated to replace the
 /// normal Proxy workflow.
 enum ProxyFailure {
-    Critical(IntProxyError),
-    Managed(FailoverStrategy),
+    Startup(ProxyStartupError),
+    Runtime(FailoverStrategy),
 }
 
-impl From<IntProxyError> for ProxyFailure {
-    fn from(error: IntProxyError) -> Self {
-        Self::Critical(error)
+impl From<ProxyStartupError> for ProxyFailure {
+    fn from(error: ProxyStartupError) -> Self {
+        Self::Startup(error)
     }
 }
 
@@ -84,7 +84,7 @@ struct TaskTxs {
 /// different mirrod features (e.g. file operations and incoming traffic).
 pub struct IntProxy {
     any_connection_accepted: bool,
-    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError>,
+    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     task_txs: TaskTxs,
     
     /// this set holds the ids of current layer and msg involved in an exchange with proxy
@@ -119,7 +119,7 @@ impl IntProxy {
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalHttpsDelivery,
     ) -> Self {
-        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, InternalProxyError> =
+        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
 
         let agent = background_tasks.register_restartable(
@@ -202,11 +202,11 @@ impl IntProxy {
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
-    ) -> Result<(), IntProxyError> {
+    ) -> Result<(), ProxyStartupError> {
         match self.run_inner(first_timeout, idle_timeout).await {
             Ok(()) => Ok(()),
-            Err(ProxyFailure::Critical(error)) => Err(error),
-            Err(ProxyFailure::Managed(failover_strategy)) => {
+            Err(ProxyFailure::Startup(error)) => Err(error),
+            Err(ProxyFailure::Runtime(failover_strategy)) => {
                 tracing::warn!("Managed exception {}, proxy is entering in failover state...", failover_strategy.fail_cause());
                 failover_strategy.run(idle_timeout, idle_timeout).await
             }
@@ -241,13 +241,13 @@ impl IntProxy {
                     let update_res = proxy.handle_task_update(task_id, task_update).await;
                     tracing::trace!(%task_id, ?update_res, "task updated");
                     match update_res {
-                        Err(InternalProxyError::Critical(err) ) => {
+                        Err(InternalProxyError::Startup(err) ) => {
                             tracing::error!(%err, "Critical error in background task update");
-                            Err(ProxyFailure::Critical(err))?
+                            Err(ProxyFailure::Startup(err))?
                         }
-                        Err(InternalProxyError::Manageable(err)) => {
+                        Err(InternalProxyError::Runtime(err)) => {
                             tracing::error!(%err, "Manageable error in background task update, proxy is entering in failover state...");
-                            return Err(ProxyFailure::Managed(FailoverStrategy::from_failed_proxy(proxy, err)))
+                            return Err(ProxyFailure::Runtime(FailoverStrategy::from_failed_proxy(proxy, err)))
                         }
                         _ => ()
                     }
@@ -258,7 +258,7 @@ impl IntProxy {
                 }
 
                 _ = time::sleep(first_timeout), if !proxy.any_connection_accepted => {
-                    Err(IntProxyError::ConnectionAcceptTimeout)?;
+                    Err(ProxyStartupError::ConnectionAcceptTimeout)?;
                 },
 
                 _ = time::sleep(idle_timeout), if proxy.any_connection_accepted && !proxy.has_layer_connections() => {
@@ -286,7 +286,7 @@ impl IntProxy {
 
     /// Routes a [`ProxyMessage`] to the correct background task.
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
-    async fn handle(&mut self, msg: ProxyMessage) -> Result<(), InternalProxyError> {
+    async fn handle(&mut self, msg: ProxyMessage) -> Result<(), ProxyRuntimeError> {
         match msg {
             ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_) | ProxyMessage::ToAgent(_)
                 if self.reconnect_task_queue.is_some() =>
@@ -359,7 +359,7 @@ impl IntProxy {
     async fn handle_task_update(
         &mut self,
         task_id: MainTaskId,
-        update: TaskUpdate<ProxyMessage, InternalProxyError>,
+        update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) -> Result<(), InternalProxyError> {
         match (task_id, update) {
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(Ok(()))) => {
@@ -382,7 +382,7 @@ impl IntProxy {
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
                     tracing::error!(%task_id, "One of the main tasks finished unexpectedly");
-                    Err(ProxyManagedError::TaskExit(task_id))?;
+                    Err(ProxyRuntimeError::TaskExit(task_id))?;
                 }
                 Err(TaskError::Error(error)) => {
                     tracing::error!(%task_id, %error, "One of the main tasks failed");
@@ -390,7 +390,7 @@ impl IntProxy {
                 }
                 Err(TaskError::Panic) => {
                     tracing::error!(%task_id, "One of the main tasks panicked");
-                    Err(ProxyManagedError::TaskPanic(task_id))?;
+                    Err(ProxyRuntimeError::TaskPanic(task_id))?;
                 }
             },
 
@@ -405,7 +405,7 @@ impl IntProxy {
     async fn handle_agent_message(
         &mut self,
         message: DaemonMessage,
-    ) -> Result<(), InternalProxyError> {
+    ) -> Result<(), ProxyRuntimeError> {
         if self.ping_pong_update_allowed
             && !matches!(message, DaemonMessage::Pong | DaemonMessage::Close(_))
         {
@@ -423,7 +423,7 @@ impl IntProxy {
                     .send(PingPongMessage::AgentSentPong)
                     .await
             }
-            DaemonMessage::Close(reason) => Err(ProxyManagedError::AgentFailed(reason))?,
+            DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
             DaemonMessage::TcpOutgoing(msg) => {
                 self.task_txs
                     .outgoing
@@ -510,7 +510,7 @@ impl IntProxy {
                     .await
             }
             other => {
-                Err(ProxyManagedError::UnexpectedAgentMessage(
+                Err(ProxyRuntimeError::UnexpectedAgentMessage(
                     UnexpectedAgentMessage(other),
                 ))?;
             }
@@ -520,7 +520,7 @@ impl IntProxy {
     }
 
     /// Routes a message from the layer to the correct background task.
-    async fn handle_layer_message(& mut self, message: FromLayer) -> Result<(), InternalProxyError> {
+    async fn handle_layer_message(& mut self, message: FromLayer) -> Result<(), ProxyRuntimeError> {
         let FromLayer {
             message_id,
             layer_id,
@@ -562,7 +562,7 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
-            other => Err(ProxyManagedError::UnexpectedLayerMessage(other))?,
+            other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }
 
         Ok(())
@@ -571,7 +571,7 @@ impl IntProxy {
     async fn handle_connection_refresh(
         &mut self,
         kind: ConnectionRefresh,
-    ) -> Result<(), InternalProxyError> {
+    ) -> Result<(), ProxyRuntimeError> {
         self.task_txs
             .ping_pong
             .send(PingPongMessage::ConnectionRefresh(kind))
@@ -625,7 +625,7 @@ impl IntProxy {
                         self.handle(msg).await?;
                     }
 
-                    Ok::<(), InternalProxyError>(())
+                    Ok::<(), ProxyRuntimeError>(())
                 })
                 .await?;
             }
