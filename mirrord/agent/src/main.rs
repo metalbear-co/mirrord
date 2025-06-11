@@ -1,6 +1,7 @@
 #![cfg(target_os = "linux")]
 #![feature(try_blocks)]
 #![feature(error_reporter)]
+#![feature(try_with_capacity)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
