@@ -25,16 +25,21 @@ pub struct ConnectParams<'a> {
 
     #[serde(with = "queue_splits_serde")]
     pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+    /// User's current git branch name - may be an empty string if user is in detached head mode or
+    /// another error occurred: this case handled by the operator
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
 }
 
 impl<'a> ConnectParams<'a> {
-    pub fn new(config: &'a LayerConfig) -> Self {
+    pub fn new(config: &'a LayerConfig, branch_name: String) -> Self {
         Self {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
+            branch_name
         }
     }
 }
