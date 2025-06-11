@@ -39,6 +39,7 @@ use crate::{
     util::remove_proxy_env,
     CliResult,
 };
+use crate::util::get_user_git_branch;
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -194,16 +195,8 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        // 'git branch --show-current' to obtain current user git branch, used for metrics reporting
-        // errors get ignored until much later, pass the operator an empty string in case of failure
-        let branch_name: String = match Command::new("git")
-            .args(["branch", "--show-current"])
-            .output()
-            .await {
-            Ok(output) => output.stdout.into(),
-            Err(_) => "".to_string()
-        };
-        
+        let branch_name = get_user_git_branch().await;
+
         let (connect_info, mut connection) = create_and_connect(config, progress, analytics, branch_name)
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
@@ -397,8 +390,7 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        // todo: take branch_name from env
-        let (connect_info, mut connection) = create_and_connect(config, progress, analytics, branch_name)
+        let (connect_info, mut connection) = create_and_connect(config, progress, analytics, None)
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
