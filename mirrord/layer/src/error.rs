@@ -222,6 +222,9 @@ impl From<HookError> for i64 {
                 // this means we bypass, so we can just return to avoid setting libc.
                 return -1;
             }
+            HookError::ProxyError(ProxyError::ProxyFailure(ref err)) => {
+                graceful_exit!(r"Internal proxy encountered {err}")
+            }
             HookError::ProxyError(ref err) => {
                 let reason = match err {
                     ProxyError::ProxyFailure(ref err) => format!("Proxy encountered an error: {err}"),
