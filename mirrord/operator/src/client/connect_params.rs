@@ -32,7 +32,7 @@ pub struct ConnectParams<'a> {
 }
 
 impl<'a> ConnectParams<'a> {
-    pub fn new(config: &'a LayerConfig, branch_name: String) -> Self {
+    pub fn new(config: &'a LayerConfig, branch_name: Option<String>) -> Self {
         Self {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),

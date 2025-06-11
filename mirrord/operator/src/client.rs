@@ -544,7 +544,7 @@ impl OperatorApi<PreparedClientCert> {
         target: ResolvedTarget<false>,
         layer_config: &mut LayerConfig,
         progress: &P,
-        branch_name: String,
+        branch_name: Option<String>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -802,6 +802,7 @@ impl OperatorApi<PreparedClientCert> {
             // Kafka and SQS splits are passed in the request body.
             kafka_splits: Default::default(),
             sqs_splits: Default::default(),
+            branch_name: None
         };
 
         if use_proxy {

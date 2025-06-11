@@ -35,7 +35,7 @@ async fn try_connect_using_operator<P, R>(
     config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
-    branch_name: String,
+    branch_name: Option<String>,
 ) -> CliResult<Option<OperatorSessionConnection>>
 where
     P: Progress,
@@ -115,7 +115,7 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut P,
     analytics: &mut R,
-    branch_name: String,
+    branch_name: Option<String>,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
