@@ -1,4 +1,3 @@
-use std::io;
 
 use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
 use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, ResponseError};
