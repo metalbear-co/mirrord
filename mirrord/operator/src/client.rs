@@ -544,6 +544,7 @@ impl OperatorApi<PreparedClientCert> {
         target: ResolvedTarget<false>,
         layer_config: &mut LayerConfig,
         progress: &P,
+        branch_name: String,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -662,7 +663,7 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let params = ConnectParams::new(layer_config);
+            let params = ConnectParams::new(layer_config, branch_name);
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
 
