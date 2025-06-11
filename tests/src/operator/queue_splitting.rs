@@ -23,15 +23,30 @@ use crate::utils::{
 };
 
 /// Produces a mirrord config file for an application run in the [`two_users`] test.
-fn get_config(single_queue_id: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
+///
+/// # Arguments
+/// - `single_queue_id`: only one queue entry in the config.
+/// - `with_asterisk_queue_id`: ONLY USED if `single_queue_id`. Use `"*"` as queue-id.
+/// - `attribute`: a name of a message attribute to require.
+/// - `pattern`: a regex to match message attribute values.
+fn get_config(
+    single_queue_id: bool,
+    with_asterisk_queue_id: bool,
+    (attribute, pattern): (&str, &str),
+) -> NamedTempFile {
     let mut config = NamedTempFile::with_suffix(".json").unwrap();
 
     let content = if single_queue_id {
+        let queue_id = if with_asterisk_queue_id {
+            "*"
+        } else {
+            "e2e-test-queues"
+        };
         serde_json::json!({
             "operator": true,
             "feature": {
                 "split_queues": {
-                    "e2e-test-queues": {
+                    queue_id: {
                         "queue_type": "SQS",
                         "message_filter": {
                             attribute: pattern,
@@ -206,23 +221,33 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
-#[case::with_regex_without_fallback_json(true, false)]
-#[case::without_regex_without_fallback_json(false, false)]
-#[case::without_regex_with_fallback_json(false, true)]
+#[case::with_regex_without_fallback_json(true, false, false)]
+#[case::without_regex_without_fallback_json(false, false, false)]
+#[case::without_regex_with_fallback_json(false, true, false)]
+#[case::without_regex_with_fallback_json_with_asterisk(false, true, true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
 pub async fn two_users(
     #[future] kube_client: kube::Client,
     #[case] with_regex: bool,
     #[case] with_fallback_json: bool,
+    #[case] with_asterisk_queue_id: bool,
 ) {
     let kube_client = kube_client.await;
     let sqs_test_resources =
         sqs_test_resources(kube_client.clone(), with_regex, with_fallback_json).await;
     let application = Application::RustSqs;
 
-    let config_a = get_config(with_regex || with_fallback_json, ("client", "^a$"));
-    let config_b = get_config(with_regex || with_fallback_json, ("client", "^b$"));
+    let config_a = get_config(
+        with_regex || with_fallback_json,
+        with_asterisk_queue_id,
+        ("client", "^a$"),
+    );
+    let config_b = get_config(
+        with_regex || with_fallback_json,
+        with_asterisk_queue_id,
+        ("client", "^b$"),
+    );
 
     println!("Starting first mirrord client");
     let mut client_a = application
