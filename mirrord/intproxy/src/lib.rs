@@ -773,4 +773,188 @@ mod test {
 
         proxy_handle.await.unwrap().unwrap();
     }
+
+    /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
+    #[tokio::test]
+    async fn switch_to_failover() {
+        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
+        let (proxy_tx, agent_rx) = mpsc::channel(12);
+
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+
+        let proxy_addr = listener.local_addr().unwrap();
+
+        let agent_conn = AgentConnection {
+            agent_rx,
+            agent_tx,
+            reconnect: ReconnectFlow::Break,
+        };
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            Default::default(),
+        );
+        let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
+
+        match proxy_rx.recv().await.unwrap() {
+            ClientMessage::SwitchProtocolVersion(version) => {
+                assert_eq!(version, *mirrord_protocol::VERSION)
+            }
+            other => panic!("unexpected client message from the proxy: {other:?}"),
+        }
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+
+        encoder
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest::New(ProcessInfo {
+                    pid: 1337,
+                    name: "hello there".into(),
+                    cmdline: vec!["hello there".into()],
+                    loaded: true,
+                })),
+            })
+            .await
+            .unwrap();
+        encoder.flush().await.unwrap();
+        match decoder.receive().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(..),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        // To make sure that the proxy has a chance to do progress.
+        // If the proxy was not waiting for agent protocol version,
+        // it would surely respond to our previous request here.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match proxy_rx.recv().await.unwrap() {
+                    ClientMessage::Ping => {
+                        proxy_tx.send(DaemonMessage::Pong).await.unwrap();
+                    }
+                    other => panic!("unexpected client message from the proxy: {other:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap_err();
+
+        proxy_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+
+        proxy_tx
+            .send(DaemonMessage::Close("no reason".to_string()))
+            .await
+            .unwrap();
+
+        encoder
+            .send(&LocalMessage {
+                message_id: 1,
+                inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
+                    path: PathBuf::from("/some/path"),
+                })),
+            })
+            .await
+            .unwrap();
+        encoder.flush().await.unwrap();
+
+        match decoder.receive().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 1,
+                inner: ProxyToLayerMessage::ProxyFailed(..),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        std::mem::drop((encoder, decoder));
+
+        proxy_handle.await.unwrap().unwrap();
+    }
+
+    /// Verifies that [`IntProxy`] run method return an error on a startup error
+    #[tokio::test]
+    async fn startup_fail() {
+        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
+        let (proxy_tx, agent_rx) = mpsc::channel(12);
+
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+
+        let proxy_addr = listener.local_addr().unwrap();
+
+        let agent_conn = AgentConnection {
+            agent_rx,
+            agent_tx,
+            reconnect: ReconnectFlow::Break,
+        };
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            Default::default(),
+        );
+        let proxy_handle = tokio::spawn(async {
+            assert!(proxy
+                .run(Duration::from_secs(1), Duration::ZERO)
+                .await
+                .is_err());
+        });
+
+        match proxy_rx.recv().await.unwrap() {
+            ClientMessage::SwitchProtocolVersion(version) => {
+                assert_eq!(version, *mirrord_protocol::VERSION)
+            }
+            other => panic!("unexpected client message from the proxy: {other:?}"),
+        }
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+
+        // To make sure that the proxy has a chance to do progress.
+        // If the proxy was not waiting for agent protocol version,
+        // it would surely respond to our previous request here.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match proxy_rx.recv().await.unwrap() {
+                    ClientMessage::Ping => {
+                        proxy_tx.send(DaemonMessage::Pong).await.unwrap();
+                    }
+                    other => panic!("unexpected client message from the proxy: {other:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap_err();
+
+        proxy_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+
+        std::mem::drop((encoder, decoder));
+
+        proxy_handle.await.unwrap();
+    }
 }
