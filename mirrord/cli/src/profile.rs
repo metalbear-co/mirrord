@@ -1,7 +1,9 @@
 //! This module contains utilities for working with [`MirrordClusterProfile`]s and
 //! [`MirrordProfile`]s.
 
-use kube::{Api, Client, Resource};
+use std::{fmt::Display, str::FromStr};
+
+use kube::{Api, Client};
 use miette::Diagnostic;
 use mirrord_config::{
     feature::{network::incoming::IncomingMode, FeatureConfig},
@@ -10,8 +12,7 @@ use mirrord_config::{
 };
 use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{
-    FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordClusterProfileSpec,
-    MirrordProfile, MirrordProfileSpec,
+    FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordProfile,
 };
 use mirrord_progress::Progress;
 use thiserror::Error;
@@ -31,9 +32,10 @@ pub enum ProfileError {
 
     #[error("mirrord profile was not found in the cluster")]
     #[diagnostic(help(
-        "Use `kubectl get mirrordclusterprofiles <profile-name>` \
-        to verify that the profile exists \
-        and its name is spelled correctly in your mirrord config."
+        "Verify that the profile exists \
+        and its name is spelled correctly in your mirrord config. \
+        For cluster-wide profile, use `kubectl get mirrordclusterprofiles <profile-name>`. \
+        For namespaced profile, use `kubectl get mirrordprofiles <profile-name> -n <namespace>`."
     ))]
     ProfileNotFound,
 
@@ -42,23 +44,78 @@ pub enum ProfileError {
         "Check if you have sufficient permissions to fetch the profile from the cluster."
     ))]
     ProfileFetchError(KubeApiError),
+
+    #[error("mirrord profile must be cluster-wide or in the same namespace as the target ({0})")]
+    NamespaceConflict(String),
+}
+
+/// Identifier of [`MirrordClusterProfile`] and [`MirrordProfile`].
+#[derive(Debug, Eq, PartialEq)]
+enum ProfileIdentifier {
+    Namespaced { namespace: String, profile: String },
+    Cluster(String),
+}
+
+impl Display for ProfileIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProfileIdentifier::Cluster(profile) => write!(f, "{profile}"),
+            ProfileIdentifier::Namespaced { namespace, profile } => {
+                write!(f, "{namespace}/{profile}")
+            }
+        }
+    }
+}
+
+impl FromStr for ProfileIdentifier {
+    type Err = ProfileError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_once('/') {
+            Some((namespace, profile)) => Ok(Self::Namespaced {
+                namespace: namespace.to_string(),
+                profile: profile.to_string(),
+            }),
+            None => Ok(Self::Cluster(s.to_string())),
+        }
+    }
+}
+
+enum ProfileFetchResult {
+    Cluster(MirrordClusterProfile),
+    Namespaced(MirrordProfile),
+}
+
+impl ProfileFetchResult {
+    fn feature_adjustments(&self) -> impl Iterator<Item = &FeatureAdjustment> {
+        match self {
+            ProfileFetchResult::Cluster(profile) => profile.spec.feature_adjustments.iter(),
+            ProfileFetchResult::Namespaced(profile) => profile.spec.feature_adjustments.iter(),
+        }
+    }
+
+    fn unknown_fields(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
+        match self {
+            ProfileFetchResult::Cluster(profile) => profile.spec.unknown_fields.iter(),
+            ProfileFetchResult::Namespaced(profile) => profile.spec.unknown_fields.iter(),
+        }
+    }
 }
 
 /// Convenience trait for [`FeatureAdjustment`].
 trait FeatureAdjustmentExt: Sized {
     /// Tries to apply this adjustment to the given [`FeatureConfig`].
-    fn apply_to(self, config: &mut FeatureConfig) -> Result<(), ProfileError>;
+    fn apply_to(&self, config: &mut FeatureConfig) -> Result<(), ProfileError>;
 }
 
 impl FeatureAdjustmentExt for FeatureAdjustment {
-    fn apply_to(self, config: &mut FeatureConfig) -> Result<(), ProfileError> {
+    fn apply_to(&self, config: &mut FeatureConfig) -> Result<(), ProfileError> {
         let Self {
             change,
             unknown_fields,
         } = self;
 
-        if let Some(field) = unknown_fields.into_keys().next() {
-            return Err(ProfileError::UnknownField(field));
+        if let Some(field) = unknown_fields.keys().next() {
+            return Err(ProfileError::UnknownField(field.to_string()));
         }
 
         match change {
@@ -96,50 +153,42 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
     }
 }
 
-/// Applies the given legacy [`MirrordProfile`] to the given [`FeatureConfig`].
-fn apply_legacy_profile(
-    config: &mut FeatureConfig,
-    profile: MirrordProfile,
+/// Applies the given profile to the given [`LayerConfig`].
+fn apply_profile<P: Progress>(
+    config: &mut LayerConfig,
+    profile: &ProfileFetchResult,
+    profile_identifier: &ProfileIdentifier,
+    subtask: &mut P,
 ) -> Result<(), ProfileError> {
-    let MirrordProfileSpec {
-        feature_adjustments,
-        unknown_fields,
-    } = profile.spec;
-
-    if let Some(field) = unknown_fields.into_keys().next() {
-        return Err(ProfileError::UnknownField(field));
+    if let Some((field, _)) = profile.unknown_fields().next() {
+        return Err(ProfileError::UnknownField(field.to_string()));
     }
 
-    for adjustment in feature_adjustments {
-        adjustment.apply_to(config)?;
+    if let ProfileIdentifier::Namespaced {
+        namespace: profile_ns,
+        profile: _,
+    } = profile_identifier
+    {
+        if let Some(target_ns) = &config.target.namespace {
+            if target_ns != profile_ns {
+                return Err(ProfileError::NamespaceConflict(target_ns.clone()));
+            }
+        } else {
+            subtask.info(&format!("setting target namespace to {profile_ns}"));
+            config.target.namespace = Some(profile_ns.to_string());
+        }
+    }
+
+    for adjustment in profile.feature_adjustments() {
+        adjustment.apply_to(&mut config.feature)?;
     }
 
     Ok(())
 }
 
-/// Applies the given [`MirrordClusterProfile`] to the given [`FeatureConfig`].
-fn apply_profile(
-    config: &mut FeatureConfig,
-    profile: MirrordClusterProfile,
-) -> Result<(), ProfileError> {
-    let MirrordClusterProfileSpec {
-        feature_adjustments,
-        unknown_fields,
-    } = profile.spec;
-
-    if let Some(field) = unknown_fields.into_keys().next() {
-        return Err(ProfileError::UnknownField(field));
-    }
-
-    for adjustment in feature_adjustments {
-        adjustment.apply_to(config)?;
-    }
-
-    Ok(())
-}
-
-/// If the [`LayerConfig::profile`] field specifies a [`MirrordProfile`] to use,
-/// fetches that profile from the cluster and applies it to the config.
+/// If the [`LayerConfig::profile`] field specifies a [`MirrordClusterProfile`] or
+/// [`MirrordProfile`] to use, fetches that profile from the cluster and applies it
+/// to the config.
 ///
 /// Verifies that the fetched profile does not contain any unknown fields or values.
 pub async fn apply_profile_if_configured<P: Progress>(
@@ -150,67 +199,89 @@ pub async fn apply_profile_if_configured<P: Progress>(
         return Ok(());
     };
 
-    let mut subtask = progress.subtask(&format!("fetching mirrord profile `{name}`"));
-    let profile: Result<MirrordClusterProfile, KubeApiError> = try {
-        let client: Client = create_kube_config(
-            config.accept_invalid_certificates,
-            config.kubeconfig.as_deref(),
-            config.kube_context.clone(),
-        )
-        .await?
-        .try_into()
-        .map_err(KubeApiError::from)?;
+    let profile_identifier = name.parse()?;
+    let mut subtask = progress.subtask(&format!("fetching mirrord profile `{profile_identifier}`"));
 
-        let api = Api::<MirrordClusterProfile>::all(client);
-        api.get(name).await?
-    };
-    let legacy_profile: Result<MirrordProfile, KubeApiError> = try {
-        let client: Client = create_kube_config(
-            config.accept_invalid_certificates,
-            config.kubeconfig.as_deref(),
-            config.kube_context.clone(),
-        )
-        .await?
-        .try_into()
-        .map_err(KubeApiError::from)?;
-
-        let api = Api::<MirrordProfile>::all(client);
-        api.get(name).await?
-    };
-    if legacy_profile.is_ok() {
-        subtask.warning(
-            &format!(
-                "Legacy resource kind detected, please contact your admin to migrate all resources of kind {} to {}", 
-                MirrordProfile::kind(&()),
-                MirrordClusterProfile::kind(&()),
-            )
-        );
-    }
-
-    match (profile, legacy_profile) {
-        (Ok(profile), _) => {
-            subtask.success(Some(&format!("mirrord cluster profile `{name}` fetched")));
-            let mut subtask = progress.subtask(&format!("applying mirrord profile `{name}`"));
-            apply_profile(&mut config.feature, profile)?;
-            subtask.success(Some(&format!("mirrord profile `{name}` applied")));
-            Ok(())
-        }
-        (_, Ok(legacy_profile)) => {
-            subtask.success(Some(&format!("legacy mirrord profile `{name}` fetched")));
+    match fetch_profile(config, &profile_identifier).await {
+        Ok(profile) => {
+            subtask.success(Some(&format!(
+                "mirrord profile `{profile_identifier}` fetched"
+            )));
             let mut subtask =
-                progress.subtask(&format!("applying legacy mirrord profile `{name}`"));
-            apply_legacy_profile(&mut config.feature, legacy_profile)?;
-            subtask.success(Some(&format!("legacy mirrord profile `{name}` applied")));
+                progress.subtask(&format!("applying mirrord profile `{profile_identifier}`"));
+            apply_profile(config, &profile, &profile_identifier, &mut subtask)?;
+            subtask.success(Some(&format!(
+                "mirrord profile `{profile_identifier}` applied"
+            )));
             Ok(())
         }
-        (Err(KubeApiError::KubeError(kube::Error::Api(error))), _) if error.code == 404 => {
+        Err(KubeApiError::KubeError(kube::Error::Api(error))) if error.code == 404 => {
             Err(CliError::ProfileError(ProfileError::ProfileNotFound))
         }
-        (_, Err(KubeApiError::KubeError(kube::Error::Api(error)))) if error.code == 404 => {
-            Err(CliError::ProfileError(ProfileError::ProfileNotFound))
-        }
-        (Err(error), _) => Err(CliError::friendlier_error_or_else(error, |error| {
+        Err(error) => Err(CliError::friendlier_error_or_else(error, |error| {
             CliError::ProfileError(ProfileError::ProfileFetchError(error))
         })),
+    }
+}
+
+async fn fetch_profile(
+    config: &LayerConfig,
+    profile_identifier: &ProfileIdentifier,
+) -> Result<ProfileFetchResult, KubeApiError> {
+    let client: Client = create_kube_config(
+        config.accept_invalid_certificates,
+        config.kubeconfig.as_deref(),
+        config.kube_context.clone(),
+    )
+    .await?
+    .try_into()
+    .map_err(KubeApiError::from)?;
+
+    match profile_identifier {
+        ProfileIdentifier::Cluster(profile) => {
+            let api = Api::<MirrordClusterProfile>::all(client);
+            Ok(ProfileFetchResult::Cluster(api.get(profile).await?))
+        }
+        ProfileIdentifier::Namespaced { namespace, profile } => {
+            let api = Api::<MirrordProfile>::namespaced(client, namespace);
+            Ok(ProfileFetchResult::Namespaced(api.get(profile).await?))
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::profile::ProfileIdentifier;
+
+    #[test]
+    fn test_profile_name() {
+        assert_eq!(
+            "my-profile".parse::<ProfileIdentifier>().unwrap(),
+            ProfileIdentifier::Cluster("my-profile".to_string())
+        );
+        assert_eq!(
+            "my-namespace/my-profile"
+                .parse::<ProfileIdentifier>()
+                .unwrap(),
+            ProfileIdentifier::Namespaced {
+                namespace: "my-namespace".to_string(),
+                profile: "my-profile".to_string()
+            }
+        );
+        assert_eq!(
+            "a/b/c".parse::<ProfileIdentifier>().unwrap(),
+            ProfileIdentifier::Namespaced {
+                namespace: "a".to_string(),
+                profile: "b/c".to_string()
+            }
+        );
+
+        assert_eq!(
+            "/my-profile".parse::<ProfileIdentifier>().unwrap(),
+            ProfileIdentifier::Namespaced {
+                namespace: "".to_string(),
+                profile: "my-profile".to_string()
+            }
+        );
     }
 }
