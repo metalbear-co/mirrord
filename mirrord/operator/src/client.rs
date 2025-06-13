@@ -605,6 +605,7 @@ impl OperatorApi<PreparedClientCert> {
                 &copied,
                 use_proxy_api,
                 layer_config.profile.as_deref(),
+                branch_name.clone(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -663,7 +664,7 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let params = ConnectParams::new(layer_config, branch_name);
+            let params = ConnectParams::new(layer_config, branch_name.clone());
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
 
@@ -689,6 +690,7 @@ impl OperatorApi<PreparedClientCert> {
                     &copied,
                     use_proxy_api,
                     layer_config.profile.as_deref(),
+                    branch_name,
                 );
                 let session_id = copied
                     .status
@@ -780,6 +782,7 @@ impl OperatorApi<PreparedClientCert> {
         crd: &CopyTargetCrd,
         use_proxy: bool,
         profile: Option<&str>,
+        branch_name: Option<String>,
     ) -> String {
         let name = crd
             .meta()
@@ -802,7 +805,7 @@ impl OperatorApi<PreparedClientCert> {
             // Kafka and SQS splits are passed in the request body.
             kafka_splits: Default::default(),
             sqs_splits: Default::default(),
-            branch_name: None
+            branch_name,
         };
 
         if use_proxy {
@@ -1186,6 +1189,7 @@ mod test {
             profile,
             kafka_splits,
             sqs_splits,
+            branch_name: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

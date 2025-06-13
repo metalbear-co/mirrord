@@ -299,6 +299,7 @@ mod vpn;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
+
 use crate::util::get_user_git_branch;
 
 async fn exec_process<P>(

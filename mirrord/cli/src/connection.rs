@@ -120,7 +120,9 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
-    if let Some(connection) = try_connect_using_operator(config, progress, analytics, branch_name).await? {
+    if let Some(connection) =
+        try_connect_using_operator(config, progress, analytics, branch_name).await?
+    {
         return Ok((
             AgentConnectInfo::Operator(connection.session),
             AgentConnection {

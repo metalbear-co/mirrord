@@ -10,8 +10,8 @@ use crate::{
     config::VpnArgs,
     connection::create_and_connect,
     error::{CliError, CliResult},
+    util::get_user_git_branch,
 };
-use crate::util::get_user_git_branch;
 
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord vpn");
@@ -49,9 +49,10 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut sub_progress = progress.subtask("create agent");
 
     let branch_name = get_user_git_branch().await;
-    let (_, connection) = create_and_connect(&mut config, &mut sub_progress, &mut analytics, branch_name)
-        .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    let (_, connection) =
+        create_and_connect(&mut config, &mut sub_progress, &mut analytics, branch_name)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     sub_progress.success(None);
 

@@ -39,7 +39,7 @@ impl<'a> ConnectParams<'a> {
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
-            branch_name
+            branch_name,
         }
     }
 }

@@ -3,7 +3,7 @@ use std::{io, io::Write, net::SocketAddr};
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use nix::libc;
 use tokio::{net::TcpListener, process::Command};
-use tracing::{Instrument, Level};
+use tracing::Level;
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
@@ -94,10 +94,24 @@ pub async fn get_user_git_branch() -> Option<String> {
         .args(["branch", "--show-current"])
         .output()
         .await
-        .ok()
-        .map(|output| String::from_utf8(output.stdout).unwrap_or_default())
     {
-        Some(output) if !output.is_empty() => Some(output),
-        _ => None,
+        Ok(output) if output.status.success() => Some(output)
+            .map(|output| String::from_utf8(output.stdout).unwrap_or_default())
+            .filter(|string| !string.is_empty()),
+        Ok(output) => {
+            tracing::debug!(
+                status = %output.status,
+                stderr = ?String::from_utf8_lossy(&output.stderr),
+                "`git branch --show-current` command failed."
+            );
+            None
+        }
+        Err(error) => {
+            tracing::debug!(
+                %error,
+                "Failed to execute `git branch` command, check that git is installed."
+            );
+            None
+        }
     }
 }
