@@ -23,6 +23,7 @@ use crate::{
     execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
     logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
+    wsl::container_config_for_wsl,
 };
 
 mod command_builder;
@@ -181,6 +182,8 @@ pub async fn container_command(
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
+    container_config_for_wsl(&mut config);
+
     let (runtime_command, _execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &mut config, runtime_args.runtime).await?;
 
@@ -235,6 +238,8 @@ pub async fn container_ext_command(
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
+
+    container_config_for_wsl(&mut config);
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()
