@@ -925,7 +925,7 @@ mod test {
         }
 
         let conn = TcpStream::connect(proxy_addr).await.unwrap();
-        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+        let (encoder, decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
             LocalMessage<LayerToProxyMessage>,
             LocalMessage<ProxyToLayerMessage>,
         >(conn);
