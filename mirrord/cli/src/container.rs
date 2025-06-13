@@ -182,7 +182,7 @@ pub async fn container_command(
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
-    container_config_for_wsl(&mut config);
+    container_config_for_wsl(runtime_args.runtime, &mut config);
 
     let (runtime_command, _execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &mut config, runtime_args.runtime).await?;
@@ -239,12 +239,12 @@ pub async fn container_ext_command(
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
-    container_config_for_wsl(&mut config);
-
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()
         .and_then(|value| ContainerRuntime::from_str(&value, true).ok())
         .unwrap_or(ContainerRuntime::Docker);
+
+    container_config_for_wsl(container_runtime, &mut config);
 
     let (runtime_command, execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &mut config, container_runtime).await?;

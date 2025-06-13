@@ -3,10 +3,13 @@ use std::{env, fs};
 
 use mirrord_config::LayerConfig;
 
-pub(super) fn container_config_for_wsl(config: &mut LayerConfig) {
+use crate::ContainerRuntime;
+
+pub(super) fn container_config_for_wsl(runtime: ContainerRuntime, config: &mut LayerConfig) {
     if is_wsl()
         && config.external_proxy.host_ip.is_none()
         && config.container.override_host_ip.is_none()
+        && matches!(runtime, ContainerRuntime::Docker)
     {
         config.external_proxy.host_ip = Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         config.container.override_host_ip =
