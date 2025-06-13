@@ -296,6 +296,7 @@ mod teams;
 mod util;
 mod verify_config;
 mod vpn;
+mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;

@@ -69,5 +69,11 @@ pub struct ContainerConfig {
     ///
     /// This should be useful if your host machine is exposed with a different IP address than the
     /// one bound as host.
+    ///
+    /// - If you're running inside WSL, and encountering problems, try setting
+    ///   `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address
+    ///   (for docker, this  would be what `host.docker.internal` resolved to, which by default is
+    ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
+    ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
 }

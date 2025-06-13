@@ -104,5 +104,10 @@ pub struct ExternalProxyConfig {
     ///
     /// This address must be accessible from within the container.
     /// If not specified, mirrord will try and resolve a local address to use.
+    ///
+    /// - If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`,
+    ///   and `container.override_host_ip` to the internal container runtime address (for docker,
+    ///   this would be what `host.docker.internal` resolved to, which by default is
+    ///   `192.168.65.254`).
     pub host_ip: Option<IpAddr>,
 }
