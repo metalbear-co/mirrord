@@ -828,3 +828,19 @@ mod test {
         )
     }
 }
+
+/// Changes the current working directory to the specified path.
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn chdir(path: Detour<PathBuf>) -> Detour<()> {
+    let path = common_path_check(path?, false)?;
+
+    let chdir_request = ChDirRequest {
+        pathname: path,
+    };
+
+    match common::make_proxy_request_with_response(chdir_request)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
+    }
+}

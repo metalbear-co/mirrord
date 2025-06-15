@@ -223,6 +223,9 @@ impl FileManager {
                 pathname,
                 flags,
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
+            FileRequest::Chdir(ChdirRequest { path }) => {
+                Some(FileResponse::Chdir(self.chdir(path)))
+            }
         })
     }
 
@@ -937,5 +940,11 @@ impl FileManager {
                 result_size,
             })
         }
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn chdir(&mut self, path: &Path) -> RemoteResult<()> {
+        let path = self.resolve_path(path)?;
+        std::env::set_current_dir(path.as_ref()).map_err(ResponseError::from)
     }
 }
