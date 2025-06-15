@@ -641,3 +641,13 @@ pub struct GetDEnts64Response {
     pub entries: Vec<DirEntryInternal>,
     pub result_size: u64,
 }
+
+/// Request to change the current working directory.
+#[derive(Encode, Decode, Debug)]
+pub struct ChDirRequest {
+    pub pathname: PathBuf,
+}
+
+/// Response to a change directory request.
+#[derive(Encode, Decode, Debug)]
+pub struct ChDirResponse {}
