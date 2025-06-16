@@ -95,8 +95,9 @@ pub async fn get_user_git_branch() -> Option<String> {
         .output()
         .await
     {
-        Ok(output) if output.status.success() => Some(output)
-            .map(|output| String::from_utf8(output.stdout).unwrap_or_default())
+        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+            .ok()
+            .map(|output| output.trim().to_string())
             .filter(|string| !string.is_empty()),
         Ok(output) => {
             tracing::debug!(
