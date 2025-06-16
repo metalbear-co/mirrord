@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.144.0](https://github.com/metalbear-co/mirrord/tree/3.144.0) - 2025-06-10
+
+
+### Added
+
+- Add user-agent to version check
+- Added an option to exclude agent's communication port from sidecar proxy if
+  the target is in a service mesh.
+
+
+### Changed
+
+- Automatically add health probe ports to http_filter ports (if a filter is
+  set). [#3244](https://github.com/metalbear-co/mirrord/issues/3244)
+
+
+### Fixed
+
+- Fixed big packets crashing mirrord agent - skip and warn, allow user to
+  override max packet size
+
+
+### Internal
+
+- Add a badge for the community Slack to README
+- Added an E2E test for splitting SQS queues based on env var regex.
+
 ## [3.143.0](https://github.com/metalbear-co/mirrord/tree/3.143.0) - 2025-05-29
 
 

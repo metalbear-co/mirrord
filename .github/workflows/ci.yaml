@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
   push:
   pull_request:
-    branches: [ main ]
+    branches: [ main, '*staging*' ]
     types: [ opened, synchronize, reopened, ready_for_review ]
 
 # Cancel previous runs on the same PR.

@@ -20,16 +20,24 @@ use crate::{
 /// Starts a [`RedirectorTask`] on the given `runtime`.
 ///
 /// Returns the [`StealHandle`] that can be used to steal incoming traffic.
-pub(super) async fn start_traffic_redirector(runtime: &BgTaskRuntime) -> AgentResult<StealHandle> {
+pub(super) async fn start_traffic_redirector(
+    runtime: &BgTaskRuntime,
+    with_mesh_exclusion: Option<u16>,
+) -> AgentResult<StealHandle> {
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let support_ipv6 = envs::IPV6_SUPPORT.from_env_or_default();
 
     let (task, handle) = runtime
         .spawn(async move {
-            incoming::create_iptables_redirector(flush_connections, &pod_ips, support_ipv6)
-                .await
-                .map(RedirectorTask::new)
+            incoming::create_iptables_redirector(
+                flush_connections,
+                &pod_ips,
+                support_ipv6,
+                with_mesh_exclusion,
+            )
+            .await
+            .map(RedirectorTask::new)
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
@@ -47,22 +55,11 @@ pub(super) async fn start_sniffer(
 ) -> BackgroundTask<SnifferCommand> {
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
-    let packet_buffer_size = envs::MIRROR_BUFFER_SIZE
-        .try_from_env()
-        .unwrap_or_else(|err| {
-            tracing::warn!(
-                ?err,
-                "Failed to read MIRRORD_AGENT_MIRROR_BUFFER_SIZE, using default value"
-            );
-            None
-        });
-
     let sniffer = runtime
         .spawn(TcpConnectionSniffer::new(
             command_rx,
             args.network_interface.clone(),
             args.is_mesh(),
-            packet_buffer_size,
         ))
         .await;
 

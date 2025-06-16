@@ -300,8 +300,10 @@ mod vpn;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
+use crate::util::get_user_git_branch;
+
 async fn exec_process<P>(
-    config: LayerConfig,
+    mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
     progress: &P,
@@ -313,7 +315,7 @@ where
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     let execution_info = MirrordExecution::start_internal(
-        &config,
+        &mut config,
         #[cfg(target_os = "macos")]
         Some(&args.binary),
         &mut sub_progress,
@@ -690,8 +692,10 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     }
     result?;
 
+    let branch_name = get_user_git_branch().await;
+
     let (connection_info, connection) =
-        create_and_connect(&config, &mut progress, &mut analytics).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
