@@ -2,11 +2,14 @@ use std::{io, io::Write, net::SocketAddr};
 
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use nix::libc;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
+
+/// User git branch (set by plugins).
+pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
@@ -74,4 +77,42 @@ pub fn intproxy_container_mode() -> bool {
         .ok()
         .and_then(|value| value.parse::<bool>().ok())
         .unwrap_or_default()
+}
+
+/// Tries to retrieve the user's git branch from [`MIRRORD_BRANCH_NAME_ENV`] in env (set by the
+/// plugins) and falls back to running 'git branch --show-current' to obtain current user git
+/// branch, used for metrics reporting.
+///
+/// If any error is encountered, including if the user is not on a git branch, the command
+/// produces an empty string, and the function returns `None`.
+pub async fn get_user_git_branch() -> Option<String> {
+    if let Ok(branch_name) = std::env::var(MIRRORD_BRANCH_NAME_ENV) {
+        return Some(branch_name);
+    }
+
+    match Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+            .ok()
+            .map(|output| output.trim().to_string())
+            .filter(|string| !string.is_empty()),
+        Ok(output) => {
+            tracing::debug!(
+                status = %output.status,
+                stderr = ?String::from_utf8_lossy(&output.stderr),
+                "`git branch --show-current` command failed."
+            );
+            None
+        }
+        Err(error) => {
+            tracing::debug!(
+                %error,
+                "Failed to execute `git branch` command, check that git is installed."
+            );
+            None
+        }
+    }
 }

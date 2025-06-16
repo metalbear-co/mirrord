@@ -35,6 +35,7 @@ async fn try_connect_using_operator<P, R>(
     config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
+    branch_name: Option<String>,
 ) -> CliResult<Option<OperatorSessionConnection>>
 where
     P: Progress,
@@ -92,7 +93,7 @@ where
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
-        .connect_in_new_session(target, config, &session_subtask)
+        .connect_in_new_session(target, config, &session_subtask, branch_name)
         .await?;
     session_subtask.success(Some("session started"));
 
@@ -114,11 +115,14 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut P,
     analytics: &mut R,
+    branch_name: Option<String>,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
 {
-    if let Some(connection) = try_connect_using_operator(config, progress, analytics).await? {
+    if let Some(connection) =
+        try_connect_using_operator(config, progress, analytics, branch_name).await?
+    {
         return Ok((
             AgentConnectInfo::Operator(connection.session),
             AgentConnection {
