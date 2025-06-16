@@ -300,6 +300,8 @@ mod vpn;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
+use crate::util::get_user_git_branch;
+
 async fn exec_process<P>(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
@@ -690,8 +692,10 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     }
     result?;
 
+    let branch_name = get_user_git_branch().await;
+
     let (connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
