@@ -1,1 +1,0 @@
-Pass the user's git branch to the operator to allow integration with mirrord Jira app.

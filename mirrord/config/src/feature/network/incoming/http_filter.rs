@@ -288,6 +288,12 @@ impl From<PortList> for HashSet<u16> {
     }
 }
 
+impl From<HashSet<u16>> for PortList {
+    fn from(value: HashSet<u16>) -> Self {
+        PortList(VecOrSingle::Multiple(Vec::from_iter(value)))
+    }
+}
+
 impl core::fmt::Display for PortList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
