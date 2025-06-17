@@ -39,14 +39,47 @@ impl Payload {
     }
 }
 
-impl IntoIterator for Payload {
-    type Item = u8;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
+pub trait ToPayload {
+    fn to_payload(&self) -> Payload;
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.into_vec().into_iter()
+pub trait IntoPayload {
+    fn into_payload(self) -> Payload;
+}
+
+impl ToPayload for &[u8] {
+    fn to_payload(&self) -> Payload {
+        Payload(Bytes::from(self.to_vec()))
     }
 }
+
+impl<const N: usize> ToPayload for [u8; N] {
+    fn to_payload(&self) -> Payload {
+        Payload(Bytes::from(self.to_vec()))
+    }
+}
+
+impl<'a> IntoPayload for Vec<u8> {
+    fn into_payload(self) -> Payload {
+        Payload(Bytes::from(self))
+    }
+}
+
+impl<'a> ToPayload for str {
+    fn to_payload(&self) -> Payload {
+        Payload(Bytes::from(self.to_string().into_bytes()))
+    }
+}
+
+impl IntoIterator for Payload {
+    type Item = u8;
+    type IntoIter = bytes::buf::IntoIter<Bytes>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 impl<B: for<'a> Into<Bytes>> From<B> for Payload {
     fn from(bytes: B) -> Self {
         Payload(bytes.into())

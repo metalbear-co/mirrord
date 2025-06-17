@@ -74,7 +74,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 pub use codec::*;
 pub use error::*;
-pub use payload::Payload;
+pub use payload::{IntoPayload, Payload, ToPayload};
 
 pub type Port = u16;
 pub type ConnectionId = u64;
