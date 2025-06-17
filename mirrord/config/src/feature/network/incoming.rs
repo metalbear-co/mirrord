@@ -522,7 +522,8 @@ impl IncomingConfig {
         }
     }
 
-    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target.
+    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target and
+    /// ports `[80, 8080]`.
     ///
     /// Usually the user app will be listening on HTTP on the same ports as these probes, so
     /// we can insert them in the user config.
@@ -538,6 +539,7 @@ impl IncomingConfig {
         if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .iter()
+                .chain(&[80, 8080])
                 // Avoid conflicts with `incoming.ignore_ports`.
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
@@ -549,12 +551,12 @@ impl IncomingConfig {
                     }
                 })
                 .copied()
-                .collect::<Vec<_>>();
+                .collect::<HashSet<_>>();
 
             // Only add something if we have a port to add, otherwise leave it as `None` so
             // we can use the `PortList::default` when initializing things.
             if filtered_ports.is_empty().not() {
-                self.http_filter.ports = Some(filtered_ports.into());
+                self.http_filter.ports.replace(filtered_ports.into());
             }
         }
 
@@ -815,7 +817,8 @@ mod test {
     }
 
     #[rstest]
-    // case_1: Base case, no conflicts.
+    // case_1: Base case, with default ports 80 and 8080 added. Port 80 is filtered out due to
+    // conflict with incoming.ports.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -832,7 +835,7 @@ mod test {
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
                 header_filter: Some("siemowit".into()),
-                ports: Some(vec![81].into()),
+                ports: Some(vec![81, 8080].into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -862,8 +865,8 @@ mod test {
             ..Default::default()
         }
     )]
-    // case_3: Conflicts between `IncomingConfig::ports` and `HttpFilterConfig::ports`, we don't
-    // change the later.
+    // case_3: Conflicts between `IncomingConfig::ports` and probe port, but default ports 80 and
+    // 8080 are still added.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -880,13 +883,14 @@ mod test {
             ports: Some([81].into()),
             http_filter: HttpFilterConfig {
                 header_filter: Some("siemomysł".into()),
+                ports: Some(vec![80, 8080].into()),
                 ..Default::default()
             },
             ..Default::default()
         }
     )]
-    // case_4: Conflicts between `IncomingConfig::ignore_ports` and `HttpFilterConfig::ports` we
-    // don't change the later.
+    // case_4: Conflicts between `IncomingConfig::ignore_ports` and probe port, but default ports 80
+    // and 8080 are still added.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -905,6 +909,7 @@ mod test {
             ignore_ports: [81].into(),
             http_filter: HttpFilterConfig {
                 header_filter: Some("otto".into()),
+                ports: Some(vec![8080].into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -919,6 +924,14 @@ mod test {
         #[case] expected: IncomingConfig,
     ) {
         config.add_probe_ports_to_http_filter_ports(&[port]);
+
+        // Sort the ports since `HashSet` does not guarantee order.
+        if let Some(http_filter_ports) = config.http_filter.ports.as_mut() {
+            let mut ports_vec: Vec<u16> = http_filter_ports.clone().into();
+            ports_vec.sort();
+            *http_filter_ports = ports_vec.into();
+        }
+
         assert_eq!(config, expected);
     }
 }

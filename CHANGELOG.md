@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.145.0](https://github.com/metalbear-co/mirrord/tree/3.145.0) - 2025-06-17
+
+
+### Added
+
+- Introduced namespaced mirrord profile.
+- Pass the user's git branch to the operator to allow integration with mirrord
+  Jira app.
+
+
+### Fixed
+
+- Fix duplicated http_filter_ports and not having the default 80,8080.
+- Optimized mirrord-agent's memory usage when mirroring incoming traffic.
+
+
+### Internal
+
+- Add workflow dispatched action to trigger operator e2e from mirrord.
+
 ## [3.144.0](https://github.com/metalbear-co/mirrord/tree/3.144.0) - 2025-06-10
 
 
