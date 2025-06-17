@@ -25,6 +25,8 @@ pub enum ProxyError {
     ConnectionClosed,
     #[error("unexpected response: {0:?}")]
     UnexpectedResponse(ProxyToLayerMessage),
+    #[error("critical error: {0}")]
+    ProxyFailure(String),
     #[error("connection lock poisoned")]
     LockPoisoned,
     #[error("{0}")]
@@ -102,7 +104,12 @@ impl ProxyConnection {
     }
 
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
-        self.responses.lock()?.receive(response_id)
+        let response = self.responses.lock()?.receive(response_id)?;
+        if let ProxyToLayerMessage::ProxyFailed(error_msg) = response {
+            Err(ProxyError::ProxyFailure(error_msg))
+        } else {
+            Ok(response)
+        }
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]

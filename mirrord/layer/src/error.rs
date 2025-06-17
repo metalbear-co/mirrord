@@ -223,8 +223,14 @@ impl From<HookError> for i64 {
                 return -1;
             }
             HookError::ProxyError(ref err) => {
+                let reason = match err {
+                    ProxyError::ProxyFailure(ref err) => {
+                        format!("Proxy encountered an error: {err}")
+                    }
+                    err => format!("Proxy error, connectivity issue or a bug: {err}"),
+                };
                 graceful_exit!(
-                    r"Proxy error, connectivity issue or a bug: {err}.
+                    r"{reason}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
                     You can find the `mirrord-intproxy` logs in {}.",
                     crate::setup()
@@ -232,7 +238,7 @@ impl From<HookError> for i64 {
                         .internal_proxy
                         .log_destination
                         .display()
-                )
+                );
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
