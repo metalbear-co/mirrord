@@ -4,6 +4,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    ops::Not,
     time::Duration,
 };
 
@@ -16,9 +17,15 @@ use aws_sdk_sqs::types::{
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
 use futures_util::FutureExt;
-use k8s_openapi::api::{
-    apps::v1::Deployment,
-    core::v1::{EnvVar, Service},
+use k8s_openapi::{
+    api::{
+        apps::v1::Deployment,
+        core::v1::{
+            ConfigMap, ConfigMapEnvSource, ConfigMapKeySelector, EnvFromSource, EnvVar,
+            EnvVarSource, Service,
+        },
+    },
+    apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
 use kube::{api::PostParams, runtime::wait::await_condition, Api, Client};
 use mirrord_operator::{
@@ -31,9 +38,10 @@ use mirrord_operator::{
 };
 use serde::Serialize;
 
-use super::{port_forwarder::PortForwarder, watch::Watcher};
+use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
-    kube_service::KubeService, resource_guard::ResourceGuard, services::service_with_env,
+    kube_service::KubeService, resource_guard::ResourceGuard,
+    services::service_with_env_and_env_from,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -134,6 +142,12 @@ const AWS_CREDS_ENVS: &[&str] = &[
     AWS_SECRET_ACCESS_KEY_ENV,
     AWS_ACCESS_KEY_ID_ENV,
 ];
+
+/// The name of the config map that will be used in an `envFrom` field.
+const CONFIG_MAP_FOR_ENV_FROM: &str = "for-env-from";
+
+/// The name of the config map that will be used in a `valueFrom` field.
+const CONFIG_MAP_FOR_VALUE_FROM: &str = "for-value-from";
 
 /// A credential provider that makes the SQS SDK use localstack.
 #[derive(Debug)]
@@ -355,6 +369,18 @@ pub struct SqsQueueEnv {
     pub json_key: Option<String>,
 }
 
+async fn config_map_resource(name: &str, map: BTreeMap<String, String>) -> ConfigMap {
+    ConfigMap {
+        data: Some(map),
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            labels: Some(get_test_resource_label_map()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 /// Create a microservice for the sqs test application.
 /// That service will be configured to use the "localstack" service in the "default" namespace for
 /// all AWS stuff.
@@ -366,10 +392,42 @@ async fn sqs_consumer_service(
     echo_queue2: &QueueInfo,
     aws_creds: HashMap<String, String>,
     with_fallback_json: bool,
+    with_env_from: bool,
+    with_value_from: bool,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
 
-    let env = if with_fallback_json {
+    let mut config_maps = Vec::new();
+    if with_env_from {
+        config_maps.push(
+            config_map_resource(
+                CONFIG_MAP_FOR_ENV_FROM,
+                BTreeMap::from_iter([(QUEUE_NAME_ENV_VAR1.into(), queue1.name.clone())]),
+            )
+            .await,
+        );
+    }
+    if with_value_from {
+        config_maps.push(
+            config_map_resource(
+                CONFIG_MAP_FOR_VALUE_FROM,
+                BTreeMap::from_iter([(QUEUE2_URL_ENV_VAR.into(), queue2.url.clone())]),
+            )
+            .await,
+        );
+    }
+    let config_maps = config_maps.is_empty().not().then_some(config_maps);
+
+    let env_var_from_tuple = |(name, value)| EnvVar {
+        name,
+        value: Some(value),
+        value_from: None,
+    };
+
+    let queue_name_env_vars = if with_fallback_json {
+        if with_env_from || with_value_from {
+            panic!("envFrom + fallback_json test case not implemented")
+        }
         // Configuration for the deployed test app, to make it expect the queues as a json object.
         let test_service_config = vec![
             ForwardingConfig {
@@ -414,26 +472,66 @@ async fn sqs_consumer_service(
                 test_service_config_string,
             ),
         ]
+        .into_iter()
+        .map(env_var_from_tuple)
+        .collect()
     } else {
-        [
-            (QUEUE_NAME_ENV_VAR1.into(), queue1.name.clone()),
-            (QUEUE2_URL_ENV_VAR.into(), queue2.url.clone()),
-        ]
-    }
-    .into_iter()
-    .chain([
+        let mut env_vars = Vec::new();
+        let var1 = if with_value_from {
+            EnvVar {
+                name: QUEUE_NAME_ENV_VAR1.into(),
+                value: None,
+                value_from: Some(EnvVarSource {
+                    config_map_key_ref: Some(ConfigMapKeySelector {
+                        key: QUEUE_NAME_ENV_VAR1.to_string(),
+                        name: CONFIG_MAP_FOR_VALUE_FROM.to_string(),
+                        optional: Some(false),
+                    }),
+                    field_ref: None,
+                    resource_field_ref: None,
+                    secret_key_ref: None,
+                }),
+            }
+        } else {
+            EnvVar {
+                name: QUEUE_NAME_ENV_VAR1.into(),
+                value: Some(queue1.name.clone()),
+                value_from: None,
+            }
+        };
+        env_vars.push(var1);
+        if with_env_from.not() {
+            env_vars.push(EnvVar {
+                name: QUEUE2_URL_ENV_VAR.into(),
+                value: Some(queue2.url.clone()),
+                value_from: None,
+            })
+        }
+        env_vars
+    };
+    // env vars that are already needed, in all test cases.
+    let env = [
         (ECHO_QUEUE_NAME_ENV_VAR1.into(), echo_queue1.name.clone()),
         (ECHO_QUEUE_NAME_ENV_VAR2.into(), echo_queue2.name.clone()),
-    ])
+    ]
+    .into_iter()
     .chain(aws_creds)
-    .map(|(name, value)| EnvVar {
-        name,
-        value: Some(value),
-        value_from: None,
-    })
+    .map(env_var_from_tuple)
+    .chain(queue_name_env_vars)
     .collect::<Vec<_>>();
 
-    service_with_env(
+    let env_from = with_env_from.then(|| {
+        vec![EnvFromSource {
+            config_map_ref: Some(ConfigMapEnvSource {
+                name: CONFIG_MAP_FOR_ENV_FROM.to_string(),
+                optional: Some(false),
+            }),
+            prefix: None,
+            secret_ref: None,
+        }]
+    });
+
+    service_with_env_and_env_from(
         &namespace,
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
@@ -441,6 +539,8 @@ async fn sqs_consumer_service(
         false,
         kube_client.clone(),
         serde_json::to_value(env).unwrap(),
+        env_from,
+        config_maps,
     )
     .await
 }
@@ -491,6 +591,8 @@ pub async fn sqs_test_resources(
     kube_client: Client,
     use_regex: bool,
     with_fallback_json: bool,
+    with_env_from: bool,
+    with_value_from: bool,
 ) -> SqsTestResources {
     let mut guards = Vec::new();
 
@@ -522,6 +624,8 @@ pub async fn sqs_test_resources(
         &echo_queue2,
         aws_creds,
         with_fallback_json,
+        with_env_from,
+        with_value_from,
     )
     .await;
 
