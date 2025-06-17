@@ -4,6 +4,8 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
+/// Payload is a wrapper for bytes, is used as message body in the protocol and by agent and
+/// intproxy as zero copy message payload
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(transparent)]
 pub struct Payload(
@@ -39,10 +41,12 @@ impl Payload {
     }
 }
 
+/// Convert a type ref to a payload probably cloning the data if self is not copyable
 pub trait ToPayload {
     fn to_payload(&self) -> Payload;
 }
 
+/// Convert a type to a payload consuming self
 pub trait IntoPayload {
     fn into_payload(self) -> Payload;
 }
@@ -118,6 +122,7 @@ impl<'de, Context> bincode::BorrowDecode<'de, Context> for Payload {
     }
 }
 
+/// this method is used to serialize the payload inner bytes, used by serde
 fn serialize_payload_inner<S>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -125,6 +130,7 @@ where
     serializer.serialize_bytes(bytes)
 }
 
+/// this method is used to deserialize the payload inner bytes, used by serde
 fn deserialize_payload_inner<'de, D>(deserializer: D) -> Result<Bytes, D::Error>
 where
     D: serde::Deserializer<'de>,
