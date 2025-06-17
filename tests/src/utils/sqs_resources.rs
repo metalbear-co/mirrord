@@ -398,19 +398,19 @@ async fn sqs_consumer_service(
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
 
     let mut config_maps = Vec::new();
-    if with_env_from {
+    if with_value_from {
         config_maps.push(
             config_map_resource(
-                CONFIG_MAP_FOR_ENV_FROM,
+                CONFIG_MAP_FOR_VALUE_FROM,
                 BTreeMap::from_iter([(QUEUE_NAME_ENV_VAR1.into(), queue1.name.clone())]),
             )
             .await,
         );
     }
-    if with_value_from {
+    if with_env_from {
         config_maps.push(
             config_map_resource(
-                CONFIG_MAP_FOR_VALUE_FROM,
+                CONFIG_MAP_FOR_ENV_FROM,
                 BTreeMap::from_iter([(QUEUE2_URL_ENV_VAR.into(), queue2.url.clone())]),
             )
             .await,
