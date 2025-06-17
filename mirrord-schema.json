@@ -463,6 +463,14 @@
             "type": "string"
           }
         },
+        "priority_class": {
+          "title": "agent.priority_class {#agent-priority_class}",
+          "description": "Allows setting the priority class name on the agent pod when using targetless mode.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
           "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.\n\nHas no effect when using the targetless mode, as targetless agent containers are never privileged.",

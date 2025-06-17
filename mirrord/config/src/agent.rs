@@ -391,6 +391,12 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_EXCLUDE_FROM_MESH", default = false)]
     pub exclude_from_mesh: bool,
 
+    /// ### agent.priority_class {#agent-priority_class}
+    ///
+    /// Allows setting the priority class name on the agent pod when using targetless mode.
+    #[config(env = "MIRRORD_AGENT_PRIORITY_CLASS", default = None)]
+    pub priority_class: Option<String>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
