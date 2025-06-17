@@ -25,7 +25,7 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
     tcp::{Filter, HttpFilter, StealType},
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Port, CLIENT_READY_FOR_LOGS,
+    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Payload, Port, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
 use tokio::{
@@ -236,7 +236,7 @@ impl PortForwarder {
                         let Some(sender) = self.task_txs.get(socket_pair) else {
                             unreachable!("sender is always created before this point")
                         };
-                        match sender.send(res.bytes).await {
+                        match sender.send(res.bytes.into_vec()).await {
                             Ok(_) => (),
                             Err(_) => {
                                 self.task_txs.remove(socket_pair);
@@ -653,7 +653,7 @@ enum PortForwardMessage {
     Connect(ConnectionPortMapping, oneshot::Sender<ConnectionId>),
 
     /// Data received from the user in the connection with the given id.
-    Send(ConnectionId, Vec<u8>),
+    Send(ConnectionId, Payload),
 
     /// A request to close the remote connection with the given id, if it exists, and the local
     /// socket.

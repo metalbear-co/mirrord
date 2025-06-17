@@ -17,6 +17,7 @@ use mirrord_protocol::{
         IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame,
         InternalHttpResponse,
     },
+    Payload,
 };
 use tokio::time;
 use tokio_retry::strategy::ExponentialBackoff;
@@ -241,6 +242,7 @@ impl HttpGatewayTask {
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
+                let body = Payload::from(body);
                 tracing::debug!(
                     body_len = body.len(),
                     elapsed_ms = start.elapsed().as_millis(),

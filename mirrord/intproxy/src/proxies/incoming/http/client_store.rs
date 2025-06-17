@@ -7,7 +7,7 @@ use std::{
 
 use futures::FutureExt;
 use hyper::{Uri, Version};
-use mirrord_protocol::tcp::IncomingTrafficTransportType;
+use mirrord_protocol::{tcp::IncomingTrafficTransportType, Payload};
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -185,7 +185,8 @@ impl ClientStore {
                 },
                 Some(setup),
             ) => {
-                let (connector, server_name) = setup.get(alpn_protocol.clone()).await?;
+                let alpn_protocol = alpn_protocol.clone().map(Payload::into_vec);
+                let (connector, server_name) = setup.get(alpn_protocol).await?;
 
                 let server_name = server_name
                     .or_else(|| {

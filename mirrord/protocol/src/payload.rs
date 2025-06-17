@@ -1,3 +1,5 @@
+use std::{borrow::Borrow, slice::SliceIndex};
+
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -16,21 +18,44 @@ impl Payload {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-    
+
     pub fn into_vec(self) -> Vec<u8> {
-        self.0.into_vec()
+        (*self.0.as_ref()).into()
+    }
+
+    pub fn into_bytes(self) -> Bytes {
+        self.0
+    }
+
+    pub fn as_ptr(&self) -> *const u8 {
+        self.0.as_ptr()
+    }
+
+    pub fn get<I>(&self, index: I) -> Option<&[u8]>
+    where
+        I: SliceIndex<[u8], Output = [u8]>,
+    {
+        self.0.as_ref().get(index)
     }
 }
 
-impl From<Bytes> for Payload {
-    fn from(bytes: Bytes) -> Self {
-        Payload(bytes)
+impl IntoIterator for Payload {
+    type Item = u8;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
+    }
+}
+impl<B: for<'a> Into<Bytes>> From<B> for Payload {
+    fn from(bytes: B) -> Self {
+        Payload(bytes.into())
     }
 }
 
-impl AsRef<[u8]> for Payload {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+impl Borrow<[u8]> for Payload {
+    fn borrow(&self) -> &[u8] {
+        &self.0
     }
 }
 

@@ -3,7 +3,7 @@ use std::{io::ErrorKind, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{tcp::IncomingTrafficTransportType, ConnectionId};
+use mirrord_protocol::{tcp::IncomingTrafficTransportType, ConnectionId, Payload};
 use mirrord_tls_util::MaybeTls;
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -55,6 +55,7 @@ impl LocalTcpConnection {
                         },
                         Some(setup),
                     ) => {
+                        let alpn_protocol = alpn_protocol.map(Payload::into_vec);
                         let (connector, server_name) = setup.get(alpn_protocol).await?;
                         let server_name = server_name
                             .or_else(|| {
