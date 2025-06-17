@@ -522,7 +522,8 @@ impl IncomingConfig {
         }
     }
 
-    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target.
+    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target and
+    /// ports `[80, 8080]`.
     ///
     /// Usually the user app will be listening on HTTP on the same ports as these probes, so
     /// we can insert them in the user config.
@@ -538,6 +539,7 @@ impl IncomingConfig {
         if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .iter()
+                .chain(&[80, 8080])
                 // Avoid conflicts with `incoming.ignore_ports`.
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
@@ -549,12 +551,12 @@ impl IncomingConfig {
                     }
                 })
                 .copied()
-                .collect::<Vec<_>>();
+                .collect::<HashSet<_>>();
 
             // Only add something if we have a port to add, otherwise leave it as `None` so
             // we can use the `PortList::default` when initializing things.
             if filtered_ports.is_empty().not() {
-                self.http_filter.ports = Some(filtered_ports.into());
+                self.http_filter.ports.replace(filtered_ports.into());
             }
         }
 
