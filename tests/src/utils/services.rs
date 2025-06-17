@@ -5,7 +5,7 @@ use k8s_openapi::api::{
     apps::v1::Deployment,
     core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
-use kube::{api::DeleteParams, Api, Client};
+use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use resource_guard::ResourceGuard;
@@ -179,6 +179,12 @@ pub(crate) async fn internal_service(
     if let Some(config_maps) = config_maps {
         let api = Api::<ConfigMap>::namespaced(kube_client.clone(), &namespace);
         for map in config_maps {
+            println!(
+                "creating {} {} in namespace {}",
+                ConfigMap::kind(&()),
+                map.name_any(),
+                namespace
+            );
             api.create(&Default::default(), &map).await.unwrap();
         }
     }
