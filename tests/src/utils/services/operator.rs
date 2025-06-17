@@ -86,7 +86,7 @@ pub async fn service_for_mirrord_ls(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env());
+    let deployment = deployment_from_json(&name, image, default_env(), None);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await

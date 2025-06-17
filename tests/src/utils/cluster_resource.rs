@@ -1,5 +1,8 @@
 use k8s_openapi::{
-    api::{apps::v1::Deployment, core::v1::Service},
+    api::{
+        apps::v1::Deployment,
+        core::v1::{EnvFromSource, Service},
+    },
     Resource,
 };
 use kube::runtime::reflector::Lookup;
@@ -10,7 +13,12 @@ use crate::utils::{CONTAINER_NAME, TEST_RESOURCE_LABEL};
 
 pub(crate) mod operator;
 
-pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
+pub(super) fn deployment_from_json(
+    name: &str,
+    image: &str,
+    env: Value,
+    env_from: Option<Vec<EnvFromSource>>,
+) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -48,6 +56,7 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
+                            "envFrom": serde_json::to_value(env_from).unwrap(),
                         }
                     ]
                 }
