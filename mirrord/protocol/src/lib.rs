@@ -68,11 +68,13 @@ pub mod outgoing;
 pub mod pause;
 pub mod tcp;
 pub mod vpn;
+pub mod payload;
 
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 pub use codec::*;
 pub use error::*;
+pub use payload::Payload;
 
 pub type Port = u16;
 pub type ConnectionId = u64;
