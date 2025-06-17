@@ -817,7 +817,8 @@ mod test {
     }
 
     #[rstest]
-    // case_1: Base case, no conflicts.
+    // case_1: Base case, with default ports 80 and 8080 added. Port 80 is filtered out due to
+    // conflict with incoming.ports.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -834,7 +835,7 @@ mod test {
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
                 header_filter: Some("siemowit".into()),
-                ports: Some(vec![81].into()),
+                ports: Some(vec![81, 8080].into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -864,8 +865,8 @@ mod test {
             ..Default::default()
         }
     )]
-    // case_3: Conflicts between `IncomingConfig::ports` and `HttpFilterConfig::ports`, we don't
-    // change the later.
+    // case_3: Conflicts between `IncomingConfig::ports` and probe port, but default ports 80 and
+    // 8080 are still added.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -882,13 +883,14 @@ mod test {
             ports: Some([81].into()),
             http_filter: HttpFilterConfig {
                 header_filter: Some("siemomysł".into()),
+                ports: Some(vec![80, 8080].into()),
                 ..Default::default()
             },
             ..Default::default()
         }
     )]
-    // case_4: Conflicts between `IncomingConfig::ignore_ports` and `HttpFilterConfig::ports` we
-    // don't change the later.
+    // case_4: Conflicts between `IncomingConfig::ignore_ports` and probe port, but default ports 80
+    // and 8080 are still added.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -907,6 +909,7 @@ mod test {
             ignore_ports: [81].into(),
             http_filter: HttpFilterConfig {
                 header_filter: Some("otto".into()),
+                ports: Some(vec![8080].into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -921,6 +924,14 @@ mod test {
         #[case] expected: IncomingConfig,
     ) {
         config.add_probe_ports_to_http_filter_ports(&[port]);
+
+        // Sort the ports since `HashSet` does not guarantee order.
+        if let Some(http_filter_ports) = config.http_filter.ports.as_mut() {
+            let mut ports_vec: Vec<u16> = http_filter_ports.clone().into();
+            ports_vec.sort();
+            *http_filter_ports = ports_vec.into();
+        }
+
         assert_eq!(config, expected);
     }
 }
