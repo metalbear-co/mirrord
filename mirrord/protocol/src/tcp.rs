@@ -149,7 +149,7 @@ pub struct ChunkedRequestStartV2 {
 pub enum IncomingTrafficTransportType {
     Tcp,
     Tls {
-        alpn_protocol: Option<Payload>,
+        alpn_protocol: Option<Vec<u8>>,
         server_name: Option<String>,
     },
 }

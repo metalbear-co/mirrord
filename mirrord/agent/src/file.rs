@@ -15,7 +15,7 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
-use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use mirrord_protocol::{file::*, FileRequest, FileResponse, IntoPayload, RemoteResult, ResponseError};
 use nix::unistd::UnlinkatFlags;
 use tracing::{error, trace, Level};
 
@@ -137,7 +137,7 @@ impl FileManager {
                 Some(FileResponse::Seek(seek_result))
             }
             FileRequest::Write(WriteFileRequest { fd, write_bytes }) => {
-                let write_result = self.write(fd, write_bytes);
+                let write_result = self.write(fd, write_bytes.into_vec());
                 Some(FileResponse::Write(write_result))
             }
             FileRequest::WriteLimited(WriteLimitedFileRequest {
@@ -145,7 +145,7 @@ impl FileManager {
                 start_from,
                 write_bytes,
             }) => {
-                let write_result = self.write_limited(remote_fd, start_from, write_bytes);
+                let write_result = self.write_limited(remote_fd, start_from, write_bytes.into_vec());
                 Some(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
@@ -330,7 +330,7 @@ impl FileManager {
 
                     // Create the response with the read bytes and the read amount
                     let response = ReadFileResponse {
-                        bytes: buffer,
+                        bytes: buffer.into_payload(),
                         read_amount: read_amount as u64,
                     };
 
@@ -373,7 +373,7 @@ impl FileManager {
                             // We handle the extra bytes in the `fgets` hook, so here we can
                             // just return the full buffer.
                             let response = ReadFileResponse {
-                                bytes: buffer,
+                                bytes: buffer.into_payload(),
                                 read_amount: read_amount as u64,
                             };
 
@@ -408,7 +408,7 @@ impl FileManager {
                     // amount We will no longer send entire buffer filled with
                     // zeroes
                     let response = ReadFileResponse {
-                        bytes: buffer,
+                        bytes: buffer.into_payload(),
                         read_amount: read_amount as u64,
                     };
 

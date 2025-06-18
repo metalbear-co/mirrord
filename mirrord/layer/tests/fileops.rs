@@ -147,7 +147,7 @@ async fn pwrite(#[values(Application::RustFileOps)] application: Application, dy
                 72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102, 105,
                 108, 101, 32, 121, 111, 117, 39, 114, 101, 32, 119, 114, 105, 116, 105, 110, 103,
                 33, 0
-            ]
+            ].into_payload()
         }))
     );
 

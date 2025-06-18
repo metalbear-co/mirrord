@@ -2,13 +2,10 @@
 #![warn(clippy::indexing_slicing)]
 use std::{net::SocketAddr, path::Path, time::Duration};
 
-use mirrord_protocol::{
-    outgoing::{
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
-    },
-    ClientMessage, DaemonMessage,
-};
+use mirrord_protocol::{outgoing::{
+    udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+}, ClientMessage, DaemonMessage, IntoPayload};
 use rstest::rstest;
 
 mod common;
@@ -66,7 +63,7 @@ async fn test_issue1776(
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
-                bytes: vec![0; 4],
+                bytes: vec![0; 4].into_payload(),
             },
         ))))
         .await;

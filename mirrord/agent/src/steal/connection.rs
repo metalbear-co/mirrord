@@ -5,19 +5,13 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use http::Request;
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::request::Parts};
-use mirrord_protocol::{
-    batched_body::{BatchedBody, Frames},
-    tcp::{
-        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedRequestStartV1, ChunkedRequestStartV2, DaemonTcp, HttpRequest, HttpRequestMetadata,
-        IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
-        InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
-        HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
-    },
-    ConnectionId,
-    RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
-    RequestId,
-};
+use mirrord_protocol::{batched_body::{BatchedBody, Frames}, tcp::{
+    ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
+    ChunkedRequestStartV1, ChunkedRequestStartV2, DaemonTcp, HttpRequest, HttpRequestMetadata,
+    IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
+    InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
+    HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
+}, ConnectionId, IntoPayload, RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex}, RequestId};
 use thiserror::Error;
 use tokio::sync::mpsc::{error::SendError, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
@@ -118,7 +112,7 @@ impl Client {
             body,
         ) = request.request.into_parts();
 
-        let body = body.collect().await?.to_bytes().to_vec();
+        let body = body.collect().await?.to_bytes().into();
 
         let internal_request = InternalHttpRequest {
             method,
@@ -551,7 +545,7 @@ impl TcpConnectionStealer {
                     .tx
                     .send(StealerMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
-                        bytes: data,
+                        bytes: data.into_payload(),
                     })))
                     .await;
             }
@@ -732,7 +726,7 @@ impl TcpConnectionStealer {
                         connection_id,
                         ConnectionMessageIn::Raw {
                             client_id,
-                            data: bytes,
+                            data: bytes.into_vec(),
                         },
                     )
                     .await;
@@ -784,7 +778,7 @@ mod test {
     };
     use tokio_stream::wrappers::ReceiverStream;
     use tokio_util::sync::CancellationToken;
-
+    use mirrord_protocol::ToPayload;
     use crate::{
         incoming::{test::DummyRedirector, RedirectorTask},
         steal::{
@@ -898,7 +892,7 @@ mod test {
         };
         assert_eq!(
             x.internal_request.body,
-            vec![InternalHttpBodyFrame::Data(b"string".to_vec())]
+            vec![InternalHttpBodyFrame::Data(b"string".to_payload())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
@@ -915,7 +909,7 @@ mod test {
         };
         assert_eq!(
             x.frames,
-            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec())]
+            vec![InternalHttpBodyFrame::Data(b"another_string".to_payload())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());

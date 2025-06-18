@@ -404,10 +404,7 @@ mod test {
         Method, Request, Response, StatusCode, Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::{
-        tcp::{HttpRequest, InternalHttpRequest},
-        ConnectionId,
-    };
+    use mirrord_protocol::{tcp::{HttpRequest, InternalHttpRequest}, ConnectionId, IntoPayload, ToPayload};
     use rstest::rstest;
     use rustls::ServerConfig;
     use tokio::{
@@ -616,7 +613,7 @@ mod test {
                 local_destination,
                 if use_tls {
                     IncomingTrafficTransportType::Tls {
-                        alpn_protocol: Some(b"http/1.1".into()),
+                        alpn_protocol: Some(b"http/1.1".to_vec()),
                         server_name: None,
                     }
                 } else {
@@ -782,7 +779,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(Vec::<u8>::new()),
+                body: StreamingBody::from(Vec::<u8>::new().into_payload()),
             },
         };
 
@@ -804,7 +801,7 @@ mod test {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
-                        assert_eq!(response.internal_response.body, b"hello\nhello\n");
+                        assert_eq!(response.internal_response.body.as_slice(), b"hello\nhello\n");
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }
@@ -847,7 +844,7 @@ mod test {
                     ))) => {
                         assert_eq!(
                             body.frames,
-                            vec![InternalHttpBodyFrame::Data(b"hello\n".into())],
+                            vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
                         );
                         assert!(!body.is_last);
                     }
@@ -861,7 +858,7 @@ mod test {
                     ))) => {
                         assert_eq!(
                             body.frames,
-                            vec![InternalHttpBodyFrame::Data(b"hello\n".into())],
+                            vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
                         );
                         assert!(body.is_last);
                     }
@@ -957,7 +954,7 @@ mod test {
         for _ in 0..2 {
             semaphore.acquire().await.unwrap().forget();
             frame_tx
-                .send(InternalHttpBodyFrame::Data(b"hello\n".into()))
+                .send(InternalHttpBodyFrame::Data(b"hello\n".to_payload()))
                 .await
                 .unwrap();
         }

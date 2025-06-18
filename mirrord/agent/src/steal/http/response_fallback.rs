@@ -6,10 +6,7 @@ use hyper::{
     body::{Body, Frame},
     Response,
 };
-use mirrord_protocol::{
-    tcp::{HttpResponse, InternalHttpBody},
-    ConnectionId, RequestId,
-};
+use mirrord_protocol::{tcp::{HttpResponse, InternalHttpBody}, ConnectionId, Payload, RequestId};
 use tokio_stream::wrappers::ReceiverStream;
 
 pub type ReceiverStreamBody = StreamBody<ReceiverStream<Result<Frame<Bytes>, Infallible>>>;
@@ -17,7 +14,7 @@ pub type ReceiverStreamBody = StreamBody<ReceiverStream<Result<Frame<Bytes>, Inf
 #[derive(Debug)]
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
-    Fallback(HttpResponse<Vec<u8>>),
+    Fallback(HttpResponse<Payload>),
     Streamed(HttpResponse<ReceiverStreamBody>),
 }
 
@@ -63,7 +60,7 @@ impl HttpResponseFallback {
             HttpResponseFallback::Fallback(req) => req
                 .internal_response
                 .map_body(|body| {
-                    Full::new(Bytes::from_owner(body))
+                    Full::new(Bytes::from_owner(body.into_vec()))
                         .map_err(|_| unreachable!())
                         .boxed()
                 })

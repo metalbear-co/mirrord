@@ -403,10 +403,7 @@ mod test {
     };
 
     use api::TcpSnifferApi;
-    use mirrord_protocol::{
-        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
-        ConnectionId, LogLevel,
-    };
+    use mirrord_protocol::{tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData}, ConnectionId, LogLevel, ToPayload};
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
     use tokio::sync::mpsc;
@@ -536,7 +533,7 @@ mod test {
             message,
             DaemonTcp::Data(TcpData {
                 connection_id: 0,
-                bytes: b"hello_1".into(),
+                bytes: b"hello_1".to_payload(),
             }),
         );
         assert_eq!(log, None);
@@ -546,7 +543,7 @@ mod test {
             message,
             DaemonTcp::Data(TcpData {
                 connection_id: 0,
-                bytes: b"hello_2".into(),
+                bytes: b"hello_2".to_payload(),
             }),
         );
         assert_eq!(log, None);
@@ -692,7 +689,7 @@ mod test {
             message,
             DaemonTcp::Data(TcpData {
                 connection_id: 0,
-                bytes: b"hello".to_vec(),
+                bytes: b"hello".to_payload(),
             }),
         );
         assert_eq!(log, None);

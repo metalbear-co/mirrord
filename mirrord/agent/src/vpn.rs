@@ -16,7 +16,7 @@ use tokio::{
     select,
     sync::mpsc::{self, Receiver, Sender},
 };
-
+use mirrord_protocol::IntoPayload;
 use crate::{
     error::AgentResult,
     util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
@@ -294,7 +294,7 @@ impl VpnTask {
                             if len > 0 {
                                 let packet = buffer[..len].to_vec();
                                 self.daemon_tx
-                                    .send(ServerVpn::Packet(packet))
+                                    .send(ServerVpn::Packet(packet.into_payload()))
                                     .await
                                     .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 
@@ -330,7 +330,7 @@ impl VpnTask {
             }
             ClientVpn::Packet(packet) => {
                 if let Some(socket) = self.socket.as_mut() {
-                    socket.write(&packet).await?;
+                    socket.write(packet.as_slice()).await?;
                 } else {
                     tracing::error!(?packet, "unable to send packet");
                 }

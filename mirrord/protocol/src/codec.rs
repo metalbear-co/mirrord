@@ -253,7 +253,7 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
-
+    use crate::Payload;
     use super::*;
     use crate::tcp::TcpData;
 
@@ -281,7 +281,7 @@ mod tests {
 
         let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 1,
-            bytes: vec![1, 2, 3],
+            bytes: Payload::from(vec![1, 2, 3]),
         }));
 
         daemon_codec.encode(msg.clone(), &mut buf).unwrap();

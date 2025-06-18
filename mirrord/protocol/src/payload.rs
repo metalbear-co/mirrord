@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Payload is a wrapper for bytes, is used as message body in the protocol and by agent and
 /// intproxy as zero copy message payload
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Eq, Clone)]
 #[serde(transparent)]
 pub struct Payload(
     #[serde(
@@ -21,6 +21,10 @@ impl Payload {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    
     pub fn into_vec(self) -> Vec<u8> {
         (*self.0.as_ref()).into()
     }
@@ -31,6 +35,10 @@ impl Payload {
 
     pub fn as_ptr(&self) -> *const u8 {
         self.0.as_ptr()
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_ref()
     }
 
     pub fn get<I>(&self, index: I) -> Option<&[u8]>
@@ -90,9 +98,15 @@ impl<B: Into<Bytes>> From<B> for Payload {
     }
 }
 
+impl<I: Borrow<[u8]>> PartialEq<I> for Payload {
+    fn eq(&self, other: &I) -> bool {
+        self.0 == other.borrow()
+    }
+}
+
 impl Borrow<[u8]> for Payload {
     fn borrow(&self) -> &[u8] {
-        &self.0
+        &self.as_slice()
     }
 }
 
