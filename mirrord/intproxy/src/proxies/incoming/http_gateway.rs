@@ -391,12 +391,7 @@ impl BackgroundTask for HttpGatewayTask {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        io,
-        ops::Not,
-        pin::Pin,
-        sync::Arc,
-    };
+    use std::{io, ops::Not, pin::Pin, sync::Arc};
 
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};

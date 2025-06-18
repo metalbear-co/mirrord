@@ -7,7 +7,11 @@ use std::{
     time::Duration,
 };
 
-use mirrord_protocol::{file::{OpenFileResponse, ReadFileResponse}, tcp::{DaemonTcp, LayerTcp}, ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload};
+use mirrord_protocol::{
+    file::{OpenFileResponse, ReadFileResponse},
+    tcp::{DaemonTcp, LayerTcp},
+    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
+};
 use rstest::rstest;
 
 mod common;
