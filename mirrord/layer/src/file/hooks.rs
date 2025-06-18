@@ -1213,6 +1213,17 @@ pub(crate) unsafe extern "C" fn unlinkat_detour(
         })
 }
 
+/// Hook for `libc::chdir`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn chdir_detour(pathname: *const c_char) -> c_int {
+    chdir(pathname.checked_into())
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
+            FN_CHDIR(raw_path)
+        })
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1360,6 +1371,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnRealpath_darwin_extsn,
         FN_REALPATH_DARWIN_EXTSN
     );
+
+    replace!(hook_manager, "chdir", chdir_detour, FnChdir, FN_CHDIR);
 
     #[cfg(target_os = "linux")]
     {

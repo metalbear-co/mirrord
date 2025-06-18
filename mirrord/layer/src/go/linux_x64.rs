@@ -327,15 +327,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
             libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
-            // Note(syscall_linux.go)
-            // if flags == 0 {
-            // 	return faccessat(dirfd, path, mode)
-            // }
-            // The Linux kernel faccessat system call does not take any flags.
-            // The glibc faccessat implements the flags itself; see
-            // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
-            // Because people naturally expect syscall.Faccessat to act
-            // like C faccessat, we do the same.
+            libc::SYS_chdir => chdir_detour(param1 as _) as i64,
             libc::SYS_faccessat => {
                 faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
             }

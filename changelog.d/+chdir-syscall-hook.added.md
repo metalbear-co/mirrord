@@ -1,0 +1,1 @@
+Added support for hooking the chdir syscall in mirrord, enabling correct handling of current working directory changes in applications. This improves compatibility with applications (such as Node.js) that rely on chdir for file system operations. 
