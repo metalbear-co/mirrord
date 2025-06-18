@@ -1212,6 +1212,7 @@ pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
 
     Detour::Success(
         bytes
+            .into_vec()
             .into_iter()
             .take(read_amount as usize)
             .collect::<Vec<_>>(),
