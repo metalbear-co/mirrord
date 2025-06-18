@@ -7,7 +7,10 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
+use mirrord_protocol::{
+    vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
+    IntoPayload,
+};
 use nix::sys::socket::SockaddrStorage;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
@@ -16,7 +19,7 @@ use tokio::{
     select,
     sync::mpsc::{self, Receiver, Sender},
 };
-use mirrord_protocol::IntoPayload;
+
 use crate::{
     error::AgentResult,
     util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},

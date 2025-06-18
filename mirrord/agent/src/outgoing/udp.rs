@@ -9,7 +9,10 @@ use futures::{
     prelude::*,
     stream::{SplitSink, SplitStream},
 };
-use mirrord_protocol::{outgoing::{udp::*, *}, ConnectionId, Payload, ResponseError};
+use mirrord_protocol::{
+    outgoing::{udp::*, *},
+    ConnectionId, Payload, ResponseError,
+};
 use streammap_ext::StreamMap;
 use tokio::{
     io,

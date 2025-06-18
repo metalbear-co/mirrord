@@ -1174,12 +1174,16 @@ mod tests {
     use std::path::PathBuf;
 
     use mirrord_intproxy_protocol::{LayerId, ProxyToLayerMessage};
-    use mirrord_protocol::{file::{
-        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-        OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest,
-        ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        SeekFileRequest, SeekFileResponse, SeekFromInternal,
-    }, ClientMessage, ErrorKindInternal, FileRequest, FileResponse, IntoPayload, RemoteIOError, ResponseError};
+    use mirrord_protocol::{
+        file::{
+            FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse,
+            OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest,
+            ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+            SeekFileRequest, SeekFileResponse, SeekFromInternal,
+        },
+        ClientMessage, ErrorKindInternal, FileRequest, FileResponse, IntoPayload, RemoteIOError,
+        ResponseError,
+    };
     use rstest::rstest;
     use semver::Version;
 

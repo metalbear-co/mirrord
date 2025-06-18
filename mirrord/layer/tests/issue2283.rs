@@ -8,7 +8,7 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
     },
-    ClientMessage, DaemonMessage, IntoPayload
+    ClientMessage, DaemonMessage, IntoPayload,
 };
 use rstest::rstest;
 

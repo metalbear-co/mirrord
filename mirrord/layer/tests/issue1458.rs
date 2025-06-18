@@ -2,10 +2,13 @@
 #![warn(clippy::indexing_slicing)]
 use std::{net::SocketAddr, path::Path, time::Duration};
 
-use mirrord_protocol::{outgoing::{
-    udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
-}, ClientMessage, DaemonMessage, IntoPayload};
+use mirrord_protocol::{
+    outgoing::{
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+    },
+    ClientMessage, DaemonMessage, IntoPayload,
+};
 use rstest::rstest;
 
 mod common;

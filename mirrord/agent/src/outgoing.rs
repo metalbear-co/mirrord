@@ -1,7 +1,10 @@
 use std::{collections::HashMap, fmt, time::Duration};
 
 use bytes::Bytes;
-use mirrord_protocol::{outgoing::{tcp::*, *}, ConnectionId, IntoPayload, RemoteError, ResponseError};
+use mirrord_protocol::{
+    outgoing::{tcp::*, *},
+    ConnectionId, IntoPayload, RemoteError, ResponseError,
+};
 use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
 use tokio::{
@@ -320,7 +323,10 @@ impl TcpOutgoingTask {
                         writer.shutdown().await.map_err(ResponseError::from)
                     }
 
-                    Some(writer) => writer.write_all(bytes.as_slice()).await.map_err(ResponseError::from),
+                    Some(writer) => writer
+                        .write_all(bytes.as_slice())
+                        .await
+                        .map_err(ResponseError::from),
 
                     None => Err(ResponseError::NotFound(connection_id)),
                 };

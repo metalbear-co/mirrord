@@ -5,13 +5,19 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use http::Request;
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::request::Parts};
-use mirrord_protocol::{batched_body::{BatchedBody, Frames}, tcp::{
-    ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-    ChunkedRequestStartV1, ChunkedRequestStartV2, DaemonTcp, HttpRequest, HttpRequestMetadata,
-    IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
-    InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
-    HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
-}, ConnectionId, IntoPayload, RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex}, RequestId};
+use mirrord_protocol::{
+    batched_body::{BatchedBody, Frames},
+    tcp::{
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
+        ChunkedRequestStartV1, ChunkedRequestStartV2, DaemonTcp, HttpRequest, HttpRequestMetadata,
+        IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
+        InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
+        HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
+    },
+    ConnectionId, IntoPayload,
+    RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
+    RequestId,
+};
 use thiserror::Error;
 use tokio::sync::mpsc::{error::SendError, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
@@ -764,9 +770,12 @@ mod test {
         service::Service,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{
-        ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
-        IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
+    use mirrord_protocol::{
+        tcp::{
+            ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
+            IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
+        },
+        ToPayload,
     };
     use rstest::rstest;
     use tokio::{
@@ -778,7 +787,7 @@ mod test {
     };
     use tokio_stream::wrappers::ReceiverStream;
     use tokio_util::sync::CancellationToken;
-    use mirrord_protocol::ToPayload;
+
     use crate::{
         incoming::{test::DummyRedirector, RedirectorTask},
         steal::{

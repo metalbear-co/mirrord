@@ -253,9 +253,9 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
-    use crate::Payload;
+
     use super::*;
-    use crate::tcp::TcpData;
+    use crate::{tcp::TcpData, Payload};
 
     #[test]
     fn sanity_client_encode_decode() {

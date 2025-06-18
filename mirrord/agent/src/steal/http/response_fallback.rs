@@ -6,7 +6,10 @@ use hyper::{
     body::{Body, Frame},
     Response,
 };
-use mirrord_protocol::{tcp::{HttpResponse, InternalHttpBody}, ConnectionId, Payload, RequestId};
+use mirrord_protocol::{
+    tcp::{HttpResponse, InternalHttpBody},
+    ConnectionId, Payload, RequestId,
+};
 use tokio_stream::wrappers::ReceiverStream;
 
 pub type ReceiverStreamBody = StreamBody<ReceiverStream<Result<Frame<Bytes>, Infallible>>>;

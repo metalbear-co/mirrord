@@ -403,7 +403,10 @@ mod test {
     };
 
     use api::TcpSnifferApi;
-    use mirrord_protocol::{tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData}, ConnectionId, LogLevel, ToPayload};
+    use mirrord_protocol::{
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+        ConnectionId, LogLevel, ToPayload,
+    };
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
     use tokio::sync::mpsc;

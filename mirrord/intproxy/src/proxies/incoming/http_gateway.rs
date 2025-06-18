@@ -404,7 +404,10 @@ mod test {
         Method, Request, Response, StatusCode, Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::{tcp::{HttpRequest, InternalHttpRequest}, ConnectionId, IntoPayload, ToPayload};
+    use mirrord_protocol::{
+        tcp::{HttpRequest, InternalHttpRequest},
+        ConnectionId, IntoPayload, ToPayload,
+    };
     use rstest::rstest;
     use rustls::ServerConfig;
     use tokio::{
@@ -801,7 +804,10 @@ mod test {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
-                        assert_eq!(response.internal_response.body.as_slice(), b"hello\nhello\n");
+                        assert_eq!(
+                            response.internal_response.body.as_slice(),
+                            b"hello\nhello\n"
+                        );
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }

@@ -15,7 +15,9 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
-use mirrord_protocol::{file::*, FileRequest, FileResponse, IntoPayload, RemoteResult, ResponseError};
+use mirrord_protocol::{
+    file::*, FileRequest, FileResponse, IntoPayload, RemoteResult, ResponseError,
+};
 use nix::unistd::UnlinkatFlags;
 use tracing::{error, trace, Level};
 
@@ -145,7 +147,8 @@ impl FileManager {
                 start_from,
                 write_bytes,
             }) => {
-                let write_result = self.write_limited(remote_fd, start_from, write_bytes.into_vec());
+                let write_result =
+                    self.write_limited(remote_fd, start_from, write_bytes.into_vec());
                 Some(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
