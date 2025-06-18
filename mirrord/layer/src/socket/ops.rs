@@ -1091,6 +1091,7 @@ fn remote_hostname_string() -> Detour<CString> {
 
     CString::new(
         bytes
+            .into_vec()
             .into_iter()
             .take(read_amount as usize - 1)
             .collect::<Vec<_>>(),

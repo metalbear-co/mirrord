@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, time::Duration};
 use bytes::Bytes;
 use mirrord_protocol::{
     outgoing::{tcp::*, *},
-    ConnectionId, IntoPayload, RemoteError, ResponseError,
+    ConnectionId, RemoteError, ResponseError,
 };
 use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
@@ -224,7 +224,7 @@ impl TcpOutgoingTask {
 
                 let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
-                    bytes: vec![].into_payload(),
+                    bytes: vec![].into(),
                 }));
 
                 self.daemon_tx.send(daemon_message).await?;
@@ -323,10 +323,7 @@ impl TcpOutgoingTask {
                         writer.shutdown().await.map_err(ResponseError::from)
                     }
 
-                    Some(writer) => writer
-                        .write_all(bytes.as_slice())
-                        .await
-                        .map_err(ResponseError::from),
+                    Some(writer) => writer.write_all(&bytes).await.map_err(ResponseError::from),
 
                     None => Err(ResponseError::NotFound(connection_id)),
                 };

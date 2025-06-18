@@ -1,51 +1,17 @@
-use std::{borrow::Borrow, slice::SliceIndex};
+use std::ops::{Deref, DerefMut};
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Payload is a wrapper for bytes, is used as message body in the protocol and by agent and
 /// intproxy as zero copy message payload
-#[derive(Serialize, Deserialize, Debug, Eq, Clone)]
-#[serde(transparent)]
-pub struct Payload(
-    #[serde(
-        serialize_with = "serialize_payload_inner",
-        deserialize_with = "deserialize_payload_inner"
-    )]
-    Bytes,
-);
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub struct Payload(pub Bytes);
 
 impl Payload {
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     pub fn into_vec(self) -> Vec<u8> {
-        (*self.0.as_ref()).into()
-    }
-
-    pub fn into_bytes(self) -> Bytes {
-        self.0
-    }
-
-    pub fn as_ptr(&self) -> *const u8 {
-        self.0.as_ptr()
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-
-    pub fn get<I>(&self, index: I) -> Option<&[u8]>
-    where
-        I: SliceIndex<[u8], Output = [u8]>,
-    {
-        self.0.as_ref().get(index)
+        self.0.into()
     }
 }
 
@@ -83,30 +49,23 @@ impl ToPayload for str {
     }
 }
 
-impl IntoIterator for Payload {
-    type Item = u8;
-    type IntoIter = bytes::buf::IntoIter<Bytes>;
+impl Deref for Payload {
+    type Target = Bytes;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Payload {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
 impl<B: Into<Bytes>> From<B> for Payload {
     fn from(bytes: B) -> Self {
         Payload(bytes.into())
-    }
-}
-
-impl<I: Borrow<[u8]>> PartialEq<I> for Payload {
-    fn eq(&self, other: &I) -> bool {
-        self.0 == other.borrow()
-    }
-}
-
-impl Borrow<[u8]> for Payload {
-    fn borrow(&self) -> &[u8] {
-        &self.as_slice()
     }
 }
 
@@ -136,18 +95,21 @@ impl<'de, Context> bincode::BorrowDecode<'de, Context> for Payload {
     }
 }
 
-/// this method is used to serialize the payload inner bytes, used by serde
-fn serialize_payload_inner<S>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_bytes(bytes)
+impl Serialize for Payload {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
 }
 
-/// this method is used to deserialize the payload inner bytes, used by serde
-fn deserialize_payload_inner<'de, D>(deserializer: D) -> Result<Bytes, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Vec::<u8>::deserialize(deserializer).map(Bytes::from)
+impl<'de> Deserialize<'de> for Payload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes = Vec::<u8>::deserialize(deserializer).map(Bytes::from)?;
+        Ok(Payload(bytes))
+    }
 }

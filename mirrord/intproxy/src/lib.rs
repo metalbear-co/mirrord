@@ -1,6 +1,7 @@
 #![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+extern crate core;
 
 use std::{
     collections::{HashMap, VecDeque},

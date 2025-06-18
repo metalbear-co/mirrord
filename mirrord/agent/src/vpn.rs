@@ -333,7 +333,7 @@ impl VpnTask {
             }
             ClientVpn::Packet(packet) => {
                 if let Some(socket) = self.socket.as_mut() {
-                    socket.write(packet.as_slice()).await?;
+                    socket.write(&packet).await?;
                 } else {
                     tracing::error!(?packet, "unable to send packet");
                 }

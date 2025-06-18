@@ -391,7 +391,12 @@ impl BackgroundTask for HttpGatewayTask {
 
 #[cfg(test)]
 mod test {
-    use std::{io, ops::Not, pin::Pin, sync::Arc};
+    use std::{
+        io,
+        ops::{Deref, Not},
+        pin::Pin,
+        sync::Arc,
+    };
 
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};
@@ -804,10 +809,7 @@ mod test {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
-                        assert_eq!(
-                            response.internal_response.body.as_slice(),
-                            b"hello\nhello\n"
-                        );
+                        assert_eq!(response.internal_response.body.as_ref(), b"hello\nhello\n");
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }
@@ -820,7 +822,9 @@ mod test {
                         let mut collected = vec![];
                         for frame in response.internal_response.body.0 {
                             match frame {
-                                InternalHttpBodyFrame::Data(data) => collected.extend(data),
+                                InternalHttpBodyFrame::Data(data) => {
+                                    collected.extend(data.into_vec())
+                                }
                                 InternalHttpBodyFrame::Trailers(trailers) => {
                                     panic!("unexpected trailing headers: {trailers:?}");
                                 }

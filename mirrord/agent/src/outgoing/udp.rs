@@ -230,7 +230,7 @@ impl UdpOutgoingTask {
                     .ok_or(ResponseError::NotFound(connection_id))
                 {
                     Ok((mirror, remote_address)) => mirror
-                        .send((BytesMut::from(bytes.as_slice()), *remote_address))
+                        .send((BytesMut::from(bytes.as_ref()), *remote_address))
                         .await
                         .map_err(ResponseError::from),
                     Err(fail) => Err(fail),

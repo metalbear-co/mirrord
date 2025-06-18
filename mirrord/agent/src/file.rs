@@ -15,9 +15,7 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
-use mirrord_protocol::{
-    file::*, FileRequest, FileResponse, IntoPayload, RemoteResult, ResponseError,
-};
+use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
 use nix::unistd::UnlinkatFlags;
 use tracing::{error, trace, Level};
 
@@ -333,7 +331,7 @@ impl FileManager {
 
                     // Create the response with the read bytes and the read amount
                     let response = ReadFileResponse {
-                        bytes: buffer.into_payload(),
+                        bytes: buffer.into(),
                         read_amount: read_amount as u64,
                     };
 
@@ -376,7 +374,7 @@ impl FileManager {
                             // We handle the extra bytes in the `fgets` hook, so here we can
                             // just return the full buffer.
                             let response = ReadFileResponse {
-                                bytes: buffer.into_payload(),
+                                bytes: buffer.into(),
                                 read_amount: read_amount as u64,
                             };
 
@@ -411,7 +409,7 @@ impl FileManager {
                     // amount We will no longer send entire buffer filled with
                     // zeroes
                     let response = ReadFileResponse {
-                        bytes: buffer.into_payload(),
+                        bytes: buffer.into(),
                         read_amount: read_amount as u64,
                     };
 

@@ -122,7 +122,7 @@ pub struct ChunkedRequestBodyV1 {
 impl From<InternalHttpBodyFrame> for Frame<Bytes> {
     fn from(value: InternalHttpBodyFrame) -> Self {
         match value {
-            InternalHttpBodyFrame::Data(data) => Frame::data(data.into_bytes()),
+            InternalHttpBodyFrame::Data(data) => Frame::data(data.0),
             InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
         }
     }
