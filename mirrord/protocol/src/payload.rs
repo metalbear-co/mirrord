@@ -63,13 +63,13 @@ impl<const N: usize> ToPayload for [u8; N] {
     }
 }
 
-impl<'a> IntoPayload for Vec<u8> {
+impl IntoPayload for Vec<u8> {
     fn into_payload(self) -> Payload {
         Payload(Bytes::from(self))
     }
 }
 
-impl<'a> ToPayload for str {
+impl ToPayload for str {
     fn to_payload(&self) -> Payload {
         Payload(Bytes::from(self.to_string().into_bytes()))
     }
@@ -84,7 +84,7 @@ impl IntoIterator for Payload {
     }
 }
 
-impl<B: for<'a> Into<Bytes>> From<B> for Payload {
+impl<B: Into<Bytes>> From<B> for Payload {
     fn from(bytes: B) -> Self {
         Payload(bytes.into())
     }
