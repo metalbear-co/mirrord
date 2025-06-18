@@ -136,6 +136,7 @@ impl ContainerVariant for PodVariant<'_> {
                     resources: Some(resources),
                     ..Default::default()
                 }],
+                priority_class_name: agent.priority_class.clone(),
                 ..Default::default()
             }),
             ..Default::default()
@@ -259,6 +260,8 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                     ]),
                     ..Default::default()
                 }],
+                // do not support priority class if running in targeted mode
+                priority_class_name: None,
                 ..Default::default()
             }),
             ..Default::default()
