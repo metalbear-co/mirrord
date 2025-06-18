@@ -393,7 +393,7 @@ impl BackgroundTask for HttpGatewayTask {
 mod test {
     use std::{
         io,
-        ops::{Deref, Not},
+        ops::Not,
         pin::Pin,
         sync::Arc,
     };
