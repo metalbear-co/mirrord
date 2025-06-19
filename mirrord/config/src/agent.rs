@@ -513,8 +513,12 @@ impl AgentFileConfig {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
-            Some(ext) => Err(ConfigError::UnsupportedFormatWithExtension { extension: ext.to_string() }),
-            None => Err(ConfigError::UnsupportedFormatWithExtension { extension: "no extension".to_string() }),
+            Some(ext) => Err(ConfigError::UnsupportedFormatWithExtension {
+                extension: ext.to_string(),
+            }),
+            None => Err(ConfigError::UnsupportedFormatWithExtension {
+                extension: "no extension".to_string(),
+            }),
         }
     }
 }
