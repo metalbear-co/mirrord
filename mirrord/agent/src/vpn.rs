@@ -7,10 +7,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use mirrord_protocol::{
-    vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
-    IntoPayload,
-};
+use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
 use nix::sys::socket::SockaddrStorage;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
@@ -297,7 +294,7 @@ impl VpnTask {
                             if len > 0 {
                                 let packet = buffer[..len].to_vec();
                                 self.daemon_tx
-                                    .send(ServerVpn::Packet(packet.into_payload()))
+                                    .send(ServerVpn::Packet(packet.into()))
                                     .await
                                     .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 

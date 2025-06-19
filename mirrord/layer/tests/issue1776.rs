@@ -7,7 +7,7 @@ use mirrord_protocol::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
     },
-    ClientMessage, DaemonMessage, IntoPayload,
+    ClientMessage, DaemonMessage,
 };
 use rstest::rstest;
 
@@ -66,7 +66,7 @@ async fn test_issue1776(
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
-                bytes: vec![0; 4].into_payload(),
+                bytes: vec![0; 4].into(),
             },
         ))))
         .await;

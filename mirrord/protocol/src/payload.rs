@@ -20,11 +20,6 @@ pub trait ToPayload {
     fn to_payload(&self) -> Payload;
 }
 
-/// Convert a type to a payload consuming self
-pub trait IntoPayload {
-    fn into_payload(self) -> Payload;
-}
-
 impl ToPayload for &[u8] {
     fn to_payload(&self) -> Payload {
         Payload(Bytes::from(self.to_vec()))
@@ -34,12 +29,6 @@ impl ToPayload for &[u8] {
 impl<const N: usize> ToPayload for [u8; N] {
     fn to_payload(&self) -> Payload {
         Payload(Bytes::from(self.to_vec()))
-    }
-}
-
-impl IntoPayload for Vec<u8> {
-    fn into_payload(self) -> Payload {
-        Payload(Bytes::from(self))
     }
 }
 

@@ -14,7 +14,7 @@ use mirrord_protocol::{
         InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
         HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
     },
-    ConnectionId, IntoPayload,
+    ConnectionId,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
@@ -551,7 +551,7 @@ impl TcpConnectionStealer {
                     .tx
                     .send(StealerMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
-                        bytes: data.into_payload(),
+                        bytes: data.into(),
                     })))
                     .await;
             }

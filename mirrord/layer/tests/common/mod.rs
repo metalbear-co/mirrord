@@ -24,7 +24,7 @@ use mirrord_protocol::{
         ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, IntoPayload, ToPayload,
+    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{sip_patch, SipPatchOptions};
@@ -601,7 +601,7 @@ impl TestIntProxy {
         self.codec
             .send(DaemonMessage::File(FileResponse::Read(Ok(
                 mirrord_protocol::file::ReadFileResponse {
-                    bytes: contents.into_payload(),
+                    bytes: contents.into(),
                     read_amount: read_amount as u64,
                 },
             ))))

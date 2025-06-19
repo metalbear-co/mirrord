@@ -406,7 +406,7 @@ mod test {
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
         tcp::{HttpRequest, InternalHttpRequest},
-        ConnectionId, IntoPayload, ToPayload,
+        ConnectionId, ToPayload,
     };
     use rstest::rstest;
     use rustls::ServerConfig;
@@ -782,7 +782,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(Vec::<u8>::new().into_payload()),
+                body: StreamingBody::from(Vec::<u8>::new().into()),
             },
         };
 

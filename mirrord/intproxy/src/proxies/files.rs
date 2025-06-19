@@ -1181,8 +1181,7 @@ mod tests {
             ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
             SeekFileRequest, SeekFileResponse, SeekFromInternal,
         },
-        ClientMessage, ErrorKindInternal, FileRequest, FileResponse, IntoPayload, RemoteIOError,
-        ResponseError,
+        ClientMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
     };
     use rstest::rstest;
     use semver::Version;
@@ -1452,7 +1451,7 @@ mod tests {
     ) -> ProxyMessage {
         let response = ReadFileResponse {
             read_amount: data.len() as u64,
-            bytes: data.into_payload(),
+            bytes: data.into(),
         };
         let response = if limited {
             FileResponse::ReadLimited(Ok(response))
@@ -1511,7 +1510,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: vec![0; 10].into_payload(),
+                bytes: vec![0; 10].into(),
                 read_amount: 10,
             }))),
         );
@@ -1534,7 +1533,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
-                bytes: vec![2].into_payload(),
+                bytes: vec![2].into(),
                 read_amount: 1,
             }))),
         );
@@ -1566,7 +1565,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: vec![0].into_payload(),
+                bytes: vec![0].into(),
                 read_amount: 1,
             }))),
         );
@@ -1578,7 +1577,7 @@ mod tests {
             assert_eq!(
                 update,
                 ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                    bytes: vec![i].into_payload(),
+                    bytes: vec![i].into(),
                     read_amount: 1,
                 }))),
             );
@@ -1591,7 +1590,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
-                bytes: expected.into_payload(),
+                bytes: expected.into(),
                 read_amount: 512,
             }))),
         );
@@ -1615,7 +1614,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: data.into_payload(),
+                bytes: data.into(),
                 read_amount: 4096,
             }))),
         );
@@ -1656,7 +1655,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: expected.into_payload(),
+                bytes: expected.into(),
                 read_amount: 10,
             })))
         );
@@ -1689,7 +1688,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: expected.into_payload(),
+                bytes: expected.into(),
                 read_amount: 20,
             }))),
         );

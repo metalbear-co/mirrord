@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use futures::{stream::FuturesUnordered, StreamExt};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
-    ConnectionId, IntoPayload, LogMessage, Port,
+    ConnectionId, LogMessage, Port,
 };
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
@@ -132,7 +132,7 @@ impl TcpSnifferApi {
                     Ok((
                         DaemonTcp::Data(TcpData {
                             connection_id,
-                            bytes: bytes.into_payload(),
+                            bytes: bytes.into(),
                         }),
                         None,
                     ))

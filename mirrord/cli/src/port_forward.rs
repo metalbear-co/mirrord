@@ -1052,7 +1052,7 @@ mod test {
             InternalHttpRequest, InternalHttpResponse, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
             StealType, TcpClose, TcpData,
         },
-        ClientMessage, DaemonMessage, IntoPayload, ToPayload,
+        ClientMessage, DaemonMessage, ToPayload,
     };
     use reqwest::{header::HeaderMap, Method, StatusCode, Version};
     use rstest::rstest;
@@ -1652,7 +1652,7 @@ mod test {
             uri: "https://www.rust-lang.org/install.html".parse().unwrap(),
             headers,
             version: Version::HTTP_11,
-            body: vec![].into_payload(),
+            body: vec![].into(),
         };
         test_connection
             .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(
