@@ -47,11 +47,11 @@ impl NetProtocolExt for NetProtocol {
         match self {
             Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
                 connection_id,
-                bytes,
+                bytes: bytes.into(),
             })),
             Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
                 connection_id,
-                bytes,
+                bytes: bytes.into(),
             })),
         }
     }

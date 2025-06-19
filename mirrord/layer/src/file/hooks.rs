@@ -6,6 +6,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
 use std::{
+    borrow::Borrow,
     ffi::CString,
     os::unix::{ffi::OsStrExt, io::RawFd},
     ptr, slice,
@@ -1090,7 +1091,7 @@ pub(crate) unsafe extern "C" fn readv_detour(
         .map(|(read_file, iovs)| {
             let ReadFileResponse { bytes, .. } = read_file;
 
-            vec_to_iovec(&bytes, iovs);
+            vec_to_iovec(bytes.borrow(), iovs);
             // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
             // `read` call being repeated.
             ssize_t::try_from(bytes.len()).unwrap()
@@ -1117,7 +1118,7 @@ pub(crate) unsafe extern "C" fn preadv_detour(
         .map(|(read_file, iovs)| {
             let ReadFileResponse { bytes, .. } = read_file;
 
-            vec_to_iovec(&bytes, iovs);
+            vec_to_iovec(bytes.borrow(), iovs);
 
             // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
             // `read` call being repeated.

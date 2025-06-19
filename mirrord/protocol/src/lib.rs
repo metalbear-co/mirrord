@@ -66,6 +66,7 @@ pub mod file;
 pub mod outgoing;
 #[deprecated = "pause feature was removed"]
 pub mod pause;
+pub mod payload;
 pub mod tcp;
 pub mod vpn;
 
@@ -73,6 +74,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 pub use codec::*;
 pub use error::*;
+pub use payload::{Payload, ToPayload};
 
 pub type Port = u16;
 pub type ConnectionId = u64;

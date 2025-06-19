@@ -12,7 +12,7 @@ use socket2::SockAddr as OsSockAddr;
 
 use crate::{
     outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
-    ConnectionId, SerializationError,
+    ConnectionId, Payload, SerializationError,
 };
 
 pub mod tcp;
@@ -114,7 +114,9 @@ impl Display for SocketAddress {
         let addr = match self {
             SocketAddress::Ip(ip_address) => ip_address.to_string(),
             SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
-            SocketAddress::Unix(Abstract(name)) => String::from_utf8_lossy(name).to_string(),
+            SocketAddress::Unix(Abstract(name)) => {
+                String::from_utf8_lossy(name.as_ref()).to_string()
+            }
             SocketAddress::Unix(Unnamed) => "<UNNAMED-UNIX-ADDRESS>".to_string(),
         };
         write!(f, "{addr}")
@@ -131,7 +133,7 @@ pub struct LayerConnect {
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct LayerWrite {
     pub connection_id: ConnectionId,
-    pub bytes: Vec<u8>,
+    pub bytes: Payload,
 }
 
 impl fmt::Debug for LayerWrite {
@@ -159,7 +161,7 @@ pub struct DaemonConnect {
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct DaemonRead {
     pub connection_id: ConnectionId,
-    pub bytes: Vec<u8>,
+    pub bytes: Payload,
 }
 
 impl fmt::Debug for DaemonRead {

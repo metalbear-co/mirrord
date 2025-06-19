@@ -11,7 +11,7 @@ use futures::{
 };
 use mirrord_protocol::{
     outgoing::{udp::*, *},
-    ConnectionId, ResponseError,
+    ConnectionId, Payload, ResponseError,
 };
 use streammap_ext::StreamMap;
 use tokio::{
@@ -130,7 +130,7 @@ impl UdpOutgoingTask {
             Ok(Some(read)) => {
                 let message = DaemonUdpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
-                    bytes: read.to_vec(),
+                    bytes: Payload::from(read.to_vec()),
                 }));
 
                 self.daemon_tx.send(message).await?
@@ -230,7 +230,7 @@ impl UdpOutgoingTask {
                     .ok_or(ResponseError::NotFound(connection_id))
                 {
                     Ok((mirror, remote_address)) => mirror
-                        .send((BytesMut::from(bytes.as_slice()), *remote_address))
+                        .send((BytesMut::from(bytes.as_ref()), *remote_address))
                         .await
                         .map_err(ResponseError::from),
                     Err(fail) => Err(fail),

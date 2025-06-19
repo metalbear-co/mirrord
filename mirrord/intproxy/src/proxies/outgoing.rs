@@ -147,7 +147,7 @@ impl OutgoingProxy {
             return Ok(());
         };
 
-        interceptor.send(bytes).await;
+        interceptor.send(bytes.into_vec()).await;
 
         Ok(())
     }

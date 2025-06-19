@@ -10,7 +10,7 @@ use std::{
 use mirrord_protocol::{
     file::{OpenFileResponse, ReadFileResponse},
     tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
 };
 use rstest::rstest;
 
@@ -84,7 +84,7 @@ async fn handle_port_subscriptions(mut intproxy: TestIntProxy) {
                 intproxy
                     .send(DaemonMessage::File(FileResponse::Read(Ok(
                         ReadFileResponse {
-                            bytes: hostname.into(),
+                            bytes: hostname.to_payload(),
                             read_amount: hostname.len() as u64,
                         },
                     ))))

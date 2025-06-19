@@ -91,7 +91,7 @@ impl VpnAgent {
     }
 
     pub async fn send_packet(&self, packet: Vec<u8>) -> Result<(), VpnError> {
-        self.send(ClientMessage::Vpn(ClientVpn::Packet(packet)))
+        self.send(ClientMessage::Vpn(ClientVpn::Packet(packet.into())))
             .await
     }
 

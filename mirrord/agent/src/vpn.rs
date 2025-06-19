@@ -294,7 +294,7 @@ impl VpnTask {
                             if len > 0 {
                                 let packet = buffer[..len].to_vec();
                                 self.daemon_tx
-                                    .send(ServerVpn::Packet(packet))
+                                    .send(ServerVpn::Packet(packet.into()))
                                     .await
                                     .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
 

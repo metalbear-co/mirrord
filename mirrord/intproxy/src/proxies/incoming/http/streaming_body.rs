@@ -8,7 +8,10 @@ use std::{
 
 use bytes::Bytes;
 use hyper::body::{Body, Frame};
-use mirrord_protocol::tcp::{InternalHttpBody, InternalHttpBodyFrame};
+use mirrord_protocol::{
+    tcp::{InternalHttpBody, InternalHttpBodyFrame},
+    Payload,
+};
 use tokio::sync::mpsc::{self, Receiver};
 
 /// Cheaply cloneable [`Body`] implementation that reads [`Frame`]s from an [`mpsc::channel`].
@@ -99,8 +102,8 @@ impl Default for StreamingBody {
     }
 }
 
-impl From<Vec<u8>> for StreamingBody {
-    fn from(value: Vec<u8>) -> Self {
+impl From<Payload> for StreamingBody {
+    fn from(value: Payload) -> Self {
         let (_, dummy_rx) = mpsc::channel(1); // `mpsc::channel` panics on capacity 0
         let frames = vec![InternalHttpBodyFrame::Data(value)];
         Self::new(dummy_rx, frames)

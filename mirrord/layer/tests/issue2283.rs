@@ -81,7 +81,7 @@ async fn test_issue2283(
         .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
-                bytes: vec![b'A'; 20],
+                bytes: vec![b'A'; 20].into(),
             },
         ))))
         .await;

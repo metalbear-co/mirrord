@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    borrow::Borrow,
     collections::{HashMap, HashSet, VecDeque},
     vec,
 };
@@ -623,7 +624,7 @@ impl FilesProxy {
                                 layer_id,
                                 message: ProxyToLayerMessage::File(FileResponse::Read(Ok(
                                     ReadFileResponse {
-                                        bytes,
+                                        bytes: bytes.into(),
                                         read_amount: read.buffer_size,
                                     },
                                 ))),
@@ -677,7 +678,7 @@ impl FilesProxy {
                                 layer_id,
                                 message: ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(
                                     ReadFileResponse {
-                                        bytes,
+                                        bytes: bytes.into(),
                                         read_amount: read.buffer_size,
                                     },
                                 ))),
@@ -931,12 +932,15 @@ impl FilesProxy {
                 let bytes = read
                     .bytes
                     .get(..requested_amount as usize)
-                    .unwrap_or(&read.bytes)
+                    .unwrap_or(read.bytes.borrow())
                     .to_vec();
                 let read_amount = bytes.len() as u64;
-                let response = ReadFileResponse { bytes, read_amount };
+                let response = ReadFileResponse {
+                    bytes: bytes.into(),
+                    read_amount,
+                };
 
-                data.buffer = read.bytes;
+                data.buffer = read.bytes.into_vec();
                 data.buffer_position = data.fd_position;
                 let message = if update_fd_position {
                     // User originally sent `FileRequest::Read`.
@@ -1447,7 +1451,7 @@ mod tests {
     ) -> ProxyMessage {
         let response = ReadFileResponse {
             read_amount: data.len() as u64,
-            bytes: data,
+            bytes: data.into(),
         };
         let response = if limited {
             FileResponse::ReadLimited(Ok(response))
@@ -1506,7 +1510,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: vec![0; 10],
+                bytes: vec![0; 10].into(),
                 read_amount: 10,
             }))),
         );
@@ -1529,7 +1533,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
-                bytes: vec![2],
+                bytes: vec![2].into(),
                 read_amount: 1,
             }))),
         );
@@ -1561,7 +1565,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: vec![0],
+                bytes: vec![0].into(),
                 read_amount: 1,
             }))),
         );
@@ -1573,7 +1577,7 @@ mod tests {
             assert_eq!(
                 update,
                 ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                    bytes: vec![i],
+                    bytes: vec![i].into(),
                     read_amount: 1,
                 }))),
             );
@@ -1586,7 +1590,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
-                bytes: expected,
+                bytes: expected.into(),
                 read_amount: 512,
             }))),
         );
@@ -1610,7 +1614,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: data,
+                bytes: data.into(),
                 read_amount: 4096,
             }))),
         );
@@ -1651,7 +1655,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: expected,
+                bytes: expected.into(),
                 read_amount: 10,
             })))
         );
@@ -1684,7 +1688,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: expected,
+                bytes: expected.into(),
                 read_amount: 20,
             }))),
         );

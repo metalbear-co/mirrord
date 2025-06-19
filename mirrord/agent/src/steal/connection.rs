@@ -118,7 +118,7 @@ impl Client {
             body,
         ) = request.request.into_parts();
 
-        let body = body.collect().await?.to_bytes().to_vec();
+        let body = body.collect().await?.to_bytes().into();
 
         let internal_request = InternalHttpRequest {
             method,
@@ -551,7 +551,7 @@ impl TcpConnectionStealer {
                     .tx
                     .send(StealerMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
-                        bytes: data,
+                        bytes: data.into(),
                     })))
                     .await;
             }
@@ -732,7 +732,7 @@ impl TcpConnectionStealer {
                         connection_id,
                         ConnectionMessageIn::Raw {
                             client_id,
-                            data: bytes,
+                            data: bytes.into_vec(),
                         },
                     )
                     .await;
@@ -770,9 +770,12 @@ mod test {
         service::Service,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{
-        ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
-        IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
+    use mirrord_protocol::{
+        tcp::{
+            ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
+            IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
+        },
+        ToPayload,
     };
     use rstest::rstest;
     use tokio::{
@@ -898,7 +901,7 @@ mod test {
         };
         assert_eq!(
             x.internal_request.body,
-            vec![InternalHttpBodyFrame::Data(b"string".to_vec())]
+            vec![InternalHttpBodyFrame::Data(b"string".to_payload())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
@@ -915,7 +918,7 @@ mod test {
         };
         assert_eq!(
             x.frames,
-            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec())]
+            vec![InternalHttpBodyFrame::Data(b"another_string".to_payload())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
