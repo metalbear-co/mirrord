@@ -782,7 +782,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(Vec::<u8>::new().into()),
+                body: StreamingBody::from(Payload::from(Vec::<u8>::new())),
             },
         };
 
