@@ -1,0 +1,1 @@
+Improved error message for unsupported configuration file extensions to show the specific extension and supported formats. 
