@@ -43,9 +43,6 @@ pub enum ConfigError {
     #[error("mirrord-config: `{0}`!")]
     SerdeYaml(#[from] serde_yaml::Error),
 
-    #[error("mirrord-config: Unsupported configuration file format!")]
-    UnsupportedFormat,
-
     #[error("mirrord-config: you provided file with extension {extension} but mirrord supports only json, toml, yaml, and yml")]
     UnsupportedFormatWithExtension { extension: String },
 
