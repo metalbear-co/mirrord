@@ -46,6 +46,9 @@ pub enum ConfigError {
     #[error("mirrord-config: Unsupported configuration file format!")]
     UnsupportedFormat,
 
+    #[error("mirrord-config: you provided file with extension {extension} but mirrord supports only json, toml, yaml, and yml")]
+    UnsupportedFormatWithExtension { extension: String },
+
     #[error("Invalid FS mode `{0}`!")]
     InvalidFsMode(String),
 
