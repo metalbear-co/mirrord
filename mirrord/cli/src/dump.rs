@@ -5,8 +5,7 @@ use mirrord_protocol::{
     tcp::{LayerTcp, NewTcpConnectionV1, TcpData},
     ClientMessage, DaemonMessage,
 };
-use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::config::DumpArgs;
 use crate::{
@@ -29,6 +28,9 @@ pub async fn dump_command(args: &DumpArgs, watch: drain::Watch) -> CliResult<()>
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::Dump, watch);
 
+    if !args.params.disable_version_check {
+        super::prompt_outdated_version(&progress).await;
+    }
     // Collect analytics
     (&config).collect_analytics(analytics.get_mut());
 
@@ -49,23 +51,10 @@ pub async fn dump_command(args: &DumpArgs, watch: drain::Watch) -> CliResult<()>
 
 /// Handles the actual dump session by subscribing to ports and listening for traffic.
 async fn dump_session(
-    connection: AgentConnection,
+    mut connection: AgentConnection,
     ports: Vec<u16>,
     progress: &mut ProgressTracker,
 ) -> CliResult<()> {
-    let (tx, mut rx) = mpsc::channel::<DaemonMessage>(1000);
-
-    // Spawn a task to handle incoming messages from the agent
-    let mut connection_rx = connection.receiver;
-    tokio::spawn(async move {
-        while let Some(message) = connection_rx.recv().await {
-            if let Err(e) = tx.send(message).await {
-                warn!("Failed to forward message: {}", e);
-                break;
-            }
-        }
-    });
-
     // Subscribe to all specified ports
     for port in &ports {
         let subscribe_message = ClientMessage::Tcp(LayerTcp::PortSubscribe(*port));
@@ -84,7 +73,7 @@ async fn dump_session(
     info!("Listening for traffic on ports: {:?}", ports);
     progress.info("Listening for traffic... Press Ctrl+C to stop");
 
-    while let Some(message) = rx.recv().await {
+    while let Some(message) = connection.receiver.recv().await {
         match message {
             DaemonMessage::Tcp(mirrord_protocol::tcp::DaemonTcp::Data(TcpData {
                 connection_id,
