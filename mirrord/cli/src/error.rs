@@ -395,6 +395,9 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
+
+    #[error("Failed starting a mirrord dump session: {0}")]
+    DumpError(String),
 }
 
 impl CliError {

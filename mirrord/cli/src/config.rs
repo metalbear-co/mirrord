@@ -46,6 +46,9 @@ pub(super) enum Commands {
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
+    /// Print incoming tcp traffic of specific ports from remote target.
+    Dump(Box<DumpArgs>),
+
     /// Generate shell completions for the provided shell.
     /// Supported shells: bash, elvish, fish, powershell, zsh
     Completions(CompletionsArgs),
@@ -349,6 +352,18 @@ pub(super) struct ExecArgs {
 
     /// Arguments to pass to the binary.
     pub(super) binary_args: Vec<String>,
+}
+
+// `mirrord dump` command
+#[derive(Args, Debug)]
+pub(super) struct DumpArgs {
+    #[clap(flatten)]
+    pub params: Box<ExecParams>,
+
+    /// List of ports to dump data from.
+    /// Can be specified multiple times.
+    #[arg(short = 'p', long)]
+    pub ports: Vec<u16>,
 }
 
 /// Target-related parameters, present in more than one command.
