@@ -399,7 +399,7 @@ where
         }
     }
 
-    if let nix::errno::Errno::E2BIG = errno {
+    if errno == nix::errno::Errno::E2BIG {
         return Err(CliError::E2Big(errno as i32));
     }
 
