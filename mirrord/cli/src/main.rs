@@ -399,6 +399,10 @@ where
         }
     }
 
+    if let Errno::E2BIG = errno {
+        return Err(CliError::E2Big(errno as i32));
+    }
+
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 

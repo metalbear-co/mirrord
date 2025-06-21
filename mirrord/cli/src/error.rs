@@ -395,6 +395,13 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
+
+    #[error("Could not load environment: it's too large. execv failed with code {0}(E2BIG)")]
+    #[diagnostic(help(
+        "Mirrord tried to load environment for the host process but is too large.
+         In order to let mirrord run this executable, you need to set the feature.env.load_from_process in the settings to false."
+    ))]
+    E2Big(i32),
 }
 
 impl CliError {
