@@ -399,6 +399,10 @@ where
         }
     }
 
+    if errno == nix::errno::Errno::E2BIG {
+        return Err(CliError::E2Big(errno as i32));
+    }
+
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
