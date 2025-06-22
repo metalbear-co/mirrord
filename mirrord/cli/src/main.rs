@@ -249,6 +249,7 @@ use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use diagnose::diagnose_command;
+use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
@@ -281,6 +282,7 @@ mod config;
 mod connection;
 mod container;
 mod diagnose;
+mod dump;
 mod error;
 mod execution;
 mod extension;
@@ -763,6 +765,7 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
+            Commands::Dump(args) => dump_command(&args, watch).await?,
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),
