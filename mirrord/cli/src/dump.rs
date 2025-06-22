@@ -11,7 +11,6 @@ use super::config::DumpArgs;
 use crate::{
     connection::{create_and_connect, AgentConnection},
     error::{CliError, CliResult},
-    util::get_user_git_branch,
 };
 
 /// Implements the `mirrord dump` command.
@@ -22,7 +21,7 @@ use crate::{
 pub async fn dump_command(args: &DumpArgs, watch: drain::Watch) -> CliResult<()> {
     // Set up configuration similar to exec command
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
-    cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
@@ -34,12 +33,9 @@ pub async fn dump_command(args: &DumpArgs, watch: drain::Watch) -> CliResult<()>
     // Collect analytics
     (&config).collect_analytics(analytics.get_mut());
 
-    // Get git branch for analytics
-    let branch_name = get_user_git_branch().await;
-
     // Create connection to the agent
     let (_connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, None).await?;
 
     progress.success(Some("Connected to agent"));
 
