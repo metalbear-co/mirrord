@@ -292,6 +292,7 @@ mod logging;
 mod operator;
 mod port_forward;
 mod profile;
+mod fixed_header;
 mod teams;
 mod util;
 mod verify_config;
@@ -759,7 +760,7 @@ fn main() -> miette::Result<()> {
     let (signal, watch) = drain::channel();
 
     let res: CliResult<(), CliError> = rt.block_on(async move {
-        logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
+        let _tui = logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,

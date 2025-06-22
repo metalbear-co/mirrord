@@ -146,6 +146,13 @@ pub enum FsMode {
     LocalWithOverrides,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum, Debug)]
+pub enum OutputMode {
+    Standard,
+    #[value(name = "fixed-header")]
+    FixedHeader,
+}
+
 impl core::fmt::Display for FsMode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
@@ -232,6 +239,14 @@ pub(super) struct ExecParams {
     /// These variables will override environment fetched from the remote target.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
+
+    /// Output mode for logs
+    #[arg(long, value_enum)]
+    pub output_mode: Option<OutputMode>,
+
+    /// Messages to display in fixed header mode
+    #[arg(long = "header", action = clap::ArgAction::Append)]
+    pub header: Option<Vec<String>>,
 }
 
 impl ExecParams {

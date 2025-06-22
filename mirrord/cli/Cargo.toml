@@ -64,6 +64,8 @@ tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
 mid = "3.0.0"
+ratatui = "0.26"
+crossterm = "0.27"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

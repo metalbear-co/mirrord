@@ -5,6 +5,8 @@ use mirrord_config::LayerConfig;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
 use tracing_subscriber::{prelude::*, EnvFilter};
+use crate::fixed_header::{run as run_fixed_header, ChannelMakeWriter};
+use std::sync::mpsc;
 
 use crate::{
     config::Commands,
@@ -15,12 +17,12 @@ use crate::{
 pub async fn init_tracing_registry(
     command: &Commands,
     watch: drain::Watch,
-) -> Result<(), CliError> {
+) -> Result<Option<std::thread::JoinHandle<()>>, CliError> {
     // Logging to the mirrord-console always takes precedence.
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
 
-        return Ok(());
+        return Ok(None);
     }
 
     let do_init = match command {
@@ -44,19 +46,49 @@ pub async fn init_tracing_registry(
     };
 
     if do_init {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(std::io::stderr)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .pretty(),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
+        let mut header: Option<Vec<String>> = None;
+        if let Commands::Exec(args) = command {
+            if let Some(mode) = args.params.output_mode {
+                if mode == crate::config::OutputMode::FixedHeader {
+                    header = Some(args.params.header.clone().unwrap_or_default());
+                }
+            }
+        }
+
+        if let Some(messages) = header {
+            let (tx, rx) = mpsc::channel();
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(std::io::stderr)
+                        .with_file(true)
+                        .with_line_number(true)
+                        .pretty(),
+                )
+                .with(tracing_subscriber::fmt::layer().with_writer(ChannelMakeWriter::new(tx.clone())))
+                .with(tracing_subscriber::EnvFilter::from_default_env())
+                .init();
+
+            let handle = std::thread::spawn(move || {
+                let _ = run_fixed_header(messages, rx);
+            });
+
+            return Ok(Some(handle));
+        } else {
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(std::io::stderr)
+                        .with_file(true)
+                        .with_line_number(true)
+                        .pretty(),
+                )
+                .with(tracing_subscriber::EnvFilter::from_default_env())
+                .init();
+        }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 /// Initializes mirrord intproxy/extproxy tracing registry.
