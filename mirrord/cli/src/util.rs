@@ -55,11 +55,12 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
 /// in macOS backlog is documented to be hardcoded limited to 128.
 #[tracing::instrument(level = Level::TRACE, ret)]
 pub(crate) fn create_listen_socket(addr: SocketAddr) -> io::Result<TcpListener> {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::STREAM,
-        Some(socket2::Protocol::TCP),
-    )?;
+    let domain = match addr {
+        SocketAddr::V4(_) => socket2::Domain::IPV4,
+        SocketAddr::V6(_) => socket2::Domain::IPV6,
+    };
+
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
 
     socket.bind(&socket2::SockAddr::from(addr))?;
     socket.listen(1024)?;
@@ -114,5 +115,18 @@ pub async fn get_user_git_branch() -> Option<String> {
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv6Addr, SocketAddr};
+
+    #[test]
+    fn create_listen_socket_supports_ipv6() {
+        let addr = SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0);
+        let listener = create_listen_socket(addr).expect("failed to bind ipv6 listener");
+        assert!(listener.local_addr().unwrap().is_ipv6());
     }
 }
