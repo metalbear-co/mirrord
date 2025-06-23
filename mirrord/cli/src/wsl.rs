@@ -10,7 +10,7 @@ use crate::ContainerRuntime;
 /// - Only when the runtime is Docker, and the user has not specified neither the
 ///   `external_proxy.host_ip` nor the `container.override_host_ip`, so we use the default docker
 ///   values.
-pub(super) fn container_config_for_wsl(runtime: ContainerRuntime, config: &mut LayerConfig) {
+pub(super) fn adjust_container_config_for_wsl(runtime: ContainerRuntime, config: &mut LayerConfig) {
     if is_wsl()
         && config.external_proxy.host_ip.is_none()
         && config.container.override_host_ip.is_none()
