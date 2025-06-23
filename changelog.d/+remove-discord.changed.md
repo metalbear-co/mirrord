@@ -1,0 +1,1 @@
+Remove Discord, only Slack

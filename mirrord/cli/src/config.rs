@@ -30,7 +30,7 @@ use thiserror::Error;
     about,
     long_about = r#"
 Encountered an issue? Have a feature request?
-Join our Discord server at https://discord.gg/metalbear or Slack at https://metalbear.co/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.co"#
+Join our Slack at https://metalbear.co/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.co"#
 )]
 pub(super) struct Cli {
     #[command(subcommand)]

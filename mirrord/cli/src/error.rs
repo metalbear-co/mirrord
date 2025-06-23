@@ -26,17 +26,17 @@ const GENERAL_HELP: &str = r#"
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Discord https://discord.gg/metalbear or Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
 
 >> Or email us at hi@metalbear.co
 
 "#;
 
-const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Discord or GitHub repository.
+const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Discord https://discord.gg/metalbear or Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
 
 >> Or email us at hi@metalbear.co
 
@@ -236,7 +236,7 @@ pub(crate) enum CliError {
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]
     #[diagnostic(help(
-        r#"This issue is related to SIP on macOS. Please create an issue or consult with us on Discord
+        r#"This issue is related to SIP on macOS. Please create an issue or consult with us on Slack
         {GENERAL_HELP}"#
     ))]
     SipError(#[from] mirrord_sip::SipError),
