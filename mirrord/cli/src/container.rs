@@ -23,7 +23,7 @@ use crate::{
     execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
     logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
-    wsl::container_config_for_wsl,
+    wsl::adjust_container_config_for_wsl,
 };
 
 mod command_builder;
@@ -182,7 +182,7 @@ pub async fn container_command(
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
-    container_config_for_wsl(runtime_args.runtime, &mut config);
+    adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
     let (runtime_command, _execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &mut config, runtime_args.runtime).await?;
@@ -244,7 +244,7 @@ pub async fn container_ext_command(
         .and_then(|value| ContainerRuntime::from_str(&value, true).ok())
         .unwrap_or(ContainerRuntime::Docker);
 
-    container_config_for_wsl(container_runtime, &mut config);
+    adjust_container_config_for_wsl(container_runtime, &mut config);
 
     let (runtime_command, execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &mut config, container_runtime).await?;
