@@ -675,6 +675,16 @@ impl LayerConfig {
             ));
         }
 
+        if self.feature.copy_target.enabled
+            && self.feature.network.incoming.http_filter.is_filter_set()
+        {
+            context.add_warning(
+                "copy target is enabled and http filter is set, this means that all \
+            unmatched HTTP requests are discarded"
+                    .to_string(),
+            );
+        }
+
         Ok(())
     }
 }
