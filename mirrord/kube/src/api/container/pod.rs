@@ -268,7 +268,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let mut pod = self.inner.as_update();
         pod.merge_from(update);
 
-        // do not configure priority class if targeted
+        // Remove priority class from spec if it's targeted.
         pod.spec
             .as_mut()
             .map(|pod_spec| pod_spec.priority_class_name.take());

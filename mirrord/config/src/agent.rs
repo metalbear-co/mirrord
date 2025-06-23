@@ -393,7 +393,20 @@ pub struct AgentConfig {
 
     /// ### agent.priority_class {#agent-priority_class}
     ///
-    /// Allows setting the priority class name on the agent pod when using targetless mode.
+    /// Specifies the priority class to assign to the agent pod.
+    ///
+    /// This option is only applicable when running in the targetless mode.
+    ///
+    /// ```json
+    /// {
+    ///   "priority_class": "my-priority-class-name"
+    /// }
+    /// ```
+    ///
+    /// In some cases, the targetless agent pod may fail to schedule due to node resource
+    /// constraints. Setting a priority class allows you to explicitly assign an existing
+    /// priority class from your cluster to the agent pod, increasing its priority relative
+    /// to other workloads.
     pub priority_class: Option<String>,
 
     /// <!--${internal}-->
