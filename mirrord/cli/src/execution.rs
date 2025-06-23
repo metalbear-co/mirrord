@@ -36,7 +36,7 @@ use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
     error::CliError,
     extract::extract_library,
-    util::remove_proxy_env,
+    util::{get_user_git_branch, remove_proxy_env},
     CliResult,
 };
 
@@ -194,9 +194,12 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        let branch_name = get_user_git_branch().await;
+
+        let (connect_info, mut connection) =
+            create_and_connect(config, progress, analytics, branch_name)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         if config.feature.network.incoming.http_filter.is_composite() {
             let version = match &connect_info {
@@ -387,9 +390,12 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        let branch_name = get_user_git_branch().await;
+
+        let (connect_info, mut connection) =
+            create_and_connect(config, progress, analytics, branch_name)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
