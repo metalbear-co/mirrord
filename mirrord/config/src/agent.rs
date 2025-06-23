@@ -394,7 +394,6 @@ pub struct AgentConfig {
     /// ### agent.priority_class {#agent-priority_class}
     ///
     /// Allows setting the priority class name on the agent pod when using targetless mode.
-    #[config(env = "MIRRORD_AGENT_PRIORITY_CLASS", default = None)]
     pub priority_class: Option<String>,
 
     /// <!--${internal}-->
