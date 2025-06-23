@@ -636,7 +636,7 @@
         },
         "override_host_ip": {
           "title": "container.override_host_ip {#container-override_host_ip}",
-          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.",
+          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.\n\n- If you're running inside WSL, and encountering problems, try setting `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address (for docker, this  would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`). You can find this ip by resolving it from inside a running container, e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`",
           "type": [
             "string",
             "null"
@@ -943,7 +943,7 @@
       "properties": {
         "host_ip": {
           "title": "external_proxy.host_ip {#external_proxy-host_ip}",
-          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.",
+          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.\n\n- If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`, and `container.override_host_ip` to the internal container runtime address (for docker, this would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`).",
           "type": [
             "string",
             "null"
