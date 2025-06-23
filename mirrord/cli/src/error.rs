@@ -78,8 +78,8 @@ pub(crate) enum ExternalProxyError {
 
     #[error("Failed to set up TCP listener for accepting intproxy connections: {0}")]
     #[diagnostic(help(
-        "If you're trying to run `mirrord container` in WSL, try setting the\
-        `container.override_host_ip` to the internal container runtime address.\
+        "If you're trying to run `mirrord container` in WSL, try setting \
+        `container.override_host_ip` to the internal container runtime address. \
         {GENERAL_BUG}"
     ))]
     ListenerSetup(std::io::Error),
