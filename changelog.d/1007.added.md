@@ -1,0 +1,1 @@
+Added a new agent config field for specifying pod priority class name when running in targetless mode.
