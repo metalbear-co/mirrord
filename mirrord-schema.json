@@ -104,7 +104,7 @@
     },
     "profile": {
       "title": "profile {#root-profile}",
-      "description": "Name of the mirrord profile to use.",
+      "description": "Name of the mirrord profile to use.\n\nTo select a cluster-wide profile\n\n```json { \"profile\": \"my-profile-name\" } ```\n\nTo select a namespaced profile\n\n```json { \"profile\": \"my-namespace/my-profile-name\" } ```",
       "type": [
         "string",
         "null"

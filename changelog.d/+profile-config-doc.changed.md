@@ -1,0 +1,1 @@
+Expand current profile config doc to address the new namespaced profile feature.
