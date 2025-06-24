@@ -16,7 +16,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 - Added a new mirrord config `agent.priority_class` field for specifying a priority class name
   for targetless agent pods.
   [#1007](https://github.com/metalbear-co/mirrord/issues/1007)
-- Added a new `mirrord dump -p <PORT> -t <TARGET> command. The command allows for getting dump
+- Added a new `mirrord dump -p <PORT> -t <TARGET>` command. The command allows for getting dump
   of target's incoming traffic.
 
 
