@@ -260,6 +260,22 @@ pub struct LayerConfig {
     /// ## profile {#root-profile}
     ///
     /// Name of the mirrord profile to use.
+    ///
+    /// To select a cluster-wide profile
+    ///
+    /// ```json
+    /// {
+    ///   "profile": "my-profile-name"
+    /// }
+    /// ```
+    ///
+    /// To select a namespaced profile
+    ///
+    /// ```json
+    /// {
+    ///   "profile": "my-namespace/my-profile-name"
+    /// }
+    /// ```
     pub profile: Option<String>,
 
     /// ## kubeconfig {#root-kubeconfig}
