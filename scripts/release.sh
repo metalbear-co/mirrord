@@ -57,31 +57,8 @@ if [[ "$CURRENT_BRANCH" != "main" ]]; then
     fi
 fi
 
-# Select remote
-echo "Available git remotes:"
-remotes=($(git remote))
-default_remote="origin"
-for i in "${!remotes[@]}"; do
-    if [[ "${remotes[$i]}" == "$default_remote" ]]; then
-        echo "$((i + 1)). ${remotes[$i]} (default)"
-    else
-        echo "$((i + 1)). ${remotes[$i]}"
-    fi
-done
-
-read -rp "Select remote to pull 'main' from [default: ${default_remote}]: " remote_choice
-if [[ -z "$remote_choice" ]]; then
-    selected_remote="$default_remote"
-elif [[ "$remote_choice" =~ ^[0-9]+$ ]] && (( remote_choice >= 1 && remote_choice <= ${#remotes[@]} )); then
-    selected_remote="${remotes[$((remote_choice - 1))]}"
-else
-    echo "Invalid input. Aborting."
-    exit 1
-fi
-
-echo "Pulling latest 'main' from remote '$selected_remote'..."
 # Ensure main is up to date
-git pull "$selected_remote" main
+git pull
 
 # Get current version from workspace Cargo.toml
 CURRENT_VERSION=$(grep -A1 '^\[workspace.package\]' Cargo.toml | grep '^version' | sed -E 's/version = "(.*)"/\1/')
