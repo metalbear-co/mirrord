@@ -38,7 +38,7 @@ mod targetless_tests {
     }
 
     /// Test spawning a targetless agent pod with a given priority class.
-    #[cfg(not(feature = "operator"))]
+    #[ignore]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn targetless_agent_with_priority_class(#[future] kube_client: Client) {

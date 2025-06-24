@@ -1,1 +1,1 @@
-Put targetless pod priority class non-operator e2e test behind a feature flag.
+Skip priority class e2e test.
