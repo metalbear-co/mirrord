@@ -8,7 +8,7 @@ use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::{QueueMessageFilter, SplitQueuesConfig},
+    feature::split_queues::QueueMessageFilter,
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
-use crate::types::LicenseInfoOwned;
+use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
 
+pub mod copy_target;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
@@ -312,37 +313,6 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
             OperatorFeatures::ProxyApi => NewOperatorFeature::ProxyApi,
         }
     }
-}
-
-/// This resource represents a copy pod created from an existing [`Target`]
-/// (operator's copy pod feature).
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "CopyTarget",
-    root = "CopyTargetCrd",
-    status = "CopyTargetStatus",
-    namespaced
-)]
-pub struct CopyTargetSpec {
-    /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
-    pub target: Target,
-    /// How long should the operator keep this pod alive after its creation.
-    /// The pod is deleted when this timout has expired and there are no connected clients.
-    pub idle_ttl: Option<u32>,
-    /// Should the operator scale down target deployment to 0 while this pod is alive.
-    /// Ignored if [`Target`] is not [`Target::Deployment`].
-    pub scale_down: bool,
-    /// Split queues client side configuration.
-    pub split_queues: Option<SplitQueuesConfig>,
-}
-
-/// This is the `status` field for [`CopyTargetCrd`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CopyTargetStatus {
-    /// The session object of the original session that created this CopyTarget
-    pub creator_session: Session,
 }
 
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
