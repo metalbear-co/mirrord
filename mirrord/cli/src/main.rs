@@ -249,6 +249,7 @@ use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use diagnose::diagnose_command;
+use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
@@ -281,6 +282,7 @@ mod config;
 mod connection;
 mod container;
 mod diagnose;
+mod dump;
 mod error;
 mod execution;
 mod extension;
@@ -296,6 +298,7 @@ mod teams;
 mod util;
 mod verify_config;
 mod vpn;
+mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
@@ -763,6 +766,7 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
+            Commands::Dump(args) => dump_command(&args, watch).await?,
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),
