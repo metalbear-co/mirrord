@@ -400,12 +400,12 @@ pub(crate) enum CliError {
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
 
-    #[error("Could not load environment: it's too large. execv failed with code {0}(E2BIG)")]
+    #[error("Failed to execute the binary: execve failed with {}", nix::errno::Errno::E2BIG)]
     #[diagnostic(help(
-        "Mirrord tried to load environment for the host process but is too large.
-         In order to let mirrord run this executable, you need to set the feature.env.load_from_process in the settings to false."
+        "This can happen when the environment of the target is too large to load locally through execve arguments.
+        Please use `feature.env.load_from_process`."
     ))]
-    E2Big(i32),
+    ExecveE2Big,
 
     #[error("Failed starting a mirrord dump session: {0}")]
     DumpError(String),
