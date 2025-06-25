@@ -28,7 +28,7 @@ where
         key_pair: &KeyPair,
         common_name: &str,
     ) -> impl Future<Output = Result<Certificate, CredentialStoreError>> + Send {
-        let certificate_request = match certificate_request(common_name, &key_pair)
+        let certificate_request = match certificate_request(common_name, key_pair)
             .and_then(|req| req.encode_pem().map_err(X509CertificateError::from))
         {
             Ok(req) => req,
