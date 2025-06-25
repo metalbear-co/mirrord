@@ -136,6 +136,7 @@ impl ContainerVariant for PodVariant<'_> {
                     resources: Some(resources),
                     ..Default::default()
                 }],
+                priority_class_name: agent.priority_class.clone(),
                 ..Default::default()
             }),
             ..Default::default()
@@ -266,6 +267,73 @@ impl ContainerVariant for PodTargetedVariant<'_> {
 
         let mut pod = self.inner.as_update();
         pod.merge_from(update);
+
+        // Remove priority class from spec if it's targeted.
+        pod.spec
+            .as_mut()
+            .map(|pod_spec| pod_spec.priority_class_name.take());
+
         pod
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use mirrord_config::{
+        agent::AgentFileConfig,
+        config::{ConfigContext, MirrordConfig},
+    };
+
+    use crate::api::{
+        container::{
+            pod::{PodTargetedVariant, PodVariant},
+            ContainerParams, ContainerVariant,
+        },
+        runtime::{ContainerRuntime, RuntimeData},
+    };
+
+    #[test]
+    fn agent_priority_class() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config_context = ConfigContext::default();
+        let mut agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        agent.priority_class = Some("test-priority-profile".to_string());
+        let params = ContainerParams {
+            name: "foobar".to_string(),
+            port: 3000,
+            gid: 13,
+            tls_cert: None,
+            pod_ips: None,
+            support_ipv6: false,
+            steal_tls_config: Default::default(),
+        };
+
+        // targetless agent pod can be configured with priority class name.
+        let update = PodVariant::new(&agent, &params).as_update();
+        assert_eq!(
+            update.spec.unwrap().priority_class_name.unwrap(),
+            "test-priority-profile"
+        );
+
+        // cannot configure priority class for targeted.
+        let update = PodTargetedVariant::new(
+            &agent,
+            &params,
+            &RuntimeData {
+                mesh: None,
+                pod_name: "some-pod".to_string(),
+                pod_ips: vec![],
+                pod_namespace: "default".to_string(),
+                node_name: "some-node".to_string(),
+                container_id: "container".to_string(),
+                container_runtime: ContainerRuntime::Docker,
+                container_name: "some-container".to_string(),
+                guessed_container: false,
+                share_process_namespace: false,
+                containers_probe_ports: vec![],
+            },
+        )
+        .as_update();
+        assert!(update.spec.unwrap().priority_class_name.is_none());
+        Ok(())
     }
 }
