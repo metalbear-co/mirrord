@@ -91,7 +91,7 @@ cargo update -w -q
 towncrier build --yes --version "${VERSION}"
 
 # Stage all changes
-git add .
+git add Cargo.toml Cargo.lock changelog.d/ CHANGELOG.md
 
 # Prompt user to push
 read -rp "Do you want to push origin/${BRANCH_NAME}? (y/n): " CONFIRM
