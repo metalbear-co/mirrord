@@ -16,7 +16,6 @@ pub trait AuthClient<R> {
         key_pair: &KeyPair,
         common_name: &str,
     ) -> impl Future<Output = Result<Certificate, CredentialStoreError>> + Send;
-
 }
 
 impl<R> AuthClient<R> for Client

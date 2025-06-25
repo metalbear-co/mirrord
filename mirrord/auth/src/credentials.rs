@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{asn1time::Time, rfc5280};
 
-
 use crate::{certificate::Certificate, key_pair::KeyPair};
 
 /// Client credentials container for authentication with the operator.
