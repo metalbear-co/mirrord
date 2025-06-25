@@ -164,6 +164,60 @@ impl CredentialStore {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::APIService;
+
+    use crate::{
+        cluster_api::client_mock::{certificate_mock, ClientMock},
+        credential_store::CredentialStore,
+    };
+
+    #[tokio::test]
+    async fn get_or_init() {
+        let operator_fingerprint = "operator_fingerprint".to_string();
+        let mut client = ClientMock {
+            return_error: false,
+        };
+
+        let mut credentials_store = CredentialStore::default();
+        // test when vacant
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint.clone(), None)
+            .await
+            .unwrap();
+        //check if saved cert is the same as the mock cert used
+        let saved_cert = credentials_store
+            .credentials
+            .get(&operator_fingerprint)
+            .unwrap()
+            .as_ref()
+            .clone();
+        let saved_cert = serde_yaml::to_string(&saved_cert).unwrap();
+        let mock_cert = serde_yaml::to_string(&certificate_mock()).unwrap();
+        assert_eq!(mock_cert, saved_cert);
+        // test when entry exists
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint.clone(), None)
+            .await
+            .unwrap();
+        client.return_error = true;
+        // test when entry exists and the client fails
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint.clone(), None)
+            .await
+            .unwrap_err();
+
+        credentials_store = CredentialStore::default();
+        client.return_error = true;
+        // test when vacant and the client fails
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint, None)
+            .await
+            .unwrap_err();
+    }
+}
+
 /// Exposes methods to safely access [`CredentialStore`] stored in a file.
 pub struct CredentialStoreSync {
     store_file: fs::File,

@@ -63,3 +63,46 @@ fn certificate_request(
 
     builder.create_certificate_signing_request(key_pair)
 }
+
+#[cfg(test)]
+pub mod client_mock {
+    use std::fmt::Debug;
+
+    use kube::Resource;
+    use serde::Deserialize;
+
+    use crate::{
+        certificate::Certificate, error::CredentialStoreError, key_pair::KeyPair, AuthClient,
+    };
+
+    #[derive(Clone)]
+    pub struct ClientMock {
+        pub return_error: bool,
+    }
+
+    impl<R> AuthClient<R> for ClientMock
+    where
+        R: for<'de> Deserialize<'de> + Resource + Clone + Debug,
+        <R as Resource>::DynamicType: Default,
+    {
+        async fn obtain_certificate(
+            &self,
+            _key_pair: &KeyPair,
+            _common_name: &str,
+        ) -> Result<Certificate, CredentialStoreError> {
+            if self.return_error {
+                Err(CredentialStoreError::FileAccess(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Mock Error",
+                )))
+            } else {
+                Ok(certificate_mock())
+            }
+        }
+    }
+
+    pub fn certificate_mock() -> Certificate {
+        const SERIALIZED: &str = r#""-----BEGIN CERTIFICATE-----\r\nMIICGTCCAcmgAwIBAgIBATAHBgMrZXAFADBwMUIwQAYDVQQDDDlUaGUgTWljaGHF\r\ngiBTbW9sYXJlayBPcmdhbml6YXRpb25gcyBUZWFtcyBMaWNlbnNlIChUcmlhbCkx\r\nKjAoBgNVBAoMIVRoZSBNaWNoYcWCIFNtb2xhcmVrIE9yZ2FuaXphdGlvbjAeFw0y\r\nNDAyMDgxNTUwNDFaFw0yNDEyMjQwMDAwMDBaMBsxGTAXBgNVBAMMEHJheno0Nzgw\r\nLW1hY2hpbmUwLDAHBgMrZW4FAAMhAAfxTouyk5L5lB3eFwC5Rg9iI4KmQaFpnGVM\r\n2sYpv9HOo4HYMIHVMIHSBhcvbWV0YWxiZWFyL2xpY2Vuc2UvaW5mbwEB/wSBs3si\r\ndHlwZSI6InRlYW1zIiwibWF4X3NlYXRzIjpudWxsLCJzdWJzY3JpcHRpb25faWQi\r\nOiJmMWIxZDI2ZS02NGQzLTQ4YjYtYjVkMi05MzAxMzAwNWE3MmUiLCJvcmdhbml6\r\nYXRpb25faWQiOiIzNTdhZmE4MS0yN2QxLTQ3YjEtYTFiYS1hYzM1ZjlhM2MyNjMi\r\nLCJ0cmlhbCI6dHJ1ZSwidmVyc2lvbiI6IjMuNzMuMCJ9MAcGAytlcAUAA0EAJbbo\r\nu42KnHJBbPMYspMdv9ZdTQMixJgQUheNEs/o4+XfwgYOaRjCVQTzYs1m9f720WQ9\r\n4J04GdQvcu7B/oTgDQ==\r\n-----END CERTIFICATE-----\r\n""#;
+        serde_yaml::from_str(SERIALIZED).unwrap()
+    }
+}
