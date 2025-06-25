@@ -721,7 +721,6 @@ impl LayerFileConfig {
         match path.as_ref().extension()
                 .or(Some(OsStr::new("json"))) // No Extension? assume json
                 .and_then(|os_val| os_val.to_str()) {
-            
             Some("json") => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
