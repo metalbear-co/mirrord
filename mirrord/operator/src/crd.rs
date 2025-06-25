@@ -390,6 +390,12 @@ pub struct SqsQueueDetails {
     /// original queue. In case of a collision, the temporary queue will get the value from the
     /// tag passed in here.
     pub tags: Option<HashMap<String, String>>,
+
+    /// When this is set, the mirrord SQS splitting operator will try to parse SQS messages as
+    /// json objects that are created when SQS messages are created form SNS notifications.
+    /// The filters will then be matched also against the message attributes that are found inside
+    /// the body of the SQS message, and originate in SNS notification attributes.
+    pub sns: Option<bool>,
 }
 
 /// The details of a queue that should be split.
