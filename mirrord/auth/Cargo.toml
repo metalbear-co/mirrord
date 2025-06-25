@@ -48,6 +48,7 @@ thiserror = { workspace = true, optional = true }
 x509-certificate = "0.24"
 reqwest = { workspace = true, features=["json", "rustls-tls-native-roots"], default-features = false, optional = true }
 tracing = { workspace = true, optional = true }
+futures = "0.3.31"
 
 [dev-dependencies]
 bcder = "0.7"

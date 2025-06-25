@@ -6,7 +6,7 @@ use std::{
 };
 
 use fs4::tokio::AsyncFileExt;
-use kube::{Client, Resource};
+use kube::Resource;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -15,8 +15,8 @@ use tokio::{
 use whoami::fallible;
 
 use crate::{
-    certificate::Certificate, credentials::Credentials, error::CredentialStoreError,
-    key_pair::KeyPair,
+    certificate::Certificate, cluster_api::AuthClient, credentials::Credentials,
+    error::CredentialStoreError, key_pair::KeyPair,
 };
 
 /// "~/.mirrord"
@@ -115,13 +115,14 @@ impl CredentialStore {
     ///
     /// Also, subscription id is accepted as an [`Option`] to make the CLI backwards compatible.
     #[tracing::instrument(level = "trace", skip(self, client))]
-    pub async fn get_or_init<R>(
+    pub async fn get_or_init<R, C>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
     ) -> Result<&mut Credentials, CredentialStoreError>
     where
+        C: AuthClient<R> + Clone,
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
@@ -133,7 +134,7 @@ impl CredentialStore {
                     .and_then(|id| self.signing_keys.get(id))
                     .cloned();
 
-                let credentials = Credentials::init::<R>(
+                let credentials = Credentials::init::<R, C>(
                     client.clone(),
                     &Self::certificate_common_name(),
                     key_pair,
@@ -146,7 +147,7 @@ impl CredentialStore {
 
                 if !credentials.is_valid() {
                     credentials
-                        .refresh::<R>(client.clone(), &Self::certificate_common_name())
+                        .refresh::<R, C>(client.clone(), &Self::certificate_common_name())
                         .await?;
                 }
 
@@ -190,18 +191,19 @@ impl CredentialStoreSync {
 
     /// Try and get/create a specific client certificate.
     /// The exclusive file lock is already acquired.
-    async fn access_credential<R, C, V>(
+    async fn access_credential<R, F, C, V>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
-        callback: C,
+        callback: F,
     ) -> Result<V, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
-        C: FnOnce(&mut Credentials) -> V,
+        C: AuthClient<R> + Clone,
+        F: FnOnce(&mut Credentials) -> V,
     {
         let mut store = CredentialStore::load(&mut self.store_file)
             .await
@@ -210,7 +212,7 @@ impl CredentialStoreSync {
 
         let value = callback(
             store
-                .get_or_init::<R>(client, operator_fingerprint, operator_subscription_id)
+                .get_or_init::<R, C>(client, operator_fingerprint, operator_subscription_id)
                 .await?,
         );
 
@@ -230,13 +232,14 @@ impl CredentialStoreSync {
     }
 
     /// Get or create specific client certificate with an exclusive lock on the file.
-    pub async fn get_client_certificate<R>(
+    pub async fn get_client_certificate<R, C>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
     ) -> Result<Certificate, CredentialStoreError>
     where
+        C: AuthClient<R> + Clone,
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
@@ -246,7 +249,7 @@ impl CredentialStoreSync {
             .map_err(CredentialStoreError::Lockfile)?;
 
         let result = self
-            .access_credential::<R, _, Certificate>(
+            .access_credential::<R, _, C, Certificate>(
                 client,
                 operator_fingerprint,
                 operator_subscription_id,

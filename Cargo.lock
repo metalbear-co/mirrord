@@ -4429,6 +4429,7 @@ dependencies = [
  "bcder",
  "chrono",
  "fs4",
+ "futures",
  "home",
  "k8s-openapi",
  "kube",

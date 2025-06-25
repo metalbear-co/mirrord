@@ -4,10 +4,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{asn1time::Time, rfc5280};
-#[cfg(feature = "client")]
-use x509_certificate::{
-    rfc2986, InMemorySigningKeyPair, X509CertificateBuilder, X509CertificateError,
-};
+
 
 use crate::{certificate::Certificate, key_pair::KeyPair};
 
@@ -36,21 +33,6 @@ impl Credentials {
             .tbs_certificate
             .validity
             .is_date_valid(Utc::now())
-    }
-
-    /// Creates [`rfc2986::CertificationRequest`] for [`Certificate`] generation in the operator.
-    #[cfg(feature = "client")]
-    fn certificate_request(
-        common_name: &str,
-        key_pair: &InMemorySigningKeyPair,
-    ) -> Result<rfc2986::CertificationRequest, X509CertificateError> {
-        let mut builder = X509CertificateBuilder::default();
-
-        let _ = builder
-            .subject()
-            .append_common_name_utf8_string(common_name);
-
-        builder.create_certificate_signing_request(key_pair)
     }
 }
 
@@ -194,20 +176,22 @@ impl DateValidityExt for rfc5280::Validity {
 /// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
-    use kube::{api::PostParams, Api, Client, Resource};
+    use kube::Resource;
 
+    //use kube::{api::PostParams, Api, Client, Resource};
     use super::*;
-    use crate::error::CredentialStoreError;
+    use crate::{cluster_api::AuthClient, error::CredentialStoreError};
 
     impl Credentials {
         /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
         /// If the `key_pair` is not given, the request is signed with a randomly generated one.
-        pub async fn init<R>(
-            client: Client,
+        pub async fn init<R, C>(
+            client: C,
             common_name: &str,
             key_pair: Option<KeyPair>,
         ) -> Result<Self, CredentialStoreError>
         where
+            C: AuthClient<R> + Clone,
             R: Resource + Clone + Debug,
             R: for<'de> Deserialize<'de>,
             R::DynamicType: Default,
@@ -217,20 +201,7 @@ pub mod client {
                 None => KeyPair::new_random()?,
             };
 
-            let certificate_request = Self::certificate_request(common_name, &key_pair)?
-                .encode_pem()
-                .map_err(X509CertificateError::from)?;
-
-            let api: Api<R> = Api::all(client);
-
-            let certificate: Certificate = api
-                .create_subresource(
-                    "certificate",
-                    "operator",
-                    &PostParams::default(),
-                    certificate_request.into(),
-                )
-                .await?;
+            let certificate = client.obtain_certificate(&key_pair, common_name).await?;
 
             Ok(Credentials {
                 certificate,
@@ -240,33 +211,20 @@ pub mod client {
 
         /// Create [`rfc2986::CertificationRequest`] and send it to the operator.
         /// Returned certificate replaces the [`Certificate`] stored in this struct.
-        pub async fn refresh<R>(
+        pub async fn refresh<R, C>(
             &mut self,
-            client: Client,
+            client: C,
             common_name: &str,
         ) -> Result<(), CredentialStoreError>
         where
+            C: AuthClient<R>,
             R: Resource + Clone + Debug,
             R: for<'de> Deserialize<'de>,
             R::DynamicType: Default,
         {
-            let certificate_request = Self::certificate_request(common_name, &self.key_pair)?
-                .encode_pem()
-                .map_err(X509CertificateError::from)?;
-
-            let api: Api<R> = Api::all(client);
-
-            let certificate: Certificate = api
-                .create_subresource(
-                    "certificate",
-                    "operator",
-                    &PostParams::default(),
-                    certificate_request.into(),
-                )
+            self.certificate = client
+                .obtain_certificate(&self.key_pair, common_name)
                 .await?;
-
-            self.certificate = certificate;
-
             Ok(())
         }
     }
