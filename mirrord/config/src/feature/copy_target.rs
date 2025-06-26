@@ -89,9 +89,6 @@ pub struct CopyTargetConfig {
     ///     {
     ///       "scale_down": true
     ///     }
-    /// 
-    /// This is useful for when you want to be the exclusive replica, for example when running consumers
-    /// and you haven't configured splitting yet.
     /// ```
     pub scale_down: bool,
 }
