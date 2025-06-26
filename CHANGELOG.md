@@ -8,6 +8,46 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.146.0](https://github.com/metalbear-co/mirrord/tree/3.146.0) - 2025-06-24
+
+
+### Added
+
+- Added a new mirrord config `agent.priority_class` field for specifying a priority class name
+  for targetless agent pods.
+  [#1007](https://github.com/metalbear-co/mirrord/issues/1007)
+- Added a new `mirrord dump -p <PORT> -t <TARGET>` command. The command allows for getting dump
+  of target's incoming traffic.
+
+
+### Changed
+
+- Changed `container.override_host_ip` config to use Docker's internal address by
+  default when running `mirrord container docker` (also changes
+  `external_proxy.host_ip` to 0.0.0.0).
+  [#3285](https://github.com/metalbear-co/mirrord/issues/3285)
+- Removed Discord links.
+
+## [3.145.0](https://github.com/metalbear-co/mirrord/tree/3.145.0) - 2025-06-17
+
+
+### Added
+
+- Introduced namespaced mirrord profile.
+- Pass the user's git branch to the operator to allow integration with mirrord
+  Jira app.
+
+
+### Fixed
+
+- Fix duplicated http_filter_ports and not having the default 80,8080.
+- Optimized mirrord-agent's memory usage when mirroring incoming traffic.
+
+
+### Internal
+
+- Add workflow dispatched action to trigger operator e2e from mirrord.
+
 ## [3.144.0](https://github.com/metalbear-co/mirrord/tree/3.144.0) - 2025-06-10
 
 
