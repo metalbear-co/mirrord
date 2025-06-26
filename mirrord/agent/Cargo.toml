@@ -72,7 +72,7 @@ rustls.workspace = true
 socket2.workspace = true
 prometheus = { version = "0.14", features = ["process"] }
 axum = { version = "0.7", features = ["macros"] }
-rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
+rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git", rev = "86bba7dbe971e166d5153227dd0099fe47da4489" }
 procfs = "0.17.0"
 rcgen.workspace = true
 

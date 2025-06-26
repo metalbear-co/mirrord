@@ -249,6 +249,7 @@ use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use diagnose::diagnose_command;
+use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
@@ -281,6 +282,7 @@ mod config;
 mod connection;
 mod container;
 mod diagnose;
+mod dump;
 mod error;
 mod execution;
 mod extension;
@@ -296,9 +298,12 @@ mod teams;
 mod util;
 mod verify_config;
 mod vpn;
+mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
+
+use crate::util::get_user_git_branch;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -690,8 +695,10 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     }
     result?;
 
+    let branch_name = get_user_git_branch().await;
+
     let (connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
@@ -759,6 +766,7 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
+            Commands::Dump(args) => dump_command(&args, watch).await?,
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),

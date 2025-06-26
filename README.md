@@ -5,7 +5,6 @@
 </div>
 
 [![Community Slack](https://img.shields.io/badge/Join-e5f7f7?logo=slack&label=Community%20Slack)](https://metalbear.co/slack)
-[![Discord](https://img.shields.io/discord/933706914808889356?color=5865F2&label=Discord&logo=discord&logoColor=white)](https://discord.gg/metalbear)
 [![Github CI](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/metalbear-co/mirrord/blob/main/LICENSE)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)](https://github.com/metalbear-co/mirrord/releases)
@@ -159,16 +158,16 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
 
 Our FAQ is available [here](https://metalbear.co/mirrord/docs/faq/general/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
-or on [Discord](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack).
+or on [Slack](https://metalbear.co/slack).
 
 ## Contributing
 
 Contributions are very welcome. Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
-We're available on [Discord](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for any questions.
+We're available on [Slack](https://metalbear.co/slack) for any questions.
 
 ## Help and Community
 
-Join our [Discord Server](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for questions, support and fun.
+Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
 
 ## Code of Conduct
 
