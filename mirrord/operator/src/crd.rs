@@ -392,7 +392,7 @@ pub struct SqsQueueDetails {
     pub tags: Option<HashMap<String, String>>,
 
     /// When this is set, the mirrord SQS splitting operator will try to parse SQS messages as
-    /// json objects that are created when SQS messages are created form SNS notifications.
+    /// json objects that are created when SQS messages are created from SNS notifications.
     /// The filters will then be matched also against the message attributes that are found inside
     /// the body of the SQS message, and originate in SNS notification attributes.
     pub sns: Option<bool>,
