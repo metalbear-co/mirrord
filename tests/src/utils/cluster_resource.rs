@@ -68,10 +68,12 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
-                            "startupProbe": use_probe.then_some(TCPSocketAction {
-                                host: None,
-                                port: IntOrString::Int(80),
-                            })
+                            "startupProbe": {
+                                "tcpSocket": use_probe.then_some(TCPSocketAction {
+                                    host: None,
+                                    port: IntOrString::Int(80),
+                                }),
+                            },
                         }
                     ]
                 }
