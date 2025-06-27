@@ -402,6 +402,9 @@ pub(crate) enum CliError {
 
     #[error("Failed starting a mirrord dump session: {0}")]
     DumpError(String),
+
+    #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
+    OperatorCopyTargetFailed { message: Option<String> },
 }
 
 impl CliError {
@@ -481,6 +484,9 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
             OperatorApiError::ParseInt(error) => Self::ParseInt(error),
+            OperatorApiError::CopiedTargetFailed { message } => {
+                Self::OperatorCopyTargetFailed { message }
+            }
         }
     }
 }
