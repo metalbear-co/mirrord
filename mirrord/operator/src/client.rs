@@ -939,16 +939,22 @@ impl OperatorApi<PreparedClientCert> {
                     })
             });
 
-        let Some(existing) = existing else {
-            subtask.success(Some("no existing copy was found"));
-            return Ok(None);
+        let existing = match existing {
+            Some(existing) => match self.wait_for_copy_ready(existing, progress).await {
+                Ok(copied) => Some(copied),
+                Err(OperatorApiError::CopiedTargetFailed { .. }) => None,
+                Err(error) => return Err(error),
+            },
+            None => None,
         };
 
-        match self.wait_for_copy_ready(existing, progress).await {
-            Ok(copied) => Ok(Some(copied)),
-            Err(OperatorApiError::CopiedTargetFailed { .. }) => Ok(None),
-            Err(error) => Err(error),
+        if existing.is_some() {
+            subtask.success(Some("found an existing copy"));
+        } else {
+            subtask.failure(Some("no existing copy was found"));
         }
+
+        Ok(existing)
     }
 
     /// Polls the given [`CopyTargetCrd`] for readiness.
