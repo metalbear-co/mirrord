@@ -12,6 +12,7 @@ use std::{
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]
 use nix::sys::statfs::Statfs;
+use serde::{Deserialize, Serialize};
 use semver::VersionReq;
 
 /// Minimal mirrord-protocol version that allows [`ReadLinkFileRequest`].
@@ -641,3 +642,11 @@ pub struct GetDEnts64Response {
     pub entries: Vec<DirEntryInternal>,
     pub result_size: u64,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct ChdirRequest {
+    pub path: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct ChdirResponse;
