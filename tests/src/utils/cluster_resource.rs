@@ -48,6 +48,13 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
+                            "startupProbe": {
+                                "httpGet": {
+                                    "path": "/",
+                                    "port": 80,
+                                    "scheme": "HTTP",
+                                }
+                            }
                         }
                     ]
                 }
