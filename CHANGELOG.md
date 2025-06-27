@@ -8,6 +8,25 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.147.0](https://github.com/metalbear-co/mirrord/tree/3.147.0) - 2025-06-26
+
+
+### Changed
+
+- mirrord exec config_file with no extension, e.g. heredoc, now assumed to be
+  of json format [#3370](https://github.com/metalbear-co/mirrord/issues/3370)
+- mirrord now extracts layer to temp_dir()/mirrord to allow easier whitelisting
+  with Carbon Black
+  [#3373](https://github.com/metalbear-co/mirrord/issues/3373)
+- Expand current profile config doc to address the new namespaced profile
+  feature.
+
+
+### Internal
+
+- Add sns flag to queue registry CRD.
+- Skip priority class e2e test.
+
 ## [3.146.0](https://github.com/metalbear-co/mirrord/tree/3.146.0) - 2025-06-24
 
 
