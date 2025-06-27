@@ -1,7 +1,7 @@
 use k8s_openapi::{
     api::{
         apps::v1::Deployment,
-        core::v1::{Service, TCPSocketAction},
+        core::v1::{Probe, Service, TCPSocketAction},
     },
     apimachinery::pkg::util::intstr::IntOrString,
     Resource,
@@ -68,12 +68,13 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
-                            "startupProbe": {
-                                "tcpSocket": use_probe.then_some(TCPSocketAction {
+                            "startupProbe": use_probe.then_some(Probe {
+                                tcp_socket: Some(TCPSocketAction {
                                     host: None,
                                     port: IntOrString::Int(80),
                                 }),
-                            },
+                                ..Default::default()
+                            }),
                         }
                     ]
                 }
