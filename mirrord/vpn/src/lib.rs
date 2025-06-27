@@ -1,7 +1,6 @@
 #![feature(concat_idents)]
 #![feature(try_blocks)]
 #![deny(unused_crate_dependencies)]
-extern crate core;
 
 #[cfg(not(target_os = "macos"))]
 pub mod linux;
