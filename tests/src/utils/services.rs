@@ -79,6 +79,7 @@ pub async fn service_with_env(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn service_with_env_and_env_from(
     namespace: &str,
     service_type: &str,
@@ -177,7 +178,7 @@ pub(crate) async fn internal_service(
     .ok();
 
     if let Some(config_maps) = config_maps {
-        let api = Api::<ConfigMap>::namespaced(kube_client.clone(), &namespace);
+        let api = Api::<ConfigMap>::namespaced(kube_client.clone(), namespace);
         for map in config_maps {
             println!(
                 "creating {} {} in namespace {}",

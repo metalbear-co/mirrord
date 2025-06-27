@@ -381,6 +381,12 @@ async fn config_map_resource(name: &str, map: BTreeMap<String, String>) -> Confi
     }
 }
 
+struct SqsConsumerServiceConfig {
+    with_fallback_json: bool,
+    with_env_from: bool,
+    with_value_from: bool,
+}
+
 /// Create a microservice for the sqs test application.
 /// That service will be configured to use the "localstack" service in the "default" namespace for
 /// all AWS stuff.
@@ -391,9 +397,11 @@ async fn sqs_consumer_service(
     echo_queue1: &QueueInfo,
     echo_queue2: &QueueInfo,
     aws_creds: HashMap<String, String>,
-    with_fallback_json: bool,
-    with_env_from: bool,
-    with_value_from: bool,
+    SqsConsumerServiceConfig {
+        with_fallback_json,
+        with_env_from,
+        with_value_from,
+    }: SqsConsumerServiceConfig,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
 
@@ -623,9 +631,11 @@ pub async fn sqs_test_resources(
         &echo_queue1,
         &echo_queue2,
         aws_creds,
-        with_fallback_json,
-        with_env_from,
-        with_value_from,
+        SqsConsumerServiceConfig {
+            with_fallback_json,
+            with_env_from,
+            with_value_from,
+        },
     )
     .await;
 
