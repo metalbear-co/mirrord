@@ -48,7 +48,7 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
-                            "readinessProbe": {
+                            "startupProbe": {
                                 "tcpSocket": {
                                     "port": 80,
                                 }
