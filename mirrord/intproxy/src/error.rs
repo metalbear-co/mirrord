@@ -20,9 +20,9 @@ pub struct UnexpectedAgentMessage(pub DaemonMessage);
 /// Convenience error type for internal errors. Used to wrap all internal errors.
 #[derive(Error, Debug)]
 pub(crate) enum InternalProxyError {
-    #[error("critical proxy error : {0}")]
+    #[error(transparent)]
     Startup(#[from] ProxyStartupError),
-    #[error("manageable error: {0}")]
+    #[error(transparent)]
     Runtime(#[from] ProxyRuntimeError),
 }
 
