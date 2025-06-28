@@ -400,6 +400,16 @@ pub(crate) enum CliError {
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
 
+    #[error(
+        "Failed to execute the binary: execve failed with {}",
+        nix::errno::Errno::E2BIG
+    )]
+    #[diagnostic(help(
+        "This can happen when the environment of the target is too large to load locally through execve arguments.
+        Please use `feature.env.load_from_process`."
+    ))]
+    ExecveE2Big,
+
     #[error("Failed starting a mirrord dump session: {0}")]
     DumpError(String),
 
