@@ -38,10 +38,12 @@ mod targetless_tests {
     }
 
     /// Test spawning a targetless agent pod with a given priority class.
-    #[ignore]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn targetless_agent_with_priority_class(#[future] kube_client: Client) {
+        if !matches!(std::env::var("MIRRORD_E2E").as_deref(), Ok("true")) {
+            return;
+        }
         let kube_client = kube_client.await;
         // create a priority class
         let priority_class = PriorityClass {
