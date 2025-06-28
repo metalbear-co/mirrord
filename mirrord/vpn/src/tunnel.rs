@@ -41,7 +41,7 @@ where
                     match message {
                         None => break 'main,
                         Some(DaemonMessage::Vpn(ServerVpn::Packet(packet))) => {
-                            if let Err(error) = stream.send(packet).await {
+                            if let Err(error) = stream.send(packet.into_vec()).await {
                                 tracing::warn!(%error, "unable to pipe back packet")
                             }
                         }
