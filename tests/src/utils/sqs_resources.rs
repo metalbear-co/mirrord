@@ -38,10 +38,14 @@ use mirrord_operator::{
 };
 use serde::Serialize;
 
-use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
+use super::{
+    get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher,
+    PRESERVE_FAILED_ENV_NAME,
+};
 use crate::utils::{
-    kube_service::KubeService, resource_guard::ResourceGuard,
-    services::service_with_env_and_env_from,
+    kube_service::KubeService,
+    resource_guard::ResourceGuard,
+    services::{guarded_and_available_rollout, service_with_env_and_env_from},
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -87,6 +91,7 @@ pub struct SqsTestResources {
     pub queue2: QueueInfo,
     pub echo_queue2: QueueInfo,
     pub sqs_client: aws_sdk_sqs::Client,
+    /// Holds resource guards that will delete the test SQS Queues when the test is done.
     _guards: Vec<ResourceGuard>,
     /// Keeps portforwarding to the localstack service alive.
     ///
@@ -406,6 +411,7 @@ async fn sqs_consumer_service(
         with_env_from,
         with_value_from,
     }: SqsConsumerServiceConfig,
+    argo_rollout: bool,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
 
@@ -543,7 +549,7 @@ async fn sqs_consumer_service(
         }]
     });
 
-    service_with_env_and_env_from(
+    let mut service = service_with_env_and_env_from(
         &namespace,
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
@@ -554,7 +560,14 @@ async fn sqs_consumer_service(
         env_from,
         config_maps,
     )
-    .await
+    .await;
+    if argo_rollout {
+        let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
+        service
+            .add_rollout(kube_client.clone(), delete_after_fail)
+            .await;
+    }
+    service
 }
 
 /// Attempts to find the `localstack` service in the `localstack` namespace.
@@ -605,6 +618,7 @@ pub async fn sqs_test_resources(
     with_fallback_json: bool,
     with_env_from: bool,
     with_value_from: bool,
+    argo_rollout: bool,
 ) -> SqsTestResources {
     let mut guards = Vec::new();
 
@@ -640,6 +654,7 @@ pub async fn sqs_test_resources(
             with_env_from,
             with_value_from,
         },
+        argo_rollout,
     )
     .await;
 

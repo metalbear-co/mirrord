@@ -124,11 +124,11 @@ pub(super) fn service_from_json(name: &str, service_type: &str) -> Service {
     .expect("Failed creating `service` from json spec!")
 }
 
-/// Creates an Argo Rollout resource with the given name, image, and env vars
+/// Creates an Argo Rollout resource with the given name, and a workloadRef to the given deployment
 ///
 /// Creates a [`Rollout`] resource following the Argo Rollouts
 /// [specification](https://argoproj.github.io/argo-rollouts/features/specification/)
-pub(super) fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
+pub(super) fn argo_rollout_from_deployment(name: &str, deployment: &Deployment) -> Rollout {
     serde_json::from_value(json!({
         "apiVersion": Rollout::API_VERSION,
         "kind": Rollout::KIND,
