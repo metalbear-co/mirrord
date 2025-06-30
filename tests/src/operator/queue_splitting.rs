@@ -265,7 +265,7 @@ pub async fn two_users(
     println!("Starting first mirrord client");
     let mut client_a = application
         .run(
-            &sqs_test_resources.deployment_target(),
+            &sqs_test_resources.target(),
             Some(sqs_test_resources.namespace()),
             None,
             Some(vec![(
@@ -306,7 +306,7 @@ pub async fn two_users(
     println!("Starting second mirrord client");
     let mut client_b = application
         .run(
-            &sqs_test_resources.deployment_target(),
+            &sqs_test_resources.target(),
             Some(sqs_test_resources.namespace()),
             None,
             Some(vec![(
