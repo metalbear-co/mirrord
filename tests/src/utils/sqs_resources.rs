@@ -43,9 +43,8 @@ use super::{
     PRESERVE_FAILED_ENV_NAME,
 };
 use crate::utils::{
-    kube_service::KubeService,
-    resource_guard::ResourceGuard,
-    services::{guarded_and_available_rollout, service_with_env_and_env_from},
+    kube_service::KubeService, resource_guard::ResourceGuard,
+    services::service_with_env_and_env_from,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -106,6 +105,10 @@ impl SqsTestResources {
 
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
+    }
+
+    pub fn target(&self) -> String {
+        self.k8s_service.rollout_or_deployment_target()
     }
 
     /// Count the temp queues created by the SQS-operator for this test instance.

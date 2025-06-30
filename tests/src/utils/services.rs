@@ -540,13 +540,13 @@ pub async fn rollout_service(
     println!("Created pod {pod_name:#?}");
 
     let mut service = KubeService {
-        name,
+        name: name.clone(),
         namespace: namespace.to_string(),
         service,
         deployment,
-        rollout: Some(rollout),
+        rollout: None, // adding the rollout below.
         pod_name,
-        guards: vec![deployment_guard, service_guard, rollout_guard],
+        guards: vec![deployment_guard, service_guard],
         namespace_guard: namespace_guard.map(|(guard, _)| guard),
     };
 
@@ -556,4 +556,5 @@ pub async fn rollout_service(
         "{:?} done creating service {name} in namespace {namespace}",
         Utc::now()
     );
+    service
 }

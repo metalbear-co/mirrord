@@ -37,6 +37,14 @@ impl KubeService {
         format!("rollout/{}", self.name)
     }
 
+    pub fn rollout_or_deployment_target(&self) -> String {
+        if self.rollout.is_some() {
+            self.rollout_target()
+        } else {
+            self.deployment_target()
+        }
+    }
+
     /// Create a rollout, a `ResourceGuard` that deletes it, and wait for the rollout to be
     /// available.
     /// Add the rollout to this service
@@ -47,9 +55,9 @@ impl KubeService {
         let (rollout_guard, rollout) =
             ResourceGuard::create(rollout_api, &rollout, delete_after_fail)
                 .await
-                .unwrap_or_else(|_| {
+                .unwrap_or_else(|err| {
                     panic!(
-                        "Failed to create rollout guard! \n{}",
+                        "Failed to create rollout guard! Error: \n{err:?}\nRollout:\n{}",
                         serde_json::to_string_pretty(&rollout).unwrap()
                     )
                 });
