@@ -302,10 +302,11 @@ mod util;
 mod verify_config;
 mod vpn;
 mod wsl;
+mod newsletter;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
-
+use crate::newsletter::suggest_newsletter_signup;
 use crate::util::get_user_git_branch;
 
 async fn exec_process<P>(
@@ -393,6 +394,9 @@ where
     // Without the success message, the final progress displays the last info message
     // as the subtask title.
     sub_progress_config.success(Some("config summary"));
+
+    // print an invitation to the newsletter on certain run count numbers
+    suggest_newsletter_signup().await;
 
     let args = binary_args
         .clone()
