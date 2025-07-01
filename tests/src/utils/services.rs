@@ -3,9 +3,9 @@ use chrono::Utc;
 use cluster_resource::*;
 use k8s_openapi::api::{
     apps::v1::Deployment,
-    core::v1::{Namespace, Service},
+    core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
-use kube::{api::DeleteParams, Api, Client};
+use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use resource_guard::ResourceGuard;
@@ -41,6 +41,8 @@ pub async fn basic_service(
         randomize_name,
         kube_client.await,
         default_env(),
+        None,
+        None,
         false,
     )
     .await
@@ -70,6 +72,35 @@ pub async fn service_with_env(
         randomize_name,
         kube_client,
         env,
+        None,
+        None,
+        false,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn service_with_env_and_env_from(
+    namespace: &str,
+    service_type: &str,
+    image: &str,
+    service_name: &str,
+    randomize_name: bool,
+    kube_client: Client,
+    env: Value,
+    env_from: Option<Vec<EnvFromSource>>,
+    config_maps: Option<Vec<ConfigMap>>,
+) -> KubeService {
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client,
+        env,
+        env_from,
+        config_maps,
         false,
     )
     .await
@@ -95,6 +126,8 @@ pub(crate) async fn internal_service(
     randomize_name: bool,
     kube_client: Client,
     env: Value,
+    env_from: Option<Vec<EnvFromSource>>,
+    config_maps: Option<Vec<ConfigMap>>,
     ipv6_only: bool,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
@@ -144,8 +177,21 @@ pub(crate) async fn internal_service(
     .await
     .ok();
 
+    if let Some(config_maps) = config_maps {
+        let api = Api::<ConfigMap>::namespaced(kube_client.clone(), namespace);
+        for map in config_maps {
+            println!(
+                "creating {} {} in namespace {}",
+                ConfigMap::kind(&()),
+                map.name_any(),
+                namespace
+            );
+            api.create(&Default::default(), &map).await.unwrap();
+        }
+    }
+
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, env);
+    let deployment = deployment_from_json(&name, image, env, env_from);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -245,7 +291,7 @@ pub async fn service_for_mirrord_ls(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env());
+    let deployment = deployment_from_json(&name, image, default_env(), None);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -462,7 +508,7 @@ pub async fn rollout_service(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env());
+    let deployment = deployment_from_json(&name, image, default_env(), None);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await

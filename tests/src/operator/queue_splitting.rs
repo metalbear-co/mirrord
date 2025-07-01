@@ -221,10 +221,13 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
-#[case::with_regex_without_fallback_json(true, false, false)]
-#[case::without_regex_without_fallback_json(false, false, false)]
-#[case::without_regex_with_fallback_json(false, true, false)]
-#[case::without_regex_with_fallback_json_with_asterisk(false, true, true)]
+#[case::with_regex_without_fallback_json(true, false, false, false, false)]
+#[case::without_regex_without_fallback_json(false, false, false, false, false)]
+#[case::without_regex_with_fallback_json(false, true, false, false, false)]
+#[case::without_regex_with_fallback_json_with_asterisk(false, true, true, false, false)]
+#[case::with_env_from(false, false, false, true, false)]
+#[case::with_value_from(false, false, false, false, true)]
+#[case::with_env_from_and_value_from(false, false, false, true, true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
 pub async fn two_users(
@@ -232,10 +235,18 @@ pub async fn two_users(
     #[case] with_regex: bool,
     #[case] with_fallback_json: bool,
     #[case] with_asterisk_queue_id: bool,
+    #[case] with_env_from: bool,
+    #[case] with_value_from: bool,
 ) {
     let kube_client = kube_client.await;
-    let sqs_test_resources =
-        sqs_test_resources(kube_client.clone(), with_regex, with_fallback_json).await;
+    let sqs_test_resources = sqs_test_resources(
+        kube_client.clone(),
+        with_regex,
+        with_fallback_json,
+        with_env_from,
+        with_value_from,
+    )
+    .await;
     let application = Application::RustSqs;
 
     let config_a = get_config(
