@@ -26,17 +26,17 @@ const GENERAL_HELP: &str = r#"
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Discord https://discord.gg/metalbear or Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
 
 >> Or email us at hi@metalbear.co
 
 "#;
 
-const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Discord or GitHub repository.
+const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Discord https://discord.gg/metalbear or Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
 
 >> Or email us at hi@metalbear.co
 
@@ -77,7 +77,11 @@ pub(crate) enum ExternalProxyError {
     Intproxy(#[from] IntProxyError),
 
     #[error("Failed to set up TCP listener for accepting intproxy connections: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
+    #[diagnostic(help(
+        "If you're trying to run `mirrord container` in WSL, try setting \
+        `container.override_host_ip` to the internal container runtime address. \
+        {GENERAL_BUG}"
+    ))]
     ListenerSetup(std::io::Error),
 
     #[error("Failed to open log file at `{0}`: {1}")]
@@ -232,7 +236,7 @@ pub(crate) enum CliError {
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]
     #[diagnostic(help(
-        r#"This issue is related to SIP on macOS. Please create an issue or consult with us on Discord
+        r#"This issue is related to SIP on macOS. Please create an issue or consult with us on Slack
         {GENERAL_HELP}"#
     ))]
     SipError(#[from] mirrord_sip::SipError),
@@ -395,6 +399,22 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
+
+    #[error(
+        "Failed to execute the binary: execve failed with {}",
+        nix::errno::Errno::E2BIG
+    )]
+    #[diagnostic(help(
+        "This can happen when the environment of the target is too large to load locally through execve arguments.
+        Please use `feature.env.load_from_process`."
+    ))]
+    ExecveE2Big,
+
+    #[error("Failed starting a mirrord dump session: {0}")]
+    DumpError(String),
+
+    #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
+    OperatorCopyTargetFailed { message: Option<String> },
 }
 
 impl CliError {
@@ -474,6 +494,9 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
             OperatorApiError::ParseInt(error) => Self::ParseInt(error),
+            OperatorApiError::CopiedTargetFailed { message } => {
+                Self::OperatorCopyTargetFailed { message }
+            }
         }
     }
 }

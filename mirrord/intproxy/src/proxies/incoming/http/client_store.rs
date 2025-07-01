@@ -185,7 +185,8 @@ impl ClientStore {
                 },
                 Some(setup),
             ) => {
-                let (connector, server_name) = setup.get(alpn_protocol.clone()).await?;
+                let alpn_protocol = alpn_protocol.clone();
+                let (connector, server_name) = setup.get(alpn_protocol).await?;
 
                 let server_name = server_name
                     .or_else(|| {

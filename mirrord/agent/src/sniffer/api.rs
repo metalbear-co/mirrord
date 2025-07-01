@@ -132,7 +132,7 @@ impl TcpSnifferApi {
                     Ok((
                         DaemonTcp::Data(TcpData {
                             connection_id,
-                            bytes,
+                            bytes: bytes.into(),
                         }),
                         None,
                     ))

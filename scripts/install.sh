@@ -26,12 +26,12 @@ copy() {
       if [ ! -d "$HOME/.local/bin" ]; then
         mkdir -p "$HOME/.local/bin"
       fi
-      mv /tmp/mirrord "$HOME/.local/bin/mirrord"
+      mv /tmp/mirrord/mirrord "$HOME/.local/bin/mirrord"
   else
       # Try without sudo first, run with sudo only if mv failed without it.
-      mv /tmp/mirrord /usr/local/bin/mirrord || (
+      mv /tmp/mirrord/mirrord /usr/local/bin/mirrord || (
         echo "Cannot write to installation target directory as current user, writing as root."
-        sudo mv /tmp/mirrord /usr/local/bin/mirrord
+        sudo mv /tmp/mirrord/mirrord /usr/local/bin/mirrord
       )
   fi
 }
@@ -70,10 +70,11 @@ function install() {
       file_issue_prompt
       exit 1
   fi
-  curl -o /tmp/mirrord -fsSL https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_$OS\_$ARCH
-  chmod +x /tmp/mirrord
+  mkdir -p /tmp/mirrord
+  curl -o /tmp/mirrord/mirrord -fsSL https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_$OS\_$ARCH
+  chmod +x /tmp/mirrord/mirrord
   copy
-  echo "mirrord installed! Have fun! For feedback and support, join our Discord server: https://discord.gg/metalbear or Slack: https://metalbear.co/slack , open an issue or discussion on our GitHub: https://github.com/metalbear-co/mirrord/ or send us an email at hi@metalbear.co"
+  echo "mirrord installed! Have fun! For feedback and support, join our Slack: https://metalbear.co/slack , open an issue or discussion on our GitHub: https://github.com/metalbear-co/mirrord/ or send us an email at hi@metalbear.co"
   }
 
 

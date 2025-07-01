@@ -1,0 +1,1 @@
+Make the documentation on outgoing traffic configuration clearer.

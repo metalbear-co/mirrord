@@ -17,6 +17,7 @@ use mirrord_protocol::{
         IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame,
         InternalHttpResponse,
     },
+    Payload,
 };
 use tokio::time;
 use tokio_retry::strategy::ExponentialBackoff;
@@ -241,6 +242,7 @@ impl HttpGatewayTask {
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
+                let body = Payload::from(body);
                 tracing::debug!(
                     body_len = body.len(),
                     elapsed_ms = start.elapsed().as_millis(),
@@ -404,7 +406,7 @@ mod test {
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
         tcp::{HttpRequest, InternalHttpRequest},
-        ConnectionId,
+        ConnectionId, ToPayload,
     };
     use rstest::rstest;
     use rustls::ServerConfig;
@@ -614,7 +616,7 @@ mod test {
                 local_destination,
                 if use_tls {
                     IncomingTrafficTransportType::Tls {
-                        alpn_protocol: Some(b"http/1.1".into()),
+                        alpn_protocol: Some(b"http/1.1".to_vec()),
                         server_name: None,
                     }
                 } else {
@@ -780,7 +782,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(Vec::<u8>::new()),
+                body: StreamingBody::from(Payload::from(Vec::<u8>::new())),
             },
         };
 
@@ -802,7 +804,7 @@ mod test {
                 semaphore.add_permits(2);
                 match tasks.next().await.unwrap().1.unwrap_message() {
                     InProxyTaskMessage::Http(HttpOut::ResponseBasic(response)) => {
-                        assert_eq!(response.internal_response.body, b"hello\nhello\n");
+                        assert_eq!(response.internal_response.body.as_ref(), b"hello\nhello\n");
                     }
                     other => panic!("unexpected task message: {other:?}"),
                 }
@@ -815,7 +817,9 @@ mod test {
                         let mut collected = vec![];
                         for frame in response.internal_response.body.0 {
                             match frame {
-                                InternalHttpBodyFrame::Data(data) => collected.extend(data),
+                                InternalHttpBodyFrame::Data(data) => {
+                                    collected.extend(data.into_vec())
+                                }
                                 InternalHttpBodyFrame::Trailers(trailers) => {
                                     panic!("unexpected trailing headers: {trailers:?}");
                                 }
@@ -845,7 +849,7 @@ mod test {
                     ))) => {
                         assert_eq!(
                             body.frames,
-                            vec![InternalHttpBodyFrame::Data(b"hello\n".into())],
+                            vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
                         );
                         assert!(!body.is_last);
                     }
@@ -859,7 +863,7 @@ mod test {
                     ))) => {
                         assert_eq!(
                             body.frames,
-                            vec![InternalHttpBodyFrame::Data(b"hello\n".into())],
+                            vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
                         );
                         assert!(body.is_last);
                     }
@@ -955,7 +959,7 @@ mod test {
         for _ in 0..2 {
             semaphore.acquire().await.unwrap().forget();
             frame_tx
-                .send(InternalHttpBodyFrame::Data(b"hello\n".into()))
+                .send(InternalHttpBodyFrame::Data(b"hello\n".to_payload()))
                 .await
                 .unwrap();
         }

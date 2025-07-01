@@ -104,7 +104,7 @@
     },
     "profile": {
       "title": "profile {#root-profile}",
-      "description": "Name of the mirrord profile to use.",
+      "description": "Name of the mirrord profile to use.\n\nTo select a cluster-wide profile\n\n```json { \"profile\": \"my-profile-name\" } ```\n\nTo select a namespaced profile\n\n```json { \"profile\": \"my-namespace/my-profile-name\" } ```",
       "type": [
         "string",
         "null"
@@ -463,6 +463,14 @@
             "type": "string"
           }
         },
+        "priority_class": {
+          "title": "agent.priority_class {#agent-priority_class}",
+          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"priority_class\": \"my-priority-class-name\" } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
           "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.\n\nHas no effect when using the targetless mode, as targetless agent containers are never privileged.",
@@ -636,7 +644,7 @@
         },
         "override_host_ip": {
           "title": "container.override_host_ip {#container-override_host_ip}",
-          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.",
+          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.\n\n- If you're running inside WSL, and encountering problems, try setting `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address (for docker, this  would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`). You can find this ip by resolving it from inside a running container, e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`",
           "type": [
             "string",
             "null"
@@ -943,7 +951,7 @@
       "properties": {
         "host_ip": {
           "title": "external_proxy.host_ip {#external_proxy-host_ip}",
-          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.",
+          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.\n\n- If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`, and `container.override_host_ip` to the internal container runtime address (for docker, this would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`).",
           "type": [
             "string",
             "null"
@@ -1634,7 +1642,7 @@
       "additionalProperties": false
     },
     "OutgoingFileConfig": {
-      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nThe `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nYou can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.\n\n```json { \"feature\": { \"network\": { \"outgoing\": \"remote\" } } } ```\n\nAlternatively, you can use more fine-grained configuration. The `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
       "type": "object",
       "properties": {
         "filter": {
