@@ -177,7 +177,6 @@ impl DateValidityExt for rfc5280::Validity {
 pub mod client {
     use kube::Resource;
 
-    //use kube::{api::PostParams, Api, Client, Resource};
     use super::*;
     use crate::{cluster_api::AuthClient, error::CredentialStoreError};
 

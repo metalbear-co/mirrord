@@ -167,6 +167,7 @@ impl CredentialStore {
 #[cfg(test)]
 mod tests {
     use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::APIService;
+    use x509_certificate::Sign;
 
     use crate::{
         cluster_api::client_mock::{certificate_mock, ClientMock},
@@ -176,9 +177,7 @@ mod tests {
     #[tokio::test]
     async fn get_or_init() {
         let operator_fingerprint = "operator_fingerprint".to_string();
-        let mut client = ClientMock {
-            return_error: false,
-        };
+        let mut client = ClientMock::default();
 
         let mut credentials_store = CredentialStore::default();
         // test when vacant
@@ -215,6 +214,92 @@ mod tests {
             .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint, None)
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn reuses_key_pair_for_different_subscriptions() {
+        let operator_fingerprint_1 = "operator_fingerprint_1".to_string();
+        let client = ClientMock::default();
+        let operator_subscription_id = Some("operator_subscription_id".to_string());
+
+        let mut credentials_store = CredentialStore::default();
+        //check if the credential store is empty
+        assert!(credentials_store.credentials.is_empty());
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_1.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        //check if the saved cert is the same as the mock cert used
+        let saved_cert_1 = credentials_store
+            .credentials
+            .get(&operator_fingerprint_1)
+            .unwrap()
+            .as_ref()
+            .clone();
+
+        let (key_pair, _) = client.pop_last_call().expect("No call to the client");
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_1.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        let saved_cert_2 = credentials_store
+            .credentials
+            .get(&operator_fingerprint_1)
+            .unwrap()
+            .as_ref()
+            .clone();
+
+        // cert must be reused
+        assert_eq!(credentials_store.credentials.len(), 1);
+        assert_eq!(
+            format!("{:#?}", saved_cert_1),
+            format!("{:#?}", saved_cert_2)
+        );
+
+        let operator_fingerprint_2 = "operator_fingerprint_2".to_string();
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_2.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(credentials_store.credentials.len(), 2);
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_2.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        // cert must be reused
+        assert_eq!(credentials_store.credentials.len(), 2);
+
+        assert_eq!(credentials_store.signing_keys.len(), 1);
+        let priv_key = credentials_store
+            .signing_keys
+            .get(operator_subscription_id.as_ref().unwrap())
+            .unwrap()
+            .private_key_data();
+        assert_eq!(priv_key, key_pair.private_key_data());
     }
 }
 

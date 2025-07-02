@@ -16,6 +16,7 @@ mod compilation_deps {
 
 /// X509 Certificate abstraction for serialization and deserialization
 pub mod certificate;
+#[cfg(feature = "client")]
 pub mod cluster_api;
 /// FileSystem based storage for multiple credentials (default contents "~/.mirrord/credentials")
 #[cfg(feature = "client")]
@@ -27,5 +28,5 @@ pub mod credentials;
 pub mod error;
 /// Public/Private key abstraction for serialization and deserialization
 pub mod key_pair;
-
+#[cfg(feature = "client")]
 pub use cluster_api::AuthClient;

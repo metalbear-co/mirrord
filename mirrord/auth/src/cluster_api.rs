@@ -10,6 +10,7 @@ use x509_certificate::{
 
 use crate::{certificate::Certificate, error::CredentialStoreError, key_pair::KeyPair};
 
+#[cfg(feature = "client")]
 pub trait AuthClient<R> {
     fn obtain_certificate(
         &self,
@@ -18,6 +19,7 @@ pub trait AuthClient<R> {
     ) -> impl Future<Output = Result<Certificate, CredentialStoreError>> + Send;
 }
 
+#[cfg(feature = "client")]
 impl<R> AuthClient<R> for Client
 where
     R: for<'de> Deserialize<'de> + Resource + Clone + Debug,
@@ -66,7 +68,11 @@ fn certificate_request(
 
 #[cfg(test)]
 pub mod client_mock {
-    use std::fmt::Debug;
+    use std::{
+        collections::VecDeque,
+        fmt::Debug,
+        sync::{Arc, Mutex},
+    };
 
     use kube::Resource;
     use serde::Deserialize;
@@ -75,9 +81,10 @@ pub mod client_mock {
         certificate::Certificate, error::CredentialStoreError, key_pair::KeyPair, AuthClient,
     };
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug, Default)]
     pub struct ClientMock {
         pub return_error: bool,
+        pub calls_list: Arc<Mutex<VecDeque<(KeyPair, String)>>>,
     }
 
     impl<R> AuthClient<R> for ClientMock
@@ -87,9 +94,13 @@ pub mod client_mock {
     {
         async fn obtain_certificate(
             &self,
-            _key_pair: &KeyPair,
-            _common_name: &str,
+            key_pair: &KeyPair,
+            common_name: &str,
         ) -> Result<Certificate, CredentialStoreError> {
+            self.calls_list
+                .lock()
+                .unwrap()
+                .push_front((key_pair.clone(), common_name.to_string()));
             if self.return_error {
                 Err(CredentialStoreError::FileAccess(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -98,6 +109,12 @@ pub mod client_mock {
             } else {
                 Ok(certificate_mock())
             }
+        }
+    }
+
+    impl ClientMock {
+        pub fn pop_last_call(&self) -> Option<(KeyPair, String)> {
+            self.calls_list.lock().unwrap().pop_back()
         }
     }
 
