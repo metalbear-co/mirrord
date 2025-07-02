@@ -8,7 +8,7 @@ use hyper::{
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
-    ConnectionId, Port, RequestId,
+    ConnectionId, Payload, Port, RequestId,
 };
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -130,7 +130,9 @@ pub fn mirrord_error_response<M: fmt::Display>(
     connection_id: ConnectionId,
     request_id: RequestId,
     port: Port,
-) -> HttpResponse<Vec<u8>> {
+) -> HttpResponse<Payload> {
+    let body = format!("mirrord-intproxy: {message}\n").into_bytes();
+    let body = Payload::from(body);
     HttpResponse {
         connection_id,
         port,
@@ -139,7 +141,7 @@ pub fn mirrord_error_response<M: fmt::Display>(
             status: StatusCode::BAD_GATEWAY,
             version,
             headers: Default::default(),
-            body: format!("mirrord-intproxy: {message}\n").into_bytes(),
+            body,
         },
     }
 }

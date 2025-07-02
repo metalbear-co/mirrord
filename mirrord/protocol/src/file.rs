@@ -14,6 +14,8 @@ use bincode::{Decode, Encode};
 use nix::sys::statfs::Statfs;
 use semver::VersionReq;
 
+use crate::Payload;
+
 /// Minimal mirrord-protocol version that allows [`ReadLinkFileRequest`].
 pub static READLINK_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.6.0".parse().expect("Bad Identifier"));
@@ -368,7 +370,7 @@ pub struct ReadFileRequest {
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct ReadFileResponse {
-    pub bytes: Vec<u8>,
+    pub bytes: Payload,
     pub read_amount: u64,
 }
 
@@ -472,7 +474,7 @@ impl From<SeekFrom> for SeekFromInternal {
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct WriteFileRequest {
     pub fd: u64,
-    pub write_bytes: Vec<u8>,
+    pub write_bytes: Payload,
 }
 
 impl fmt::Debug for WriteFileRequest {
@@ -493,7 +495,7 @@ pub struct WriteFileResponse {
 pub struct WriteLimitedFileRequest {
     pub remote_fd: u64,
     pub start_from: u64,
-    pub write_bytes: Vec<u8>,
+    pub write_bytes: Payload,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

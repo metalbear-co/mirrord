@@ -23,7 +23,7 @@ use mirrord_protocol::{
         SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest, WriteFileResponse,
         XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
     },
-    ResponseError,
+    Payload, ResponseError,
 };
 use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
@@ -457,10 +457,10 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
     trace!("pwrite: local_fd {local_fd}");
-
+    let write_bytes = Payload::from(buffer.to_vec());
     let writing_file = WriteLimitedFileRequest {
         remote_fd,
-        write_bytes: buffer.to_vec(),
+        write_bytes,
         start_from: offset,
     };
 
@@ -503,7 +503,7 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 
     let writing_file = WriteFileRequest {
         fd: remote_fd,
-        write_bytes: write_bytes.ok_or(Bypass::EmptyBuffer)?,
+        write_bytes: write_bytes.ok_or(Bypass::EmptyBuffer)?.into(),
     };
 
     let WriteFileResponse { written_amount } =
