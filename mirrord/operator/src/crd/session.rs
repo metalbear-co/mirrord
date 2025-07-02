@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
     version = "v1alpha",
     kind = "MirrordSession"
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordSessionSpec {
     /// Owner of this session
     pub owner: MirrordSessionOwner,
@@ -23,6 +24,7 @@ pub struct MirrordSessionSpec {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordSessionOwner {
     /// Unique ID.
     pub user_id: String,

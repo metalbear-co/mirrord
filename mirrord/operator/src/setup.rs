@@ -643,6 +643,16 @@ impl OperatorClusterRole {
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
+            // `MirrordSession`s
+            PolicyRule {
+                api_groups: Some(vec![MirrordSession::group(&()).into_owned()]),
+                resources: Some(vec![MirrordSession::plural(&()).into_owned()]),
+                verbs: ["get", "list", "watch", "create", "delete"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            },
         ];
 
         if kafka_splitting {
