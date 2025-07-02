@@ -39,7 +39,7 @@ use crate::{
         subscriptions::PortSubscriptions,
         Command, StealerCommand,
     },
-    util::{ChannelClosedFuture, ClientId},
+    util::{protocol_version::ClientProtocolVersion, ChannelClosedFuture, ClientId},
 };
 
 /// A stolen HTTP request that matched a client's filter.
@@ -95,9 +95,7 @@ struct Client {
     /// Client's [`mirrord_protocol`] version.
     ///
     /// Determines which variant of [`DaemonTcp`] we use to send stolen HTTP requests.
-    ///
-    /// [`None`] until protocol version negotiation concludes.
-    protocol_version: Option<semver::Version>,
+    protocol_version: ClientProtocolVersion,
     /// Client subscriptions to stolen connections.
     /// Used to unsubscribe when the client exits.
     subscribed_connections: HashSet<ConnectionId>,
@@ -120,7 +118,7 @@ impl Client {
             body,
         ) = request.request.into_parts();
 
-        let body = body.collect().await?.to_bytes().to_vec();
+        let body = body.collect().await?.to_bytes().into();
 
         let internal_request = InternalHttpRequest {
             method,
@@ -330,18 +328,11 @@ impl Client {
     /// client disconnects. Both cases are quite normal, so don't log errors higher than on
     /// [`Level::DEBUG`].
     fn send_request_in_bg(&self, request: MatchedHttpRequest) {
-        let framed = self
-            .protocol_version
-            .as_ref()
-            .is_some_and(|v| HTTP_FRAMED_VERSION.matches(v));
-        let chunked = self
-            .protocol_version
-            .as_ref()
-            .is_some_and(|v| HTTP_CHUNKED_REQUEST_VERSION.matches(v));
+        let framed = self.protocol_version.matches(&HTTP_FRAMED_VERSION);
+        let chunked = self.protocol_version.matches(&HTTP_CHUNKED_REQUEST_VERSION);
         let chunked_v2 = self
             .protocol_version
-            .as_ref()
-            .is_some_and(|v| HTTP_CHUNKED_REQUEST_V2_VERSION.matches(v));
+            .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION);
 
         let tx = self.tx.clone();
 
@@ -560,7 +551,7 @@ impl TcpConnectionStealer {
                     .tx
                     .send(StealerMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
-                        bytes: data,
+                        bytes: data.into(),
                     })))
                     .await;
             }
@@ -623,6 +614,11 @@ impl TcpConnectionStealer {
         client_id: ClientId,
         port_steal: StealType,
     ) -> AgentResult<()> {
+        let Some(client) = self.clients.get(&client_id) else {
+            // Client has exited, we're processing a stale message from the shared channel.
+            return Ok(());
+        };
+
         let spec = match port_steal {
             StealType::All(port) => Ok((port, None)),
             StealType::FilteredHttp(port, filter) => Regex::new(&format!("(?i){filter}"))
@@ -633,21 +629,15 @@ impl TcpConnectionStealer {
                 .map_err(|err| BadHttpFilterExRegex(filter, err.to_string())),
         };
 
-        let protocol_version = self
-            .clients
-            .get(&client_id)
-            .and_then(|client| client.protocol_version.clone());
-
         let res = match spec {
             Ok((port, filter)) => {
                 self.port_subscriptions
-                    .add(client_id, port, protocol_version, filter)
+                    .add(client_id, port, client.protocol_version.clone(), filter)
                     .await?
             }
             Err(e) => Err(e.into()),
         };
 
-        let client = self.clients.get(&client_id).expect("client not found");
         let _ = client
             .tx
             .send(StealerMessage::TcpSteal(DaemonTcp::SubscribeResult(res)))
@@ -695,25 +685,27 @@ impl TcpConnectionStealer {
         let StealerCommand { client_id, command } = command;
 
         match command {
-            Command::NewClient(daemon_tx) => {
+            Command::NewClient(daemon_tx, protocol_version) => {
                 self.clients_closed
                     .push(ChannelClosedFuture::new(daemon_tx.clone(), client_id));
                 self.clients.insert(
                     client_id,
                     Client {
                         tx: daemon_tx,
-                        protocol_version: None,
+                        protocol_version,
                         subscribed_connections: Default::default(),
                     },
                 );
             }
 
             Command::ConnectionUnsubscribe(connection_id) => {
-                self.clients
-                    .get_mut(&client_id)
-                    .expect("client not found")
-                    .subscribed_connections
-                    .remove(&connection_id);
+                let Some(client) = self.clients.get_mut(&client_id) else {
+                    // Client has already exited, we're processing a stale message from the shared
+                    // channel.
+                    return Ok(());
+                };
+
+                client.subscribed_connections.remove(&connection_id);
 
                 self.connections
                     .send(
@@ -740,7 +732,7 @@ impl TcpConnectionStealer {
                         connection_id,
                         ConnectionMessageIn::Raw {
                             client_id,
-                            data: bytes,
+                            data: bytes.into_vec(),
                         },
                     )
                     .await;
@@ -758,11 +750,6 @@ impl TcpConnectionStealer {
                     HTTP_REQUEST_IN_PROGRESS_COUNT
                         .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 }
-            }
-
-            Command::SwitchProtocolVersion(new_version) => {
-                let client = self.clients.get_mut(&client_id).expect("client not found");
-                client.protocol_version.replace(new_version);
             }
         }
 
@@ -783,9 +770,12 @@ mod test {
         service::Service,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{
-        ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
-        IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
+    use mirrord_protocol::{
+        tcp::{
+            ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
+            IncomingTrafficTransportType, InternalHttpBodyFrame, StealType,
+        },
+        ToPayload,
     };
     use rstest::rstest;
     use tokio::{
@@ -885,7 +875,7 @@ mod test {
         let (client_tx, mut client_rx) = mpsc::channel::<StealerMessage>(4);
         let client = Client {
             tx: client_tx,
-            protocol_version: Some("1.7.0".parse().unwrap()),
+            protocol_version: "1.7.0".parse().unwrap(),
             subscribed_connections: Default::default(),
         };
 
@@ -911,7 +901,7 @@ mod test {
         };
         assert_eq!(
             x.internal_request.body,
-            vec![InternalHttpBodyFrame::Data(b"string".to_vec())]
+            vec![InternalHttpBodyFrame::Data(b"string".to_payload())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
@@ -928,7 +918,7 @@ mod test {
         };
         assert_eq!(
             x.frames,
-            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec())]
+            vec![InternalHttpBodyFrame::Data(b"another_string".to_payload())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
@@ -961,7 +951,7 @@ mod test {
         let (client_tx, mut client_rx) = mpsc::channel::<StealerMessage>(4);
         let client = Client {
             tx: client_tx,
-            protocol_version: Some("1.7.0".parse().unwrap()),
+            protocol_version: "1.7.0".parse().unwrap(),
             subscribed_connections: Default::default(),
         };
 
@@ -1015,7 +1005,7 @@ mod test {
                 TcpConnectionStealer::new(command_rx, handle, None).start(CancellationToken::new()),
             )
             .into_status("TcpStealerTask");
-        let mut api = TcpStealerApi::new(0, command_tx.clone(), task_status, 8)
+        let mut api = TcpStealerApi::new(0, Default::default(), command_tx.clone(), task_status, 8)
             .await
             .unwrap();
 

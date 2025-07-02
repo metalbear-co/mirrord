@@ -93,7 +93,7 @@ impl KubernetesAPI {
             .await?
             .has_group("route.openshift.io")
         {
-            progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/faq/limitations/#does-mirrord-support-openshift");
+            progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://metalbear.co/mirrord/docs/faq/limitations/#does-mirrord-support-openshift");
         } else {
             debug!("OpenShift was not detected.");
         }
@@ -204,7 +204,7 @@ impl KubernetesAPI {
         &self,
         progress: &mut P,
         target_config: &TargetConfig,
-        network_config: Option<&NetworkConfig>,
+        network_config: Option<&mut NetworkConfig>,
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
@@ -225,24 +225,30 @@ impl KubernetesAPI {
                 progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
             }
 
-            let stolen_probes = network_config
-                .into_iter()
-                .flat_map(|config| {
-                    containers_probe_ports
-                        .iter()
-                        .copied()
-                        .filter(|port| config.incoming.steals_port_without_filter(*port))
-                })
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>();
+            if let Some(network_config) = network_config {
+                if let Some(modified_ports) = network_config
+                    .incoming
+                    .add_probe_ports_to_http_filter_ports(containers_probe_ports)
+                {
+                    progress.info(&format!("`network.incoming.http_filter.ports` has been set to use ports {modified_ports}."));
+                }
 
-            if stolen_probes.is_empty().not() {
-                progress.warning(&format!(
+                let stolen_probes = containers_probe_ports
+                    .iter()
+                    .copied()
+                    .filter(|port| network_config.incoming.steals_port_without_filter(*port))
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                if stolen_probes.is_empty().not() {
+                    progress.warning(&format!(
                     "Your mirrord config may steal HTTP/gRPC health checks configured on ports [{}], \
                     causing Kubernetes to terminate containers on the targeted pod. \
                     Use an HTTP filter to prevent this.",
-                    stolen_probes.join(", "),
+                    stolen_probes,
                 ));
+                }
             }
         }
 

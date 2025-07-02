@@ -11,7 +11,7 @@ use super::http::HttpFilter;
 use crate::{
     incoming::{RedirectedConnection, RedirectorTaskError, StealHandle},
     metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
-    util::ClientId,
+    util::{protocol_version::ClientProtocolVersion, ClientId},
 };
 
 /// Set of active port subscriptions.
@@ -72,7 +72,7 @@ impl PortSubscriptions {
         &mut self,
         client_id: ClientId,
         port: Port,
-        client_protocol_version: Option<semver::Version>,
+        client_protocol_version: ClientProtocolVersion,
         filter: Option<HttpFilter>,
     ) -> Result<RemoteResult<Port>, RedirectorTaskError> {
         let filtered = filter.is_some();
@@ -197,7 +197,7 @@ impl PortSubscriptions {
 /// version, if any.
 ///
 /// [`mirrord_protocol`] version affects which stolen requests can be handled by the client.
-pub type Filters = Arc<DashMap<ClientId, (HttpFilter, Option<semver::Version>)>>;
+pub type Filters = Arc<DashMap<ClientId, (HttpFilter, ClientProtocolVersion)>>;
 
 /// Steal subscription for a port.
 #[derive(Debug, Clone)]
@@ -217,7 +217,7 @@ impl PortSubscription {
     /// Create a new instance. Variant is picked based on the optional `filter`.
     fn new(
         client_id: ClientId,
-        client_protocol_version: Option<semver::Version>,
+        client_protocol_version: ClientProtocolVersion,
         filter: Option<HttpFilter>,
     ) -> Self {
         match filter {
@@ -234,7 +234,7 @@ impl PortSubscription {
     fn try_extend(
         &mut self,
         client_id: ClientId,
-        client_protocol_version: Option<semver::Version>,
+        client_protocol_version: ClientProtocolVersion,
         filter: Option<HttpFilter>,
     ) -> bool {
         match (self, filter) {
@@ -288,14 +288,21 @@ mod test {
         let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
 
         // Adding unfiltered subscription.
-        subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
+        subscriptions
+            .add(0, 80, Default::default(), None)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(state.borrow().has_redirections([80]));
         let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Same client cannot subscribe again (unfiltered).
         assert_eq!(
-            subscriptions.add(0, 80, None, None).await.unwrap(),
+            subscriptions
+                .add(0, 80, Default::default(), None)
+                .await
+                .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         assert!(state.borrow().has_redirections([80]));
@@ -305,7 +312,7 @@ mod test {
         // Same client cannot subscribe again (filtered).
         assert_eq!(
             subscriptions
-                .add(0, 80, None, Some(dummy_filter()))
+                .add(0, 80, Default::default(), Some(dummy_filter()))
                 .await
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
@@ -316,7 +323,10 @@ mod test {
 
         // Another client cannot subscribe (unfiltered).
         assert_eq!(
-            subscriptions.add(1, 80, None, None).await.unwrap(),
+            subscriptions
+                .add(1, 80, Default::default(), None)
+                .await
+                .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         assert!(state.borrow().has_redirections([80]));
@@ -326,7 +336,7 @@ mod test {
         // Another client cannot subscribe (filtered).
         assert_eq!(
             subscriptions
-                .add(1, 80, None, Some(dummy_filter()))
+                .add(1, 80, Default::default(), Some(dummy_filter()))
                 .await
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
@@ -348,7 +358,7 @@ mod test {
 
         // Adding filtered subscription.
         subscriptions
-            .add(0, 80, None, Some(dummy_filter()))
+            .add(0, 80, Default::default(), Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();
@@ -361,7 +371,10 @@ mod test {
 
         // Same client cannot subscribe again (unfiltered).
         assert_eq!(
-            subscriptions.add(0, 80, None, None).await.unwrap(),
+            subscriptions
+                .add(0, 80, Default::default(), None)
+                .await
+                .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         assert!(state.borrow().has_redirections([80]));
@@ -374,7 +387,7 @@ mod test {
         // Same client cannot subscribe again (filtered).
         assert_eq!(
             subscriptions
-                .add(0, 80, None, Some(dummy_filter()))
+                .add(0, 80, Default::default(), Some(dummy_filter()))
                 .await
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
@@ -388,7 +401,10 @@ mod test {
 
         // Another client cannot subscribe (unfiltered).
         assert_eq!(
-            subscriptions.add(1, 80, None, None).await.unwrap(),
+            subscriptions
+                .add(1, 80, Default::default(), None)
+                .await
+                .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         assert!(state.borrow().has_redirections([80]));
@@ -400,7 +416,7 @@ mod test {
 
         // Another client can subscribe (filtered).
         subscriptions
-            .add(1, 80, None, Some(dummy_filter()))
+            .add(1, 80, Default::default(), Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();
@@ -441,11 +457,15 @@ mod test {
         let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
 
         // Adding unfiltered subscription for port 80.
-        subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
+        subscriptions
+            .add(0, 80, Default::default(), None)
+            .await
+            .unwrap()
+            .unwrap();
 
         // Adding filtered subscription for port 81.
         subscriptions
-            .add(1, 81, None, Some(dummy_filter()))
+            .add(1, 81, Default::default(), Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();
@@ -486,11 +506,15 @@ mod test {
         let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
 
         // Adding unfiltered subscription for port 80.
-        subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
+        subscriptions
+            .add(0, 80, Default::default(), None)
+            .await
+            .unwrap()
+            .unwrap();
 
         // Adding filtered subscription for port 81.
         subscriptions
-            .add(0, 81, None, Some(dummy_filter()))
+            .add(0, 81, Default::default(), Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();

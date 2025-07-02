@@ -56,6 +56,7 @@ impl RawSocketTcpCapture {
         capture
             .ignore_outgoing()
             .map_err(AgentError::PacketIgnoreOutgoing)?;
+
         Ok(Self { inner: capture })
     }
 
@@ -86,8 +87,8 @@ impl RawSocketTcpCapture {
     /// Extracts TCP packet from the raw Ethernet packet given as bytes.
     /// If the given Ethernet packet is not TCP, returns [`None`].
     #[tracing::instrument(skip(eth_packet), level = Level::TRACE, fields(bytes = %eth_packet.len()))]
-    fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionDirectionId, TcpPacketData)> {
-        let eth_packet = EthernetPacket::new(&eth_packet[..])?;
+    fn get_tcp_packet(eth_packet: &[u8]) -> Option<(TcpSessionDirectionId, TcpPacketData)> {
+        let eth_packet = EthernetPacket::new(eth_packet)?;
         let ip_packet = match eth_packet.get_ethertype() {
             EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
             _ => return None,
@@ -113,11 +114,24 @@ impl RawSocketTcpCapture {
             "Got a TCP packet from the raw socket",
         );
 
+        // Packet sniffing can produce *a lot* of packets.
+        // We don't want to fail the whole agent if we can't handle all incoming packets.
+        let Ok(mut bytes) = Vec::try_with_capacity(tcp_packet.packet().len()) else {
+            tracing::error!(
+                payload_len = tcp_packet.packet().len(),
+                identifier = ?identifier,
+                "Failed to allocate memory for a sniffed TCP packet, dropping it.",
+
+            );
+            return None;
+        };
+        bytes.extend_from_slice(tcp_packet.payload());
+
         Some((
             identifier,
             TcpPacketData {
                 flags: tcp_packet.get_flags(),
-                bytes: tcp_packet.payload().to_vec(),
+                bytes,
             },
         ))
     }
@@ -131,7 +145,6 @@ impl TcpCapture for RawSocketTcpCapture {
     async fn next(&mut self) -> io::Result<(TcpSessionDirectionId, TcpPacketData)> {
         loop {
             let raw = self.inner.next().await?;
-
             if let Some(tcp) = Self::get_tcp_packet(raw) {
                 break Ok(tcp);
             }

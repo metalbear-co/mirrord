@@ -1,5 +1,9 @@
 use k8s_openapi::{
-    api::{apps::v1::Deployment, core::v1::Service},
+    api::{
+        apps::v1::Deployment,
+        core::v1::{Probe, Service, TCPSocketAction},
+    },
+    apimachinery::pkg::util::intstr::IntOrString,
     Resource,
 };
 use kube::runtime::reflector::Lookup;
@@ -10,7 +14,23 @@ use crate::utils::{CONTAINER_NAME, TEST_RESOURCE_LABEL};
 
 pub(crate) mod operator;
 
+/// List of test images that run a TCP server on port 80.
+///
+/// For deployed test targets using these images, we will use a TCP startup probe.
+///
+/// See [test images repo](https://github.com/metalbear-co/test-images) for reference.
+const TCP_SERVER_IMAGES: &[&str] = &[
+    "ghcr.io/metalbear-co/mirrord-pytest:latest",
+    "ghcr.io/metalbear-co/mirrord-node:latest",
+    "ghcr.io/metalbear-co/mirrord-http-logger:latest",
+    "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
+    "ghcr.io/metalbear-co/mirrord-websocket:latest",
+    "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+];
+
 pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
+    let use_probe = TCP_SERVER_IMAGES.contains(&image);
+
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -48,6 +68,13 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
+                            "startupProbe": use_probe.then_some(Probe {
+                                tcp_socket: Some(TCPSocketAction {
+                                    host: None,
+                                    port: IntOrString::Int(80),
+                                }),
+                                ..Default::default()
+                            }),
                         }
                     ]
                 }

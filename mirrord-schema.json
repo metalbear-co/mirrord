@@ -104,7 +104,7 @@
     },
     "profile": {
       "title": "profile {#root-profile}",
-      "description": "Name of the mirrord profile to use.",
+      "description": "Name of the mirrord profile to use.\n\nTo select a cluster-wide profile\n\n```json { \"profile\": \"my-profile-name\" } ```\n\nTo select a namespaced profile\n\n```json { \"profile\": \"my-namespace/my-profile-name\" } ```",
       "type": [
         "string",
         "null"
@@ -156,7 +156,7 @@
     },
     "skip_sip": {
       "title": "skip_sip {#root-skip_sip}",
-      "description": "Allows mirrord to skip patching (macOS SIP) unwanted processes.\n\nWhen patching is skipped, mirrord will no longer be able to load into the process and its child processes.",
+      "description": "Allows mirrord to skip patching (macOS SIP) unwanted processes.\n\nWhen patching is skipped, mirrord will no longer be able to load into the process and its child processes.\n\nDefaults to `{ \"skip_sip\": \"git\" }`\n\nWhen specified, the given value will replace the default list rather than being added to.",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
@@ -197,7 +197,7 @@
   "additionalProperties": false,
   "definitions": {
     "AdvancedFsUserConfig": {
-      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` or `false` - Read from the local file system. 4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode. > This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally. 4. `\"not_found\"` - List of patters that should never be read nor written. These files should be treated as non-existent. 4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n1. Check agains \"mapping\" if path needs to be replaced, if matched then continue to next step with new path after replacements otherwise continue as usual. 2. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n3. There are pre-defined exceptions to the set FS mode. 1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs) are read locally by default. 2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs) are read remotely by default when the mode is `localwithoverrides`. 3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs) under the running user's home directory will not be found by the application when the mode is not `local`.\n\nIn order to override that default setting for a path, or a pattern, include it the appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs), add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ], \"not_found\": [ \"\\\\.config/gcloud\" ] } } } ```",
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` or `false` - Read from the local file system. 4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode. > This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally. 4. `\"not_found\"` - List of patters that should never be read nor written. These files should be treated as non-existent. 4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n1. Check agains \"mapping\" if path needs to be replaced, if matched then continue to next step with new path after replacements otherwise continue as usual. 2. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n3. There are pre-defined exceptions to the set FS mode. 1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs) are read locally by default. 2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs) are read remotely by default when the mode is `localwithoverrides`. 3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs) under the running user's home directory will not be found by the application when the mode is not `local`.\n\nIn order to override that default setting for a path, or a pattern, include it the appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs), add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://metalbear.co/mirrord/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ], \"not_found\": [ \"\\\\.config/gcloud\" ] } } } ```",
       "type": "object",
       "properties": {
         "local": {
@@ -284,7 +284,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false } } ```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false } } ```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -341,6 +341,14 @@
         "ephemeral": {
           "title": "agent.ephemeral {#agent-ephemeral}",
           "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/).\n\nNot compatible with targetless runs.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "exclude_from_mesh": {
+          "title": "agent.exclude_from_mesh {#agent-exclude_from_mesh}",
+          "description": "When running the agent as an ephemeral container, use this option to exclude the agent's port from the service mesh sidecar proxy.",
           "type": [
             "boolean",
             "null"
@@ -454,6 +462,14 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "priority_class": {
+          "title": "agent.priority_class {#agent-priority_class}",
+          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"priority_class\": \"my-priority-class-name\" } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
@@ -628,7 +644,7 @@
         },
         "override_host_ip": {
           "title": "container.override_host_ip {#container-override_host_ip}",
-          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.",
+          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.\n\n- If you're running inside WSL, and encountering problems, try setting `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address (for docker, this  would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`). You can find this ip by resolving it from inside a running container, e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`",
           "type": [
             "string",
             "null"
@@ -758,7 +774,7 @@
       ]
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nCan be set to one of the options:\n\n1. `false` - Disables the feature, won't have remote environment variables. 2. `true` - Enables the feature, will obtain remote environment variables. 3. object - see below (means `true` + additional configuration).\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" }, \"mapping\": { \".+_TIMEOUT\": \"1000\" } } } } ```",
+      "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nCan be set to one of the options:\n\n1. `false` - Disables the feature, won't have remote environment variables. 2. `true` - Enables the feature, will obtain remote environment variables. 3. object - see below (means `true` + additional configuration).\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://metalbear.co/mirrord/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" }, \"mapping\": { \".+_TIMEOUT\": \"1000\" } } } } ```",
       "type": "object",
       "properties": {
         "env_file": {
@@ -876,6 +892,14 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "ignore_system_proxy_config": {
+          "title": "_experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}",
+          "description": "Disables any system wide proxy configuration for affecting the running application.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "DEPRECATED, WILL BE REMOVED",
@@ -927,7 +951,7 @@
       "properties": {
         "host_ip": {
           "title": "external_proxy.host_ip {#external_proxy-host_ip}",
-          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.",
+          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.\n\n- If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`, and `container.override_host_ip` to the internal container runtime address (for docker, this would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`).",
           "type": [
             "string",
             "null"
@@ -989,12 +1013,12 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Controls mirrord features.\n\nSee the [technical reference, Technical Reference](https://mirrord.dev/docs/reference/) to learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, \"copy_target\": false, \"hostname\": true } } ```",
+      "description": "Controls mirrord features.\n\nSee the [technical reference, Technical Reference](https://metalbear.co/mirrord/docs/reference/) to learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, \"copy_target\": false, \"hostname\": true } } ```",
       "type": "object",
       "properties": {
         "copy_target": {
           "title": "feature.copy_target {#feature-copy_target}",
-          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/overview/teams/?utm_source=copytarget).\n\nThis feature is not compatible with rollout targets and running without a target (`targetless` mode).",
+          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.co/mirrord/docs/overview/teams/?utm_source=copytarget).\n\nThis feature is not compatible with rollout targets and running without a target (`targetless` mode).",
           "anyOf": [
             {
               "$ref": "#/definitions/CopyTargetFileConfig"
@@ -1125,7 +1149,7 @@
     },
     "FsUserConfig": {
       "title": "feature.fs {#fs}",
-      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup mirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json { \"feature\": { \"fs\": \"read\" } } ```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] } } } ```",
+      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://metalbear.co/mirrord/docs/reference/fileops/) for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup mirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json { \"feature\": { \"fs\": \"read\" } } ```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] } } } ```",
       "anyOf": [
         {
           "description": "<!--${internal}--> Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
@@ -1189,7 +1213,7 @@
         },
         "ports": {
           "title": "feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}",
-          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will *not* be stolen, unless listed in [`feature.network.incoming.ports`](#feature-network-incoming-ports).\n\nSet to [80, 8080] by default.",
+          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will *not* be stolen, unless listed in [`feature.network.incoming.ports`](#feature-network-incoming-ports).\n\nWe check the pod's health probe ports and automatically add them here, as they're usually the same ports your app might be listening on. If your app ports and the health probe ports don't match, then setting this option will override this behavior.\n\nSet to [80, 8080] by default.",
           "anyOf": [
             {
               "$ref": "#/definitions/PortList"
@@ -1365,7 +1389,7 @@
     },
     "IncomingFileConfig": {
       "title": "incoming (network)",
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000], \"listen_ports\": [[80, 8111]] } } } } ```",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000], \"listen_ports\": [[80, 8111]] } } } } ```",
       "anyOf": [
         {
           "anyOf": [
@@ -1570,7 +1594,7 @@
       }
     },
     "NetworkFileConfig": {
-      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } } } } ```",
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://metalbear.co/mirrord/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } } } } ```",
       "type": "object",
       "properties": {
         "dns": {
@@ -1618,7 +1642,7 @@
       "additionalProperties": false
     },
     "OutgoingFileConfig": {
-      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more details.\n\nThe `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nYou can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.\n\n```json { \"feature\": { \"network\": { \"outgoing\": \"remote\" } } } ```\n\nAlternatively, you can use more fine-grained configuration. The `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
       "type": "object",
       "properties": {
         "filter": {

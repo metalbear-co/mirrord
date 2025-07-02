@@ -2,6 +2,8 @@ use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 
+use crate::Payload;
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NetworkConfiguration {
     pub ip: IpAddr,
@@ -13,7 +15,7 @@ pub struct NetworkConfiguration {
 pub enum ClientVpn {
     GetNetworkConfiguration,
     OpenSocket,
-    Packet(Vec<u8>),
+    Packet(Payload),
 }
 
 impl fmt::Debug for ClientVpn {
@@ -33,7 +35,7 @@ impl fmt::Debug for ClientVpn {
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub enum ServerVpn {
     NetworkConfiguration(NetworkConfiguration),
-    Packet(Vec<u8>),
+    Packet(Payload),
 }
 
 impl fmt::Debug for ServerVpn {

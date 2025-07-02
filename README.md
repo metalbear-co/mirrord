@@ -4,16 +4,16 @@
 
 </div>
 
-[![Discord](https://img.shields.io/discord/933706914808889356?color=5865F2&label=Discord&logo=discord&logoColor=white)](https://discord.gg/metalbear)
+[![Community Slack](https://img.shields.io/badge/Join-e5f7f7?logo=slack&label=Community%20Slack)](https://metalbear.co/slack)
 [![Github CI](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/metalbear-co/mirrord/blob/main/LICENSE)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)](https://github.com/metalbear-co/mirrord/releases)
 [![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
 
-[mirrord lets developers run local processes in the context of their Kubernetes environment](https://mirrord.dev/).
+[mirrord lets developers run local processes in the context of their Kubernetes environment](https://metalbear.co/mirrord/).
 It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually
 going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
-It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
+It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://metalbear.co/mirrord/docs/overview/introduction/).
 
 # Contents
 
@@ -133,7 +133,7 @@ mirrord exec node app.js --target pod/my-pod
 When you select a pod to impersonate, mirrord launches a pod on the same node as the pod you selected.
 The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process,
 routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables.
-You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
+You can read more about it [here](https://metalbear.co/mirrord/docs/overview/introduction/).
 
 ### Additional capabilities
 
@@ -143,7 +143,7 @@ Container run inside the pod launched by mirrord requires additional [Linux capa
 - `CAP_SYS_PTRACE` - for reading target pod environment
 - `CAP_SYS_ADMIN` - for joining target pod network namespace
 
-However, you can disable any subset of those in the [configuration](https://mirrord.dev/docs/reference/configuration/).
+However, you can disable any subset of those in the [configuration](https://metalbear.co/mirrord/docs/reference/configuration/).
 This will possibly limit mirrord functionalities or even make it unusable in some setups.
 
 ```bash
@@ -156,18 +156,18 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
 
 ## FAQ
 
-Our FAQ is available [here](https://mirrord.dev/docs/faq/general/).
+Our FAQ is available [here](https://metalbear.co/mirrord/docs/faq/general/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
-or on [Discord](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack).
+or on [Slack](https://metalbear.co/slack).
 
 ## Contributing
 
 Contributions are very welcome. Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
-We're available on [Discord](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for any questions.
+We're available on [Slack](https://metalbear.co/slack) for any questions.
 
 ## Help and Community
 
-Join our [Discord Server](https://discord.gg/metalbear) or [Slack](https://metalbear.co/slack) for questions, support and fun.
+Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
 
 ## Code of Conduct
 

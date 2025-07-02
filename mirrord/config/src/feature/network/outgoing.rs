@@ -67,10 +67,23 @@ pub enum OutgoingFilterConfig {
 
 /// Tunnel outgoing network operations through mirrord.
 ///
-/// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
+/// See the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more
 /// details.
 ///
-/// The `remote` and `local` config for this feature are **mutually** exclusive.
+/// You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "outgoing": "remote"
+///     }
+///   }
+/// }
+/// ```
+///
+/// Alternatively, you can use more fine-grained configuration. The `remote` and `local` config for
+/// this feature are **mutually** exclusive.
 ///
 /// ```json
 /// {

@@ -32,9 +32,10 @@ pub(crate) struct AgentConnection {
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
-    config: &LayerConfig,
+    config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
+    branch_name: Option<String>,
 ) -> CliResult<Option<OperatorSessionConnection>>
 where
     P: Progress,
@@ -92,7 +93,7 @@ where
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
-        .connect_in_new_session(target, config, &session_subtask)
+        .connect_in_new_session(target, config, &session_subtask, branch_name)
         .await?;
     session_subtask.success(Some("session started"));
 
@@ -111,14 +112,17 @@ where
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn create_and_connect<P, R: Reporter>(
-    config: &LayerConfig,
+    config: &mut LayerConfig,
     progress: &mut P,
     analytics: &mut R,
+    branch_name: Option<String>,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
 {
-    if let Some(connection) = try_connect_using_operator(config, progress, analytics).await? {
+    if let Some(connection) =
+        try_connect_using_operator(config, progress, analytics, branch_name).await?
+    {
         return Ok((
             AgentConnectInfo::Operator(connection.session),
             AgentConnection {
@@ -180,7 +184,7 @@ where
         k8s_api.create_agent(
             progress,
             &config.target,
-            Some(&config.feature.network),
+            Some(&mut config.feature.network),
             agent_container_config,
         ),
     )
@@ -230,7 +234,7 @@ where
                 let mut actions = HashSet::new();
                 actions.insert(IdeAction::Link {
                     label: "Get started (read the docs)".to_string(),
-                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
+                    link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
                 });
                 actions.insert(IdeAction::Link {
                     label: "Try it now".to_string(),
@@ -243,7 +247,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
@@ -260,7 +264,7 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Get started (read the docs)".to_string(),
-                link: "https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
+                link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
             });
             actions.insert(IdeAction::Link {
                 label: "Try it now".to_string(),
@@ -273,6 +277,6 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
 }

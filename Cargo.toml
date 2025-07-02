@@ -30,15 +30,15 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.142.1"
+version = "3.148.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
-documentation = "https://mirrord.dev/docs"
+documentation = "https://metalbear.co/mirrord/docs"
 authors = ["MetalBear <hi@metalbear.co>"]
 description = "Run a local process in the context of a cloud environment"
-homepage = "https://mirrord.dev"
+homepage = "https://metalbear.co/mirrord"
 publish = false
 keywords = [
     "cli",

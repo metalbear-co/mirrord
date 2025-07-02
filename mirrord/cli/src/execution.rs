@@ -36,7 +36,7 @@ use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
     error::CliError,
     extract::extract_library,
-    util::remove_proxy_env,
+    util::{get_user_git_branch, remove_proxy_env},
     CliResult,
 };
 
@@ -179,7 +179,7 @@ impl MirrordExecution {
     /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
-        config: &LayerConfig,
+        config: &mut LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
@@ -194,9 +194,12 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        let branch_name = get_user_git_branch().await;
+
+        let (connect_info, mut connection) =
+            create_and_connect(config, progress, analytics, branch_name)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         if config.feature.network.incoming.http_filter.is_composite() {
             let version = match &connect_info {
@@ -314,11 +317,7 @@ impl MirrordExecution {
                             .clone()
                             .map(|x| x.to_vec())
                             .unwrap_or_default(),
-                        skip: &config
-                            .skip_sip
-                            .clone()
-                            .map(|x| x.to_vec())
-                            .unwrap_or_default(),
+                        skip: &config.skip_sip,
                     },
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
@@ -379,7 +378,7 @@ impl MirrordExecution {
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start_external<P>(
-        config: &LayerConfig,
+        config: &mut LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         tls: Option<&SecureChannelSetup>,
@@ -391,9 +390,12 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        let branch_name = get_user_git_branch().await;
+
+        let (connect_info, mut connection) =
+            create_and_connect(config, progress, analytics, branch_name)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
