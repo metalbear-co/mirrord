@@ -25,7 +25,7 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
     tcp::{Filter, HttpFilter, StealType},
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Port, CLIENT_READY_FOR_LOGS,
+    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Payload, Port, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
 use tokio::{
@@ -236,7 +236,7 @@ impl PortForwarder {
                         let Some(sender) = self.task_txs.get(socket_pair) else {
                             unreachable!("sender is always created before this point")
                         };
-                        match sender.send(res.bytes).await {
+                        match sender.send(res.bytes.into_vec()).await {
                             Ok(_) => (),
                             Err(_) => {
                                 self.task_txs.remove(socket_pair);
@@ -653,7 +653,7 @@ enum PortForwardMessage {
     Connect(ConnectionPortMapping, oneshot::Sender<ConnectionId>),
 
     /// Data received from the user in the connection with the given id.
-    Send(ConnectionId, Vec<u8>),
+    Send(ConnectionId, Payload),
 
     /// A request to close the remote connection with the given id, if it exists, and the local
     /// socket.
@@ -1052,7 +1052,7 @@ mod test {
             InternalHttpRequest, InternalHttpResponse, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
             StealType, TcpClose, TcpData,
         },
-        ClientMessage, DaemonMessage,
+        ClientMessage, DaemonMessage, ToPayload,
     };
     use reqwest::{header::HeaderMap, Method, StatusCode, Version};
     use rstest::rstest;
@@ -1191,7 +1191,7 @@ mod test {
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
-            bytes: b"data-my-beloved".to_vec(),
+            bytes: b"data-my-beloved".to_payload(),
         }));
         assert_eq!(test_connection.recv().await, expected);
 
@@ -1200,7 +1200,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: b"reply-my-beloved".to_vec(),
+                    bytes: b"reply-my-beloved".to_payload(),
                 },
             ))))
             .await;
@@ -1288,13 +1288,13 @@ mod test {
         // expect data to be received
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
-            bytes: b"data-from-1".to_vec(),
+            bytes: b"data-from-1".to_payload(),
         }));
         assert_eq!(test_connection.recv().await, expected);
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 2,
-            bytes: b"data-from-2".to_vec(),
+            bytes: b"data-from-2".to_payload(),
         }));
         assert_eq!(test_connection.recv().await, expected);
 
@@ -1303,7 +1303,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: b"reply-to-1".to_vec(),
+                    bytes: b"reply-to-1".to_payload(),
                 },
             ))))
             .await;
@@ -1311,7 +1311,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 2,
-                    bytes: b"reply-to-2".to_vec(),
+                    bytes: b"reply-to-2".to_payload(),
                 },
             ))))
             .await;
@@ -1379,7 +1379,7 @@ mod test {
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"data-my-beloved".to_vec(),
+                bytes: b"data-my-beloved".to_payload(),
             })))
             .await;
 
@@ -1454,7 +1454,7 @@ mod test {
         test_connection
             .send(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"data-my-beloved".to_vec(),
+                bytes: b"data-my-beloved".to_payload(),
             })))
             .await;
 
@@ -1469,7 +1469,7 @@ mod test {
             test_connection.recv().await,
             ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                 connection_id: 1,
-                bytes: b"reply-my-beloved".to_vec()
+                bytes: b"reply-my-beloved".to_payload()
             }))
         );
 
@@ -1564,14 +1564,14 @@ mod test {
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"connection-1-my-beloved".to_vec(),
+                bytes: b"connection-1-my-beloved".to_payload(),
             })))
             .await;
 
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 2,
-                bytes: b"connection-2-my-beloved".to_vec(),
+                bytes: b"connection-2-my-beloved".to_payload(),
             })))
             .await;
 
@@ -1652,7 +1652,7 @@ mod test {
             uri: "https://www.rust-lang.org/install.html".parse().unwrap(),
             headers,
             version: Version::HTTP_11,
-            body: vec![],
+            body: vec![].into(),
         };
         test_connection
             .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(
@@ -1684,7 +1684,7 @@ mod test {
             version: Version::HTTP_11,
             headers,
             body: InternalHttpBody(
-                [InternalHttpBodyFrame::Data(b"yay".into())]
+                [InternalHttpBodyFrame::Data(b"yay".to_payload())]
                     .into_iter()
                     .collect(),
             ),

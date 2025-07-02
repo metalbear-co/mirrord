@@ -74,6 +74,9 @@ pub enum OperatorApiError {
 
     #[error(transparent)]
     ParseInt(#[from] ParseIntError),
+
+    #[error("copied target failed: {}", message.as_deref().unwrap_or("reason unknown"))]
+    CopiedTargetFailed { message: Option<String> },
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
