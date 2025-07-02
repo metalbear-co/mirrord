@@ -4,6 +4,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    ops::Not,
     time::Duration,
 };
 
@@ -284,6 +285,7 @@ pub async fn create_queue_registry_resource(
                     .to_string(),
                 ),
                 names_from_json_map: Some(true),
+                sns: None,
             }),
         )])
     } else if use_regex {
@@ -294,6 +296,7 @@ pub async fn create_queue_registry_resource(
                 tags: None,
                 fallback_name: None,
                 names_from_json_map: None,
+                sns: None,
             }),
         )])
     } else {
@@ -305,6 +308,7 @@ pub async fn create_queue_registry_resource(
                     tags: None,
                     fallback_name: None,
                     names_from_json_map: None,
+                    sns: None,
                 }),
             ),
             (
@@ -314,6 +318,7 @@ pub async fn create_queue_registry_resource(
                     tags: None,
                     fallback_name: None,
                     names_from_json_map: None,
+                    sns: None,
                 }),
             ),
         ])
