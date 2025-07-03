@@ -22,7 +22,6 @@ use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
-    error::ProxyStartupError,
     IntProxy,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
@@ -129,9 +128,7 @@ pub(crate) async fn connect_and_ping(
     connect_info: AgentConnectInfo,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<AgentConnection, InternalProxyError> {
-    let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
-        .await
-        .map_err(ProxyStartupError::from)?;
+    let mut agent_conn = AgentConnection::new(config, connect_info, analytics).await?;
 
     agent_conn
         .agent_tx

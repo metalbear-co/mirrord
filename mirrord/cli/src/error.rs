@@ -4,7 +4,10 @@ use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
-use mirrord_intproxy::{agent_conn::ConnectionTlsError, error::ProxyStartupError};
+use mirrord_intproxy::{
+    agent_conn::{AgentConnectionError, ConnectionTlsError},
+    error::ProxyStartupError,
+};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use mirrord_tls_util::SecureChannelError;
@@ -111,6 +114,10 @@ pub(crate) enum InternalProxyError {
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
+
+    #[error("Unable to connect to agent: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    AgentConnection(#[from] AgentConnectionError),
 
     #[error("Main internal proxy logic failed: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
