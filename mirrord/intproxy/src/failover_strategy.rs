@@ -1,8 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
 use mirrord_intproxy_protocol::{
-    LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProxyToLayerMessage,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProxyToLayerMessage,
 };
+use mirrord_protocol::FileRequest;
 use tokio::time;
 
 use crate::{
@@ -50,8 +51,8 @@ impl FailoverStrategy {
     ) -> Result<(), ProxyStartupError> {
         let mut failover = self;
 
-        while let Some((layer_id, msg_id)) = failover.pending_layers.pop() {
-            failover.update_layer_on_error(layer_id, msg_id).await;
+        while let Some((layer_id, message_id)) = failover.pending_layers.pop() {
+            failover.send_error_to_layer(layer_id, message_id).await;
         }
 
         loop {
@@ -128,18 +129,8 @@ impl FailoverStrategy {
                 );
                 self.layers.insert(new_layer.id, tx);
             }
-            ProxyMessage::FromLayer(FromLayer {
-                message: msg @ LayerToProxyMessage::Incoming(_),
-                ..
-            }) => {
-                tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");
-            }
-            ProxyMessage::FromLayer(FromLayer {
-                message_id,
-                layer_id,
-                ..
-            }) => {
-                self.update_layer_on_error(layer_id, message_id).await;
+            ProxyMessage::FromLayer(message) => {
+                self.update_layer_on_error(message).await;
             }
             msg => {
                 tracing::info!(message = ?msg, "Proxy in failover mode, ignoring a message");
@@ -147,7 +138,24 @@ impl FailoverStrategy {
         }
     }
 
-    async fn update_layer_on_error(&self, layer_id: LayerId, message_id: MessageId) {
+    async fn update_layer_on_error(
+        &self,
+        FromLayer {
+            layer_id,
+            message_id,
+            message,
+        }: FromLayer,
+    ) {
+        match message {
+            LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
+            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => {
+                tracing::info!(message = ?message, "Proxy in failover mode, ignoring a message");
+            }
+            _ => self.send_error_to_layer(layer_id, message_id).await,
+        }
+    }
+
+    async fn send_error_to_layer(&self, layer_id: LayerId, message_id: MessageId) {
         if let Some(layer) = self.layers.get(&layer_id) {
             layer
                 .send(LocalMessage {

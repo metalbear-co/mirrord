@@ -13,8 +13,12 @@ use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
-use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage, MessageId};
-use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
+use mirrord_intproxy_protocol::{
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
+};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage, FileRequest, LogLevel, CLIENT_READY_FOR_LOGS,
+};
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},
@@ -241,7 +245,6 @@ impl IntProxy {
                         "Received a task update",
                     );
                     let update_res = proxy.handle_task_update(task_id, task_update).await;
-                    tracing::trace!(%task_id, ?update_res, "task updated");
                     match update_res {
                         Err(InternalProxyError::Startup(err) ) => {
                             tracing::error!(%err, "Critical error in background task update");
@@ -330,7 +333,11 @@ impl IntProxy {
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
             ProxyMessage::FromLayer(msg) => {
-                if !matches!(msg.message, LayerToProxyMessage::Incoming(_)) {
+                if !matches!(
+                    msg.message,
+                    LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
+                        | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+                ) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
                 self.handle_layer_message(msg).await?
@@ -777,7 +784,7 @@ mod test {
     /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
     #[tokio::test]
     async fn switch_to_failover() {
-        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
+        let (agent_tx, _proxy_rx) = mpsc::channel(12);
         let (proxy_tx, agent_rx) = mpsc::channel(12);
 
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
@@ -799,13 +806,6 @@ mod test {
             Default::default(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
-
-        match proxy_rx.recv().await.unwrap() {
-            ClientMessage::SwitchProtocolVersion(version) => {
-                assert_eq!(version, *mirrord_protocol::VERSION)
-            }
-            other => panic!("unexpected client message from the proxy: {other:?}"),
-        }
 
         let conn = TcpStream::connect(proxy_addr).await.unwrap();
         let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
@@ -833,22 +833,6 @@ mod test {
             } => {}
             other => panic!("unexpected local message from the proxy: {other:?}"),
         }
-
-        // To make sure that the proxy has a chance to do progress.
-        // If the proxy was not waiting for agent protocol version,
-        // it would surely respond to our previous request here.
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                match proxy_rx.recv().await.unwrap() {
-                    ClientMessage::Ping => {
-                        proxy_tx.send(DaemonMessage::Pong).await.unwrap();
-                    }
-                    other => panic!("unexpected client message from the proxy: {other:?}"),
-                }
-            }
-        })
-        .await
-        .unwrap_err();
 
         proxy_tx
             .send(DaemonMessage::SwitchProtocolVersionResponse(
@@ -889,14 +873,12 @@ mod test {
     /// Verifies that [`IntProxy`] run method return an error on a startup error
     #[tokio::test]
     async fn startup_fail() {
-        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
+        let (agent_tx, _proxy_rx) = mpsc::channel(12);
+        let (_proxy_tx, agent_rx) = mpsc::channel(12);
 
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
-
-        let proxy_addr = listener.local_addr().unwrap();
 
         let agent_conn = AgentConnection {
             agent_rx,
@@ -910,51 +892,12 @@ mod test {
             Default::default(),
             Default::default(),
         );
-        let proxy_handle = tokio::spawn(async {
-            assert!(proxy
-                .run(Duration::from_secs(1), Duration::ZERO)
-                .await
-                .is_err());
-        });
-
-        match proxy_rx.recv().await.unwrap() {
-            ClientMessage::SwitchProtocolVersion(version) => {
-                assert_eq!(version, *mirrord_protocol::VERSION)
-            }
-            other => panic!("unexpected client message from the proxy: {other:?}"),
-        }
-
-        let conn = TcpStream::connect(proxy_addr).await.unwrap();
-        let (encoder, decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
-            LocalMessage<LayerToProxyMessage>,
-            LocalMessage<ProxyToLayerMessage>,
-        >(conn);
-
-        // To make sure that the proxy has a chance to do progress.
-        // If the proxy was not waiting for agent protocol version,
-        // it would surely respond to our previous request here.
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                match proxy_rx.recv().await.unwrap() {
-                    ClientMessage::Ping => {
-                        proxy_tx.send(DaemonMessage::Pong).await.unwrap();
-                    }
-                    other => panic!("unexpected client message from the proxy: {other:?}"),
-                }
-            }
-        })
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            proxy.run(Duration::from_millis(100), Duration::ZERO),
+        )
         .await
+        .unwrap()
         .unwrap_err();
-
-        proxy_tx
-            .send(DaemonMessage::SwitchProtocolVersionResponse(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await
-            .unwrap();
-
-        std::mem::drop((encoder, decoder));
-
-        proxy_handle.await.unwrap();
     }
 }

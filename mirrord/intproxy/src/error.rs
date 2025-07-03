@@ -34,6 +34,8 @@ pub(crate) enum ProxyRuntimeError {
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
 
+    #[error("connection with agent failed: {0}")]
+    AgentConnection(#[from] AgentConnectionError),
     #[error("agent closed connection with error: {0}")]
     AgentFailed(String),
     #[error(transparent)]
@@ -66,8 +68,6 @@ pub(crate) enum ProxyRuntimeError {
 /// exist a failover strategy, so facing this error the proxy stops working.
 #[derive(Error, Debug)]
 pub enum ProxyStartupError {
-    #[error("connecting with agent failed: {0}")]
-    AgentConnection(#[from] AgentConnectionError),
     #[error("waiting for the first layer connection timed out")]
     ConnectionAcceptTimeout,
 }
