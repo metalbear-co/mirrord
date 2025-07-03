@@ -15,13 +15,14 @@ use crate::{
     IntProxy,
 };
 
-/// This struct is a strategy that handle failover logic for [`IntProxy`](IntProxy).
+/// This struct is a strategy that handle failover logic for [`IntProxy`].
 ///
 /// Essentially send an error message to every layer that:
 /// - is waiting for a response and wasn't yet updated bout the failure happened
 /// - send an error to every layer that sends a message (if a response is expected in the normal
 ///   workflow)
-/// all while continues to accept new connections from layers
+///
+/// All while continues to accept new connections from layers
 pub(super) struct FailoverStrategy {
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     layer_initializer: TaskSender<LayerInitializer>,
