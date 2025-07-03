@@ -27,6 +27,8 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
+#[cfg(feature = "experimental")]
+use crate::crd::session::MirrordSession;
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
@@ -248,6 +250,12 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordProfile::crd().to_writer(&mut writer)?;
+
+        #[cfg(feature = "experimental")]
+        {
+            writer.write_all(b"---\n")?;
+            MirrordSession::crd().to_writer(&mut writer)?;
+        }
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
@@ -640,6 +648,19 @@ impl OperatorClusterRole {
                 ..Default::default()
             },
         ];
+
+        #[cfg(feature = "experimental")]
+        {
+            rules.push(PolicyRule {
+                api_groups: Some(vec![MirrordSession::group(&()).into_owned()]),
+                resources: Some(vec![MirrordSession::plural(&()).into_owned()]),
+                verbs: ["get", "list", "watch", "create", "delete"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            });
+        }
 
         if kafka_splitting {
             rules.extend([
