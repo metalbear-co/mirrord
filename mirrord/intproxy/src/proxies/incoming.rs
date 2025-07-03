@@ -557,7 +557,7 @@ impl IncomingProxy {
                 let tx = self.tcp_proxies.get(is_steal).get(&data.connection_id);
 
                 if let Some(tx) = tx {
-                    tx.send(data.bytes).await;
+                    tx.send(data.bytes.into_vec()).await;
                 } else {
                     tracing::debug!(
                         connection_id = data.connection_id,
@@ -759,7 +759,7 @@ impl IncomingProxy {
                     message_bus
                         .send(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                             connection_id,
-                            bytes,
+                            bytes: bytes.into(),
                         })))
                         .await;
                 }

@@ -691,6 +691,16 @@ impl LayerConfig {
             ));
         }
 
+        if self.feature.copy_target.enabled
+            && self.feature.network.incoming.http_filter.is_filter_set()
+        {
+            context.add_warning(
+                "copy target is enabled and http filter is set, this means that all \
+            unmatched HTTP requests are discarded"
+                    .to_string(),
+            );
+        }
+
         Ok(())
     }
 }
@@ -719,7 +729,8 @@ impl LayerFileConfig {
         let rendered = template_engine.render("main", &tera::Context::new())?;
 
         match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
-            Some("json") => Ok(serde_json::from_str::<Self>(&rendered)?),
+            // No Extension? assume json
+            Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
             _ => Err(ConfigError::UnsupportedFormat),

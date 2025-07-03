@@ -20,7 +20,7 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectionId, Port, RemoteResult, RequestId};
+use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnectionV1 {
@@ -40,7 +40,7 @@ pub struct NewTcpConnectionV2 {
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct TcpData {
     pub connection_id: ConnectionId,
-    pub bytes: Vec<u8>,
+    pub bytes: Payload,
 }
 
 impl fmt::Debug for TcpData {
@@ -91,7 +91,7 @@ pub enum DaemonTcp {
     /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
     /// flakiness.
     SubscribeResult(RemoteResult<Port>),
-    HttpRequest(HttpRequest<Vec<u8>>),
+    HttpRequest(HttpRequest<Payload>),
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
     HttpRequestChunked(ChunkedRequest),
     NewConnectionV2(NewTcpConnectionV2),
@@ -122,7 +122,7 @@ pub struct ChunkedRequestBodyV1 {
 impl From<InternalHttpBodyFrame> for Frame<Bytes> {
     fn from(value: InternalHttpBodyFrame) -> Self {
         match value {
-            InternalHttpBodyFrame::Data(data) => Frame::data(data.into()),
+            InternalHttpBodyFrame::Data(data) => Frame::data(data.0),
             InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
         }
     }
@@ -318,7 +318,7 @@ pub enum LayerTcpSteal {
     /// anymore.
     PortUnsubscribe(Port),
     Data(TcpData),
-    HttpResponse(HttpResponse<Vec<u8>>),
+    HttpResponse(HttpResponse<Payload>),
     HttpResponseFramed(HttpResponse<InternalHttpBody>),
     HttpResponseChunked(ChunkedResponse),
 }
@@ -579,7 +579,7 @@ impl Body for InternalHttpBody {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum InternalHttpBodyFrame {
-    Data(Vec<u8>),
+    Data(Payload),
     Trailers(#[serde(with = "http_serde::header_map")] HeaderMap),
 }
 

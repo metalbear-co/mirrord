@@ -1642,7 +1642,7 @@
       "additionalProperties": false
     },
     "OutgoingFileConfig": {
-      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nThe `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nYou can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.\n\n```json { \"feature\": { \"network\": { \"outgoing\": \"remote\" } } } ```\n\nAlternatively, you can use more fine-grained configuration. The `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
       "type": "object",
       "properties": {
         "filter": {

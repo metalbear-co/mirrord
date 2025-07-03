@@ -8,6 +8,60 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.148.0](https://github.com/metalbear-co/mirrord/tree/3.148.0) - 2025-07-01
+
+
+### Added
+
+- Added a warning that notifies about the possibility of losing
+  requests unmatched requests when both HTTP filter and copy target
+  are used.
+  [#3223](https://github.com/metalbear-co/mirrord/issues/3223)
+- Added E2BIG error handling in the mirrord CLI. mirrord CLI
+  now shows a more informative error.
+  [#3254](https://github.com/metalbear-co/mirrord/issues/3254)
+
+
+### Changed
+
+- Made the documentation on outgoing traffic configuration clearer.
+
+
+### Fixed
+
+- Fixed an issue where the copy target feature was failing with a request
+  timeout.
+
+
+### Internal
+
+- Introduced a new struct `Payload` that enables to cheaply clone mirrord-protocol
+  messages and enables almost zero copy message handling.
+  [#3365](https://github.com/metalbear-co/mirrord/issues/3365)
+- Added a release preparation script.
+- Added a startup probe to the HTTP server containers deployed in the E2E
+  tests.
+- Fixed the install script.
+
+## [3.147.0](https://github.com/metalbear-co/mirrord/tree/3.147.0) - 2025-06-26
+
+
+### Changed
+
+- mirrord exec config_file with no extension, e.g. heredoc, now assumed to be
+  of json format [#3370](https://github.com/metalbear-co/mirrord/issues/3370)
+- mirrord now extracts layer to temp_dir()/mirrord to allow easier whitelisting
+  with Carbon Black
+  [#3373](https://github.com/metalbear-co/mirrord/issues/3373)
+- Expand current profile config doc to address the new namespaced profile
+  feature.
+
+
+### Internal
+
+- Add sns flag to queue registry CRD.
+- Skip priority class e2e test.
+
 ## [3.146.0](https://github.com/metalbear-co/mirrord/tree/3.146.0) - 2025-06-24
 
 

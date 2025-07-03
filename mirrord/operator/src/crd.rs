@@ -8,7 +8,7 @@ use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::{QueueMessageFilter, SplitQueuesConfig},
+    feature::split_queues::QueueMessageFilter,
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
-use crate::types::LicenseInfoOwned;
+use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
 
+pub mod copy_target;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
@@ -314,37 +315,6 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
     }
 }
 
-/// This resource represents a copy pod created from an existing [`Target`]
-/// (operator's copy pod feature).
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "CopyTarget",
-    root = "CopyTargetCrd",
-    status = "CopyTargetStatus",
-    namespaced
-)]
-pub struct CopyTargetSpec {
-    /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
-    pub target: Target,
-    /// How long should the operator keep this pod alive after its creation.
-    /// The pod is deleted when this timout has expired and there are no connected clients.
-    pub idle_ttl: Option<u32>,
-    /// Should the operator scale down target deployment to 0 while this pod is alive.
-    /// Ignored if [`Target`] is not [`Target::Deployment`].
-    pub scale_down: bool,
-    /// Split queues client side configuration.
-    pub split_queues: Option<SplitQueuesConfig>,
-}
-
-/// This is the `status` field for [`CopyTargetCrd`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CopyTargetStatus {
-    /// The session object of the original session that created this CopyTarget
-    pub creator_session: Session,
-}
-
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
 /// split it, and temporarily change the name there to the name of the branch queue when splitting.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -390,6 +360,12 @@ pub struct SqsQueueDetails {
     /// original queue. In case of a collision, the temporary queue will get the value from the
     /// tag passed in here.
     pub tags: Option<HashMap<String, String>>,
+
+    /// When this is set, the mirrord SQS splitting operator will try to parse SQS messages as
+    /// json objects that are created when SQS messages are created from SNS notifications.
+    /// The filters will then be matched also against the message attributes that are found inside
+    /// the body of the SQS message, and originate in SNS notification attributes.
+    pub sns: Option<bool>,
 }
 
 /// The details of a queue that should be split.
