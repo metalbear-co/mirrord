@@ -6,7 +6,7 @@ use std::{
 };
 
 use fs4::tokio::AsyncFileExt;
-use kube::{Client, Resource};
+use kube::Resource;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -15,8 +15,8 @@ use tokio::{
 use whoami::fallible;
 
 use crate::{
-    certificate::Certificate, credentials::Credentials, error::CredentialStoreError,
-    key_pair::KeyPair,
+    certificate::Certificate, cluster_api::AuthClient, credentials::Credentials,
+    error::CredentialStoreError, key_pair::KeyPair,
 };
 
 /// "~/.mirrord"
@@ -115,13 +115,14 @@ impl CredentialStore {
     ///
     /// Also, subscription id is accepted as an [`Option`] to make the CLI backwards compatible.
     #[tracing::instrument(level = "trace", skip(self, client))]
-    pub async fn get_or_init<R>(
+    pub async fn get_or_init<R, C>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
     ) -> Result<&mut Credentials, CredentialStoreError>
     where
+        C: AuthClient<R> + Clone,
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
@@ -133,7 +134,7 @@ impl CredentialStore {
                     .and_then(|id| self.signing_keys.get(id))
                     .cloned();
 
-                let credentials = Credentials::init::<R>(
+                let credentials = Credentials::init::<R, C>(
                     client.clone(),
                     &Self::certificate_common_name(),
                     key_pair,
@@ -146,7 +147,7 @@ impl CredentialStore {
 
                 if !credentials.is_valid() {
                     credentials
-                        .refresh::<R>(client.clone(), &Self::certificate_common_name())
+                        .refresh::<R, C>(client.clone(), &Self::certificate_common_name())
                         .await?;
                 }
 
@@ -160,6 +161,145 @@ impl CredentialStore {
         }
 
         Ok(credentials)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::APIService;
+    use x509_certificate::Sign;
+
+    use crate::{
+        cluster_api::client_mock::{certificate_mock, ClientMock},
+        credential_store::CredentialStore,
+    };
+
+    #[tokio::test]
+    async fn get_or_init() {
+        let operator_fingerprint = "operator_fingerprint".to_string();
+        let mut client = ClientMock::default();
+
+        let mut credentials_store = CredentialStore::default();
+        // test when vacant
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint.clone(), None)
+            .await
+            .unwrap();
+        //check if saved cert is the same as the mock cert used
+        let saved_cert = credentials_store
+            .credentials
+            .get(&operator_fingerprint)
+            .unwrap()
+            .as_ref()
+            .clone();
+        let saved_cert = serde_yaml::to_string(&saved_cert).unwrap();
+        let mock_cert = serde_yaml::to_string(&certificate_mock()).unwrap();
+        assert_eq!(mock_cert, saved_cert);
+        // test when entry exists
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint.clone(), None)
+            .await
+            .unwrap();
+        client.return_error = true;
+        // test when entry exists and the client fails
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint.clone(), None)
+            .await
+            .unwrap_err();
+
+        credentials_store = CredentialStore::default();
+        client.return_error = true;
+        // test when vacant and the client fails
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(&client, operator_fingerprint, None)
+            .await
+            .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn reuses_key_pair_for_different_subscriptions() {
+        let operator_fingerprint_1 = "operator_fingerprint_1".to_string();
+        let client = ClientMock::default();
+        let operator_subscription_id = Some("operator_subscription_id".to_string());
+
+        let mut credentials_store = CredentialStore::default();
+        //check if the credential store is empty
+        assert!(credentials_store.credentials.is_empty());
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_1.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        //check if the saved cert is the same as the mock cert used
+        let saved_cert_1 = credentials_store
+            .credentials
+            .get(&operator_fingerprint_1)
+            .unwrap()
+            .as_ref()
+            .clone();
+
+        let (key_pair, _) = client.pop_last_call().expect("No call to the client");
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_1.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        let saved_cert_2 = credentials_store
+            .credentials
+            .get(&operator_fingerprint_1)
+            .unwrap()
+            .as_ref()
+            .clone();
+
+        // cert must be reused
+        assert_eq!(credentials_store.credentials.len(), 1);
+        assert_eq!(
+            format!("{:#?}", saved_cert_1),
+            format!("{:#?}", saved_cert_2)
+        );
+
+        let operator_fingerprint_2 = "operator_fingerprint_2".to_string();
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_2.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(credentials_store.credentials.len(), 2);
+
+        credentials_store
+            .get_or_init::<APIService, ClientMock>(
+                &client,
+                operator_fingerprint_2.clone(),
+                operator_subscription_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        // cert must be reused
+        assert_eq!(credentials_store.credentials.len(), 2);
+
+        assert_eq!(credentials_store.signing_keys.len(), 1);
+        let priv_key = credentials_store
+            .signing_keys
+            .get(operator_subscription_id.as_ref().unwrap())
+            .unwrap()
+            .private_key_data();
+        assert_eq!(priv_key, key_pair.private_key_data());
     }
 }
 
@@ -190,18 +330,19 @@ impl CredentialStoreSync {
 
     /// Try and get/create a specific client certificate.
     /// The exclusive file lock is already acquired.
-    async fn access_credential<R, C, V>(
+    async fn access_credential<R, F, C, V>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
-        callback: C,
+        callback: F,
     ) -> Result<V, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
-        C: FnOnce(&mut Credentials) -> V,
+        C: AuthClient<R> + Clone,
+        F: FnOnce(&mut Credentials) -> V,
     {
         let mut store = CredentialStore::load(&mut self.store_file)
             .await
@@ -210,7 +351,7 @@ impl CredentialStoreSync {
 
         let value = callback(
             store
-                .get_or_init::<R>(client, operator_fingerprint, operator_subscription_id)
+                .get_or_init::<R, C>(client, operator_fingerprint, operator_subscription_id)
                 .await?,
         );
 
@@ -230,13 +371,14 @@ impl CredentialStoreSync {
     }
 
     /// Get or create specific client certificate with an exclusive lock on the file.
-    pub async fn get_client_certificate<R>(
+    pub async fn get_client_certificate<R, C>(
         &mut self,
-        client: &Client,
+        client: &C,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
     ) -> Result<Certificate, CredentialStoreError>
     where
+        C: AuthClient<R> + Clone,
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
@@ -246,7 +388,7 @@ impl CredentialStoreSync {
             .map_err(CredentialStoreError::Lockfile)?;
 
         let result = self
-            .access_credential::<R, _, Certificate>(
+            .access_credential::<R, _, C, Certificate>(
                 client,
                 operator_fingerprint,
                 operator_subscription_id,
