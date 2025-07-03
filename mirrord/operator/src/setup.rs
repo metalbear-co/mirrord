@@ -27,11 +27,12 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
+#[cfg(feature = "experimental")]
+use crate::crd::session::MirrordSession;
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
-    session::MirrordSession,
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -250,8 +251,11 @@ impl OperatorSetup for Operator {
         writer.write_all(b"---\n")?;
         MirrordProfile::crd().to_writer(&mut writer)?;
 
-        writer.write_all(b"---\n")?;
-        MirrordSession::crd().to_writer(&mut writer)?;
+        #[cfg(feature = "experimental")]
+        {
+            writer.write_all(b"---\n")?;
+            MirrordSession::crd().to_writer(&mut writer)?;
+        }
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
@@ -643,8 +647,11 @@ impl OperatorClusterRole {
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
-            // `MirrordSession`s
-            PolicyRule {
+        ];
+
+        #[cfg(feature = "experimental")]
+        {
+            rules.push(PolicyRule {
                 api_groups: Some(vec![MirrordSession::group(&()).into_owned()]),
                 resources: Some(vec![MirrordSession::plural(&()).into_owned()]),
                 verbs: ["get", "list", "watch", "create", "delete"]
@@ -652,8 +659,8 @@ impl OperatorClusterRole {
                     .map(String::from)
                     .collect(),
                 ..Default::default()
-            },
-        ];
+            });
+        }
 
         if kafka_splitting {
             rules.extend([
