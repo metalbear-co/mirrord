@@ -7,7 +7,7 @@ use serde::Serialize;
 
 // Permanent ID once extension is published
 static MIRRORD_CHROME_EXTENSION_ID: LazyLock<&str> = LazyLock::new(|| {
-    option_env!("MIRRORD_CHROME_EXTENSION_ID").unwrap_or("ejpgopblebjoiepjnhngaffejlaggogm")
+    option_env!("MIRRORD_CHROME_EXTENSION_ID").unwrap_or("bijejadnnfgjkfdocgocklekjhnhkhkf")
 });
 
 pub(crate) fn init_browser_extension<P>(network_config: &NetworkConfig, progress: &P)
