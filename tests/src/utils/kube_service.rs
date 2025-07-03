@@ -3,7 +3,7 @@ use k8s_openapi::api::{apps::v1::Deployment, core::v1::Service};
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 
 use super::resource_guard::ResourceGuard;
-use crate::utils::CONTAINER_NAME;
+use crate::utils::{cluster_resource::argo_rollout_from_deployment, watch, CONTAINER_NAME};
 
 /// A service deployed to the kubernetes cluster.
 ///
@@ -35,6 +35,42 @@ impl KubeService {
         }
 
         format!("rollout/{}", self.name)
+    }
+
+    pub fn rollout_or_deployment_target(&self) -> String {
+        if self.rollout.is_some() {
+            self.rollout_target()
+        } else {
+            self.deployment_target()
+        }
+    }
+
+    /// Create a rollout, a `ResourceGuard` that deletes it, and wait for the rollout to be
+    /// available.
+    /// Add the rollout to this service
+    pub async fn add_rollout(&mut self, kube_client: kube::Client, delete_after_fail: bool) {
+        let rollout = argo_rollout_from_deployment(&self.name, &self.deployment);
+        let rollout_api: kube::Api<Rollout> =
+            kube::Api::namespaced(kube_client.clone(), &self.namespace);
+        let (rollout_guard, rollout) =
+            ResourceGuard::create(rollout_api, &rollout, delete_after_fail)
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to create rollout guard! Error: \n{err:?}\nRollout:\n{}",
+                        serde_json::to_string_pretty(&rollout).unwrap()
+                    )
+                });
+        println!(
+            "Created rollout\n{}",
+            serde_json::to_string_pretty(&rollout).unwrap()
+        );
+
+        // Wait for the rollout to have at least 1 available replica
+        watch::wait_until_rollout_available(&self.name, &self.namespace, 1, kube_client).await;
+
+        self.rollout = Some(rollout);
+        self.guards.push(rollout_guard);
     }
 }
 

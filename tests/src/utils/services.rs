@@ -539,38 +539,22 @@ pub async fn rollout_service(
         .unwrap();
     println!("Created pod {pod_name:#?}");
 
-    // `Rollout`
-    let rollout = argo_rollout_from_json(&name, &deployment);
-    let (rollout_guard, rollout) =
-        ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "Failed to create rollout guard! \n{}",
-                    serde_json::to_string_pretty(&rollout).unwrap()
-                )
-            });
-    println!(
-        "Created rollout\n{}",
-        serde_json::to_string_pretty(&rollout).unwrap()
-    );
+    let mut service = KubeService {
+        name: name.clone(),
+        namespace: namespace.to_string(),
+        service,
+        deployment,
+        rollout: None, // adding the rollout below.
+        pod_name,
+        guards: vec![deployment_guard, service_guard],
+        namespace_guard: namespace_guard.map(|(guard, _)| guard),
+    };
 
-    // Wait for the rollout to have at least 1 available replica
-    watch::wait_until_rollout_available(&name, namespace, 1, kube_client.clone()).await;
+    service.add_rollout(kube_client, delete_after_fail).await;
 
     println!(
         "{:?} done creating service {name} in namespace {namespace}",
         Utc::now()
     );
-
-    KubeService {
-        name,
-        namespace: namespace.to_string(),
-        service,
-        deployment,
-        rollout: Some(rollout),
-        pod_name,
-        guards: vec![deployment_guard, service_guard, rollout_guard],
-        namespace_guard: namespace_guard.map(|(guard, _)| guard),
-    }
+    service
 }
