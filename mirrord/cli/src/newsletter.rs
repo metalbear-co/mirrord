@@ -1,11 +1,11 @@
 use std::{path::PathBuf, sync::LazyLock};
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt},
 };
+use tokio::process::Command;
 use tracing::trace;
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
@@ -53,7 +53,7 @@ impl NewsletterPrompt {
 /// Called during normal execution, suggests newsletter signup if the user has run mirrord a certain
 /// number of times.
 pub async fn suggest_newsletter_signup() {
-    let newsletter_invites = vec![
+    let newsletter_invites = [
         NewsletterPrompt {
             runs: NEWSLETTER_INVITE_FIRST,
             message: format!("Nice! You ran {NEWSLETTER_INVITE_FIRST} successful mirrord sessions."),
@@ -181,3 +181,29 @@ pub enum DataStoreError {
     Json(serde_json::Error),
 }
 
+#[cfg(not(target_os = "macos"))]
+fn get_open_command() -> Command {
+    let mut command = Command::new("gio");
+    command.arg("open");
+    command
+}
+
+#[cfg(target_os = "macos")]
+fn get_open_command() -> Command {
+    Command::new("open")
+}
+
+/// Attempts to open the mirrord newsletter sign-up page in the default browser.
+/// In case of failure, prints the link.
+pub async fn newsletter_command() {
+    // open URL with param utm_source=newslttrcmd
+    let url = format!("{NEWSLETTER_SIGNUP_URL}cmd");
+    match get_open_command().arg(&url).output().await {
+        Ok(output) if output.status.success() => {}
+        other => {
+            tracing::trace!("failed to open browser, command result: {other:?}");
+            println!("To sign up for the mirrord newsletter and get notified of new features as they come out, visit:\n\n\
+             {url}");
+        }
+    }
+}

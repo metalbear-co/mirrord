@@ -843,6 +843,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::PortForward(args) => port_forward(&args, watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
+            Commands::Newsletter => newsletter::newsletter_command().await,
         };
 
         Ok(())
