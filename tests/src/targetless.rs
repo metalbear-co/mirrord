@@ -13,7 +13,8 @@ mod targetless_tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        application::Application, kube_client, random_string, resource_guard::ResourceGuard,
+        application::Application, kube_client, operator_installed, random_string,
+        resource_guard::ResourceGuard,
     };
 
     /// `mirrord exec` a program that connects to the kubernetes api service by its internal name
@@ -38,13 +39,14 @@ mod targetless_tests {
     }
 
     /// Test spawning a targetless agent pod with a given priority class.
+    #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn targetless_agent_with_priority_class(#[future] kube_client: Client) {
-        if !matches!(std::env::var("MIRRORD_E2E").as_deref(), Ok("true")) {
+        let kube_client = kube_client.await;
+        if operator_installed(&kube_client).await.unwrap() {
             return;
         }
-        let kube_client = kube_client.await;
         // create a priority class
         let priority_class = PriorityClass {
             metadata: ObjectMeta {

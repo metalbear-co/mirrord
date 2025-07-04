@@ -5,7 +5,8 @@ use std::{path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
-use kube::{Client, Config};
+use kube::{api::GroupVersionKind, discovery, Client, Config, Resource};
+use mirrord_operator::crd::MirrordOperatorCrd;
 pub use process::TestProcess;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
@@ -174,4 +175,20 @@ pub fn config_dir() -> PathBuf {
     let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     config_path.push("configs");
     config_path
+}
+
+/// Detect if Operator is installed
+#[allow(dead_code)]
+pub(crate) async fn operator_installed(client: &Client) -> kube::Result<bool> {
+    let gvk = GroupVersionKind {
+        group: MirrordOperatorCrd::group(&()).into_owned(),
+        version: MirrordOperatorCrd::version(&()).into_owned(),
+        kind: MirrordOperatorCrd::kind(&()).into_owned(),
+    };
+
+    match discovery::oneshot::pinned_kind(client, &gvk).await {
+        Ok(..) => Ok(true),
+        Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
+        Err(error) => Err(error),
+    }
 }
