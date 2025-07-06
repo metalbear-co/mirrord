@@ -750,6 +750,9 @@ pub(super) struct OperatorSetupParams {
     /// are targeted with `scale_down` feature enabled.
     #[arg(long, default_value_t = false)]
     pub(super) application_auto_pause: bool,
+
+    #[arg(long = "experimental-statefull-sessions", default_value_t = false)]
+    pub(super) statefull_sessions: bool,
 }
 
 /// `mirrord operator session` family of commands.

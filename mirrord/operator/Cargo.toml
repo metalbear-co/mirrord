@@ -48,7 +48,6 @@ crd = [
   "dep:thiserror",
 ]
 setup = ["crd", "dep:serde_yaml"]
-experimental = []
 
 [dependencies]
 mirrord-agent-env = { path = "../agent/env", features = ["schema"], optional = true }

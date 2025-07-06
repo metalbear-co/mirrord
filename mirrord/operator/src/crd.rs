@@ -25,7 +25,6 @@ pub mod kube_target;
 pub mod label_selector;
 pub mod policy;
 pub mod profile;
-#[cfg(feature = "experimental")]
 pub mod session;
 pub mod steal_tls;
 
