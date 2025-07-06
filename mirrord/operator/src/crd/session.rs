@@ -42,6 +42,7 @@ pub struct MirrordSessionOwner {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
+    pub api_version: String,
     pub kind: String,
     pub namespace: String,
     pub name: Option<String>,
