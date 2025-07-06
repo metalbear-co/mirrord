@@ -45,7 +45,9 @@ pub struct SessionTarget {
     pub api_version: String,
     pub kind: String,
     pub namespace: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 
