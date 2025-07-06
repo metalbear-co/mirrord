@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct MirrordSessionSpec {
     /// Resources needed to report session metrics to the mirrord Jira app
-    #[serde(skip_serializing_if = "JiraMetricsResources::is_empty")]
+    #[serde(default, skip_serializing_if = "JiraMetricsResources::is_empty")]
     pub jira_metrics_resources: JiraMetricsResources,
 
     /// Owner of this session
