@@ -36,7 +36,7 @@ pub struct MirrordSessionOwner {
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct JiraMetricsResources {
     /// The Jira webhook URL, used to update total session time in the mirrord Jira app
