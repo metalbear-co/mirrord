@@ -15,6 +15,9 @@ pub struct MirrordSessionSpec {
     #[serde(default, skip_serializing_if = "JiraMetricsResources::is_empty")]
     pub jira_metrics_resources: JiraMetricsResources,
 
+    /// Session's target
+    pub target: SessionTarget,
+
     /// Owner of this session
     pub owner: MirrordSessionOwner,
 
@@ -33,6 +36,16 @@ pub struct MirrordSessionOwner {
     pub hostname: String,
     /// Creator Kubernetes username.
     pub k8s_username: String,
+}
+
+/// Resources needed to report session metrics to the mirrord Jira app
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTarget {
+    pub kind: String,
+    pub namespace: String,
+    pub name: Option<String>,
+    pub container: Option<String>,
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app
