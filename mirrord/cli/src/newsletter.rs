@@ -56,14 +56,14 @@ pub async fn suggest_newsletter_signup() {
     let newsletter_invites = [
         NewsletterPrompt {
             runs: NEWSLETTER_INVITE_FIRST,
-            message: format!("Nice! You ran {NEWSLETTER_INVITE_FIRST} successful mirrord sessions."),
+            message: "Join thousands of devs using mirrord!".to_string(),
         },
         NewsletterPrompt {
             runs: NEWSLETTER_INVITE_SECOND,
             message: "Liking what mirrord can do?".to_string(),
         },NewsletterPrompt {
             runs: NEWSLETTER_INVITE_THIRD,
-            message: format!("{NEWSLETTER_INVITE_THIRD} sessions with mirrord! Looks like you're doing some serious work"),
+            message: "Looks like you're doing some serious work with mirrord!".to_string(),
         }
     ];
 
