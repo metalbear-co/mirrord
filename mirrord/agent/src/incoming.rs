@@ -21,7 +21,7 @@ pub use connection::{
     tcp::StolenTcp,
     IncomingStream, IncomingStreamItem,
 };
-pub use error::RedirectorTaskError;
+pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;
 pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::RedirectorTask;

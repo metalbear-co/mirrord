@@ -1,28 +1,21 @@
 use std::{
     collections::{HashMap, VecDeque},
-    convert::Infallible,
     error::Report,
     fmt,
     ops::{Not, RangeInclusive},
-    pin::Pin,
-    task::{Context, Poll},
     vec,
 };
 
-use bytes::Bytes;
-use futures::StreamExt;
-use hyper::{
-    body::{Body, Frame},
-    Response,
-};
+use futures::{stream::FuturesUnordered, StreamExt};
+use hyper::Response;
 use mirrord_protocol::{
     tcp::{
-        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestStartV2,
-        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, HttpResponse,
-        IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType,
-        TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION,
-        HTTP_FRAMED_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, ChunkedResponse, DaemonTcp,
+        HttpRequest, HttpRequestMetadata, HttpResponse, IncomingTrafficTransportType,
+        InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew, InternalHttpRequest,
+        LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType, TcpClose, TcpData,
+        HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
+        MODE_AGNOSTIC_HTTP_REQUESTS,
     },
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
 };
@@ -35,12 +28,15 @@ use crate::{
     error::AgentResult,
     http::filter::HttpFilter,
     incoming::{
-        IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider, StolenHttp,
-        StolenTcp,
+        ConnError, IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider,
+        StolenHttp, StolenTcp,
     },
+    steal::api::wait_body::WaitForFullBody,
     util::{protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus, ClientId},
     AgentError,
 };
+
+mod wait_body;
 
 /// Bridges the communication between the agent and the [`TcpStealerTask`](super::TcpStealerTask).
 ///
@@ -64,9 +60,14 @@ pub struct TcpStealerApi {
     /// View on the task status.
     task_status: BgTaskStatus,
     /// Set of our active connections.
-    connections: HashMap<ConnectionId, IncomingConnection>,
+    connections: HashMap<ConnectionId, ClientConnectionState>,
     /// Streams of updates from our active connections.
     incoming_streams: StreamMap<ConnectionId, IncomingStream>,
+    /// Requests that are in progress, waiting for their full body to be received.
+    ///
+    /// This provides compatibility with old [`mirrord_protocol`] versions
+    /// that do not support chunked requests.
+    requests_in_progress: FuturesUnordered<WaitForFullBody>,
     /// For assigning ids to new connections.
     connection_ids_iter: RangeInclusive<ConnectionId>,
     /// [`Self::recv`] and [`Self::handle_client_message`] can result in more than one message.
@@ -117,15 +118,15 @@ impl TcpStealerApi {
             command_tx,
             message_rx,
             task_status,
-            connections: HashMap::new(),
-            incoming_streams: StreamMap::new(),
+            connections: Default::default(),
+            incoming_streams: Default::default(),
+            requests_in_progress: Default::default(),
             connection_ids_iter: 0..=ConnectionId::MAX,
-            queued_messages: VecDeque::new(),
+            queued_messages: Default::default(),
         })
     }
 
-    /// Send the `command` to the stealer task,
-    /// with the client id of the client that is using this API instance.
+    /// Sends the `command` to the stealer task.
     async fn send_command(&mut self, command: Command) -> AgentResult<()> {
         let command = StealerCommand {
             client_id: self.client_id,
@@ -136,91 +137,6 @@ impl TcpStealerApi {
             Err(self.task_status.wait_assert_running().await)
         } else {
             Ok(())
-        }
-    }
-
-    async fn send_response(
-        &mut self,
-        response: HttpResponse<Vec<InternalHttpBodyFrame>>,
-        body_finished: bool,
-    ) {
-        if response.request_id != Self::REQUEST_ID {
-            return;
-        }
-        let Some(connection) = self.connections.get_mut(&response.connection_id) else {
-            return;
-        };
-        let Some(response_tx) = connection.response_tx.take() else {
-            return;
-        };
-
-        let mut hyper_response = Response::new(());
-        *hyper_response.status_mut() = response.internal_response.status;
-        *hyper_response.headers_mut() = response.internal_response.headers;
-        *hyper_response.version_mut() = response.internal_response.version;
-        let (parts, _) = hyper_response.into_parts();
-
-        let body_sender = response_tx.send(parts);
-
-        for frame in response.internal_response.body {
-            body_sender.send_frame(frame.into()).await;
-        }
-
-        if body_finished {
-            let data_tx = body_sender.finish();
-            connection.data_tx = data_tx;
-        } else {
-            connection.response_body_tx.replace(body_sender);
-        }
-    }
-
-    async fn send_chunked(&mut self, response: ChunkedResponse) {
-        match response {
-            ChunkedResponse::Start(response) => {
-                self.send_response(response, false).await;
-            }
-
-            ChunkedResponse::Body(body) => {
-                let ChunkedRequestBodyV1 {
-                    frames,
-                    is_last,
-                    request_id,
-                    connection_id,
-                } = body;
-
-                if request_id != 0 {
-                    return;
-                }
-                let Some(connection) = self.connections.get_mut(&connection_id) else {
-                    return;
-                };
-                let Some(frame_tx) = connection.response_body_tx.take() else {
-                    return;
-                };
-
-                for frame in frames {
-                    frame_tx.send_frame(frame.into()).await;
-                }
-
-                if is_last {
-                    let data_tx = frame_tx.finish();
-                    connection.data_tx = data_tx;
-                } else {
-                    connection.response_body_tx.replace(frame_tx);
-                }
-            }
-
-            ChunkedResponse::Error(error) => {
-                let ChunkedRequestErrorV1 {
-                    request_id,
-                    connection_id,
-                } = error;
-
-                if request_id == 0 {
-                    self.connections.remove(&connection_id);
-                    self.incoming_streams.remove(&connection_id);
-                }
-            }
         }
     }
 
@@ -252,6 +168,10 @@ impl TcpStealerApi {
                     }
                 }
 
+                Some(request) = self.requests_in_progress.next() => {
+                    self.handle_request_completed(request)?;
+                }
+
                 Some((connection_id, item)) = self.incoming_streams.next() => {
                     self.handle_incoming_item(connection_id, item);
                 }
@@ -259,8 +179,19 @@ impl TcpStealerApi {
         }
     }
 
+    /// Handles a stolen HTTP request received from the stealer task.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     fn handle_request(&mut self, request: StolenHttp) -> AgentResult<()> {
+        let need_to_wait = self
+            .protocol_version
+            .matches(&HTTP_CHUNKED_REQUEST_VERSION)
+            .not()
+            && request.request_head.body_finished.not();
+        if need_to_wait {
+            self.requests_in_progress.push(request.into());
+            return Ok(());
+        }
+
         let connection_id = self
             .connection_ids_iter
             .next()
@@ -271,17 +202,6 @@ impl TcpStealerApi {
             stream,
             response_provider,
         } = request;
-
-        let mut connection =
-            self.connections
-                .entry(connection_id)
-                .insert_entry(IncomingConnection {
-                    data_tx: None,
-                    request_in_progress: None,
-                    response_tx: Some(response_provider),
-                    response_body_tx: None,
-                });
-        self.incoming_streams.insert(connection_id, stream);
 
         if self
             .protocol_version
@@ -343,25 +263,6 @@ impl TcpStealerApi {
                 ));
                 self.queued_messages.push_back(message);
             }
-        } else if request_head.body_finished.not() {
-            // Request body has not finished, and the client does not support chunked.
-            // We need to wait for the body to finish.
-
-            connection
-                .get_mut()
-                .request_in_progress
-                .replace(HttpRequest {
-                    internal_request: InternalHttpRequest {
-                        method: request_head.method,
-                        uri: request_head.uri,
-                        headers: request_head.headers,
-                        version: request_head.version,
-                        body: InternalHttpBody(request_head.body_head.into()),
-                    },
-                    connection_id,
-                    request_id: Self::REQUEST_ID,
-                    port: info.original_destination.port(),
-                });
         } else if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestFramed(HttpRequest {
                 internal_request: InternalHttpRequest {
@@ -392,9 +293,16 @@ impl TcpStealerApi {
             self.queued_messages.push_back(message);
         }
 
+        self.incoming_streams.insert(connection_id, stream);
+        self.connections.insert(
+            connection_id,
+            ClientConnectionState::HttpRequestSent { response_provider },
+        );
+
         Ok(())
     }
 
+    /// Handles a stolen TCP connection received from the stealer task.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     fn handle_connection(&mut self, connection: StolenTcp) -> AgentResult<()> {
         let connection_id = self
@@ -407,15 +315,8 @@ impl TcpStealerApi {
             data_tx,
         } = connection;
 
-        self.connections.insert(
-            connection_id,
-            IncomingConnection {
-                data_tx: Some(data_tx),
-                request_in_progress: None,
-                response_tx: None,
-                response_body_tx: None,
-            },
-        );
+        self.connections
+            .insert(connection_id, ClientConnectionState::Tcp { data_tx });
         self.incoming_streams.insert(connection_id, stream);
 
         let new_connection = NewTcpConnectionV1 {
@@ -447,14 +348,31 @@ impl TcpStealerApi {
         Ok(())
     }
 
+    /// Handles an incoming item from one of connections' streams.
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn handle_incoming_item(&mut self, connection_id: ConnectionId, item: IncomingStreamItem) {
         match item {
             IncomingStreamItem::Frame(frame) => {
-                self.handle_request_frame(connection_id, Some(frame));
+                self.queued_messages.push_back(DaemonMessage::TcpSteal(
+                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: vec![frame],
+                        is_last: false,
+                        connection_id,
+                        request_id: Self::REQUEST_ID,
+                    })),
+                ));
             }
 
-            IncomingStreamItem::NoMoreFrames => self.handle_request_frame(connection_id, None),
+            IncomingStreamItem::NoMoreFrames => {
+                self.queued_messages.push_back(DaemonMessage::TcpSteal(
+                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: Default::default(),
+                        is_last: false,
+                        connection_id,
+                        request_id: Self::REQUEST_ID,
+                    })),
+                ));
+            }
 
             IncomingStreamItem::Data(bytes) => {
                 self.queued_messages
@@ -492,50 +410,67 @@ impl TcpStealerApi {
         }
     }
 
+    /// Handles a completed (full body read) HTTP request.
     #[tracing::instrument(level = Level::TRACE, ret)]
-    fn handle_request_frame(
+    fn handle_request_completed(
         &mut self,
-        connection_id: ConnectionId,
-        frame: Option<InternalHttpBodyFrame>,
-    ) {
-        let connection = self
-            .connections
-            .get_mut(&connection_id)
-            .expect("connection not found, data structures in TcpStealerApi are out of sync");
-
-        let Some(mut request) = connection.request_in_progress.take() else {
-            let is_last = frame.is_none();
-            self.queued_messages
-                .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
-                    ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                        frames: frame.into_iter().collect(),
-                        is_last,
+        request: Result<StolenHttp, ConnError>,
+    ) -> AgentResult<()> {
+        match request {
+            Ok(request) => {
+                let connection_id = self
+                    .connection_ids_iter
+                    .next()
+                    .ok_or(AgentError::ExhaustedConnectionId)?;
+                self.incoming_streams.insert(connection_id, request.stream);
+                self.connections.insert(
+                    connection_id,
+                    ClientConnectionState::HttpRequestSent {
+                        response_provider: request.response_provider,
+                    },
+                );
+                let message = if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
+                    DaemonTcp::HttpRequestFramed(HttpRequest {
+                        internal_request: InternalHttpRequest {
+                            method: request.request_head.method,
+                            uri: request.request_head.uri,
+                            headers: request.request_head.headers,
+                            version: request.request_head.version,
+                            body: InternalHttpBody(
+                                request.request_head.body_head.into_iter().collect(),
+                            ),
+                        },
                         connection_id,
                         request_id: Self::REQUEST_ID,
-                    }),
-                )));
-
-            return;
-        };
-
-        match frame {
-            Some(frame) => {
-                request.internal_request.body.0.push_back(frame);
-                connection.request_in_progress.replace(request);
-            }
-
-            None if self.protocol_version.matches(&HTTP_FRAMED_VERSION) => {
-                self.queued_messages.push_back(DaemonMessage::TcpSteal(
-                    DaemonTcp::HttpRequestFramed(request),
-                ));
-            }
-
-            None => {
-                let request = request.map_body(|body| frames_to_legacy(body.0));
+                        port: request.info.original_destination.port(),
+                    })
+                } else {
+                    DaemonTcp::HttpRequest(HttpRequest {
+                        internal_request: InternalHttpRequest {
+                            method: request.request_head.method,
+                            uri: request.request_head.uri,
+                            headers: request.request_head.headers,
+                            version: request.request_head.version,
+                            body: frames_to_legacy(request.request_head.body_head),
+                        },
+                        connection_id,
+                        request_id: Self::REQUEST_ID,
+                        port: request.info.original_destination.port(),
+                    })
+                };
                 self.queued_messages
-                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(request)));
+                    .push_back(DaemonMessage::TcpSteal(message));
+            }
+            Err(error) => {
+                self.queued_messages
+                    .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                        "Stolen request failed: {}",
+                        Report::new(error),
+                    ))));
             }
         }
+
+        Ok(())
     }
 
     /// Handles a [`LayerTcpSteal`] message from the client.
@@ -577,30 +512,69 @@ impl TcpStealerApi {
             }
 
             LayerTcpSteal::Data(data) => {
-                let connection = self.connections.get_mut(&data.connection_id);
-
-                let Some(connection) = connection else {
+                let Some(connection) = self.connections.get_mut(&data.connection_id) else {
                     return Ok(());
                 };
-
-                if data.bytes.is_empty() {
-                    connection.data_tx = None;
-                } else if let Some(data_tx) = connection.data_tx.as_ref() {
-                    let _ = data_tx.send(data.bytes.into_vec()).await;
-                }
+                connection.send_data(data.bytes.into_vec()).await;
             }
 
             LayerTcpSteal::HttpResponse(response) => {
-                let response = response.map_body(|body| vec![InternalHttpBodyFrame::Data(body)]);
-                self.send_response(response, true).await;
+                if response.request_id != Self::REQUEST_ID {
+                    return Ok(());
+                }
+                let Some(connection) = self.connections.get_mut(&response.connection_id) else {
+                    return Ok(());
+                };
+                let response =
+                    response.map_body(|body| std::iter::once(InternalHttpBodyFrame::Data(body)));
+                connection.send_response(response).await;
+                connection.send_response_frame(None).await;
             }
 
             LayerTcpSteal::HttpResponseFramed(response) => {
-                let response = response.map_body(|body| body.0.into_iter().collect());
-                self.send_response(response, true).await;
+                if response.request_id != Self::REQUEST_ID {
+                    return Ok(());
+                }
+                let Some(connection) = self.connections.get_mut(&response.connection_id) else {
+                    return Ok(());
+                };
+                let response = response.map_body(|body| body.0);
+                connection.send_response(response).await;
+                connection.send_response_frame(None).await;
             }
 
-            LayerTcpSteal::HttpResponseChunked(response) => self.send_chunked(response).await,
+            LayerTcpSteal::HttpResponseChunked(response) => match response {
+                ChunkedResponse::Start(response) => {
+                    if response.request_id != Self::REQUEST_ID {
+                        return Ok(());
+                    }
+                    let Some(connection) = self.connections.get_mut(&response.connection_id) else {
+                        return Ok(());
+                    };
+                    connection.send_response(response).await;
+                }
+                ChunkedResponse::Body(body) => {
+                    if body.request_id != 0 {
+                        return Ok(());
+                    }
+                    let Some(connection) = self.connections.get_mut(&body.connection_id) else {
+                        return Ok(());
+                    };
+                    for frame in body.frames {
+                        connection.send_response_frame(Some(frame)).await;
+                    }
+                    if body.is_last {
+                        connection.send_response_frame(None).await;
+                    }
+                }
+                ChunkedResponse::Error(error) => {
+                    if error.request_id != Self::REQUEST_ID {
+                        return Ok(());
+                    }
+                    self.incoming_streams.remove(&error.connection_id);
+                    self.connections.remove(&error.connection_id);
+                }
+            },
         }
 
         Ok(())
@@ -615,59 +589,90 @@ impl fmt::Debug for TcpStealerApi {
     }
 }
 
-/// [`Body`] type we use when providing [`Response`]s to stolen requests.
-struct ResponseBody {
-    /// Frames from the initial HTTP response [`mirrord_protocol`] message.
-    head: vec::IntoIter<InternalHttpBodyFrame>,
-    /// Receiver for the rest of the frames.
-    /// Closed when the client signalizes the end of the response body.
-    rx: mpsc::Receiver<InternalHttpBodyFrame>,
+/// State of a stolen connection, from the perspective of the client.
+enum ClientConnectionState {
+    /// TCP connection, client is sending data.
+    Tcp { data_tx: mpsc::Sender<Vec<u8>> },
+    /// HTTP request sent, waiting for the response from the client.
+    HttpRequestSent { response_provider: ResponseProvider },
+    /// HTTP request sent, response received, client is sending response body frames.
+    HttpResponseReceived { body_provider: ResponseBodyProvider },
+    /// HTTP request finished, connection upgraded, client is sending data.
+    HttpUpgraded { data_tx: mpsc::Sender<Vec<u8>> },
+    /// TCP connection or HTTP request, client is no longer sending data.
+    Closed,
 }
 
-impl Body for ResponseBody {
-    type Data = Bytes;
-    type Error = Infallible;
+impl ClientConnectionState {
+    async fn send_data(&mut self, data: Vec<u8>) {
+        let sender = match self {
+            Self::Tcp { data_tx } => data_tx,
+            Self::HttpUpgraded { data_tx } => data_tx,
+            _ => return,
+        };
 
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let this = self.get_mut();
-
-        if let Some(frame) = this.head.next() {
-            return Poll::Ready(Some(Ok(frame.into())));
+        if data.is_empty() {
+            *self = Self::Closed;
+            return;
         }
 
-        this.rx
-            .poll_recv(cx)
-            .map(|frame| frame.map(Frame::from).map(Ok))
+        let _ = sender.send(data).await;
+    }
+
+    async fn send_response_frame(&mut self, frame: Option<InternalHttpBodyFrame>) {
+        let state = std::mem::replace(self, Self::Closed);
+        let response_provider = match state {
+            Self::HttpResponseReceived { body_provider } => body_provider,
+            state => {
+                *self = state;
+                return;
+            }
+        };
+
+        match frame {
+            Some(frame) => {
+                response_provider.send_frame(frame.into()).await;
+            }
+            None => match response_provider.finish() {
+                Some(data_tx) => *self = Self::HttpUpgraded { data_tx },
+                None => {
+                    *self = Self::Closed;
+                }
+            },
+        }
+    }
+
+    async fn send_response<B>(&mut self, response: HttpResponse<B>)
+    where
+        B: IntoIterator<Item = InternalHttpBodyFrame>,
+    {
+        let state = std::mem::replace(self, Self::Closed);
+        let response_provider = match state {
+            Self::HttpRequestSent { response_provider } => response_provider,
+            state => {
+                *self = state;
+                return;
+            }
+        };
+
+        let mut hyper_response = Response::new(());
+        *hyper_response.status_mut() = response.internal_response.status;
+        *hyper_response.headers_mut() = response.internal_response.headers;
+        *hyper_response.version_mut() = response.internal_response.version;
+        let (parts, _) = hyper_response.into_parts();
+
+        let body_provider = response_provider.send(parts);
+        *self = Self::HttpResponseReceived { body_provider };
+
+        for frame in response.internal_response.body {
+            self.send_response_frame(Some(frame)).await;
+        }
     }
 }
 
-/// Represents a stolen connection in the [`TcpStealerApi`].
-struct IncomingConnection {
-    /// For sending data to the connection source.
-    ///
-    /// If this connection is an HTTP request, this is for sending data after the HTTP upgrade.
-    data_tx: Option<mpsc::Sender<Vec<u8>>>,
-    /// If the client's [`mirrord_protocol`] version does not support
-    /// [`DaemonTcp::HttpRequestChunked`], we must gather the incoming body frames here.
-    ///
-    /// When we've read the full body, we send the full request in one of the legacy types.
-    ///
-    /// (only for HTTP requests)
-    request_in_progress: Option<HttpRequest<InternalHttpBody>>,
-    /// For sending the HTTP response.
-    ///
-    /// (only for HTTP requests)
-    response_tx: Option<ResponseProvider>,
-    /// For sending the HTTP response body frames.
-    ///
-    /// (only for HTTP requests)
-    response_body_tx: Option<ResponseBodyProvider>,
-}
-
-fn frames_to_legacy<I: IntoIterator<Item = InternalHttpBodyFrame>>(frames: I) -> Payload {
+/// Converts a vec of [`InternalHttpBodyFrame`]s to [`Payload`] (body format used in
+/// [`DaemonTcp::HttpRequest`]).
+fn frames_to_legacy(frames: Vec<InternalHttpBodyFrame>) -> Payload {
     frames
         .into_iter()
         .filter_map(|frame| match frame {
