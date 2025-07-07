@@ -751,8 +751,8 @@ pub(super) struct OperatorSetupParams {
     #[arg(long, default_value_t = false)]
     pub(super) application_auto_pause: bool,
 
-    /// Enable MirrordSession CRD's (curretly experimental and requires operator compiled with
-    /// experimental flag).
+    /// Enable MirrordClusterSession CRD's (curretly experimental and requires operator compiled
+    /// with experimental flag).
     #[arg(
         long = "experimental-statefull-sessions",
         default_value_t = false,

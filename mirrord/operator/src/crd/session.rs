@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 #[kube(
     group = "mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordSession"
+    kind = "MirrordClusterSession"
 )]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordSessionSpec {
+pub struct MirrordClusterSessionSpec {
     /// Resources needed to report session metrics to the mirrord Jira app
     #[serde(default, skip_serializing_if = "JiraMetricsResources::is_empty")]
     pub jira_metrics_resources: JiraMetricsResources,
@@ -19,7 +19,7 @@ pub struct MirrordSessionSpec {
     pub target: SessionTarget,
 
     /// Owner of this session
-    pub owner: MirrordSessionOwner,
+    pub owner: MirrordClusterSessionOwner,
 
     /// Start time of this session when actual websocket connection is first created.
     pub start_time: DateTime<Utc>,
@@ -27,7 +27,7 @@ pub struct MirrordSessionSpec {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordSessionOwner {
+pub struct MirrordClusterSessionOwner {
     /// Unique ID.
     pub user_id: String,
     /// Creator local username.

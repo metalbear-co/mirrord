@@ -31,7 +31,7 @@ use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
-    session::MirrordSession,
+    session::MirrordClusterSession,
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -289,7 +289,7 @@ impl OperatorSetup for Operator {
 
         if self.stateful_sessions {
             writer.write_all(b"---\n")?;
-            MirrordSession::crd().to_writer(&mut writer)?;
+            MirrordClusterSession::crd().to_writer(&mut writer)?;
         }
 
         Ok(())
@@ -774,8 +774,8 @@ impl OperatorClusterRole {
 
         if options.stateful_sessions {
             rules.push(PolicyRule {
-                api_groups: Some(vec![MirrordSession::group(&()).into_owned()]),
-                resources: Some(vec![MirrordSession::plural(&()).into_owned()]),
+                api_groups: Some(vec![MirrordClusterSession::group(&()).into_owned()]),
+                resources: Some(vec![MirrordClusterSession::plural(&()).into_owned()]),
                 verbs: ["get", "list", "watch", "create", "delete"]
                     .into_iter()
                     .map(String::from)
