@@ -192,6 +192,12 @@ impl State {
 
         client_id
     }
+
+    fn is_with_mesh_exclusion(&self) -> bool {
+        self.ephemeral
+            && envs::EXCLUDE_FROM_MESH.from_env_or_default()
+            && envs::IN_SERVICE_MESH.from_env_or_default()
+    }
 }
 enum BackgroundTask<Command> {
     Running(BgTaskStatus, Sender<Command>),
@@ -626,10 +632,9 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ipv4_listener_result
     }?;
 
-    debug!(
-        client_listener_address = %listener.local_addr()?,
-        "Created the client listener.",
-    );
+    let client_listener_address = listener.local_addr()?;
+
+    debug!(%client_listener_address, "Created the client listener.");
 
     let state = State::new(&args).await?;
 
@@ -652,11 +657,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
     if !leftover_rules.is_empty() {
-        tracing::error!(
+        error!(
             leftover_rules = ?leftover_rules,
             "Detected dirty iptables. Either some other mirrord agent is running \
             or the previous agent failed to clean up before exit. \
-            If no other mirrord agent is targeting this pod, please delete the pod."
+            If no other mirrord agent is targeting this pod, please delete the pod. \
+            If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
         );
         let _ = notify_client_about_dirty_iptables(
             listener,
@@ -692,7 +698,14 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let stealer = match state.container_pid() {
         None => BackgroundTask::Disabled,
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(&state.network_runtime, pid).await?;
+            let steal_handle = setup::start_traffic_redirector(
+                &state.network_runtime,
+                pid,
+                state
+                    .is_with_mesh_exclusion()
+                    .then(|| client_listener_address.port()),
+            )
+            .await?;
             setup::start_stealer(&state.network_runtime, steal_handle)
         }
     };
@@ -813,13 +826,16 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain(ipv6_enabled: bool) -> Result<(), IPTablesError> {
+async fn clear_iptable_chain(
+    ipv6_enabled: bool,
+    with_mesh_exclusion: bool,
+) -> Result<(), IPTablesError> {
     let v4_result: Result<(), IPTablesError> = try {
         let ipt = IPTablesWrapper::from(new_iptables());
         if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
             trace!("No iptables mirrord rules found, skipping iptables cleanup.");
         } else {
-            let tables = SafeIpTables::load(ipt, false).await?;
+            let tables = SafeIpTables::load(ipt, false, with_mesh_exclusion).await?;
             tables.cleanup().await?
         }
     };
@@ -830,7 +846,7 @@ async fn clear_iptable_chain(ipv6_enabled: bool) -> Result<(), IPTablesError> {
             if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
                 trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
             } else {
-                let tables = SafeIpTables::load(ipt, false).await?;
+                let tables = SafeIpTables::load(ipt, true, with_mesh_exclusion).await?;
                 tables.cleanup().await?
             }
         }
@@ -877,6 +893,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
     let pid = state.container_pid();
+    let with_mesh_exclusion = state.is_with_mesh_exclusion();
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
@@ -902,7 +919,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 
     let runtime = RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?;
     runtime
-        .spawn(clear_iptable_chain(args.ipv6))
+        .spawn(clear_iptable_chain(args.ipv6, with_mesh_exclusion))
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {
             task: "IPTablesCleaner",

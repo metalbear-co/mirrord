@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    borrow::Borrow,
     collections::{HashMap, HashSet, VecDeque},
     vec,
 };
@@ -623,7 +624,7 @@ impl FilesProxy {
                                 layer_id,
                                 message: ProxyToLayerMessage::File(FileResponse::Read(Ok(
                                     ReadFileResponse {
-                                        bytes,
+                                        bytes: bytes.into(),
                                         read_amount: read.buffer_size,
                                     },
                                 ))),
@@ -677,7 +678,7 @@ impl FilesProxy {
                                 layer_id,
                                 message: ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(
                                     ReadFileResponse {
-                                        bytes,
+                                        bytes: bytes.into(),
                                         read_amount: read.buffer_size,
                                     },
                                 ))),
@@ -931,12 +932,15 @@ impl FilesProxy {
                 let bytes = read
                     .bytes
                     .get(..requested_amount as usize)
-                    .unwrap_or(&read.bytes)
+                    .unwrap_or(read.bytes.borrow())
                     .to_vec();
                 let read_amount = bytes.len() as u64;
-                let response = ReadFileResponse { bytes, read_amount };
+                let response = ReadFileResponse {
+                    bytes: bytes.into(),
+                    read_amount,
+                };
 
-                data.buffer = read.bytes;
+                data.buffer = read.bytes.into_vec();
                 data.buffer_position = data.fd_position;
                 let message = if update_fd_position {
                     // User originally sent `FileRequest::Read`.
@@ -1185,7 +1189,7 @@ mod tests {
     use super::{FilesProxy, FilesProxyMessage};
     use crate::{
         background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
-        error::IntProxyError,
+        error::ProxyRuntimeError,
         main_tasks::{MainTaskId, ProxyMessage, ToLayer},
     };
 
@@ -1199,9 +1203,9 @@ mod tests {
         file_buffer_size: u64,
     ) -> (
         TaskSender<FilesProxy>,
-        BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     ) {
-        let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
+        let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
 
         let proxy = tasks.register(
@@ -1220,7 +1224,7 @@ mod tests {
     /// Convenience for opening a dir.
     async fn prepare_dir(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     ) {
         let request = FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 0xdad });
         proxy
@@ -1368,7 +1372,7 @@ mod tests {
     /// Helper function for opening a file in a running [`FilesProxy`].
     async fn open_file(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
         readonly: bool,
     ) -> u64 {
         let message_id = rand::random();
@@ -1414,7 +1418,7 @@ mod tests {
 
     async fn make_read_request(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
         remote_fd: u64,
         buffer_size: u64,
         start_from: Option<u64>,
@@ -1441,13 +1445,13 @@ mod tests {
 
     async fn respond_to_read_request(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
         data: Vec<u8>,
         limited: bool,
     ) -> ProxyMessage {
         let response = ReadFileResponse {
             read_amount: data.len() as u64,
-            bytes: data,
+            bytes: data.into(),
         };
         let response = if limited {
             FileResponse::ReadLimited(Ok(response))
@@ -1461,7 +1465,7 @@ mod tests {
 
     async fn respond_to_read_request_with_err(
         proxy: &TaskSender<FilesProxy>,
-        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
         error: ResponseError,
         limited: bool,
     ) -> ProxyMessage {
@@ -1506,7 +1510,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: vec![0; 10],
+                bytes: vec![0; 10].into(),
                 read_amount: 10,
             }))),
         );
@@ -1529,7 +1533,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
-                bytes: vec![2],
+                bytes: vec![2].into(),
                 read_amount: 1,
             }))),
         );
@@ -1561,7 +1565,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: vec![0],
+                bytes: vec![0].into(),
                 read_amount: 1,
             }))),
         );
@@ -1573,7 +1577,7 @@ mod tests {
             assert_eq!(
                 update,
                 ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                    bytes: vec![i],
+                    bytes: vec![i].into(),
                     read_amount: 1,
                 }))),
             );
@@ -1586,7 +1590,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
-                bytes: expected,
+                bytes: expected.into(),
                 read_amount: 512,
             }))),
         );
@@ -1610,7 +1614,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: data,
+                bytes: data.into(),
                 read_amount: 4096,
             }))),
         );
@@ -1651,7 +1655,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: expected,
+                bytes: expected.into(),
                 read_amount: 10,
             })))
         );
@@ -1684,7 +1688,7 @@ mod tests {
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                bytes: expected,
+                bytes: expected.into(),
                 read_amount: 20,
             }))),
         );

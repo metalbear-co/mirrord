@@ -249,6 +249,7 @@ use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use diagnose::diagnose_command;
+use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
@@ -277,10 +278,12 @@ use semver::Version;
 use tracing::{error, info, warn};
 use which::which;
 
+mod browser;
 mod config;
 mod connection;
 mod container;
 mod diagnose;
+mod dump;
 mod error;
 mod execution;
 mod extension;
@@ -296,12 +299,15 @@ mod teams;
 mod util;
 mod verify_config;
 mod vpn;
+mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
+use crate::util::get_user_git_branch;
+
 async fn exec_process<P>(
-    config: LayerConfig,
+    mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
     progress: &P,
@@ -313,7 +319,7 @@ where
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     let execution_info = MirrordExecution::start_internal(
-        &config,
+        &mut config,
         #[cfg(target_os = "macos")]
         Some(&args.binary),
         &mut sub_progress,
@@ -358,6 +364,10 @@ where
 
     sub_progress.success(Some("ready to launch process"));
 
+    if config.experimental.browser_extension_config {
+        browser::init_browser_extension(&config.feature.network, progress);
+    }
+
     // Print config details for the user
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
@@ -395,6 +405,10 @@ where
         if _did_sip_patch {
             return Err(CliError::RosettaMissing(binary));
         }
+    }
+
+    if errno == nix::errno::Errno::E2BIG {
+        return Err(CliError::ExecveE2Big);
     }
 
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
@@ -690,8 +704,10 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     }
     result?;
 
+    let branch_name = get_user_git_branch().await;
+
     let (connection_info, connection) =
-        create_and_connect(&config, &mut progress, &mut analytics).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
@@ -759,6 +775,7 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
+            Commands::Dump(args) => dump_command(&args, watch).await?,
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),

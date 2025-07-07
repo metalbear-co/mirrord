@@ -32,7 +32,7 @@ where
 
         let gid = getgid();
         managed
-            .add_rule(&format!(
+            .add_rule(format!(
                 "-m owner --gid-owner {gid} -p tcp {exclude_source_ips} -j RETURN"
             ))
             .inspect_err(|_| {

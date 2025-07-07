@@ -52,7 +52,7 @@ impl RedirectedTcp {
         };
 
         let destination = tcp_task::Destination::StealingClient {
-            data_tx: incoming_tx.into(),
+            data_tx: incoming_tx,
             data_rx: outgoing_rx,
         };
         let task = tcp_task::TcpTask {

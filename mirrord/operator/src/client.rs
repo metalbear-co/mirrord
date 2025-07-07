@@ -1,4 +1,4 @@
-use std::{fmt, ops::Not};
+use std::{fmt, ops::Not, time::Duration};
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -31,8 +31,8 @@ use tracing::Level;
 
 use crate::{
     crd::{
-        CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, NewOperatorFeature, TargetCrd,
-        OPERATOR_STATUS_NAME,
+        copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
+        MirrordOperatorCrd, NewOperatorFeature, TargetCrd, OPERATOR_STATUS_NAME,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
@@ -542,8 +542,9 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        layer_config: &LayerConfig,
+        layer_config: &mut LayerConfig,
         progress: &P,
+        branch_name: Option<String>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -583,18 +584,21 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let (session, reused_copy) = if do_copy_target {
-            let mut copy_subtask = progress.subtask("copying target");
+            let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
                 copy_subtask.info(&format!(
-                    "Creating a target copy for {reason} (even though `copy_target` was not explicitly set)."
+                    "The copy target feature is used for {reason} (even though `copy_target` was not explicitly set)."
                 ));
             }
-            let (copied, reused) = self.copy_target(layer_config, true).await?;
-            copy_subtask.success(Some(if reused {
-                "found target copy to reuse"
-            } else {
-                "target copied"
-            }));
+
+            let (copied, reused) = {
+                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                match reused {
+                    Some(reused) => (reused, true),
+                    None => (self.copy_target(layer_config, progress).await?, false),
+                }
+            };
+            copy_subtask.success(None);
 
             let id = copied
                 .status
@@ -604,6 +608,7 @@ impl OperatorApi<PreparedClientCert> {
                 &copied,
                 use_proxy_api,
                 layer_config.profile.as_deref(),
+                branch_name.clone(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -628,6 +633,14 @@ impl OperatorApi<PreparedClientCert> {
                         )
                         .as_str(),
                     );
+                }
+                if let Some(modified_ports) = layer_config
+                    .feature
+                    .network
+                    .incoming
+                    .add_probe_ports_to_http_filter_ports(&runtime_data.containers_probe_ports)
+                {
+                    progress.info(&format!("`network.incoming.http_filter.ports` has been set to use ports {modified_ports}."));
                 }
 
                 let stolen_probes = runtime_data
@@ -654,7 +667,7 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let params = ConnectParams::new(layer_config);
+            let params = ConnectParams::new(layer_config, branch_name.clone());
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
 
@@ -672,14 +685,13 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
-                let mut copy_subtask = progress.subtask("copying target");
-                let (copied, _) = self.copy_target(layer_config, false).await?;
-                copy_subtask.success(Some("target copied"));
+                let copied = self.copy_target(layer_config, progress).await?;
 
                 let connect_url = Self::copy_target_connect_url(
                     &copied,
                     use_proxy_api,
                     layer_config.profile.as_deref(),
+                    branch_name,
                 );
                 let session_id = copied
                     .status
@@ -771,6 +783,7 @@ impl OperatorApi<PreparedClientCert> {
         crd: &CopyTargetCrd,
         use_proxy: bool,
         profile: Option<&str>,
+        branch_name: Option<String>,
     ) -> String {
         let name = crd
             .meta()
@@ -793,6 +806,7 @@ impl OperatorApi<PreparedClientCert> {
             // Kafka and SQS splits are passed in the request body.
             kafka_splits: Default::default(),
             sqs_splits: Default::default(),
+            branch_name,
         };
 
         if use_proxy {
@@ -810,29 +824,76 @@ impl OperatorApi<PreparedClientCert> {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }
 
-    /// Creates a new or optionally reuses an existing [`CopyTargetCrd`] resource using the
-    /// operator.
+    /// Creates a new [`CopyTargetCrd`] resource using the operator.
     ///
-    /// If new, this should create a new dummy pod out of the [`Target`] specified in the given
+    /// This should create a new dummy pod out of the [`Target`] specified in the given
     /// [`LayerConfig`].
-    ///
-    /// Reuse mechanism can be enabled by setting `allow_reuse` to `true`.
     ///
     /// # Returns
     ///
-    /// * The created or reused [`CopyTargetCrd`]
-    /// * Whether the [`CopyTargetCrd`] was reused
+    /// The created [`CopyTargetCrd`].
     ///
     /// # Note
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    #[tracing::instrument(level = Level::TRACE, skip(layer_config), err, ret)]
-    async fn copy_target(
+    #[tracing::instrument(level = Level::TRACE, skip(layer_config, progress), err, ret)]
+    async fn copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
-        allow_reuse: bool,
-    ) -> OperatorApiResult<(CopyTargetCrd, bool)> {
+        progress: &P,
+    ) -> OperatorApiResult<CopyTargetCrd> {
+        let mut subtask = progress.subtask("copying target");
+
+        // We do not validate the `target` here, it's up to the operator.
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let scale_down = layer_config.feature.copy_target.scale_down;
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+        let split_queues = layer_config
+            .feature
+            .split_queues
+            .is_set()
+            .then(|| layer_config.feature.split_queues.clone());
+
+        let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+        let copy_target_name = TargetCrd::urlfied_name(&target);
+        let copy_target_spec = CopyTargetSpec {
+            target,
+            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+            scale_down,
+            split_queues,
+        };
+
+        let copied = copy_target_api
+            .create(
+                &PostParams::default(),
+                &CopyTargetCrd::new(&copy_target_name, copy_target_spec),
+            )
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::CopyingTarget,
+            })?;
+        subtask.success(Some("target copy created"));
+
+        self.wait_for_copy_ready(copied, progress).await
+    }
+
+    async fn try_reuse_copy_target<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<Option<CopyTargetCrd>> {
+        let mut subtask = progress.subtask("checking for existing target copies");
+
         // We do not validate the `target` here, it's up to the operator.
         let target = layer_config
             .target
@@ -854,7 +915,6 @@ impl OperatorApi<PreparedClientCert> {
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
-        let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
             target,
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
@@ -862,40 +922,98 @@ impl OperatorApi<PreparedClientCert> {
             split_queues,
         };
 
-        if allow_reuse {
-            let existing = copy_target_api
-                .list(&ListParams::default())
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::CopyingTarget,
-                })?
-                .items
-                .into_iter()
-                .find(|copy_target| {
-                    copy_target.spec == copy_target_spec
-                        && copy_target.status.as_ref().is_some_and(|status| {
-                            status.creator_session.user_id.as_ref() == Some(&user_id)
-                        })
-                });
-
-            if let Some(copy_target) = existing {
-                tracing::debug!(?copy_target, "reusing copy_target");
-                return Ok((copy_target, true));
-            }
-        }
-
-        copy_target_api
-            .create(
-                &PostParams::default(),
-                &CopyTargetCrd::new(&copy_target_name, copy_target_spec),
-            )
+        let existing = copy_target_api
+            .list(&ListParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::CopyingTarget,
-            })
-            .map(|copied| (copied, false))
+            })?
+            .items
+            .into_iter()
+            .find(|copy_target| {
+                copy_target.spec == copy_target_spec
+                    && copy_target.status.as_ref().is_some_and(|status| {
+                        status.creator_session.user_id.as_ref() == Some(&user_id)
+                            && status.phase.as_deref() != Some(CopyTargetStatus::PHASE_FAILED)
+                    })
+            });
+
+        let existing = match existing {
+            Some(existing) => match self.wait_for_copy_ready(existing, progress).await {
+                Ok(copied) => Some(copied),
+                Err(OperatorApiError::CopiedTargetFailed { .. }) => None,
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
+
+        if existing.is_some() {
+            subtask.success(Some("found an existing copy"));
+        } else {
+            subtask.failure(Some("no existing copy was found"));
+        }
+
+        Ok(existing)
+    }
+
+    /// Polls the given [`CopyTargetCrd`] for readiness.
+    async fn wait_for_copy_ready<P: Progress>(
+        &self,
+        mut copied: CopyTargetCrd,
+        progress: &P,
+    ) -> OperatorApiResult<CopyTargetCrd> {
+        let namespace = copied
+            .metadata
+            .namespace
+            .as_deref()
+            .ok_or_else(|| KubeApiError::invalid_state(&copied, "no namespace"))?;
+        let name = copied
+            .metadata
+            .name
+            .clone()
+            .ok_or_else(|| KubeApiError::invalid_state(&copied, "no name"))?;
+        let api = Api::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
+        let mut wait_subtask: Option<P> = None;
+
+        loop {
+            let phase = copied
+                .status
+                .as_ref()
+                .and_then(|status| status.phase.as_deref());
+            match phase {
+                Some(CopyTargetStatus::PHASE_IN_PROGRESS) => {
+                    if wait_subtask.is_none() {
+                        wait_subtask.replace(progress.subtask("waiting for the copy to be ready"));
+                    }
+                }
+                Some(CopyTargetStatus::PHASE_READY) | None => {
+                    if let Some(mut subtask) = wait_subtask {
+                        subtask.success(None);
+                    }
+                    break Ok(copied);
+                }
+                Some(CopyTargetStatus::PHASE_FAILED) => {
+                    break Err(OperatorApiError::CopiedTargetFailed {
+                        message: copied.status.and_then(|status| status.failure_message),
+                    });
+                }
+                Some(other) => {
+                    break Err(OperatorApiError::CopiedTargetFailed {
+                        message: Some(format!("unknown phase `{other}`")),
+                    });
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            copied = api
+                .get(&name)
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: OperatorOperation::CopyingTarget,
+                })?;
+        }
     }
 
     /// Connects to the target, reusing the given [`OperatorSession`].
@@ -1176,6 +1294,7 @@ mod test {
             profile,
             kafka_splits,
             sqs_splits,
+            branch_name: None,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

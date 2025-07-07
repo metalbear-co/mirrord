@@ -154,9 +154,13 @@ pub struct HttpFilterConfig {
     /// Other ports will *not* be stolen, unless listed in
     /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
     ///
+    /// We check the pod's health probe ports and automatically add them here, as they're
+    /// usually the same ports your app might be listening on. If your app ports and the
+    /// health probe ports don't match, then setting this option will override this behavior.
+    ///
     /// Set to [80, 8080] by default.
-    #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
-    pub ports: PortList,
+    #[config(env = "MIRRORD_HTTP_FILTER_PORTS")]
+    pub ports: Option<PortList>,
 }
 
 impl HttpFilterConfig {
@@ -172,7 +176,13 @@ impl HttpFilterConfig {
     }
 
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
-        self.is_filter_set().then(|| &*self.ports.0)
+        if let Some(ports) = self.ports.as_ref()
+            && self.is_filter_set()
+        {
+            Some(&*ports.0)
+        } else {
+            None
+        }
     }
 }
 
@@ -226,8 +236,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
 
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
-            .transpose()?
-            .unwrap_or_default();
+            .transpose()?;
 
         Ok(Self::Generated {
             header_filter,
@@ -267,9 +276,32 @@ impl From<PortList> for Vec<u16> {
     }
 }
 
+impl From<Vec<u16>> for PortList {
+    fn from(value: Vec<u16>) -> Self {
+        PortList(VecOrSingle::Multiple(value))
+    }
+}
+
 impl From<PortList> for HashSet<u16> {
     fn from(value: PortList) -> Self {
         value.0.into()
+    }
+}
+
+impl From<HashSet<u16>> for PortList {
+    fn from(value: HashSet<u16>) -> Self {
+        PortList(VecOrSingle::Multiple(Vec::from_iter(value)))
+    }
+}
+
+impl core::fmt::Display for PortList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for port in self.iter() {
+            write!(f, "{port} ")?;
+        }
+        write!(f, "]")?;
+        Ok(())
     }
 }
 
@@ -277,6 +309,11 @@ impl CollectAnalytics for &HttpFilterConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("header_filter", self.header_filter.is_some());
         analytics.add("path_filter", self.path_filter.is_some());
-        analytics.add("ports", self.ports.len());
+        analytics.add(
+            "ports",
+            self.get_filtered_ports()
+                .map(|p| p.len())
+                .unwrap_or_default(),
+        );
     }
 }

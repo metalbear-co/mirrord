@@ -91,7 +91,7 @@ impl RedirectedHttp {
             body_tail: self.request.body_tail,
             on_upgrade: self.request.upgrade,
             upgrade_rx,
-            tx: tx.into(),
+            tx,
         };
         self.runtime_handle.spawn(task.run());
 

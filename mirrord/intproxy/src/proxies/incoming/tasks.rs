@@ -3,7 +3,7 @@ use std::{convert::Infallible, fmt, io};
 use hyper::{upgrade::OnUpgrade, Version};
 use mirrord_protocol::{
     tcp::{ChunkedResponse, HttpResponse, InternalHttpBody},
-    ConnectionId, Port, RequestId,
+    ConnectionId, Payload, Port, RequestId,
 };
 use thiserror::Error;
 
@@ -40,7 +40,7 @@ impl fmt::Debug for InProxyTaskMessage {
 #[derive(Debug)]
 pub enum HttpOut {
     /// Response from the local application's HTTP server.
-    ResponseBasic(HttpResponse<Vec<u8>>),
+    ResponseBasic(HttpResponse<Payload>),
     /// Response from the local application's HTTP server.
     ResponseFramed(HttpResponse<InternalHttpBody>),
     /// Response from the local application's HTTP server.

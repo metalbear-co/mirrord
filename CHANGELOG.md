@@ -8,6 +8,127 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.148.0](https://github.com/metalbear-co/mirrord/tree/3.148.0) - 2025-07-01
+
+
+### Added
+
+- Added a warning that notifies about the possibility of losing
+  requests unmatched requests when both HTTP filter and copy target
+  are used.
+  [#3223](https://github.com/metalbear-co/mirrord/issues/3223)
+- Added E2BIG error handling in the mirrord CLI. mirrord CLI
+  now shows a more informative error.
+  [#3254](https://github.com/metalbear-co/mirrord/issues/3254)
+
+
+### Changed
+
+- Made the documentation on outgoing traffic configuration clearer.
+
+
+### Fixed
+
+- Fixed an issue where the copy target feature was failing with a request
+  timeout.
+
+
+### Internal
+
+- Introduced a new struct `Payload` that enables to cheaply clone mirrord-protocol
+  messages and enables almost zero copy message handling.
+  [#3365](https://github.com/metalbear-co/mirrord/issues/3365)
+- Added a release preparation script.
+- Added a startup probe to the HTTP server containers deployed in the E2E
+  tests.
+- Fixed the install script.
+
+## [3.147.0](https://github.com/metalbear-co/mirrord/tree/3.147.0) - 2025-06-26
+
+
+### Changed
+
+- mirrord exec config_file with no extension, e.g. heredoc, now assumed to be
+  of json format [#3370](https://github.com/metalbear-co/mirrord/issues/3370)
+- mirrord now extracts layer to temp_dir()/mirrord to allow easier whitelisting
+  with Carbon Black
+  [#3373](https://github.com/metalbear-co/mirrord/issues/3373)
+- Expand current profile config doc to address the new namespaced profile
+  feature.
+
+
+### Internal
+
+- Add sns flag to queue registry CRD.
+- Skip priority class e2e test.
+
+## [3.146.0](https://github.com/metalbear-co/mirrord/tree/3.146.0) - 2025-06-24
+
+
+### Added
+
+- Added a new mirrord config `agent.priority_class` field for specifying a priority class name
+  for targetless agent pods.
+  [#1007](https://github.com/metalbear-co/mirrord/issues/1007)
+- Added a new `mirrord dump -p <PORT> -t <TARGET>` command. The command allows for getting dump
+  of target's incoming traffic.
+
+
+### Changed
+
+- Changed `container.override_host_ip` config to use Docker's internal address by
+  default when running `mirrord container docker` (also changes
+  `external_proxy.host_ip` to 0.0.0.0).
+  [#3285](https://github.com/metalbear-co/mirrord/issues/3285)
+- Removed Discord links.
+
+## [3.145.0](https://github.com/metalbear-co/mirrord/tree/3.145.0) - 2025-06-17
+
+
+### Added
+
+- Introduced namespaced mirrord profile.
+- Pass the user's git branch to the operator to allow integration with mirrord
+  Jira app.
+
+
+### Fixed
+
+- Fix duplicated http_filter_ports and not having the default 80,8080.
+- Optimized mirrord-agent's memory usage when mirroring incoming traffic.
+
+
+### Internal
+
+- Add workflow dispatched action to trigger operator e2e from mirrord.
+
+## [3.144.0](https://github.com/metalbear-co/mirrord/tree/3.144.0) - 2025-06-10
+
+
+### Added
+
+- Add user-agent to version check
+- Added an option to exclude agent's communication port from sidecar proxy if
+  the target is in a service mesh.
+
+
+### Changed
+
+- Automatically add health probe ports to http_filter ports (if a filter is
+  set). [#3244](https://github.com/metalbear-co/mirrord/issues/3244)
+
+
+### Fixed
+
+- Fixed big packets crashing mirrord agent - skip and warn, allow user to
+  override max packet size
+
+
+### Internal
+
+- Add a badge for the community Slack to README
+- Added an E2E test for splitting SQS queues based on env var regex.
+
 ## [3.143.0](https://github.com/metalbear-co/mirrord/tree/3.143.0) - 2025-05-29
 
 

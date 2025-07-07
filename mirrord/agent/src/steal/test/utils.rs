@@ -830,7 +830,7 @@ impl StealingClient {
                             connection_id,
                         })) => {
                             assert_eq!(connection_id, expect_connection_id);
-                            got_bytes.extend(bytes);
+                            got_bytes.extend(bytes.as_ref());
                             assert!(expected.starts_with(&got_bytes));
                         }
                         other => panic!("unexpected message: {other:?}"),

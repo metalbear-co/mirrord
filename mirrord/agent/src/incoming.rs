@@ -31,6 +31,10 @@ use tokio::net::TcpStream;
 pub trait PortRedirector {
     type Error: Sized;
 
+    fn initialize(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        std::future::ready(Ok(()))
+    }
+
     /// Start redirecting connections from the given port.
     ///
     /// # Note
@@ -96,8 +100,9 @@ pub async fn create_iptables_redirector(
     flush_connections: bool,
     pod_ips: &[IpAddr],
     support_ipv6: bool,
+    with_mesh_exclusion: Option<u16>,
 ) -> io::Result<ComposedRedirector<IpTablesRedirector>> {
-    let ipv4 = IpTablesRedirector::create(flush_connections, pod_ips, false)
+    let ipv4 = IpTablesRedirector::create(flush_connections, pod_ips, false, with_mesh_exclusion)
         .await
         .inspect_err(|error| {
             tracing::error!(
@@ -107,7 +112,7 @@ pub async fn create_iptables_redirector(
         });
 
     let ipv6 = if support_ipv6 {
-        IpTablesRedirector::create(flush_connections, pod_ips, true)
+        IpTablesRedirector::create(flush_connections, pod_ips, true, with_mesh_exclusion)
             .await
             .inspect_err(|error| {
                 tracing::error!(

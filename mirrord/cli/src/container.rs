@@ -23,6 +23,7 @@ use crate::{
     execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
     logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
+    wsl::adjust_container_config_for_wsl,
 };
 
 mod command_builder;
@@ -92,7 +93,7 @@ async fn create_config_and_analytics<P: Progress>(
 async fn prepare_proxies<P: Progress + Send + Sync>(
     analytics: &mut AnalyticsReporter,
     progress: &P,
-    config: &LayerConfig,
+    config: &mut LayerConfig,
     runtime: ContainerRuntime,
 ) -> CliResult<(
     RuntimeCommandBuilder,
@@ -178,11 +179,13 @@ pub async fn container_command(
     progress.warning("mirrord container is currently an unstable feature");
 
     let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
-    let (config, mut analytics) =
+    let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
+    adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
+
     let (runtime_command, _execution_info, _tls_setup) =
-        prepare_proxies(&mut analytics, &progress, &config, runtime_args.runtime).await?;
+        prepare_proxies(&mut analytics, &progress, &mut config, runtime_args.runtime).await?;
 
     progress.success(None);
 
@@ -233,7 +236,7 @@ pub async fn container_ext_command(
     let cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
-    let (config, mut analytics) =
+    let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
@@ -241,8 +244,10 @@ pub async fn container_ext_command(
         .and_then(|value| ContainerRuntime::from_str(&value, true).ok())
         .unwrap_or(ContainerRuntime::Docker);
 
+    adjust_container_config_for_wsl(container_runtime, &mut config);
+
     let (runtime_command, execution_info, _tls_setup) =
-        prepare_proxies(&mut analytics, &progress, &config, container_runtime).await?;
+        prepare_proxies(&mut analytics, &progress, &mut config, container_runtime).await?;
 
     let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));

@@ -72,6 +72,8 @@ where
     }
 
     async fn run_inner(&mut self) -> Result<(), R::Error> {
+        self.redirector.initialize().await?;
+
         loop {
             tokio::select! {
                 next_conn = self.redirector.next_connection() => {

@@ -24,7 +24,7 @@ use mirrord_protocol::{
         TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION,
         HTTP_FRAMED_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
     },
-    ConnectionId, DaemonMessage, LogMessage, RequestId,
+    ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::StreamMap;
@@ -410,7 +410,7 @@ impl TcpStealerApi {
                 self.queued_messages
                     .push_back(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
-                        bytes,
+                        bytes: bytes.into(),
                     })));
             }
 
@@ -536,7 +536,7 @@ impl TcpStealerApi {
                 if data.bytes.is_empty() {
                     connection.data_tx = None;
                 } else if let Some(data_tx) = connection.data_tx.as_ref() {
-                    let _ = data_tx.send(data.bytes).await;
+                    let _ = data_tx.send(data.bytes.into_vec()).await;
                 }
             }
 
@@ -661,16 +661,16 @@ struct IncomingConnection {
     response_body_tx: Option<ResponseBodyProvider>,
 }
 
-fn frames_to_legacy<I: IntoIterator<Item = InternalHttpBodyFrame>>(frames: I) -> Vec<u8> {
+fn frames_to_legacy<I: IntoIterator<Item = InternalHttpBodyFrame>>(frames: I) -> Payload {
     frames
         .into_iter()
         .filter_map(|frame| match frame {
-            InternalHttpBodyFrame::Data(data) => Some(data),
+            InternalHttpBodyFrame::Data(data) => Some(data.0),
             InternalHttpBodyFrame::Trailers(..) => None,
         })
-        .reduce(|mut d1, d2| {
-            d1.extend_from_slice(&d2);
-            d1
+        .fold(Vec::new(), |mut add, data| {
+            add.extend_from_slice(&data);
+            add
         })
-        .unwrap_or_default()
+        .into()
 }

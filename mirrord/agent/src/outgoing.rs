@@ -188,7 +188,7 @@ impl TcpOutgoingTask {
             Ok(Some(read)) => {
                 let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
-                    bytes: read.to_vec(),
+                    bytes: read.into(),
                 }));
 
                 self.daemon_tx.send(message).await?;
@@ -224,7 +224,7 @@ impl TcpOutgoingTask {
 
                 let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
-                    bytes: vec![],
+                    bytes: vec![].into(),
                 }));
 
                 self.daemon_tx.send(daemon_message).await?;

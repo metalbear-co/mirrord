@@ -159,7 +159,8 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "communication_timeout": 30,
     "startup_timeout": 360,
     "network_interface": "eth0",
-    "flush_connections": false
+    "flush_connections": false,
+    "exclude_from_mesh": false
   }
 }
 ```
@@ -212,6 +213,11 @@ Runs the agent as an
 Not compatible with targetless runs.
 
 Defaults to `false`.
+
+### agent.exclude_from_mesh {#agent-exclude_from_mesh}
+
+When running the agent as an ephemeral container, use this option to exclude
+the agent's port from the service mesh sidecar proxy.
 
 ### agent.flush_connections {#agent-flush_connections}
 
@@ -358,6 +364,23 @@ as targeted agent always runs on the same node as its target container.
 }
 ```
 
+### agent.priority_class {#agent-priority_class}
+
+Specifies the priority class to assign to the agent pod.
+
+This option is only applicable when running in the targetless mode.
+
+```json
+{
+  "priority_class": "my-priority-class-name"
+}
+```
+
+In some cases, the targetless agent pod may fail to schedule due to node resource
+constraints. Setting a priority class allows you to explicitly assign an existing
+priority class from your cluster to the agent pod, increasing its priority relative
+to other workloads.
+
 ### agent.privileged {#agent-privileged}
 
 Run the mirror agent as privileged container.
@@ -479,6 +502,12 @@ when connecting to the host machine from within the container.
 This should be useful if your host machine is exposed with a different IP address than the
 one bound as host.
 
+- If you're running inside WSL, and encountering problems, try setting
+  `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address
+  (for docker, this  would be what `host.docker.internal` resolved to, which by default is
+  `192.168.65.254`). You can find this ip by resolving it from inside a running container,
+  e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
+
 ## experimental {#root-experimental}
 
 mirrord Experimental features.
@@ -566,6 +595,11 @@ Specify a custom host ip addr to listen on.
 
 This address must be accessible from within the container.
 If not specified, mirrord will try and resolve a local address to use.
+
+- If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`,
+  and `container.override_host_ip` to the internal container runtime address (for docker,
+  this would be what `host.docker.internal` resolved to, which by default is
+  `192.168.65.254`).
 
 ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
 
@@ -1279,6 +1313,10 @@ Activate the HTTP traffic filter only for these ports.
 Other ports will *not* be stolen, unless listed in
 [`feature.network.incoming.ports`](#feature-network-incoming-ports).
 
+We check the pod's health probe ports and automatically add them here, as they're
+usually the same ports your app might be listening on. If your app ports and the
+health probe ports don't match, then setting this option will override this behavior.
+
 Set to [80, 8080] by default.
 
 #### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
@@ -1780,6 +1818,22 @@ of failure.
 ## profile {#root-profile}
 
 Name of the mirrord profile to use.
+
+To select a cluster-wide profile
+
+```json
+{
+  "profile": "my-profile-name"
+}
+```
+
+To select a namespaced profile
+
+```json
+{
+  "profile": "my-namespace/my-profile-name"
+}
+```
 
 ## sip_binaries {#root-sip_binaries}
 

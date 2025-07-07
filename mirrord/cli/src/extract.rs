@@ -54,7 +54,15 @@ where
 
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
-        None => temp_dir().as_path().join(file_name),
+        None => {
+            let dir = temp_dir().join("mirrord");
+            // make dir if it doesn't exist
+            if !dir.exists() {
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| CliError::LayerExtractError(dir.clone(), e))?;
+            }
+            dir.as_path().join(file_name)
+        }
     };
     if !file_path.exists() {
         let mut file = File::create(&file_path)
