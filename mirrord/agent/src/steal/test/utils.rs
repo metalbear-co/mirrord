@@ -388,7 +388,12 @@ impl TestRequest {
                     .flatten()
                     .copied()
                     .collect::<Vec<_>>();
-                assert_eq!(body.as_ref(), &expected);
+                assert_eq!(
+                    body.as_ref(),
+                    &expected,
+                    "unexpected body: {}",
+                    String::from_utf8_lossy(&body)
+                );
             }
         }
     }

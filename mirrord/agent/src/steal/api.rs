@@ -367,7 +367,7 @@ impl TcpStealerApi {
                 self.queued_messages.push_back(DaemonMessage::TcpSteal(
                     DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
                         frames: Default::default(),
-                        is_last: false,
+                        is_last: true,
                         connection_id,
                         request_id: Self::REQUEST_ID,
                     })),
@@ -621,7 +621,7 @@ impl ClientConnectionState {
 
     async fn send_response_frame(&mut self, frame: Option<InternalHttpBodyFrame>) {
         let state = std::mem::replace(self, Self::Closed);
-        let response_provider = match state {
+        let body_provider = match state {
             Self::HttpResponseReceived { body_provider } => body_provider,
             state => {
                 *self = state;
@@ -631,9 +631,10 @@ impl ClientConnectionState {
 
         match frame {
             Some(frame) => {
-                response_provider.send_frame(frame.into()).await;
+                body_provider.send_frame(frame.into()).await;
+                *self = Self::HttpResponseReceived { body_provider }
             }
-            None => match response_provider.finish() {
+            None => match body_provider.finish() {
                 Some(data_tx) => *self = Self::HttpUpgraded { data_tx },
                 None => {
                     *self = Self::Closed;
@@ -662,11 +663,10 @@ impl ClientConnectionState {
         let (parts, _) = hyper_response.into_parts();
 
         let body_provider = response_provider.send(parts);
-        *self = Self::HttpResponseReceived { body_provider };
-
         for frame in response.internal_response.body {
-            self.send_response_frame(Some(frame)).await;
+            body_provider.send_frame(frame.into()).await;
         }
+        *self = Self::HttpResponseReceived { body_provider };
     }
 }
 
