@@ -174,6 +174,56 @@ impl TcpStealerApi {
         }
     }
 
+    async fn send_chunked(&mut self, response: ChunkedResponse) {
+        match response {
+            ChunkedResponse::Start(response) => {
+                self.send_response(response, false).await;
+            }
+
+            ChunkedResponse::Body(body) => {
+                let ChunkedRequestBodyV1 {
+                    frames,
+                    is_last,
+                    request_id,
+                    connection_id,
+                } = body;
+
+                if request_id != 0 {
+                    return;
+                }
+                let Some(connection) = self.connections.get_mut(&connection_id) else {
+                    return;
+                };
+                let Some(frame_tx) = connection.response_body_tx.take() else {
+                    return;
+                };
+
+                for frame in frames {
+                    frame_tx.send_frame(frame.into()).await;
+                }
+
+                if is_last {
+                    let data_tx = frame_tx.finish();
+                    connection.data_tx = data_tx;
+                } else {
+                    connection.response_body_tx.replace(frame_tx);
+                }
+            }
+
+            ChunkedResponse::Error(error) => {
+                let ChunkedRequestErrorV1 {
+                    request_id,
+                    connection_id,
+                } = error;
+
+                if request_id == 0 {
+                    self.connections.remove(&connection_id);
+                    self.incoming_streams.remove(&connection_id);
+                }
+            }
+        }
+    }
+
     /// Returns a [`DaemonMessage`] to be sent to the client.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     pub(crate) async fn recv(&mut self) -> AgentResult<DaemonMessage> {
@@ -550,51 +600,7 @@ impl TcpStealerApi {
                 self.send_response(response, true).await;
             }
 
-            LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(response)) => {
-                self.send_response(response, false).await;
-            }
-
-            LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(body)) => {
-                let ChunkedRequestBodyV1 {
-                    frames,
-                    is_last,
-                    request_id,
-                    connection_id,
-                } = body;
-
-                if request_id != 0 {
-                    return Ok(());
-                }
-                let Some(connection) = self.connections.get_mut(&connection_id) else {
-                    return Ok(());
-                };
-                let Some(frame_tx) = connection.response_body_tx.take() else {
-                    return Ok(());
-                };
-
-                for frame in frames {
-                    frame_tx.send_frame(frame.into()).await;
-                }
-
-                if is_last {
-                    let data_tx = frame_tx.finish();
-                    connection.data_tx = data_tx;
-                } else {
-                    connection.response_body_tx.replace(frame_tx);
-                }
-            }
-
-            LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Error(error)) => {
-                let ChunkedRequestErrorV1 {
-                    request_id,
-                    connection_id,
-                } = error;
-
-                if request_id == 0 {
-                    self.connections.remove(&connection_id);
-                    self.incoming_streams.remove(&connection_id);
-                }
-            }
+            LayerTcpSteal::HttpResponseChunked(response) => self.send_chunked(response).await,
         }
 
         Ok(())
