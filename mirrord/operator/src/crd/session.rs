@@ -15,7 +15,7 @@ pub struct MirrordSessionSpec {
     #[serde(default, skip_serializing_if = "JiraMetricsResources::is_empty")]
     pub jira_metrics_resources: JiraMetricsResources,
 
-    /// Session's target
+    /// Session's [`Target`](mirrord_config::target::Target)
     pub target: SessionTarget,
 
     /// Owner of this session
@@ -42,11 +42,20 @@ pub struct MirrordSessionOwner {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
+    /// Target's Resource apiVersion
     pub api_version: String,
+
+    /// Target's Resource Kind
     pub kind: String,
+
+    /// Target Namespace
     pub namespace: String,
+
+    /// Target Name (will be empty for targetless)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+
+    /// Target Container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
