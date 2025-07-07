@@ -46,7 +46,7 @@ async fn operator_setup(
         sqs_splitting,
         kafka_splitting,
         application_auto_pause,
-        statefull_sessions,
+        stateful_sessions,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     if !accept_tos {
@@ -94,7 +94,7 @@ async fn operator_setup(
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            statefull_sessions,
+            stateful_sessions,
         });
 
         match file {

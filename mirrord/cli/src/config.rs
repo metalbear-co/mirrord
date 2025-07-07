@@ -758,7 +758,7 @@ pub(super) struct OperatorSetupParams {
         default_value_t = false,
         hide = true
     )]
-    pub(super) statefull_sessions: bool,
+    pub(super) stateful_sessions: bool,
 }
 
 /// `mirrord operator session` family of commands.

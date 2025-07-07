@@ -102,7 +102,7 @@ pub struct SetupOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
-    pub statefull_sessions: bool,
+    pub stateful_sessions: bool,
 }
 
 #[derive(Debug)]
@@ -122,7 +122,7 @@ pub struct Operator {
     client_ca_role_binding: OperatorClientCaRoleBinding,
     sqs_splitting: bool,
     kafka_splitting: bool,
-    statefull_sessions: bool,
+    stateful_sessions: bool,
 }
 
 impl Operator {
@@ -135,7 +135,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            statefull_sessions,
+            stateful_sessions,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -151,7 +151,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            statefull_sessions,
+            stateful_sessions,
         });
         let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
@@ -199,7 +199,7 @@ impl Operator {
             client_ca_role_binding,
             sqs_splitting,
             kafka_splitting,
-            statefull_sessions,
+            stateful_sessions,
         }
     }
 }
@@ -287,7 +287,7 @@ impl OperatorSetup for Operator {
             }
         }
 
-        if self.statefull_sessions {
+        if self.stateful_sessions {
             writer.write_all(b"---\n")?;
             MirrordSession::crd().to_writer(&mut writer)?;
         }
@@ -552,7 +552,7 @@ pub struct OperatorClusterRoleOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
-    pub statefull_sessions: bool,
+    pub stateful_sessions: bool,
 }
 
 #[derive(Debug)]
@@ -772,7 +772,7 @@ impl OperatorClusterRole {
             });
         }
 
-        if options.statefull_sessions {
+        if options.stateful_sessions {
             rules.push(PolicyRule {
                 api_groups: Some(vec![MirrordSession::group(&()).into_owned()]),
                 resources: Some(vec![MirrordSession::plural(&()).into_owned()]),
