@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionSpec {
     /// Resources needed to report session metrics to the mirrord Jira app
-    #[serde(default, skip_serializing_if = "JiraMetricsResources::is_empty")]
-    pub jira_metrics_resources: JiraMetricsResources,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jira_metrics_resources: Option<JiraMetricsResources>,
 
     /// Session's [`Target`](mirrord_config::target::Target)
     pub target: SessionTarget,
@@ -65,16 +65,8 @@ pub struct SessionTarget {
 #[serde(rename_all = "camelCase")]
 pub struct JiraMetricsResources {
     /// The Jira webhook URL, used to update total session time in the mirrord Jira app
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jira_webhook_url: Option<String>,
+    pub jira_webhook_url: String,
 
     /// The user's current git branch, used for sending session metrics to mirrord Jira app
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub branch_name: Option<String>,
-}
-
-impl JiraMetricsResources {
-    pub fn is_empty(&self) -> bool {
-        self.jira_webhook_url.is_none() && self.branch_name.is_none()
-    }
+    pub branch_name: String,
 }
