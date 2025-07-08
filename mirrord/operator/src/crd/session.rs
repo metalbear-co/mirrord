@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,14 +14,11 @@ pub struct MirrordClusterSessionSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jira_metrics_resources: Option<JiraMetricsResources>,
 
-    /// Session's [`Target`](mirrord_config::target::Target)
-    pub target: SessionTarget,
-
     /// Owner of this session
     pub owner: MirrordClusterSessionOwner,
 
-    /// Start time of this session when actual websocket connection is first created.
-    pub start_time: DateTime<Utc>,
+    /// Session's [`Target`](mirrord_config::target::Target)
+    pub target: SessionTarget,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
