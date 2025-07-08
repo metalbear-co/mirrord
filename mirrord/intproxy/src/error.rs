@@ -1,5 +1,3 @@
-use std::io;
-
 use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
 use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, ResponseError};
 use thiserror::Error;
@@ -19,16 +17,24 @@ use crate::{
 #[error("agent sent an unexpected message: {0:?}")]
 pub struct UnexpectedAgentMessage(pub DaemonMessage);
 
+/// Convenience error type for internal errors. Used to wrap all internal errors.
 #[derive(Error, Debug)]
-pub enum IntProxyError {
-    #[error("waiting for the first layer connection timed out")]
-    ConnectionAcceptTimeout,
-    #[error("accepting layer connection failed: {0}")]
-    ConnectionAccept(io::Error),
+pub(crate) enum InternalProxyError {
+    #[error(transparent)]
+    Startup(#[from] ProxyStartupError),
+    #[error(transparent)]
+    Runtime(#[from] ProxyRuntimeError),
+}
+
+/// This kind of error causes a partial failure of the proxy, meaning that for these errors does
+/// exist a failover strategy, so in case of incurring of this error, the proxy change behavior,
+/// according to [`crate::FailoverStrategy`]
+#[derive(Error, Debug)]
+pub(crate) enum ProxyRuntimeError {
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
 
-    #[error("connecting with agent failed: {0}")]
+    #[error("connection with agent failed: {0}")]
     AgentConnection(#[from] AgentConnectionError),
     #[error("agent closed connection with error: {0}")]
     AgentFailed(String),
@@ -58,7 +64,13 @@ pub enum IntProxyError {
     FilesProxy(#[from] FilesProxyError),
 }
 
-pub type Result<T> = core::result::Result<T, IntProxyError>;
+/// This kind of error causes a total failure of the proxy, meaning that for these errors doesn't
+/// exist a failover strategy, so facing this error the proxy stops working.
+#[derive(Error, Debug)]
+pub enum ProxyStartupError {
+    #[error("waiting for the first layer connection timed out")]
+    ConnectionAcceptTimeout,
+}
 
 pub fn agent_lost_io_error() -> ResponseError {
     ResponseError::RemoteIO(RemoteIOError {

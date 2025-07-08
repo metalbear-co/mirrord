@@ -218,6 +218,8 @@ pub enum ProxyToLayerMessage {
     Incoming(IncomingResponse),
     /// A response to layer's [`LayerToProxyMessage::GetEnv`].
     GetEnv(RemoteResult<HashMap<String, String>>),
+    /// Internal proxy encountered a fatal error.
+    ProxyFailed(String),
 }
 
 /// A response to layer's [`IncomingRequest`].

@@ -1,0 +1,1 @@
+Added browser extension configuration and initiation.
