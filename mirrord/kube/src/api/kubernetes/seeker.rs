@@ -157,13 +157,12 @@ impl KubeResourceSeeker<'_> {
             Some((name, containers))
         }
 
-        // TODO(alex) [high]: We have to set `None` here when copy-target.
+        // `copy_target` can be used on dead resources.
         if self.copy_target {
             self.list_all_namespaced(None)
         } else {
             self.list_all_namespaced(Some("status.phase=Running"))
         }
-        // TODO(alex) [high]: Here we get pods that are not running back.
         .try_filter(|pod| std::future::ready(self.copy_target || check_pod_status(pod)))
         .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
         .map_ok(|(pod, containers)| {
@@ -183,12 +182,13 @@ impl KubeResourceSeeker<'_> {
     }
 
     /// The list of deployments that have at least 1 `Replicas` and a deployment name.
+    ///
+    /// - When `copy_target` is enabled, we ignore the replicas requirement.
     async fn deployments(&self) -> Result<Vec<String>> {
         fn check_deployment_replicas(deployment: &Deployment) -> bool {
             deployment
                 .status
                 .as_ref()
-                // TODO(alex) [high]: We don't care if there are no replicas and it's copy-target?
                 .map(|status| status.available_replicas >= Some(1))
                 .unwrap_or(false)
         }
