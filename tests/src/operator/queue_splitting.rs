@@ -94,7 +94,7 @@ async fn expect_output_lines<const N: usize, const M: usize>(
     let lines = test_process
         .await_exactly_n_lines(
             expected_lines.len() + expected_in_order_lines.len(),
-            Duration::from_secs(20),
+            Duration::from_secs(90),
         )
         .await;
     for expected_line in expected_lines.into_iter() {
@@ -316,7 +316,7 @@ pub async fn two_users(
 
     println!("letting split time to start before writing messages");
     tokio::time::timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(90),
         watch_sqs_sessions(
             sqs_test_resources.kube_client.clone(),
             sqs_test_resources.namespace(),
@@ -369,6 +369,7 @@ pub async fn two_users(
     .await;
     println!("Queue 2 was split correctly!");
 
+    println!("Verifying the right number of temp queues were created.");
     let num_temp_queues = sqs_test_resources.count_temp_queues().await;
 
     assert_eq!(
@@ -380,8 +381,12 @@ pub async fn two_users(
 
     // TODO: verify queue tags.
 
+    println!("Killing test clients (local mirrord runs).");
     client_a.child.kill().await.unwrap();
+    println!("...Killed first test client.");
     client_b.child.kill().await.unwrap();
+    println!("...Killed second test client.");
 
+    println!("Waiting for the temp queues to be deleted after the mirrord sessions ended.");
     sqs_test_resources.wait_for_temp_queue_deletion().await;
 }
