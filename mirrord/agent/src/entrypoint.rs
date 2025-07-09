@@ -667,7 +667,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             leftover_rules = ?leftover_rules,
             "Detected dirty iptables. Either some other mirrord agent is running \
             or the previous agent failed to clean up before exit. \
-            If no other mirrord agent is targeting this pod, please delete the pod."
+            If no other mirrord agent is targeting this pod, please delete the pod. \
+            If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
         );
         let _ = notify_client_about_dirty_iptables(
             listener,

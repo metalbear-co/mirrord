@@ -111,6 +111,7 @@ impl FoundTargets {
                 .namespace
                 .as_deref()
                 .unwrap_or(client.default_namespace()),
+            copy_target: config.feature.copy_target.enabled,
         };
 
         let (targets, namespaces) = tokio::try_join!(

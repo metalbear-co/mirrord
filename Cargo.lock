@@ -4273,6 +4273,7 @@ name = "mirrord"
 version = "3.148.0"
 dependencies = [
  "actix-codec",
+ "base64 0.22.1",
  "clap",
  "clap_complete",
  "const-random",

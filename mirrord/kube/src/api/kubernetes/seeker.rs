@@ -21,6 +21,7 @@ use crate::{
 pub struct KubeResourceSeeker<'a> {
     pub client: &'a kube::Client,
     pub namespace: &'a str,
+    pub copy_target: bool,
 }
 
 impl KubeResourceSeeker<'_> {
@@ -156,26 +157,33 @@ impl KubeResourceSeeker<'_> {
             Some((name, containers))
         }
 
-        self.list_all_namespaced(Some("status.phase=Running"))
-            .try_filter(|pod| std::future::ready(check_pod_status(pod)))
-            .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
-            .map_ok(|(pod, containers)| {
-                stream::iter(if containers.len() == 1 {
-                    vec![Ok(format!("pod/{pod}"))]
-                } else {
-                    containers
-                        .iter()
-                        .map(move |container| Ok(format!("pod/{pod}/container/{container}")))
-                        .collect()
-                })
+        // `copy_target` can be used on dead resources.
+        if self.copy_target {
+            self.list_all_namespaced(None)
+        } else {
+            self.list_all_namespaced(Some("status.phase=Running"))
+        }
+        .try_filter(|pod| std::future::ready(self.copy_target || check_pod_status(pod)))
+        .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
+        .map_ok(|(pod, containers)| {
+            stream::iter(if containers.len() == 1 {
+                vec![Ok(format!("pod/{pod}"))]
+            } else {
+                containers
+                    .iter()
+                    .map(move |container| Ok(format!("pod/{pod}/container/{container}")))
+                    .collect()
             })
-            .try_flatten()
-            .try_collect()
-            .await
-            .map_err(KubeApiError::KubeError)
+        })
+        .try_flatten()
+        .try_collect()
+        .await
+        .map_err(KubeApiError::KubeError)
     }
 
     /// The list of deployments that have at least 1 `Replicas` and a deployment name.
+    ///
+    /// - When `copy_target` is enabled, we ignore the replicas requirement.
     async fn deployments(&self) -> Result<Vec<String>> {
         fn check_deployment_replicas(deployment: &Deployment) -> bool {
             deployment
@@ -187,7 +195,9 @@ impl KubeResourceSeeker<'_> {
 
         self.list_all_namespaced::<Deployment>(None)
             .filter(|response| std::future::ready(response.is_ok()))
-            .try_filter(|deployment| std::future::ready(check_deployment_replicas(deployment)))
+            .try_filter(|deployment| {
+                std::future::ready(self.copy_target || check_deployment_replicas(deployment))
+            })
             .try_filter_map(|deployment| {
                 std::future::ready(Ok(deployment
                     .metadata
