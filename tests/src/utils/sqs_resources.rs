@@ -106,17 +106,27 @@ impl SqsTestResources {
 
     /// Count the temp queues created by the SQS-operator for this test instance.
     pub async fn count_temp_queues(&self) -> usize {
-        self.sqs_client
+        println!("Counting temporary queues created by the SQS operator for this test.");
+
+        let urls = self
+            .sqs_client
             .list_queues()
             .queue_name_prefix("mirrord-")
             .send()
             .await
             .unwrap()
             .queue_urls
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let count = urls
             .iter()
             .filter(|q_url| q_url.contains(&self.queue1.name) || q_url.contains(&self.queue2.name))
-            .count()
+            .count();
+
+        println!(
+            "Found {count} queues. TEST_QUEUE_NAMES=[{}, {}], ALL_QUEUE_URLS={urls:?}.",
+            self.queue1.name, self.queue2.name
+        );
+        count
     }
 
     /// Wait for all the temp queues created by the SQS operator
