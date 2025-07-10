@@ -2,7 +2,7 @@
 #![cfg(feature = "operator")]
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     ops::Not,
     time::Duration,
@@ -661,8 +661,18 @@ pub async fn wait_for_stable_state(
     .await;
 
     println!("Waiting for exactly {expected_pods} pods to be ready.");
+    let mut seen_pods: HashSet<String> = Default::default();
     let api = Api::<Pod>::namespaced(kube_client.clone(), namespace);
     Watcher::new(api, Default::default(), move |pods| {
+        for (uid, pod) in pods {
+            if seen_pods.insert(uid.clone()) {
+                println!(
+                    "Seeing a pod for the first time. NAME={:?}, SPEC={:?}",
+                    pod.metadata.name, pod.spec,
+                )
+            }
+        }
+
         if pods.len() != expected_pods {
             return false;
         }
