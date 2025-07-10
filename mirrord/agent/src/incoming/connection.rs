@@ -71,7 +71,7 @@ impl ConnectionInfo {
 /// [`MaybeHttp::detect`] transforms the incoming [`TcpStream`](tokio::net::TcpStream)
 /// into one of multiple types due to possible TLS handshake and HTTP detection.
 ///
-/// Having a super trait allows us to return [`Box<dyn IncomingStream>`]
+/// Having a super trait allows us to return [`Box<dyn IncomingIO>`]
 /// and simplify the code in general.
 pub trait IncomingIO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
