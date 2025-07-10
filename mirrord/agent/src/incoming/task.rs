@@ -71,6 +71,13 @@ where
         (task, steal_handle)
     }
 
+    /// Runs the main [`RedirectorTask`] even loop.
+    ///
+    /// # Async operations
+    ///
+    /// Beware **not** to `.await` on any network IO here.
+    /// This task is meant to serve multiple clients,
+    /// and waiting on IO would prevent it from processing new redirected connections.
     async fn run_inner(&mut self) -> Result<(), R::Error> {
         self.redirector.initialize().await?;
 
