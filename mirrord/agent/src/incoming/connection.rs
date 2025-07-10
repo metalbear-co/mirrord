@@ -276,11 +276,8 @@ impl Stream for IncomingStream {
             return Poll::Ready(None);
         };
 
-        let item = match std::task::ready!(rx.poll_recv(cx)) {
-            Some(item) => item,
-            None => IncomingStreamItem::Finished(Err(ConnError::Dropped)),
-        };
-
+        let item = std::task::ready!(rx.poll_recv(cx))
+            .unwrap_or(IncomingStreamItem::Finished(Err(ConnError::Dropped)));
         if matches!(item, IncomingStreamItem::Finished(..)) {
             this.rx = None;
         }
