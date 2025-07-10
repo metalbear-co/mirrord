@@ -623,7 +623,17 @@ pub async fn wait_for_stable_state(
         MirrordSqsSession::plural(&())
     );
     let api = Api::<MirrordSqsSession>::namespaced(kube_client.clone(), namespace);
+    let mut seen_sessions: HashSet<String> = Default::default();
     Watcher::new(api, Default::default(), move |sessions| {
+        for (uid, session) in sessions {
+            if seen_sessions.insert(uid.clone()) {
+                println!(
+                    "Seeing a session for the first time. NAME={:?}, SPEC={:?}",
+                    session.metadata.name, session.spec,
+                )
+            }
+        }
+
         if sessions.len() != expected_sessions {
             return false;
         }
@@ -661,8 +671,8 @@ pub async fn wait_for_stable_state(
     .await;
 
     println!("Waiting for exactly {expected_pods} pods to be ready.");
-    let mut seen_pods: HashSet<String> = Default::default();
     let api = Api::<Pod>::namespaced(kube_client.clone(), namespace);
+    let mut seen_pods: HashSet<String> = Default::default();
     Watcher::new(api, Default::default(), move |pods| {
         for (uid, pod) in pods {
             if seen_pods.insert(uid.clone()) {
