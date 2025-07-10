@@ -760,6 +760,7 @@ pub async fn write_sqs_messages(
     let mut batch_send = sqs_client.send_message_batch().queue_url(&queue.url);
     for (index, message) in messages.into_iter().enumerate() {
         let entry = SendMessageBatchRequestEntryBuilder::default()
+            .id(index.to_string())
             .message_body(message.body)
             .message_attributes(
                 message.attribute_name,
