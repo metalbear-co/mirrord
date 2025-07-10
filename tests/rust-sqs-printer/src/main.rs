@@ -1,7 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt, future::Future};
 
-use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message, Client};
+use aws_sdk_sqs::{error::SdkError, types::Message, Client};
 use tokio::time::{sleep, Duration};
+
+/// Backoff used in case of IO errors.
+const BACKOFF: Duration = Duration::from_secs(2);
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
@@ -19,16 +22,39 @@ const QUEUE_JSON_ENV_VAR: &str = "SQS_TEST_Q_JSON";
 const QUEUE1_NAME_KEY: &str = "queue1_name";
 const QUEUE2_URL_KEY: &str = "queue2_url";
 
+/// In a loop, retries the future produced by the given function,
+/// until it succeeds or returns a fatal error.
+///
+/// Some errors are retried with backoff. These are errors that can be triggered by agent loss,
+/// which can happen when the agent is restarting the target workload.
+async fn retry_with_backoff<F, Fut, T, E, R>(mut f: F) -> Result<T, SdkError<E, R>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, SdkError<E, R>>>,
+    E: fmt::Debug,
+    R: fmt::Debug,
+{
+    loop {
+        match f().await {
+            Ok(res) => break Ok(res),
+            Err(err @ SdkError::DispatchFailure(..) | err @ SdkError::ResponseError(..)) => {
+                // This might be triggered by agent loss, so we retry with backoff.
+                eprintln!("SQS request failed, retrying with backoff: {err:?}");
+                sleep(BACKOFF).await;
+            }
+            Err(err) => break Err(err),
+        }
+    }
+}
+
 /// Reads from queue and prints the contents of each message in a new line.
 async fn read_from_queue_by_name(read_q_name: String, client: Client, queue_num: u8) {
-    let read_q_url = client
-        .get_queue_url()
-        .queue_name(read_q_name)
-        .send()
+    let read_q_url = retry_with_backoff(|| client.get_queue_url().queue_name(&read_q_name).send())
         .await
         .unwrap()
         .queue_url
         .unwrap();
+
     read_from_queue_by_url(read_q_url, client, queue_num).await;
 }
 
@@ -46,38 +72,32 @@ async fn read_from_queue_by_url(read_q_url: String, client: Client, queue_num: u
         .wait_time_seconds(5)
         .queue_url(&read_q_url);
     loop {
-        let res = match receive_message_request.clone().send().await {
-            Ok(res) => res,
-            Err(err) => {
-                println!("ERROR: {err:?}");
-                sleep(Duration::from_secs(3)).await;
-                continue;
-            }
-        };
-        if let ReceiveMessageOutput {
-            messages: Some(messages),
+        let messages = retry_with_backoff(|| receive_message_request.clone().send())
+            .await
+            .unwrap()
+            .messages
+            .unwrap_or_default();
+        for Message {
+            body,
+            receipt_handle,
             ..
-        } = res
+        } in messages
         {
-            for Message {
-                body,
-                receipt_handle,
-                ..
-            } in messages
-            {
-                println!(
-                    "{queue_num}:{}",
-                    body.expect("Got message without body. Expected content.")
-                );
-                if let Some(handle) = receipt_handle {
+            println!(
+                "{queue_num}:{}",
+                body.expect("Got message without body. Expected content.")
+            );
+
+            if let Some(handle) = receipt_handle {
+                retry_with_backoff(|| {
                     client
                         .delete_message()
                         .queue_url(&read_q_url)
-                        .receipt_handle(handle)
+                        .receipt_handle(&handle)
                         .send()
-                        .await
-                        .unwrap();
-                }
+                })
+                .await
+                .unwrap();
             }
         }
     }
