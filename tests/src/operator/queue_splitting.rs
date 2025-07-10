@@ -274,6 +274,7 @@ pub async fn two_users(
             &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
             1,
+            1,
         ),
     )
     .await
@@ -297,6 +298,7 @@ pub async fn two_users(
             &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
             2,
+            1,
         ),
     )
     .await

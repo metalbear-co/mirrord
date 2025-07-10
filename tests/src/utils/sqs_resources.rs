@@ -576,6 +576,7 @@ pub async fn wait_for_stable_state(
     kube_client: &Client,
     namespace: &str,
     expected_sessions: usize,
+    expected_pods: usize,
 ) {
     println!(
         "Waiting for {} {} to have status.",
@@ -608,7 +609,7 @@ pub async fn wait_for_stable_state(
     .await;
 
     println!(
-        "Waiting for {expected_sessions} ready {}.",
+        "Waiting for exactly {expected_sessions} ready {}.",
         MirrordSqsSession::plural(&())
     );
     let api = Api::<MirrordSqsSession>::namespaced(kube_client.clone(), namespace);
@@ -649,9 +650,12 @@ pub async fn wait_for_stable_state(
     .run()
     .await;
 
-    println!("Waiting for all pods to be ready.");
+    println!("Waiting for exactly {expected_pods} pods to be ready.");
     let api = Api::<Pod>::namespaced(kube_client.clone(), namespace);
-    Watcher::new(api, Default::default(), |pods| {
+    Watcher::new(api, Default::default(), move |pods| {
+        if pods.len() != expected_pods {
+            return false;
+        }
         let ready = pods.values().all(|pod| {
             let Some(status) = &pod.status else {
                 return false;
@@ -665,7 +669,7 @@ pub async fn wait_for_stable_state(
             container_statuses.iter().all(|status| status.ready)
         });
         if ready {
-            println!("All pods are ready.");
+            println!("{expected_pods} pods are ready.");
         }
         ready
     })
