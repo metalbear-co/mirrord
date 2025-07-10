@@ -201,9 +201,20 @@ impl MaybeHttp {
         let tls_connector = tls_handler.connector(stream.get_ref().1);
 
         let (stream, http_version): (Box<dyn IncomingIO>, _) = match tls_connector.alpn_protocol() {
-            Some(tls::HTTP_2_ALPN_NAME) => (Box::new(stream), Some(HttpVersion::V2)),
-            Some(tls::HTTP_1_1_ALPN_NAME) => (Box::new(stream), Some(HttpVersion::V1)),
-            Some(tls::HTTP_1_0_ALPN_NAME) => (Box::new(stream), Some(HttpVersion::V1)),
+            Some(tls::HTTP_2_ALPN_NAME) => (
+                Box::new(IncomingIoWrapper {
+                    io: stream,
+                    _metric_guard: metric_guard,
+                }),
+                Some(HttpVersion::V2),
+            ),
+            Some(tls::HTTP_1_1_ALPN_NAME | tls::HTTP_1_0_ALPN_NAME) => (
+                Box::new(IncomingIoWrapper {
+                    io: stream,
+                    _metric_guard: metric_guard,
+                }),
+                Some(HttpVersion::V1),
+            ),
             Some(..) => (
                 Box::new(IncomingIoWrapper {
                     io: stream,
