@@ -6,8 +6,6 @@ use core::time::Duration;
 use std::collections::HashSet;
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
-use k8s_openapi::api::core::v1::Pod;
-use kube::Api;
 use rstest::*;
 use tempfile::NamedTempFile;
 
@@ -16,10 +14,8 @@ use crate::utils::{
     kube_client,
     process::TestProcess,
     sqs_resources::{
-        await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
-        QueueInfo,
+        sqs_test_resources, wait_for_stable_state, write_sqs_messages, QueueInfo, TestMessage,
     },
-    watch::Watcher,
 };
 
 /// Produces a mirrord config file for an application run in the [`two_users`] test.
@@ -272,34 +268,16 @@ pub async fn two_users(
             )]),
         )
         .await;
-
-    tokio::time::timeout(Duration::from_secs(30), async {
-        await_registry_status(
-            sqs_test_resources.kube_client.clone(),
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        wait_for_stable_state(
+            &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
-        )
-        .await;
-
-        Watcher::new(
-            Api::<Pod>::namespaced(kube_client.clone(), sqs_test_resources.namespace()),
-            Default::default(),
-            |pods| {
-                pods.values().all(|pod| {
-                    let Some(status) = &pod.status else {
-                        return false;
-                    };
-                    status.phase.as_deref() == Some("Running")
-                })
-            },
-        )
-        .run()
-        .await;
-    })
+            1,
+        ),
+    )
     .await
-    .unwrap();
-
-    // TODO make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(20)).await;
+    .expect("timeout waiting for stable cluster state after starting the first client");
 
     println!("Starting second mirrord client");
     let mut client_b = application
@@ -313,40 +291,62 @@ pub async fn two_users(
             )]),
         )
         .await;
-
-    println!("letting split time to start before writing messages");
     tokio::time::timeout(
-        Duration::from_secs(90),
-        watch_sqs_sessions(
-            sqs_test_resources.kube_client.clone(),
+        Duration::from_secs(30),
+        wait_for_stable_state(
+            &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
+            2,
         ),
     )
     .await
-    .unwrap();
+    .expect("timeout waiting for stable cluster state after starting the second client");
 
-    // TODO: make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(60)).await;
-
+    let messages_queue_1 = [
+        ("a", "1"),
+        ("b", "2"),
+        ("c", "3"),
+        // test attribute value case-insensitivity
+        ("C", "4"),
+        ("B", "5"),
+        ("A", "6"),
+    ]
+    .map(|(attribute_value, body)| TestMessage {
+        body: body.into(),
+        attribute_name: "cliENT".into(), // test attribute name case-insensitivity
+        attribute_value: attribute_value.into(),
+    })
+    .into();
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue1,
-        "cliENT",                        // Test attribute name case-insensitivity
-        &["a", "b", "c", "C", "B", "A"], // Should also be case-insensitive
-        &["1", "2", "3", "4", "5", "6"],
+        messages_queue_1,
     )
     .await;
 
+    let messages_queue_2 = [
+        ("A", "10"),
+        ("B", "20"),
+        ("C", "30"),
+        // test attribute value case-insensitivity
+        ("c", "40"),
+        ("b", "50"),
+        ("a", "60"),
+    ]
+    .map(|(attribute_value, body)| TestMessage {
+        body: body.into(),
+        attribute_name: "CLIent".into(), // test attribute name case-insensitivity
+        attribute_value: attribute_value.into(),
+    })
+    .into();
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue2,
-        "CLIent",                        // Test attribute name case-insensitivity
-        &["A", "B", "C", "c", "b", "a"], // Should also be case-insensitive
-        &["10", "20", "30", "40", "50", "60"],
+        messages_queue_2,
     )
     .await;
 
-    // Test app prints 1: before messages from queue 1 and 2: before messages from queue 2.
+    // Test app prints `1:` before messages from queue 1 and `2:` before messages from queue 2.
     expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
     println!("Client a received the correct messages.");
     expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;

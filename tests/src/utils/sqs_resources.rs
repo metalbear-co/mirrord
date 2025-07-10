@@ -13,6 +13,7 @@ use aws_credential_types::provider::{
     future::ProvideCredentials as ProvideCredentialsFuture, ProvideCredentials,
 };
 use aws_sdk_sqs::types::{
+    builders::SendMessageBatchRequestEntryBuilder,
     MessageAttributeValue,
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
@@ -22,17 +23,17 @@ use k8s_openapi::{
         apps::v1::Deployment,
         core::v1::{
             ConfigMap, ConfigMapEnvSource, ConfigMapKeySelector, EnvFromSource, EnvVar,
-            EnvVarSource, Service,
+            EnvVarSource, Pod, Service,
         },
     },
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
-use kube::{api::PostParams, runtime::wait::await_condition, Api, Client};
+use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_operator::{
     crd::{
-        is_session_ready, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        MirrordWorkloadQueueRegistrySpec, QueueConsumer, QueueConsumerType, QueueNameSource,
-        SplitQueue, SqsQueueDetails,
+        MirrordSqsSession, MirrordWorkloadQueueRegistry, MirrordWorkloadQueueRegistrySpec,
+        QueueConsumer, QueueConsumerType, QueueNameSource, SplitQueue, SqsQueueDetails,
+        SqsSessionStatus,
     },
     setup::OPERATOR_NAME,
 };
@@ -252,8 +253,8 @@ async fn sqs_queue(
     QueueInfo { name, url }
 }
 
-/// Create the `MirrordWorkloadQueueRegistry` K8s resource.
-/// No ResourceGuard needed, the namespace is guarded.
+/// Create the [`MirrordWorkloadQueueRegistry`] K8s resource.
+/// No [`ResourceGuard`] is created, assuming that the whole namespace is guared.
 ///
 /// # Arguments:
 /// * `fallback_queues` - if not `None`, then a fallback will be set using the given queues.
@@ -563,32 +564,113 @@ async fn get_localstack_service(kube_client: &Client) -> Option<Service> {
     service_api.get("localstack").await.ok()
 }
 
-/// Watch [`MirrordSqsSession`] resources in the given namespace and return once two unique sessions
-/// are ready.
+/// Waits until the SQS test namespace reaches stable state.
 ///
-/// Return `Err(())` if there was an error while watching or if a session was deleted before 2 were
-/// ready.
-pub async fn watch_sqs_sessions(kube_client: Client, namespace: &str) {
-    let api = Api::<MirrordSqsSession>::namespaced(kube_client, namespace);
-    Watcher::new(api, Default::default(), |sessions| {
-        sessions
-            .values()
-            .filter(|s| is_session_ready(Some(s)))
-            .count()
-            == 2
+/// This check includes:
+/// 1. Waiting for the [`MirrordWorkloadQueueRegistry`] [`QUEUE_REGISTRY_RESOURCE_NAME`] to have a
+///    non-empty status.
+/// 2. Waiting for `expected_sessions` [`MirrordSqsSession`] resources to be ready.
+/// 3. Waiting for all pods in the namespace to be ready (phase is `Running` and all containers are
+///    ready).
+pub async fn wait_for_stable_state(
+    kube_client: &Client,
+    namespace: &str,
+    expected_sessions: usize,
+) {
+    println!(
+        "Waiting for {} {} to have status.",
+        MirrordWorkloadQueueRegistry::kind(&()),
+        QUEUE_REGISTRY_RESOURCE_NAME
+    );
+    let api = Api::<MirrordWorkloadQueueRegistry>::namespaced(kube_client.clone(), namespace);
+    Watcher::new(api, Default::default(), |registries| {
+        let registry = registries
+            .get(QUEUE_REGISTRY_RESOURCE_NAME)
+            .expect("queue registry was not found in the test namespace");
+        let queue_names = registry
+            .status
+            .as_ref()
+            .and_then(|status| status.sqs_details.as_ref())
+            .map(|details| details.queue_names.clone())
+            .unwrap_or_default();
+        let ready = queue_names.is_empty().not();
+        if ready {
+            println!(
+                "{} {} has status, queue_names={:?}",
+                MirrordWorkloadQueueRegistry::kind(&()),
+                QUEUE_REGISTRY_RESOURCE_NAME,
+                queue_names
+            )
+        }
+        ready
     })
     .run()
     .await;
-}
 
-pub async fn await_registry_status(kube_client: Client, namespace: &str) {
-    let api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client, namespace);
-    let has_status =
-        |qr: Option<&MirrordWorkloadQueueRegistry>| qr.is_some_and(|qr| qr.status.is_some());
+    println!(
+        "Waiting for {expected_sessions} ready {}.",
+        MirrordSqsSession::plural(&())
+    );
+    let api = Api::<MirrordSqsSession>::namespaced(kube_client.clone(), namespace);
+    Watcher::new(api, Default::default(), move |sessions| {
+        if sessions.len() != expected_sessions {
+            return false;
+        }
+        sessions.values().for_each(|session| {
+            if session.metadata.deletion_timestamp.is_some() {
+                panic!(
+                    "{} {} is being deleted",
+                    MirrordSqsSession::kind(&()),
+                    session.metadata.name.as_deref().unwrap_or("<no-name>")
+                );
+            }
+        });
+        let ready = sessions.values().all(|session| match &session.status {
+            Some(SqsSessionStatus::Ready(..)) => true,
+            Some(
+                SqsSessionStatus::StartError(error) | SqsSessionStatus::CleanupError { error, .. },
+            ) => {
+                panic!(
+                    "{} {} failed: {error}",
+                    MirrordSqsSession::kind(&()),
+                    session.metadata.name.as_deref().unwrap_or("<no-name>")
+                )
+            }
+            _ => false,
+        });
+        if ready {
+            println!(
+                "{expected_sessions} {} are ready: {sessions:?}",
+                MirrordSqsSession::plural(&())
+            );
+        }
+        ready
+    })
+    .run()
+    .await;
 
-    await_condition(api, QUEUE_REGISTRY_RESOURCE_NAME, has_status)
-        .await
-        .unwrap();
+    println!("Waiting for all pods to be ready.");
+    let api = Api::<Pod>::namespaced(kube_client.clone(), namespace);
+    Watcher::new(api, Default::default(), |pods| {
+        let ready = pods.values().all(|pod| {
+            let Some(status) = &pod.status else {
+                return false;
+            };
+            if status.phase.as_deref() != Some("Running") {
+                return false;
+            }
+            let Some(container_statuses) = &status.container_statuses else {
+                return false;
+            };
+            container_statuses.iter().all(|status| status.ready)
+        });
+        if ready {
+            println!("All pods are ready.");
+        }
+        ready
+    })
+    .run()
+    .await;
 }
 
 /// - Fetch AWS credentials from the operator container.
@@ -668,36 +750,35 @@ pub async fn sqs_test_resources(
 pub async fn write_sqs_messages(
     sqs_client: &aws_sdk_sqs::Client,
     queue: &QueueInfo,
-    message_attribute_name: &str,
-    message_attributes: &[&str],
-    messages: &[&str],
+    messages: Vec<TestMessage>,
 ) {
     println!("Sending messages {messages:?} to queue {}.", queue.name);
+
     let fifo = queue.name.ends_with(".fifo");
     let group_id = fifo.then_some("e2e-tests".to_string());
-    for (i, (body, attr)) in messages.iter().zip(message_attributes).enumerate() {
-        println!(
-            r#"Sending message "{body}" with attribute "{message_attribute_name}: {attr}" to queue {}"#,
-            queue.name
-        );
-        sqs_client
-            .send_message()
-            .queue_url(&queue.url)
-            .message_body(*body)
+
+    let mut batch_send = sqs_client.send_message_batch().queue_url(&queue.url);
+    for (index, message) in messages.into_iter().enumerate() {
+        let entry = SendMessageBatchRequestEntryBuilder::default()
+            .message_body(message.body)
             .message_attributes(
-                message_attribute_name,
+                message.attribute_name,
                 MessageAttributeValue::builder()
-                    .string_value(*attr)
+                    .string_value(message.attribute_value)
                     .data_type("String")
                     .build()
                     .unwrap(),
             )
             .set_message_group_id(group_id.clone())
-            .set_message_deduplication_id(fifo.then_some(i.to_string()))
-            .send()
-            .await
-            .expect("Sending SQS message failed.");
+            .set_message_deduplication_id(fifo.then_some(index.to_string()))
+            .build()
+            .unwrap();
+        batch_send = batch_send.entries(entry);
     }
+    batch_send
+        .send()
+        .await
+        .expect("Sending SQS messages failed.");
 }
 
 /// Fetches AWS client environment from the operator container spec.
@@ -734,4 +815,11 @@ async fn fetch_aws_creds(client: Client) -> HashMap<String, String> {
     );
 
     env_map
+}
+
+#[derive(Debug)]
+pub struct TestMessage {
+    pub body: String,
+    pub attribute_name: String,
+    pub attribute_value: String,
 }
