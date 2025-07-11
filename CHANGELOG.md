@@ -8,6 +8,40 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.149.0](https://github.com/metalbear-co/mirrord/tree/3.149.0) - 2025-07-11
+
+
+### Added
+
+- mirrord-intproxy now propagates critical errors to the mirrord-layer,
+  solving the issue where the user application was terminating with a very
+  generic
+  `Proxy error, connectivity issue or a bug` error message.
+  [#3161](https://github.com/metalbear-co/mirrord/issues/3161)
+- Added MirrordClusterSession CRD initial implementation, currently hidden
+  behind "experimental" feature for mirrord-operator crate.
+- Added browser extension configuration and initiation.
+
+
+### Changed
+
+- Change the SIP patch dir to be nested in the same folder as the extracted
+  layer (`TMPDIR/mirrord`).
+- Do not check for pod running or if the deployment has replicas when using
+  copy-target.
+- Clearer error when iptables are dirty.
+
+
+### Fixed
+
+- Fixed an issue where mirrord was failing to spawn an ephemeral agent due to
+  `resourceVersion` conflict.
+
+
+### Internal
+
+- Skip targetless pod priority class test if `MIRRORD_E2E` is not set to true.
+
 ## [3.148.0](https://github.com/metalbear-co/mirrord/tree/3.148.0) - 2025-07-01
 
 
