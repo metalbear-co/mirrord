@@ -1,14 +1,14 @@
 use std::{
     fmt::Debug,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, OnceLock},
 };
 
 use enum_dispatch::enum_dispatch;
-use mirrord_agent_env::{envs, mesh::MeshVendor};
+use mirrord_agent_env::mesh::MeshVendor;
 use tracing::{warn, Level};
 
 use crate::{
-    error::IPTablesResult,
+    error::{IPTablesError, IPTablesResult},
     flush_connections::FlushConnections,
     mesh::{
         exclusion::{MeshExclusion, WithMeshExclusion},
@@ -66,26 +66,6 @@ pub trait IPTables {
 pub struct IPTablesWrapper {
     table_name: &'static str,
     tables: Arc<iptables::IPTables>,
-}
-
-/// wrapper around iptables::new that uses nft or legacy based on env
-pub fn new_iptables() -> iptables::IPTables {
-    match envs::NFTABLES.try_from_env().ok().flatten() {
-        Some(true) => iptables::new_with_cmd("/usr/sbin/iptables-nft"),
-        Some(false) => iptables::new_with_cmd("/usr/sbin/iptables-legacy"),
-        None => todo!(),
-    }
-    .expect("IPTables initialization may not fail!")
-}
-
-/// wrapper around iptables::new that uses nft or legacy based on env
-pub fn new_ip6tables() -> iptables::IPTables {
-    match envs::NFTABLES.try_from_env().ok().flatten() {
-        Some(true) => iptables::new_with_cmd("/usr/sbin/ip6tables-nft"),
-        Some(false) => iptables::new_with_cmd("/usr/sbin/ip6tables-legacy"),
-        None => todo!(),
-    }
-    .expect("IPTables initialization may not fail!")
 }
 
 impl Debug for IPTablesWrapper {
@@ -323,6 +303,80 @@ where
             _ => None,
         }
     }
+}
+
+/// Whether [`get_iptables`] should use nftables when no backend is explicitly configured.
+///
+/// Initialized with the first [`get_iptables`] call when the `nftables` argument is not provided.
+const IPTABLES_BACKEND_NFTABLES: OnceLock<bool> = OnceLock::new();
+
+/// Returns correct [`IPTablesWrapper`] to use for traffic redirection.
+///
+/// If `nftables` argument is not provided, this function will choose between legacy and nftables:
+/// 1. First, kernel support will be checked by adding a dummy rule that will not affect traffic.
+/// 2. Second, if multiple backeds are supported, both will be checked for existing mesh rules. If a
+///    mesh is detected using a backend, that backend will be used.
+pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper, IPTablesError> {
+    let nftables = nftables.or_else(|| IPTABLES_BACKEND_NFTABLES.get().copied());
+    if let Some(nftables) = nftables {
+        let path = match (nftables, ip6) {
+            (true, true) => "/usr/sbin/ip6tables-nft",
+            (true, false) => "/usr/sbin/iptables-nft",
+            (false, true) => "/usr/sbin/ip6tables-legacy",
+            (false, false) => "/usr/sbin/iptables-legacy",
+        };
+        let wrapper = iptables::new_with_cmd(path)
+            .expect("IPTables initialization should not fail, the binary should be present in the agent image");
+        return Ok(wrapper.into());
+    }
+
+    let with_kernel_support = if ip6 {
+        ["/usr/sbin/ip6tables-legacy", "/usr/sbin/ip6tables-nft"]
+    } else {
+        ["/usr/sbin/iptables-legacy", "/usr/sbin/iptables-nft"]
+    };
+    let mut with_kernel_support = with_kernel_support
+        .into_iter()
+        .filter_map(|binary_path| {
+            let wrapper = iptables::new_with_cmd(binary_path)
+                .expect("IPTables initialization should not fail, the binary should be present in the agent image");
+
+            // To verify kernel support for this iptables backend,
+            // we try to add a dummy rule.
+            // The rule drops all packets with protocol 255,
+            // which is a reserved protocol number.
+            // The rule should not affect any traffic at all.
+            // Borrowed with love from
+            // https://github.com/istio/istio/blob/4494a1a4c236b146a266eb62ce89d4c2a683f99c/tools/istio-iptables/pkg/dependencies/implementation_linux.go#L54.
+            if wrapper.append("filter", "INPUT", "-p 255 -j DROP").is_err() {
+                return None;
+            }
+            let _ = wrapper.delete("filter", "INPUT", "-p 255 -j DROP");
+            Some(IPTablesWrapper::from(wrapper))
+        })
+        .collect::<Vec<_>>();
+
+    if with_kernel_support.len() > 1 {
+        for wrapper in with_kernel_support.iter().rev() {
+            let mesh = MeshVendor::detect(wrapper).ok().flatten();
+            if mesh.is_some() {
+                let _ = IPTABLES_BACKEND_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
+                return Ok(wrapper.clone());
+            }
+        }
+    }
+
+    with_kernel_support
+        .pop()
+        .inspect(|wrapper| {
+            let _ = IPTABLES_BACKEND_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
+        })
+        .ok_or(
+            "neither iptables-legacy nor iptables-nft seems to be supported by the kernel, \
+            agent will not be able to redirect incoming traffic",
+        )
+        .map_err(From::from)
+        .map_err(IPTablesError)
 }
 
 #[cfg(test)]
