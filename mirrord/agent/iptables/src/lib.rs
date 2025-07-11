@@ -348,17 +348,48 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
             // The rule should not affect any traffic at all.
             // Borrowed with love from
             // https://github.com/istio/istio/blob/4494a1a4c236b146a266eb62ce89d4c2a683f99c/tools/istio-iptables/pkg/dependencies/implementation_linux.go#L54.
-            if wrapper.append("filter", "INPUT", "-p 255 -j DROP").is_err() {
+            let failed = wrapper
+                .append("filter", "INPUT", "-p 255 -j DROP")
+                .inspect_err(|error| {
+                    tracing::debug!(
+                        %error,
+                        command = wrapper.cmd,
+                        "Failed to add a dummy rule using one of the iptables binaries, \
+                        assuming no kernel support for it."
+                    )
+                })
+                .is_err();
+            if failed {
                 return None;
             }
-            let _ = wrapper.delete("filter", "INPUT", "-p 255 -j DROP");
+
+            let _ = wrapper.delete("filter", "INPUT", "-p 255 -j DROP")
+                .inspect_err(|error| {
+                    tracing::error!(
+                        %error,
+                        command = wrapper.cmd,
+                        "Failed to delete a dummy rule added when checking kernel support for one of the iptables binaries. \
+                        The rule should not any affect traffic."
+                    )
+                });
+
             Some(IPTablesWrapper::from(wrapper))
         })
         .collect::<Vec<_>>();
 
     if with_kernel_support.len() > 1 {
         for wrapper in with_kernel_support.iter().rev() {
-            let mesh = MeshVendor::detect(wrapper).ok().flatten();
+            let mesh = MeshVendor::detect(wrapper)
+                .inspect_err(|error| {
+                    tracing::warn!(
+                        %error,
+                        "Failed to detect mesh rules with one of the iptables binaries, \
+                        assuming no mesh rules.",
+                    );
+                })
+                .ok()
+                .flatten();
+
             if mesh.is_some() {
                 let _ = IPTABLES_BACKEND_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
                 return Ok(wrapper.clone());
