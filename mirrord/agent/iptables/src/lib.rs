@@ -308,7 +308,7 @@ where
 /// Whether [`get_iptables`] should use nftables when no backend is explicitly configured.
 ///
 /// Initialized with the first [`get_iptables`] call when the `nftables` argument is not provided.
-const IPTABLES_BACKEND_NFTABLES: OnceLock<bool> = OnceLock::new();
+static IPTABLES_BACKEND_NFTABLES: OnceLock<bool> = OnceLock::new();
 
 /// Returns correct [`IPTablesWrapper`] to use for traffic redirection.
 ///

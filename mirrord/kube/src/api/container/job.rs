@@ -445,7 +445,7 @@ mod test {
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
-                                    { "name": envs::NFTABLES.name, "value": "true" },
+                                    { "name": envs::NFTABLES.name, "value": Some(true) },
                                     { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
                                     { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) }
                                 ],
