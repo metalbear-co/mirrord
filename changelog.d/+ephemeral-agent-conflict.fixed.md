@@ -1,1 +1,0 @@
-Fixed an issue where mirrord was failing to spawn an ephemeral agent due to `resourceVersion` conflict.
