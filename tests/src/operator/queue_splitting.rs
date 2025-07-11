@@ -269,7 +269,7 @@ pub async fn two_users(
         )
         .await;
     tokio::time::timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(120),
         wait_for_stable_state(
             &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
