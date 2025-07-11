@@ -4,6 +4,7 @@ use std::{
     ops::Not,
 };
 
+use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{error::IPTablesError, IPTablesWrapper, SafeIpTables};
 use nix::sys::socket::{
     self,
@@ -82,14 +83,10 @@ impl IpTablesRedirector {
     }
 
     pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
-        let iptables = if self.ipv6 {
-            mirrord_agent_iptables::new_ip6tables()
-        } else {
-            mirrord_agent_iptables::new_iptables()
-        };
-
+        let ntfables = envs::NFTABLES.try_from_env().unwrap_or_default();
+        let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6)?;
         let iptables = SafeIpTables::create(
-            iptables.into(),
+            iptables,
             self.flush_connections,
             self.pod_ips.as_deref(),
             self.ipv6,

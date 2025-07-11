@@ -310,12 +310,12 @@ pub struct AgentConfig {
 
     /// ### agent.nftables {#agent-nftables}
     ///
-    /// Use iptables-nft instead of iptables-legacy.
-    /// Defaults to `false`.
+    /// Determines which iptables backend will be used for traffic redirection.
     ///
-    /// Needed if your mesh uses nftables instead of iptables-legacy,
-    #[config(default = false)]
-    pub nftables: bool,
+    /// If set to `true`, the agent will use iptables-nft.
+    /// If set to `false`, the agent will use iptables-legacy.
+    /// If not set, the agent will try to detect the correct backend at runtime.
+    pub nftables: Option<bool>,
 
     /// ### agent.dns {#agent-dns}
     #[config(nested)]
