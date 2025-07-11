@@ -2,7 +2,7 @@
 #![cfg(feature = "operator")]
 
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     ops::Not,
     time::Duration,
@@ -27,7 +27,6 @@ use k8s_openapi::{
         },
     },
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
-    NamespaceResourceScope,
 };
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_operator::{
@@ -38,7 +37,7 @@ use mirrord_operator::{
     },
     setup::OPERATOR_NAME,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
 
 use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
@@ -838,59 +837,4 @@ pub struct TestMessage {
     pub body: String,
     pub attribute_name: String,
     pub attribute_value: String,
-}
-
-/// Utility function for printing resources state in the background.
-///
-/// In order not to be too spammy, the background task prints resource state only when:
-/// 1. The resource is seen for the first time.
-/// 2. The resource enters the deletion state.
-/// 3. The resource is deleted.
-pub fn observe_resources<R>(client: Client, namespace: &str)
-where
-    R: 'static
-        + Resource<DynamicType = (), Scope = NamespaceResourceScope>
-        + Clone
-        + Debug
-        + Send
-        + DeserializeOwned,
-{
-    let api = Api::<R>::namespaced(client, namespace);
-    let mut seen_resources: HashMap<String, R> = Default::default();
-    let mut watcher = Watcher::new(api, Default::default(), move |resources| {
-        for (uid, resource) in resources {
-            match seen_resources.entry(uid.clone()) {
-                Entry::Occupied(mut e) => {
-                    if e.get().meta().deletion_timestamp.is_some()
-                        != resource.meta().deletion_timestamp.is_some()
-                    {
-                        println!("{} {uid} is now being deleted: {resource:?}", R::kind(&()))
-                    }
-                    e.insert(resource.clone());
-                }
-                Entry::Vacant(e) => {
-                    println!(
-                        "Seeing {} {uid} for the first time: {resource:?}",
-                        R::kind(&())
-                    );
-                    e.insert(resource.clone());
-                }
-            }
-        }
-
-        seen_resources.retain(|uid, resource| {
-            if resources.contains_key(uid) {
-                true
-            } else {
-                println!("{} {uid} was deleted: {resource:?}", R::kind(&()));
-                false
-            }
-        });
-
-        false
-    });
-
-    tokio::spawn(async move {
-        watcher.run().await;
-    });
 }

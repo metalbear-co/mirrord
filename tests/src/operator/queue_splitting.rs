@@ -6,8 +6,6 @@ use core::time::Duration;
 use std::collections::HashSet;
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
-use k8s_openapi::api::core::v1::Pod;
-use mirrord_operator::crd::MirrordSqsSession;
 use rstest::*;
 use tempfile::NamedTempFile;
 
@@ -16,8 +14,7 @@ use crate::utils::{
     kube_client,
     process::TestProcess,
     sqs_resources::{
-        observe_resources, sqs_test_resources, wait_for_stable_state, write_sqs_messages,
-        QueueInfo, TestMessage,
+        sqs_test_resources, wait_for_stable_state, write_sqs_messages, QueueInfo, TestMessage,
     },
 };
 
@@ -257,15 +254,6 @@ pub async fn two_users(
         with_regex || with_fallback_json,
         with_asterisk_queue_id,
         ("client", "^b$"),
-    );
-
-    observe_resources::<MirrordSqsSession>(
-        sqs_test_resources.kube_client.clone(),
-        sqs_test_resources.namespace(),
-    );
-    observe_resources::<Pod>(
-        sqs_test_resources.kube_client.clone(),
-        sqs_test_resources.namespace(),
     );
 
     println!("Starting first mirrord client");
