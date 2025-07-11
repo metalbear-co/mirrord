@@ -314,7 +314,7 @@ static IPTABLES_BACKEND_NFTABLES: OnceLock<bool> = OnceLock::new();
 ///
 /// If `nftables` argument is not provided, this function will choose between legacy and nftables:
 /// 1. First, kernel support will be checked by adding a dummy rule that will not affect traffic.
-/// 2. Second, if multiple backeds are supported, both will be checked for existing mesh rules. If a
+/// 2. Second, if multiple backends are supported, both will be checked for existing mesh rules. If a
 ///    mesh is detected using a backend, that backend will be used.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper, IPTablesError> {
     let nftables = nftables.or_else(|| IPTABLES_BACKEND_NFTABLES.get().copied());
