@@ -1,1 +1,0 @@
-Skip targetless pod priority class test if `MIRRORD_E2E` is not set to true.

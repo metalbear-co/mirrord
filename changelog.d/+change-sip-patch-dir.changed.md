@@ -1,1 +1,0 @@
-Change the SIP patch dir to be nested in the same folder as the extracted layer (`TMPDIR/mirrord`).
