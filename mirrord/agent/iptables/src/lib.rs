@@ -70,20 +70,20 @@ pub struct IPTablesWrapper {
 
 /// wrapper around iptables::new that uses nft or legacy based on env
 pub fn new_iptables() -> iptables::IPTables {
-    if envs::NFTABLES.from_env_or_default() {
-        iptables::new_with_cmd("/usr/sbin/iptables-nft")
-    } else {
-        iptables::new_with_cmd("/usr/sbin/iptables-legacy")
+    match envs::NFTABLES.try_from_env().ok().flatten() {
+        Some(true) => iptables::new_with_cmd("/usr/sbin/iptables-nft"),
+        Some(false) => iptables::new_with_cmd("/usr/sbin/iptables-legacy"),
+        None => todo!(),
     }
     .expect("IPTables initialization may not fail!")
 }
 
 /// wrapper around iptables::new that uses nft or legacy based on env
 pub fn new_ip6tables() -> iptables::IPTables {
-    if envs::NFTABLES.from_env_or_default() {
-        iptables::new_with_cmd("/usr/sbin/ip6tables-nft")
-    } else {
-        iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
+    match envs::NFTABLES.try_from_env().ok().flatten() {
+        Some(true) => iptables::new_with_cmd("/usr/sbin/ip6tables-nft"),
+        Some(false) => iptables::new_with_cmd("/usr/sbin/ip6tables-legacy"),
+        None => todo!(),
     }
     .expect("IPTables initialization may not fail!")
 }
