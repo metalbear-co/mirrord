@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-winapi = { version = "0.3.9", features = ["winreg", "winerror", "errhandlingapi"] }
+winapi = { version = "0.3.9", features = ["winreg", "winerror", "errhandlingapi", "handleapi", "processthreadsapi", "winbase"] }
 
 [dev-dependencies]
 rand = "0.9.1"

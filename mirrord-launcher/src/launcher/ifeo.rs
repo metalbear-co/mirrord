@@ -11,7 +11,10 @@
 
 use std::path::Path;
 
-use crate::{process::process_name_from_path, registry::Registry};
+use crate::{
+    process::{CreateProcessHandles, create_process, process_name_from_path},
+    registry::Registry,
+};
 
 pub const IMAGE_FILE_EXECUTION_OPTIONS: &str =
     r#"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"#;
@@ -23,7 +26,7 @@ fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
         .get_or_insert_key(program)
 }
 
-fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
+pub fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     let debug = debug.as_ref();
 
     remove_ifeo(&program);
@@ -42,7 +45,7 @@ fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     false
 }
 
-fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
+pub fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
     if let Some(mut ifeo) = get_ifeo(program) {
         let deleted = ifeo.delete_value(DEBUGGER_VALUE);
         ifeo.flush();
@@ -52,18 +55,25 @@ fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
     false
 }
 
-pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
+pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>>(
+    program: T,
+    debug: U,
+) -> Option<CreateProcessHandles> {
     let program = program.as_ref();
 
-    if let Some(full_path) = program.to_str() {
-        if let Some(file_name) = process_name_from_path(program) {
-            let install = set_ifeo(&file_name, debug);
-            let _ = std::process::Command::new(full_path).spawn();
-            let uninstall = remove_ifeo(file_name);
+    let file_name = process_name_from_path(program)?;
 
-            return install && uninstall;
-        }
+    let install = set_ifeo(&file_name, debug);
+    if !install {
+        return None;
     }
 
-    false
+    let handles = create_process(program, [], false)?;
+
+    let uninstall = remove_ifeo(file_name);
+    if uninstall {
+        return None;
+    }
+
+    Some(handles)
 }

@@ -5,8 +5,6 @@
 //! Abstracts C string semantics behind regular Rust containers.
 //! Automatically manages `HKEY` handles RAII.
 
-pub mod hkey;
-
 use std::collections::HashMap;
 
 use winapi::{
@@ -25,7 +23,7 @@ use winapi::{
     },
 };
 
-use hkey::SafeHKey;
+use crate::handle::hkey::SafeHKey;
 
 use crate::win_str::*;
 
