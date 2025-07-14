@@ -642,45 +642,50 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
 
-    // check that chain names won't conflict with another agent or failed cleanup
-    let leftover_rules = state
-        .network_runtime
-        .spawn(async move {
-            let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
-            let rules_v4 = SafeIpTables::list_mirrord_rules(&mirrord_agent_iptables::get_iptables(
-                nftables, false,
-            )?)
-            .await?;
-            let rules_v6 = if args.ipv6 {
-                SafeIpTables::list_mirrord_rules(&mirrord_agent_iptables::get_iptables(
-                    nftables, true,
-                )?)
-                .await?
-            } else {
-                vec![]
-            };
+    // Check that chain names won't conflict with another agent or failed cleanup.
+    // This check is only relevant if we have a target.
+    // If we don't have any target, the agent should be running in a fresh network namespace,
+    // and you should **not** expect that it can access iptables.
+    if state.container_pid().is_some() {
+        let leftover_rules = state
+            .network_runtime
+            .spawn(async move {
+                let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
+                let rules_v4 = SafeIpTables::list_mirrord_rules(
+                    &mirrord_agent_iptables::get_iptables(nftables, false)?,
+                )
+                .await?;
+                let rules_v6 = if args.ipv6 {
+                    SafeIpTables::list_mirrord_rules(&mirrord_agent_iptables::get_iptables(
+                        nftables, true,
+                    )?)
+                    .await?
+                } else {
+                    vec![]
+                };
 
-            Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
-        })
-        .await
-        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
-        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+                Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
+            })
+            .await
+            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
-    if !leftover_rules.is_empty() {
-        error!(
-            leftover_rules = ?leftover_rules,
-            "Detected dirty iptables. Either some other mirrord agent is running \
-            or the previous agent failed to clean up before exit. \
-            If no other mirrord agent is targeting this pod, please delete the pod. \
-            If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
-        );
-        let _ = notify_client_about_dirty_iptables(
-            listener,
-            args.communication_timeout,
-            state.tls_connector.clone(),
-        )
-        .await;
-        return Err(AgentError::IPTablesDirty);
+        if !leftover_rules.is_empty() {
+            error!(
+                leftover_rules = ?leftover_rules,
+                "Detected dirty iptables. Either some other mirrord agent is running \
+                or the previous agent failed to clean up before exit. \
+                If no other mirrord agent is targeting this pod, please delete the pod. \
+                If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
+            );
+            let _ = notify_client_about_dirty_iptables(
+                listener,
+                args.communication_timeout,
+                state.tls_connector.clone(),
+            )
+            .await;
+            return Err(AgentError::IPTablesDirty);
+        }
     }
 
     let cancellation_token = CancellationToken::new();
