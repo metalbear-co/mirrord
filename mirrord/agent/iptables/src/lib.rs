@@ -349,7 +349,7 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
             // The rule should not affect any traffic at all.
             // Borrowed with love from
             // https://github.com/istio/istio/blob/4494a1a4c236b146a266eb62ce89d4c2a683f99c/tools/istio-iptables/pkg/dependencies/implementation_linux.go#L54.
-            let failed = wrapper
+            wrapper
                 .append("filter", "INPUT", "-p 255 -j DROP")
                 .inspect_err(|error| {
                     tracing::debug!(
@@ -359,10 +359,7 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
                         assuming no kernel support for it."
                     )
                 })
-                .is_err();
-            if failed {
-                return None;
-            }
+                .ok()?;
 
             let _ = wrapper.delete("filter", "INPUT", "-p 255 -j DROP")
                 .inspect_err(|error| {
