@@ -82,44 +82,42 @@ impl PortSubscriptions {
         port: u16,
         filter: Option<HttpFilter>,
     ) -> Result<(), RedirectorTaskError> {
-        let metric = if filter.is_some() {
-            &STEAL_FILTERED_PORT_SUBSCRIPTION
-        } else {
-            &STEAL_UNFILTERED_PORT_SUBSCRIPTION
-        };
-
         match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => match (e.get_mut(), filter) {
                 (PortSubscription::Unfiltered(..), Some(filter)) => {
                     STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_sub(1, Ordering::Relaxed);
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
                     e.insert(PortSubscription::Filtered([(client_id, filter)].into()));
                 }
 
                 (PortSubscription::Unfiltered(..), None) => {
-                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_sub(1, Ordering::Relaxed);
                     e.insert(PortSubscription::Unfiltered(client_id));
                 }
 
                 (PortSubscription::Filtered(filters), Some(filter)) => {
-                    if filters.contains_key(&client_id) {
-                        STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_sub(1, Ordering::Relaxed);
+                    if filters.contains_key(&client_id).not() {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
                     }
                     filters.insert(client_id, filter);
                 }
 
                 (PortSubscription::Filtered(filters), None) => {
                     STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_sub(filters.len(), Ordering::Relaxed);
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_add(filters.len(), Ordering::Relaxed);
                     e.insert(PortSubscription::Unfiltered(client_id));
                 }
             },
 
             Entry::Vacant(e) => {
                 self.handle.steal(port).await?;
+                if filter.is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
+                }
                 e.insert(PortSubscription::new(client_id, filter));
             }
         };
-
-        metric.fetch_add(1, Ordering::Relaxed);
 
         Ok(())
     }
