@@ -9,7 +9,9 @@
 //! Registering this should allow us to create a global override for our target process,
 //! and we have to mitigate the effect of that, to avoid capturing stray processes.
 
-use crate::registry::Registry;
+use std::path::Path;
+
+use crate::{process::process_name_from_path, registry::Registry};
 
 pub const IMAGE_FILE_EXECUTION_OPTIONS: &str =
     r#"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"#;
@@ -21,11 +23,18 @@ fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
         .get_or_insert_key(program)
 }
 
-pub fn set_ifeo<T: AsRef<str>, U: AsRef<str>>(program: T, debug: U) -> bool {
+fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
+    let debug = debug.as_ref();
+
     remove_ifeo(&program);
 
+    let debug = debug.to_str();
+    if debug.is_none() {
+        return false;
+    }
+
     if let Some(mut ifeo) = get_ifeo(program) {
-        let inserted = ifeo.insert_value_string(DEBUGGER_VALUE, debug.as_ref().into());
+        let inserted = ifeo.insert_value_string(DEBUGGER_VALUE, debug.unwrap().into());
         ifeo.flush();
         return inserted;
     }
@@ -33,11 +42,27 @@ pub fn set_ifeo<T: AsRef<str>, U: AsRef<str>>(program: T, debug: U) -> bool {
     false
 }
 
-pub fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
+fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
     if let Some(mut ifeo) = get_ifeo(program) {
         let deleted = ifeo.delete_value(DEBUGGER_VALUE);
         ifeo.flush();
         return deleted;
+    }
+
+    false
+}
+
+pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
+    let program = program.as_ref();
+
+    if let Some(full_path) = program.to_str() {
+        if let Some(file_name) = process_name_from_path(program) {
+            let install = set_ifeo(&file_name, debug);
+            let _ = std::process::Command::new(full_path).spawn();
+            let uninstall = remove_ifeo(file_name);
+
+            return install && uninstall;
+        }
     }
 
     false

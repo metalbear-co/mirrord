@@ -1,8 +1,11 @@
 mod launcher;
+mod process;
 mod registry;
 mod win_str;
 
-use launcher::ifeo::{remove_ifeo, set_ifeo};
+use std::path::Path;
+
+use launcher::ifeo::{remove_ifeo, set_ifeo, start_ifeo};
 
 #[inline]
 fn start_notepad() {
@@ -10,12 +13,13 @@ fn start_notepad() {
 }
 
 fn main() {
-    let set = set_ifeo("notepad.exe", "mspaint.exe");
-    start_notepad();
-    let del = remove_ifeo("notepad.exe");
+    const NOTEPAD: &str = r#"c:\windows\notepad.exe"#;
+    const PAINT: &str = r#"mspaint.exe"#;
+
+    let success = start_ifeo(Path::new(NOTEPAD), Path::new(PAINT));
     start_notepad();
 
-    if set && del {
+    if success {
         println!("success!");
     }
 }
