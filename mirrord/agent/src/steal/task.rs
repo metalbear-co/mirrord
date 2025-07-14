@@ -132,7 +132,8 @@ impl TcpStealerTask {
                 let Some(client) = clients.get(client_id) else {
                     tracing::error!(
                         client_id,
-                        "TcpStealerTask failed to find a connected client for a stolen TCP connection. \
+                        "TcpStealerTask failed to find a connected client for a stolen TCP connection, \
+                        the connection will be passed through to its original destination. \
                         This is a bug in the agent, please report it.",
                     );
                     tcp.pass_through();
@@ -157,7 +158,8 @@ impl TcpStealerTask {
                 let Some(client) = clients.get(client_id) else {
                     tracing::error!(
                         client_id,
-                        "TcpStealerTask failed to find a connected client for a stolen HTTP request. \
+                        "TcpStealerTask failed to find a connected client for a stolen HTTP request, \
+                        the request will be passed through to its original destination. \
                         This is a bug in the agent, please report it.",
                     );
                     http.pass_through();
@@ -189,7 +191,7 @@ impl TcpStealerTask {
                 clients.get(client_id).or_else(|| {
                     tracing::error!(
                         client_id,
-                        "TcpStealerTask failed to find a a connected client for a stolen HTTP request. \
+                        "TcpStealerTask failed to find a connected client for a stolen HTTP request. \
                         This is a bug in the agent, please report it.",
                     );
                     None
