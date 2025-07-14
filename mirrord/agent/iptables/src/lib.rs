@@ -305,11 +305,6 @@ where
     }
 }
 
-/// Whether [`get_iptables`] should use nftables when no backend is explicitly configured.
-///
-/// Initialized with the first [`get_iptables`] call when the `nftables` argument is not provided.
-static SHOULD_USE_NFTABLES: OnceLock<bool> = OnceLock::new();
-
 /// Returns correct [`IPTablesWrapper`] to use for traffic redirection.
 ///
 /// If `nftables` argument is not provided, this function will choose between legacy and nftables:
@@ -317,7 +312,13 @@ static SHOULD_USE_NFTABLES: OnceLock<bool> = OnceLock::new();
 /// 2. Second, if multiple backends are supported, both will be checked for existing mesh rules. If
 ///    a mesh is detected using a backend, that backend will be used.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper, IPTablesError> {
-    let nftables = nftables.or_else(|| SHOULD_USE_NFTABLES.get().copied());
+    /// Whether we should use nftables when no backend is explicitly configured.
+    ///
+    /// Initialized with the first call of this function, when the `nftables` argument is not
+    /// provided.
+    static DETECTED_NFTABLES: OnceLock<bool> = OnceLock::new();
+
+    let nftables = nftables.or_else(|| DETECTED_NFTABLES.get().copied());
     if let Some(nftables) = nftables {
         let path = match (nftables, ip6) {
             (true, true) => "/usr/sbin/ip6tables-nft",
@@ -391,7 +392,7 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
                 .flatten();
 
             if mesh.is_some() {
-                let _ = SHOULD_USE_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
+                let _ = DETECTED_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
                 return Ok(wrapper.clone());
             }
         }
@@ -400,7 +401,7 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
     with_kernel_support
         .pop()
         .inspect(|wrapper| {
-            let _ = SHOULD_USE_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
+            let _ = DETECTED_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
         })
         .ok_or(
             "neither iptables-legacy nor iptables-nft seems to be supported by the kernel, \
