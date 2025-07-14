@@ -8,7 +8,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
-use tokio_rustls::client::TlsStream;
+use tokio_rustls::TlsStream;
 
 /// Either a TCP connection or a TLS client connection over TCP.
 pub enum MaybeTls {
