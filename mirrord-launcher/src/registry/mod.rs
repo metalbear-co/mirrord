@@ -18,7 +18,9 @@ use winapi::{
         errhandlingapi::{GetLastError, SetLastError},
         winnt::{REG_BINARY, REG_DWORD, REG_MULTI_SZ, REG_QWORD, REG_SZ},
         winreg::{
-            RegCreateKeyW, RegDeleteKeyW, RegDeleteValueW, RegEnumKeyW, RegEnumValueW, RegFlushKey, RegOpenKeyW, RegQueryValueExW, RegSetValueExW, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS
+            HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, RegCreateKeyW,
+            RegDeleteKeyW, RegDeleteValueW, RegEnumKeyW, RegEnumValueW, RegFlushKey, RegOpenKeyW,
+            RegQueryValueExW, RegSetValueExW,
         },
     },
 };
@@ -28,7 +30,7 @@ use hkey::SafeHKey;
 use crate::win_str::*;
 
 /// Registry container.
-/// 
+///
 /// Offers operations over [`HKEY`] handle, and is further responsible for
 /// doing [`RegCloseKey`] through the [`SafeHKey`] class.
 #[derive(Debug)]
@@ -52,9 +54,9 @@ pub enum RegistryValue {
 
 impl RegistryValue {
     /// Constructs [`RegistryValue`] from data, and it's type.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `value_type` - Raw Windows variant type.
     /// * `data` - Raw data to construct [`RegistryValue`] from.
     pub fn from(value_type: u32, data: Vec<u8>) -> Option<Self> {
@@ -171,9 +173,9 @@ impl Registry {
     }
 
     /// Returns [`Registry`] for [`HKEY_LOCAL_MACHINE`] hive.
-    /// 
+    ///
     /// # Warning
-    /// 
+    ///
     /// Might require Administrator privileges to do operations over it.
     pub fn hklm() -> Self {
         Self {
@@ -242,7 +244,7 @@ impl Registry {
                     std::ptr::null_mut(),
                     &mut value_type,
                     std::ptr::null_mut(),
-                    &mut data_len
+                    &mut data_len,
                 )
             } as u32;
             if ret != ERROR_SUCCESS {
@@ -251,7 +253,7 @@ impl Registry {
 
             // Initialize buffer with the expected data.
             data = vec![0u8; data_len as usize];
-            
+
             // Reset `name_len`, otherwise the function fails.
             name_len = name.len() as u32;
 
@@ -264,7 +266,7 @@ impl Registry {
                     std::ptr::null_mut(),
                     &mut value_type,
                     data.as_mut_ptr(),
-                    &mut data_len
+                    &mut data_len,
                 )
             } as u32;
             if ret != ERROR_SUCCESS {
@@ -288,9 +290,9 @@ impl Registry {
 
     /// Inserts a key into the current key. If succesful, returns
     /// [`Registry`] based on the new key.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `key_path` - The name of the new key.
     pub fn insert_key<T: AsRef<str>>(&mut self, key_path: T) -> Option<Self> {
         let key_path = string_to_u16_buffer(key_path);
@@ -308,9 +310,9 @@ impl Registry {
 
     /// Retrieves a key from the current key. If succesful, returns
     /// [`Registry`] based on the retrieved key.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `key_path` - The name of the key to be retrieved.
     pub fn get_key<T: AsRef<str>>(&self, key_path: T) -> Option<Self> {
         let key_path = string_to_u16_buffer(key_path);
@@ -328,18 +330,18 @@ impl Registry {
 
     /// Retrieves, or inserts, a new key from/into the current key.
     /// Returns [`Registry`] based on said key.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `key_path` - The name of key to be inserted/retrieved.
     pub fn get_or_insert_key<T: AsRef<str>>(&mut self, key_path: T) -> Option<Self> {
         self.insert_key(key_path)
     }
 
     /// Deletes an existing key from the current key. Returns operation status.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `key_path` - The name of key to be deleted.
     pub fn delete_key<T: AsRef<str>>(&mut self, key_path: T) -> bool {
         let key_path = string_to_u16_buffer(key_path);
@@ -354,9 +356,9 @@ impl Registry {
 
     /// Retrieves a value from the current key. If succesful, returns
     /// [`RegistryValue`].
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `value_path` - The name of the value to be retrieved.
     pub fn get_value<T: AsRef<str>>(&self, value_path: T) -> Option<RegistryValue> {
         let value_path = string_to_u16_buffer(value_path);
@@ -440,9 +442,9 @@ impl Registry {
     }
 
     /// Inserts a value into the current key. Returns operation status.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `value_path` - The name of value to be inserted.
     /// * `value` - The value to be inserted.
     pub fn insert_value<T: AsRef<str>>(&mut self, value_path: T, value: RegistryValue) -> bool {
@@ -505,9 +507,9 @@ impl Registry {
     }
 
     /// Deletes an existing value from the current key. Returns operation status.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `value_path` - The name of value to be deleted.
     pub fn delete_value<T: AsRef<str>>(&mut self, value_path: T) -> bool {
         let value_path = string_to_u16_buffer(value_path);
@@ -521,9 +523,9 @@ impl Registry {
     }
 
     /// Flushes changes made towards the current key to disk.
-    /// 
+    ///
     /// # MSDN
-    /// 
+    ///
     /// `Calling RegFlushKey is an expensive operation that significantly affects
     /// system-wide performance as it consumes disk bandwidth and blocks modifications
     /// to all keys by all processes in the registry hive that is being flushed until the flush
@@ -534,7 +536,7 @@ impl Registry {
     ///
     /// `The RegFlushKey function returns only when all the data for the hive that contains
     /// the specified key has been written to the registry store on disk.`
-    /// 
+    ///
     /// `The RegFlushKey function writes out the data for other keys in the hive that have
     /// been modified since the last lazy flush or system start.`
     pub fn flush(&mut self) -> bool {
