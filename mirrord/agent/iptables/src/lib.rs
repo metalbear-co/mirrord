@@ -367,7 +367,7 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
                         %error,
                         command = wrapper.cmd,
                         "Failed to delete a dummy rule added when checking kernel support for one of the iptables binaries. \
-                        The rule should not any affect traffic."
+                        The rule should not affect any traffic."
                     )
                 });
 
