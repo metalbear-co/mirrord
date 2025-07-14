@@ -318,6 +318,10 @@ impl MirrordExecution {
                             .map(|x| x.to_vec())
                             .unwrap_or_default(),
                         skip: &config.skip_sip,
+                        log_destination: config
+                            .experimental
+                            .sip_log_destination
+                            .as_ref(),
                     },
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this

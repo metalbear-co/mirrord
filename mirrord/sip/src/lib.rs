@@ -1,4 +1,5 @@
 #![feature(iter_intersperse)]
+#![feature(file_lock)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
 #![deny(unused_crate_dependencies)]
@@ -43,13 +44,16 @@ mod main {
     use std::{
         env,
         ffi::OsStr,
+        fs::OpenOptions,
         io::{self, BufRead},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
     };
-
+    use std::fs::File;
+    use std::io::Write;
     use apple_codesign::{CodeSignatureFlags, MachFile};
+    use fs4::fs_std::FileExt;
     use object::{
         macho::{self, MachHeader64, LC_RPATH},
         read::{
@@ -136,6 +140,8 @@ mod main {
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
         pub skip: &'a [String],
+        /// TODO
+        pub log_destination: Option<&'a PathBuf>,
     }
 
     struct BinaryInfo {
@@ -534,7 +540,7 @@ mod main {
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
-    /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
+    /// If file is a script with shebang, the SipStatus is derived from the SipStatus of the
     /// file the shebang points to.
     fn get_sip_status(path: &str, opts: SipPatchOptions) -> Result<SipStatus> {
         let complete_path = get_complete_path(path)?;
@@ -634,6 +640,19 @@ mod main {
         Ok(output)
     }
 
+    /// Write a value to a log file, if the file exists, in a thread-safe way
+    fn write_log_to_file(file: Option<File>, value: &Result<SipStatus>) -> Result<()> {
+        if let Some(mut file) = file {
+            file.lock_exclusive()
+                .map_err(|error| SipError::IO(error))?;
+            writeln!(file, "{:?}", value)
+                .map_err(|error| SipError::IO(error))?;
+            file.unlock()
+                .map_err(|error| SipError::IO(error))?;
+        };
+        Ok(())
+    }
+
     /// Check if the file that the user wants to execute is a SIP protected binary
     ///
     /// (or a script starting with a shebang that leads to a SIP protected binary).
@@ -641,7 +660,21 @@ mod main {
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
     pub fn sip_patch(binary_path: &str, opts: SipPatchOptions) -> Result<Option<String>> {
-        match get_sip_status(binary_path, opts) {
+        // set up logging to a file if present in config
+        let log_file = if let Some(log_destination) = opts.log_destination {
+            let output_file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_destination)?;
+            Some(File::from(output_file))
+        } else {
+            None
+        };
+
+        let status = get_sip_status(binary_path, opts);
+        let _ = write_log_to_file(log_file, &status)
+            .map_err(|error| warn!("Couldn't log SIP status to file: {error}"));
+        match status {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
@@ -1021,6 +1054,7 @@ mod main {
                     SipPatchOptions {
                         patch: &[],
                         skip: &[signed_temp_file_path.to_string()],
+                        log_destination: None,
                     }
                 )
                 .unwrap(),

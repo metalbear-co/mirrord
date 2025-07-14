@@ -75,6 +75,11 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         SipPatchOptions {
             patch: patch_binaries,
             skip: skip_patch_binaries,
+            log_destination: crate::setup()
+                .layer_config()
+                .experimental
+                .sip_log_destination
+                .as_ref(),
         },
     ) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),

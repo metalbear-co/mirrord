@@ -214,6 +214,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
+                log_destination: config.experimental.sip_log_destination.as_ref(),
             },
         ) {
             let err = exec::execvp(
