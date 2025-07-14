@@ -2,14 +2,15 @@ use std::error::Error;
 
 use windows::{core as windows_core, Win32::System::Threading as Win32};
 
-use crate::commandline;
+use crate::commandline::TargetCommandline;
 
 pub fn execute(
-    commandline: Vec<String>,
+    target_commandline: TargetCommandline,
     suspended: bool,
 ) -> Result<Win32::PROCESS_INFORMATION, Box<dyn Error>> {
-    let (appname, mut cmdline) =
-        commandline::build(commandline).expect("commandline should be parsable");
+    let (appname, mut cmdline) = target_commandline
+        .to_wstr_tup()
+        .expect("commandline should be parsable");
 
     let startup_info = Win32::STARTUPINFOW::default();
     let creation_flags = {
