@@ -5,6 +5,8 @@ use std::{
     sync::atomic::Ordering,
 };
 
+use tracing::Level;
+
 use crate::{
     http::filter::HttpFilter,
     incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
@@ -76,35 +78,42 @@ impl PortSubscriptions {
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the port to steal from
     /// * `filter` - optional [`HttpFilter`]
+    #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     pub async fn add(
         &mut self,
         client_id: ClientId,
         port: u16,
         filter: Option<HttpFilter>,
     ) -> Result<(), RedirectorTaskError> {
-        match self.subscriptions.entry(port) {
+        let replaced = match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => match (e.get_mut(), filter) {
                 (PortSubscription::Unfiltered(..), Some(filter)) => {
                     STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_sub(1, Ordering::Relaxed);
                     STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
                     e.insert(PortSubscription::Filtered([(client_id, filter)].into()));
+                    true
                 }
 
                 (PortSubscription::Unfiltered(..), None) => {
                     e.insert(PortSubscription::Unfiltered(client_id));
+                    true
                 }
 
                 (PortSubscription::Filtered(filters), Some(filter)) => {
-                    if filters.contains_key(&client_id).not() {
-                        STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
+                    match filters.insert(client_id, filter) {
+                        Some(..) => true,
+                        None => {
+                            STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
+                            false
+                        }
                     }
-                    filters.insert(client_id, filter);
                 }
 
                 (PortSubscription::Filtered(filters), None) => {
                     STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_sub(filters.len(), Ordering::Relaxed);
                     STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_add(filters.len(), Ordering::Relaxed);
                     e.insert(PortSubscription::Unfiltered(client_id));
+                    true
                 }
             },
 
@@ -116,8 +125,14 @@ impl PortSubscriptions {
                     STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
                 }
                 e.insert(PortSubscription::new(client_id, filter));
+                false
             }
         };
+
+        if replaced {
+            // All info already be contained in the span.
+            tracing::debug!("An existing port subscription was evicted.");
+        }
 
         Ok(())
     }
@@ -128,6 +143,7 @@ impl PortSubscriptions {
     ///
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the subscription port
+    #[tracing::instrument(level = Level::DEBUG)]
     pub fn remove(&mut self, client_id: ClientId, port: u16) {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
             return;
@@ -161,6 +177,7 @@ impl PortSubscriptions {
     /// # Params
     ///
     /// * `client_id` - identifier of the client that issued the subscriptions
+    #[tracing::instrument(level = Level::DEBUG)]
     pub fn remove_all(&mut self, client_id: ClientId) {
         self.subscriptions
             .retain(|port, subscription| match subscription {
