@@ -196,9 +196,11 @@ messages, the agent stays alive until there are no more heartbeat messages.
 
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
-Disables specified Linux capabilities for the agent container.
-If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
-`SYS_ADMIN`.
+If nothing is disabled here, agent uses:
+1. `NET_ADMIN`,
+2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
+3. `SYS_PTRACE`,
+4. `SYS_ADMIN`.
 
 Has no effect when using the targetless mode,
 as targetless agent containers have no capabilities.
@@ -364,6 +366,18 @@ as targeted agent always runs on the same node as its target container.
 }
 ```
 
+### agent.passthrough_mirroring {#agent-passthrough_mirroring}
+
+Enables an alternative implementation of traffic mirroring,
+based on iptables redirects.
+
+When used with `agent.flush_connections`, it might fix issues
+with mirroring non HTTP/1 traffic.
+
+When this is set, `network_interface` setting is ignored.
+
+Defaults to `false`.
+
 ### agent.priority_class {#agent-priority_class}
 
 Specifies the priority class to assign to the agent pod.
@@ -512,6 +526,12 @@ one bound as host.
 
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
+
+### _experimental_ browser_extension_config {#experimental-browser_extension_config}
+
+mirrord will either open a URL for initiating mirrord browser extension to
+automatically inject HTTP header that matches the HTTP filter configured in
+`feature.network.incoming.http_filter.header_filter`.
 
 ### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
 
@@ -1583,7 +1603,20 @@ Tunnel outgoing network operations through mirrord.
 See the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more
 details.
 
-The `remote` and `local` config for this feature are **mutually** exclusive.
+You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.
+
+```json
+{
+  "feature": {
+    "network": {
+      "outgoing": "remote"
+    }
+  }
+}
+```
+
+Alternatively, you can use more fine-grained configuration. The `remote` and `local` config for
+this feature are **mutually** exclusive.
 
 ```json
 {
