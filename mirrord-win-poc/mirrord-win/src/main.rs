@@ -1,36 +1,24 @@
 mod commandline;
 mod process;
 
-use std::{
-    env::{self, Args},
-    thread,
-    time::Duration,
-};
+use std::env;
+
+use commandline::CliConfig;
 
 fn main() {
-    let args = env::args();
-    println!("Raw args {args:?}");
+    let config = CliConfig::from(env::args());
+    println!("Raw args {config:?}");
 
-    let commandline = read_target_cmdline(args);
+    let commandline = config.target_commandline;
     // execution strategy - direct running
-    println!("Running {commandline:?}");
+    println!("Running {commandline:#?}");
 
     // CreateProcess(SUSPENDED)
     let proc_info = process::execute(commandline, true).expect("execute commandline");
     println!("Execute Success! {proc_info:#?}");
 
     // inject LayerDll
-    println!("Sleeping 10 secs!");
-    thread::sleep(Duration::from_secs(10));
 
     // ResumeProcess
     process::resume(&proc_info).expect("Failed to resume process");
-}
-
-fn read_target_cmdline(args: Args) -> Vec<String> {
-    args.into_iter()
-        // ignore all arguments up-to (incl.) "--"
-        .skip_while(|arg| arg.ne("--"))
-        .skip(1)
-        .collect()
 }
