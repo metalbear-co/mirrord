@@ -129,9 +129,15 @@ impl TcpStealerTask {
             }
 
             (PortSubscription::Unfiltered(client_id), StolenTraffic::Tcp(tcp)) => {
-                let client = clients
-                    .get(client_id)
-                    .expect("subscription should be removed on client disconnect");
+                let Some(client) = clients.get(client_id) else {
+                    tracing::error!(
+                        client_id,
+                        "TcpStealerTask failed to find a connected client for a stolen TCP connection. \
+                        This is a bug in the agent, please report it.",
+                    );
+                    tcp.pass_through();
+                    return;
+                };
 
                 let message = if client.protocol_version.matches(&protocol_version_req) {
                     StealerMessage::StolenTcp(tcp.steal())
@@ -148,9 +154,15 @@ impl TcpStealerTask {
             }
 
             (PortSubscription::Unfiltered(client_id), StolenTraffic::Http(http)) => {
-                let client = clients
-                    .get(client_id)
-                    .expect("subscription should be removed on client disconnect");
+                let Some(client) = clients.get(client_id) else {
+                    tracing::error!(
+                        client_id,
+                        "TcpStealerTask failed to find a connected client for a stolen HTTP request. \
+                        This is a bug in the agent, please report it.",
+                    );
+                    http.pass_through();
+                    return;
+                };
 
                 let message = if client.protocol_version.matches(&protocol_version_req) {
                     StealerMessage::StolenHttp(http.steal())
@@ -173,10 +185,15 @@ impl TcpStealerTask {
         filters
             .iter()
             .filter(|(_, filter)| filter.matches(http.parts_mut()))
-            .map(|(client_id, _)| {
-                clients
-                    .get(client_id)
-                    .expect("subscription should be removed on client disconnect")
+            .filter_map(|(client_id, _)| {
+                clients.get(client_id).or_else(|| {
+                    tracing::error!(
+                        client_id,
+                        "TcpStealerTask failed to find a a connected client for a stolen HTTP request. \
+                        This is a bug in the agent, please report it.",
+                    );
+                    None
+                })
             })
             .for_each(|client| {
                 if client.protocol_version.matches(&protocol_version_req).not() {
