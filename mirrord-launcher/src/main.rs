@@ -5,7 +5,7 @@ mod win_str;
 
 use std::path::Path;
 
-use launcher::ifeo::{remove_ifeo, set_ifeo, start_ifeo};
+use launcher::ifeo::{start_ifeo};
 
 #[inline]
 fn start_notepad() {
