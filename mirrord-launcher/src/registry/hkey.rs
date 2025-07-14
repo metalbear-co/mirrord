@@ -1,7 +1,7 @@
 use winapi::{shared::minwindef::HKEY, um::winreg::RegCloseKey};
 
 /// Safe `HKEY` abstraction.
-///
+/// 
 /// Acquires raw `HKEY` handle, does [`RegCloseKey`] on [`std::ops::Drop`].
 #[derive(Debug)]
 pub struct SafeHKey {
@@ -10,9 +10,9 @@ pub struct SafeHKey {
 
 impl SafeHKey {
     /// Constructs [`SafeHKey`] from [`HKEY`].
-    ///
+    /// 
     /// # Arguments
-    ///
+    /// 
     /// * `handle`: Windows raw [`HKEY`] handle.
     pub fn from(handle: HKEY) -> Self {
         Self { handle }
