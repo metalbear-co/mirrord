@@ -1,12 +1,12 @@
 use windows::core::{PCWSTR, PWSTR};
 
-pub struct OwnedPCWSTR {
+pub struct OwnedWSTR {
     container: Vec<u16>,
 }
 
-impl OwnedPCWSTR {
+impl OwnedWSTR {
     pub fn from_string(val: &String) -> Self {
-        OwnedPCWSTR {
+        OwnedWSTR {
             // chain(null terminator) -----------VVVV
             container: val.encode_utf16().chain([0u16]).collect(),
         }
@@ -20,7 +20,7 @@ impl OwnedPCWSTR {
     }
 }
 
-pub fn build(commandline: Vec<String>) -> Result<(OwnedPCWSTR, OwnedPCWSTR), ()> {
+pub fn build(commandline: Vec<String>) -> Result<(OwnedWSTR, OwnedWSTR), ()> {
     if commandline.len() < 1 {
         return Err(());
     }
@@ -30,7 +30,7 @@ pub fn build(commandline: Vec<String>) -> Result<(OwnedPCWSTR, OwnedPCWSTR), ()>
     };
     let commandline = commandline.join(" ");
 
-    let applicationname = OwnedPCWSTR::from_string(applicationname);
-    let commandline = OwnedPCWSTR::from_string(&commandline);
+    let applicationname = OwnedWSTR::from_string(applicationname);
+    let commandline = OwnedWSTR::from_string(&commandline);
     Ok((applicationname, commandline))
 }
