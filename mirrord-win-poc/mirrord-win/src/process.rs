@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use windows::Win32::System::Threading as Win32;
+use windows::{core as windows_core, Win32::System::Threading as Win32};
 
 use crate::commandline;
 
@@ -36,4 +36,14 @@ pub fn execute(
         )?;
     };
     Ok(process_information)
+}
+
+pub fn resume(process_info: &Win32::PROCESS_INFORMATION) -> windows_core::Result<()> {
+    unsafe {
+        // ResumeThread: If the function fails, the return value is (DWORD) -1 (u32::MAX)
+        if Win32::ResumeThread(process_info.hThread) == u32::MAX {
+            return Err(windows_core::Error::from_win32());
+        }
+    }
+    Ok(())
 }
