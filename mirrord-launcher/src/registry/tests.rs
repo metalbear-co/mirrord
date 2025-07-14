@@ -82,11 +82,9 @@ fn hkcu_get_preferred_languages() {
 
     let preferred_languages = preferred_languages.unwrap();
     assert!(!preferred_languages.is_empty());
-    let first = preferred_languages.first();
-    assert!(first.is_some());
 
-    let first = first.unwrap();
-    assert_eq!(first, "en-US");
+    let first = preferred_languages.first();
+    assert_eq!(first, Some(&"en-US".to_string()));
 }
 
 #[test]
@@ -105,10 +103,7 @@ fn hkcu_set_get_value() {
     assert!(inserted);
 
     let value = key.get_value_string(value_name);
-    assert!(value.is_some());
-
-    let value = value.unwrap();
-    assert_eq!(value, "Hello, world!");
+    assert_eq!(value, Some("Hello, world!".to_string()));
 
     let deleted = hkcu.delete_key(key_name);
     assert!(deleted);
@@ -147,36 +142,21 @@ fn hkcu_set_get_values() {
     // --------------------------------
 
     let binary = key.get_value_binary("Binary");
-    assert!(binary.is_some());
-
-    let binary = binary.unwrap();
-    assert_eq!(binary, vec![b'H', b'i', b'!']);
+    assert_eq!(binary, Some(vec![b'H', b'i', b'!']));
 
     let dword = key.get_value_dword("Dword");
-    assert!(dword.is_some());
-
-    let dword = dword.unwrap();
-    assert_eq!(dword, 123);
+    assert_eq!(dword, Some(123));
 
     let qword = key.get_value_qword("Qword");
-    assert!(qword.is_some());
-
-    let qword = qword.unwrap();
-    assert_eq!(qword, 456);
+    assert_eq!(qword, Some(456));
 
     let test_string = key.get_value_string("String");
-    assert!(test_string.is_some());
-
-    let test_string = test_string.unwrap();
-    assert_eq!(test_string, "Hello!".to_string());
+    assert_eq!(test_string, Some("Hello!".to_string()));
 
     let test_multi_string = key.get_value_multi_string("MultiString");
-    assert!(test_multi_string.is_some());
-
-    let test_multi_string = test_multi_string.unwrap();
     assert_eq!(
         test_multi_string,
-        vec!["Hello".to_string(), "world!".to_string()]
+        Some(vec!["Hello".to_string(), "world!".to_string()])
     );
 
     let values = key.values();
