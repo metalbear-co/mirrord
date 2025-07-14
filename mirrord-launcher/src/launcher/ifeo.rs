@@ -26,7 +26,7 @@ fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
         .get_or_insert_key(program)
 }
 
-pub fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
+fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     let debug = debug.as_ref();
 
     remove_ifeo(&program);
@@ -45,7 +45,7 @@ pub fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     false
 }
 
-pub fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
+fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
     if let Some(mut ifeo) = get_ifeo(program) {
         let deleted = ifeo.delete_value(DEBUGGER_VALUE);
         ifeo.flush();
