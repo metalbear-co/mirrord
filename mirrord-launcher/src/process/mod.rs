@@ -5,7 +5,9 @@ use std::{mem::MaybeUninit, path::Path};
 use winapi::{
     shared::winerror::ERROR_SUCCESS,
     um::{
-        errhandlingapi::GetLastError, processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW}, winbase::CREATE_SUSPENDED
+        errhandlingapi::GetLastError,
+        processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW},
+        winbase::CREATE_SUSPENDED,
     },
 };
 
@@ -13,6 +15,13 @@ use crate::{
     handle::handle::SafeHandle,
     win_str::{string_to_u16_buffer, u16_buffer_to_string},
 };
+
+/// Suspended state.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Suspended {
+    Yes,
+    No,
+}
 
 /// Structure containing the [`SafeHandle`]-s returned by
 /// [`CreateProcessW`]. Because RAII, you must wait on the handles,
@@ -23,10 +32,18 @@ pub struct CreateProcessHandles {
     thread: SafeHandle,
 }
 
+/// Create a process found at path, with the specified arguments.
+/// May be suspended depending on the arguments. Resuming required.
+///
+/// # Arguments
+///
+/// * `path` - Path to process to be started, relative/absolute.
+/// * `args` - Arguments to be passed to process creation.
+/// * `suspended` - Whether the process should start suspended or not.
 pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
     path: T,
     args: U,
-    suspended: bool,
+    suspended: Suspended,
 ) -> Option<CreateProcessHandles> {
     let path = path.as_ref();
     let args = args.as_ref();
@@ -43,7 +60,7 @@ pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
 
     // Set flags.
     let mut flags = 0u32;
-    if suspended {
+    if suspended == Suspended::Yes {
         flags |= CREATE_SUSPENDED;
     }
 

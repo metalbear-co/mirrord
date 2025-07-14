@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use crate::{
-    process::{CreateProcessHandles, create_process, process_name_from_path},
+    process::{CreateProcessHandles, Suspended, create_process, process_name_from_path},
     registry::Registry,
 };
 
@@ -55,9 +55,22 @@ pub fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
     false
 }
 
-pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>>(
+/// Starts program in the context of IFEO "guard", registering IFEO override
+/// before the process creation, and removing it later.
+///
+/// Program may be started suspended depending on arguments.
+///
+/// # Arguments
+///
+/// * `program` - Path to program to be started, relative/absolute.
+/// * `debug` - Path to program to override execution, relatiev/absolute.
+/// * `args` - Arguments to be passed to process creation.
+/// * `suspended` - Whether the process should begin in a suspended state or not. Requires resuming.
+pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>, V: AsRef<[String]>>(
     program: T,
     debug: U,
+    args: V,
+    suspended: Suspended,
 ) -> Option<CreateProcessHandles> {
     let program = program.as_ref();
 
@@ -68,7 +81,7 @@ pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>>(
         return None;
     }
 
-    let handles = create_process(program, [], false)?;
+    let handles = create_process(program, args, suspended)?;
 
     let uninstall = remove_ifeo(file_name);
     if uninstall {
