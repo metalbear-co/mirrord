@@ -1,0 +1,26 @@
+[package]
+name = "mirrord-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+
+[dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_System_Threading",
+    "Win32_Security",
+]
+
+[lints]
+workspace = true
