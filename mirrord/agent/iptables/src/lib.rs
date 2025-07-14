@@ -377,20 +377,20 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> Result<IPTablesWrapper
 
     if with_kernel_support.len() > 1 {
         for wrapper in with_kernel_support.iter().rev() {
-            let mesh = MeshVendor::detect(wrapper)
-                .inspect_err(|error| {
+            match MeshVendor::detect(wrapper) {
+                Ok(Some(..)) => {
+                    let _ = DETECTED_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
+                    return Ok(wrapper.clone());
+                }
+                Ok(None) => {}
+                Err(error) => {
                     tracing::warn!(
                         %error,
+                        command = wrapper.tables.cmd,
                         "Failed to detect mesh rules with one of the iptables binaries, \
                         assuming no mesh rules.",
                     );
-                })
-                .ok()
-                .flatten();
-
-            if mesh.is_some() {
-                let _ = DETECTED_NFTABLES.set(wrapper.tables.cmd.ends_with("-nft"));
-                return Ok(wrapper.clone());
+                }
             }
         }
     }
