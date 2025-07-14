@@ -305,7 +305,6 @@ mod test {
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
-                                    { "name": envs::NFTABLES.name, "value": agent.nftables.to_string() },
                                     { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
                                     { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) }
 
@@ -338,7 +337,8 @@ mod test {
     #[test]
     fn targeted() -> Result<(), Box<dyn std::error::Error>> {
         let mut config_context = ConfigContext::default();
-        let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        let mut agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        agent.nftables = Some(true);
         let support_ipv6 = false;
         let params = ContainerParams {
             name: "foobar".to_string(),
@@ -445,9 +445,9 @@ mod test {
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
-                                    { "name": envs::NFTABLES.name, "value": agent.nftables.to_string() },
-                                    { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
-                                    { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) }
+                                    { "name": envs::JSON_LOG.name, "value": agent.json_log.to_string() },
+                                    { "name": envs::IPV6_SUPPORT.name, "value": support_ipv6.to_string() },
+                                    { "name": envs::NFTABLES.name, "value": "true" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {

@@ -37,10 +37,13 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     let mut env = vec![
         envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),
         envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
-        envs::NFTABLES.as_k8s_spec(&agent.nftables),
         envs::JSON_LOG.as_k8s_spec(&agent.json_log),
         envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
     ];
+
+    if let Some(nftables) = agent.nftables {
+        env.push(envs::NFTABLES.as_k8s_spec(&nftables));
+    }
 
     if let Some(attempts) = agent.dns.attempts {
         env.push(envs::DNS_ATTEMPTS.as_k8s_spec(&attempts));
