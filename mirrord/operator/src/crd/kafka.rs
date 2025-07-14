@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
     kind = "MirrordKafkaClientConfig",
     namespaced,
     printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#,
-    printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#
+    printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#,
+    printcolumn = r#"{"name":"SASL_OAUTH_TOKEN_PROVIDER", "type":"string", "description":"Kind of SASL OAUTH token provider.", "jsonPath":".spec.saslOauthTokenProvider"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaClientConfigSpec {
@@ -33,6 +34,11 @@ pub struct MirrordKafkaClientConfigSpec {
     ///
     /// Example value: `default/my-secret`
     pub load_from_secret: Option<String>,
+
+    /// Optional kind of SASL OAUTH token provider to use when authenticating with Kafka.
+    ///
+    /// When this is set, an implicit `sasl.mechanism=OAUTHBEARER` property is added.
+    pub sasl_oauth_token_provider: Option<SaslOauthTokenProvider>,
 }
 
 /// Property to use when creating operator's Kafka client.
@@ -45,6 +51,21 @@ pub struct MirrordKafkaClientProperty {
     /// Value for the property, e.g `kafka.default.svc.cluster.local:9092`.
     /// `null` clears the property from parent resource when resolving the final configuration.
     pub value: Option<String>,
+}
+
+/// Kind of SASL OAUTH token provider to use when authenticating with Kafka.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SaslOauthTokenProvider {
+    /// Amazon Managed Streaming.
+    Msk,
+    /// For future compatibility.
+    ///
+    /// Will prevent deserialization failure when new variants are added,
+    /// and [`MirrordKafkaClientConfig`] is fetched with an old version of this crate.
+    #[schemars(skip)]
+    #[serde(other, skip_serializing)]
+    Unsupported,
 }
 
 /// Defines splittable Kafka topics consumed by some workload living in the same namespace.
