@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.150.0](https://github.com/metalbear-co/mirrord/tree/3.150.0) - 2025-07-14
+
+
+### Changed
+
+- Changed semantics of the `agent.nftables` configuration field.
+
+  When the field is not set, the agent will pick between `iptables-legacy` and
+  `iptables-nft` at runtime,
+  based on kernel support and existing mesh rules.
+
+  When the field is set, the agent will always use either `iptables-legacy` or
+  `iptables-nft`.
+- The agent now eagerly detects HTTP in incoming connections.
+
+
+### Internal
+
+- Add E2E test for using an asterisk queue-id on client config, together with
+  SQS json in fallback field.
+- Added an E2E test for splitting SQS queues based on env var regex.
+- E2E tests for splitting SQS with queue names in env vars originating in
+  ConfigMaps.
+- Improved SQS E2E tests, removing unnecessary sleeps.
+
 ## [3.149.0](https://github.com/metalbear-co/mirrord/tree/3.149.0) - 2025-07-11
 
 
