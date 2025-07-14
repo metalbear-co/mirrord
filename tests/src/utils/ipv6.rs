@@ -39,6 +39,8 @@ pub async fn ipv6_service(
               "value": "::"
             }
         ]),
+        None,
+        None,
         true,
     )
     .await

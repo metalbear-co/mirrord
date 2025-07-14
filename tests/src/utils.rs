@@ -1,7 +1,7 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
 use k8s_openapi::api::core::v1::Service;
@@ -35,6 +35,13 @@ pub const PRESERVE_FAILED_ENV_NAME: &str = "MIRRORD_E2E_PRESERVE_FAILED";
 
 /// All Kubernetes resources created for testing purposes share this label.
 pub const TEST_RESOURCE_LABEL: (&str, &str) = ("mirrord-e2e-test-resource", "true");
+
+pub fn get_test_resource_label_map() -> BTreeMap<String, String> {
+    BTreeMap::from_iter([(
+        TEST_RESOURCE_LABEL.0.to_string(),
+        TEST_RESOURCE_LABEL.1.to_string(),
+    )])
+}
 
 /// Creates a random string of 7 alphanumeric lowercase characters.
 pub(crate) fn random_string() -> String {

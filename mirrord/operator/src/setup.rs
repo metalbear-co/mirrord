@@ -31,6 +31,7 @@ use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
+    session::MirrordClusterSession,
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -101,6 +102,7 @@ pub struct SetupOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
+    pub stateful_sessions: bool,
 }
 
 #[derive(Debug)]
@@ -120,6 +122,7 @@ pub struct Operator {
     client_ca_role_binding: OperatorClientCaRoleBinding,
     sqs_splitting: bool,
     kafka_splitting: bool,
+    stateful_sessions: bool,
 }
 
 impl Operator {
@@ -132,6 +135,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
+            stateful_sessions,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -143,8 +147,12 @@ impl Operator {
 
         let service_account = OperatorServiceAccount::new(&namespace, aws_role_arn);
 
-        let cluster_role =
-            OperatorClusterRole::new(sqs_splitting, kafka_splitting, application_auto_pause);
+        let cluster_role = OperatorClusterRole::new(OperatorClusterRoleOptions {
+            sqs_splitting,
+            kafka_splitting,
+            application_auto_pause,
+            stateful_sessions,
+        });
         let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
@@ -191,6 +199,7 @@ impl Operator {
             client_ca_role_binding,
             sqs_splitting,
             kafka_splitting,
+            stateful_sessions,
         }
     }
 }
@@ -276,6 +285,11 @@ impl OperatorSetup for Operator {
                 writer.write_all(b"---\n")?;
                 role_binding.to_writer(&mut writer)?;
             }
+        }
+
+        if self.stateful_sessions {
+            writer.write_all(b"---\n")?;
+            MirrordClusterSession::crd().to_writer(&mut writer)?;
         }
 
         Ok(())
@@ -533,11 +547,19 @@ impl OperatorServiceAccount {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct OperatorClusterRoleOptions {
+    pub sqs_splitting: bool,
+    pub kafka_splitting: bool,
+    pub application_auto_pause: bool,
+    pub stateful_sessions: bool,
+}
+
 #[derive(Debug)]
 pub struct OperatorClusterRole(ClusterRole);
 
 impl OperatorClusterRole {
-    pub fn new(sqs_splitting: bool, kafka_splitting: bool, application_auto_pause: bool) -> Self {
+    pub fn new(options: OperatorClusterRoleOptions) -> Self {
         let mut rules = vec![
             PolicyRule {
                 api_groups: Some(vec![
@@ -641,7 +663,7 @@ impl OperatorClusterRole {
             },
         ];
 
-        if kafka_splitting {
+        if options.kafka_splitting {
             rules.extend([
                 PolicyRule {
                     api_groups: Some(vec![MirrordKafkaEphemeralTopic::group(&()).into_owned()]),
@@ -673,7 +695,7 @@ impl OperatorClusterRole {
             ]);
         }
 
-        if sqs_splitting {
+        if options.sqs_splitting {
             rules.extend([
                 // Allow the SQS controller to update queue registry status.
                 PolicyRule {
@@ -741,11 +763,23 @@ impl OperatorClusterRole {
             ]);
         }
 
-        if application_auto_pause {
+        if options.application_auto_pause {
             rules.push(PolicyRule {
                 api_groups: Some(vec!["argoproj.io".to_owned()]),
                 resources: Some(vec!["applications".to_owned()]),
                 verbs: vec!["list".to_owned(), "get".to_owned(), "patch".to_owned()],
+                ..Default::default()
+            });
+        }
+
+        if options.stateful_sessions {
+            rules.push(PolicyRule {
+                api_groups: Some(vec![MirrordClusterSession::group(&()).into_owned()]),
+                resources: Some(vec![MirrordClusterSession::plural(&()).into_owned()]),
+                verbs: ["get", "list", "watch", "create", "delete"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
                 ..Default::default()
             });
         }
@@ -773,7 +807,7 @@ impl OperatorClusterRole {
 
 impl Default for OperatorClusterRole {
     fn default() -> Self {
-        Self::new(false, false, false)
+        Self::new(OperatorClusterRoleOptions::default())
     }
 }
 

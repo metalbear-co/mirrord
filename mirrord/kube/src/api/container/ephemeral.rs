@@ -102,6 +102,10 @@ where
         None => Some(vec![ephemeral_container]),
     };
 
+    // Clear the resource version to avoid conflicts.
+    // The target pod might have changed since we fetched it.
+    ephemeral_containers_subresource.metadata.resource_version = None;
+
     pod_api
         .replace_subresource(
             "ephemeralcontainers",

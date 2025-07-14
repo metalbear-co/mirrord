@@ -32,6 +32,12 @@ where
     /// Handles the given [`runtime::watcher()`] event and returns whether [`Self::condition`] is
     /// now fulfilled.
     fn handle_event(&mut self, event: Event<R>) -> bool {
+        let event = event.modify(|resource| {
+            // Managed fields are not important for our tests,
+            // and they generate a lot of noise when logging resources.
+            resource.meta_mut().managed_fields = None;
+        });
+
         match event {
             Event::Apply(resource) => {
                 let name = resource.meta().name.clone().unwrap();

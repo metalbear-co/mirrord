@@ -85,9 +85,9 @@ mod main {
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
-    /// scripts.
+    /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
-        Lazy::new(|| env::temp_dir().join(MIRRORD_PATCH_DIR));
+        Lazy::new(|| env::temp_dir().join("mirrord").join(MIRRORD_PATCH_DIR));
 
     /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
     /// a trailing `/`, so that the stripped path starts with a `/`
