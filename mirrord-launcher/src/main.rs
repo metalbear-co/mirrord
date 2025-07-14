@@ -19,7 +19,7 @@ fn start_notepad() {
 }
 
 fn main() {
-    let success = start_ifeo(Path::new(NOTEPAD), Path::new(PAINT), [], Suspended::No);
+    let success = start_ifeo(NOTEPAD, PAINT, [], Suspended::No);
     start_notepad();
 
     if success.is_some() {
