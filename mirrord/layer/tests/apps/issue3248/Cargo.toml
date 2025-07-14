@@ -1,7 +1,0 @@
-[package]
-name = "issue3248"
-version = "0.1.0"
-edition = "2021"
-license.workspace = true
-
-[dependencies]
