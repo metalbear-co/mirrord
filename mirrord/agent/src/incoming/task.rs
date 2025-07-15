@@ -8,7 +8,10 @@ use std::{
 
 use futures::{future::Shared, FutureExt, StreamExt};
 use hyper_util::rt::TokioIo;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{
+    mpsc::{self, error::TrySendError},
+    oneshot,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
@@ -173,10 +176,18 @@ where
         };
 
         let Some(http_version) = conn.http_version else {
-            let mut redirected = RedirectedTcp::new(conn.stream, conn.info);
+            let redirected = RedirectedTcp::new(conn.stream, conn.info);
 
             for mirror_tx in &port_state.mirror_txs {
-                let _ = mirror_tx.try_send(MirroredTraffic::Tcp(redirected.mirror()));
+                if let Err(TrySendError::Full(..)) =
+                    mirror_tx.try_send(MirroredTraffic::Tcp(redirected.mirror()))
+                {
+                    tracing::warn!(
+                        connection = ?redirected,
+                        "Mirroring client's traffic channel is full, \
+                        client will not receive mirrored traffic",
+                    );
+                }
             }
 
             match &port_state.steal_tx {
@@ -250,7 +261,15 @@ where
         let mut redirected = RedirectedHttp::new(info, request);
 
         for mirror_tx in &port_state.mirror_txs {
-            let _ = mirror_tx.try_send(MirroredTraffic::Http(redirected.mirror()));
+            if let Err(TrySendError::Full(..)) =
+                mirror_tx.try_send(MirroredTraffic::Http(redirected.mirror()))
+            {
+                tracing::warn!(
+                    request = ?redirected,
+                    "Mirroring client's traffic channel is full, \
+                    client will not receive mirrored request",
+                );
+            }
         }
 
         match &port_state.steal_tx {

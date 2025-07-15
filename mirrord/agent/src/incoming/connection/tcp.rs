@@ -47,7 +47,7 @@ impl RedirectedTcp {
     ///
     /// For the data to flow, you must start the connection task with either [`Self::steal`] or
     /// [`Self::pass_through`].
-    pub fn mirror(&mut self) -> MirroredTcp {
+    pub fn mirror(&self) -> MirroredTcp {
         MirroredTcp {
             info: self.info.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(self.mirror_tx.subscribe())),
