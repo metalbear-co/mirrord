@@ -1,0 +1,1 @@
+Added a new traffic mirroring implementation, in which the connections are redirected using iptables.
