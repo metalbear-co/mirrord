@@ -147,7 +147,7 @@ where
     async fn recv(&mut self) -> Result<CowBytes<'_>, ConnError> {
         self.buffer.clear();
         self.stream
-            .read(&mut self.buffer)
+            .read_buf(&mut self.buffer)
             .await
             .map_err(From::from)
             .map_err(ConnError::PassthroughIoError)?;
