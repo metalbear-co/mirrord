@@ -83,7 +83,7 @@ impl MirrorHandle {
     pub async fn next(&mut self) -> Option<Result<MirroredTraffic, RedirectorTaskError>> {
         match self.mirrored_ports.next().await? {
             (.., Some(conn)) => Some(Ok(conn)),
-            (.., None) => Some(Err(self.task_error.get().await.into())),
+            (.., None) => Some(Err(self.task_error.get().await)),
         }
     }
 }

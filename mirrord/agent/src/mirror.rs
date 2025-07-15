@@ -153,7 +153,7 @@ impl TcpMirrorApi {
                     },
 
                     Some(traffic) = mirror_handle.next() => match traffic? {
-                        MirroredTraffic::Tcp(tcp) if protocol_version.matches(&*MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                        MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                             let connection = NewTcpConnectionV1 {
                                 connection_id: id,
@@ -200,7 +200,7 @@ impl TcpMirrorApi {
                             DaemonTcp::NewConnectionV1(message)
                         }
 
-                        MirroredTraffic::Http(http) if protocol_version.matches(&*MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                        MirroredTraffic::Http(http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                             incoming_streams.insert(id, http.stream);
 
