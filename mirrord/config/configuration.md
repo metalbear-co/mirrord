@@ -350,10 +350,11 @@ it uses `eth0`.
 
 ### agent.nftables {#agent-nftables}
 
-Use iptables-nft instead of iptables-legacy.
-Defaults to `false`.
+Determines which iptables backend will be used for traffic redirection.
 
-Needed if your mesh uses nftables instead of iptables-legacy,
+If set to `true`, the agent will use iptables-nft.
+If set to `false`, the agent will use iptables-legacy.
+If not set, the agent will try to detect the correct backend at runtime.
 
 ### agent.node_selector {#agent-node_selector}
 
@@ -529,7 +530,7 @@ This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
 ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
 
-mirrord will either open a URL for initiating mirrord browser extension to
+mirrord will open a URL for initiating mirrord browser extension to
 automatically inject HTTP header that matches the HTTP filter configured in
 `feature.network.incoming.http_filter.header_filter`.
 
