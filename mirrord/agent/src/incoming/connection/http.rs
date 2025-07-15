@@ -106,7 +106,7 @@ impl RedirectedHttp {
         StolenHttp {
             info: self.info,
             request_head,
-            stream: IncomingStream { rx: Some(rx) },
+            stream: IncomingStream::Steal(rx),
             response_provider: ResponseProvider {
                 response_tx: self.request.response_tx,
                 upgrade_tx,

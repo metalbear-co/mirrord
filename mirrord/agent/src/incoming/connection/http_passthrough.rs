@@ -68,7 +68,7 @@ impl PassThroughTask {
         {
             Ok(response) => response,
             Err(error) => {
-                let error = ConnError::PassthroughHttpError(error);
+                let error = ConnError::PassthroughHttpError(error.into());
                 let _ = extracted.response_tx.send(
                     MirrordErrorResponse::new(version, Report::new(&error).pretty(true)).into(),
                 );
@@ -88,15 +88,18 @@ impl PassThroughTask {
         let (mut outgoing, mut incoming) = tokio::try_join!(
             outgoing_upgrade
                 .map_ok(TokioIo::new)
+                .map_err(From::from)
                 .map_err(ConnError::PassthroughHttpError),
             incoming_upgrade
                 .into_inner()
                 .map_ok(TokioIo::new)
+                .map_err(From::from)
                 .map_err(ConnError::IncomingHttpError),
         )?;
 
         tokio::io::copy_bidirectional(&mut outgoing, &mut incoming)
             .await
+            .map_err(From::from)
             .map_err(ConnError::UpgradedError)?;
 
         Ok(())
@@ -109,6 +112,7 @@ impl PassThroughTask {
     ) -> Result<HttpSender<RolledBackBody>, ConnError> {
         let stream = TcpStream::connect(self.info.pass_through_address())
             .await
+            .map_err(From::from)
             .map_err(ConnError::TcpConnectError)?;
 
         let stream = match &self.info.tls_connector {
@@ -120,6 +124,7 @@ impl PassThroughTask {
                         stream,
                     )
                     .await
+                    .map_err(From::from)
                     .map_err(ConnError::TcpConnectError)?;
                 MaybeTls::Tls(stream)
             }
@@ -133,6 +138,7 @@ impl PassThroughTask {
 
         HttpSender::new(TokioIo::new(stream), version)
             .await
+            .map_err(From::from)
             .map_err(ConnError::PassthroughHttpError)
     }
 }

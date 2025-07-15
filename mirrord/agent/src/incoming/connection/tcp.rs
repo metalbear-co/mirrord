@@ -53,9 +53,7 @@ impl RedirectedTcp {
 
         let stolen = StolenTcp {
             info: self.info.clone(),
-            stream: IncomingStream {
-                rx: Some(incoming_rx),
-            },
+            stream: IncomingStream::Steal(incoming_rx),
             data_tx: outgoing_tx,
         };
 

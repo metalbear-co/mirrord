@@ -55,7 +55,9 @@ impl StealTask {
         };
 
         while let Some(result) = body.frame().await {
-            let frame = result.map_err(ConnError::IncomingHttpError)?;
+            let frame = result
+                .map_err(From::from)
+                .map_err(ConnError::IncomingHttpError)?;
 
             self.tx
                 .send(IncomingStreamItem::Frame(frame.into()))
@@ -81,6 +83,7 @@ impl StealTask {
 
         let (upgraded, read_buf) = (&mut self.on_upgrade)
             .await
+            .map_err(From::from)
             .map_err(ConnError::IncomingHttpError)?;
 
         if read_buf.is_empty().not() {
@@ -100,16 +103,16 @@ impl StealTask {
             tokio::select! {
                 result = data_rx.recv(), if stealer_writes => match result {
                     Some(data) => {
-                        upgraded.write_all(&data).await.map_err(ConnError::UpgradedError)?;
+                        upgraded.write_all(&data).await.map_err(From::from).map_err(ConnError::UpgradedError)?;
                     }
                     None => {
                         stealer_writes = false;
-                        upgraded.shutdown().await.map_err(ConnError::UpgradedError)?;
+                        upgraded.shutdown().await.map_err(From::from).map_err(ConnError::UpgradedError)?;
                     }
                 },
 
                 result = upgraded.read_buf(&mut buffer), if peer_writes => {
-                    result.map_err(ConnError::UpgradedError)?;
+                    result.map_err(From::from).map_err(ConnError::UpgradedError)?;
 
                     if buffer.is_empty() {
                         peer_writes = false;

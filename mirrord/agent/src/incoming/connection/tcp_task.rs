@@ -40,7 +40,7 @@ impl TcpTask {
         while source_writes || destination_writes {
             tokio::select! {
                 result = self.incoming_io.read_buf(&mut read_buf), if source_writes => {
-                    result.map_err(ConnError::IncomingTcpError)?;
+                    result.map_err(From::from).map_err(ConnError::IncomingTcpError)?;
 
                     if read_buf.is_empty() {
                         source_writes = false;
@@ -58,6 +58,7 @@ impl TcpTask {
                         self.incoming_io
                             .shutdown()
                             .await
+                            .map_err(From::from)
                             .map_err(ConnError::IncomingTcpError)?;
                     },
 
@@ -65,10 +66,12 @@ impl TcpTask {
                         self.incoming_io
                             .write_all(&data)
                             .await
+                            .map_err(From::from)
                             .map_err(ConnError::IncomingTcpError)?;
                         self.incoming_io
                             .flush()
                             .await
+                            .map_err(From::from)
                             .map_err(ConnError::IncomingTcpError)?;
                     }
                 },
@@ -96,6 +99,7 @@ impl Destination {
     pub async fn pass_through(info: &ConnectionInfo) -> Result<Self, ConnError> {
         let tcp_stream = TcpStream::connect(info.pass_through_address())
             .await
+            .map_err(From::from)
             .map_err(ConnError::TcpConnectError)?;
 
         match &info.tls_connector {
@@ -103,6 +107,7 @@ impl Destination {
                 let stream = tls_connector
                     .connect(info.original_destination.ip(), None, tcp_stream)
                     .await
+                    .map_err(From::from)
                     .map_err(ConnError::TlsConnectError)?;
 
                 Ok(Self::PassThrough {
@@ -123,6 +128,7 @@ impl Destination {
             Self::PassThrough { stream, .. } => stream
                 .write_all(data)
                 .await
+                .map_err(From::from)
                 .map_err(ConnError::PassthroughTcpError),
 
             Self::StealingClient { data_tx, .. } => data_tx
@@ -139,6 +145,7 @@ impl Destination {
                 stream
                     .read_buf(buffer)
                     .await
+                    .map_err(From::from)
                     .map_err(ConnError::PassthroughTcpError)?;
                 Ok(Cow::Borrowed(buffer))
             }
@@ -155,6 +162,7 @@ impl Destination {
             Self::PassThrough { stream, .. } => stream
                 .shutdown()
                 .await
+                .map_err(From::from)
                 .map_err(ConnError::PassthroughTcpError),
 
             Self::StealingClient { data_tx, .. } => data_tx

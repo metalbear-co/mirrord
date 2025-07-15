@@ -33,24 +33,26 @@ pub enum HttpDetectError {
 }
 
 /// Errors that can occur when handling a redirected incoming connection.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum ConnError {
     #[error("failed to make a passthrough TCP connection: {0}")]
-    TcpConnectError(#[source] io::Error),
+    TcpConnectError(#[source] Arc<io::Error>),
     #[error("failed to make a passthrough TLS connection: {0}")]
-    TlsConnectError(#[source] io::Error),
+    TlsConnectError(#[source] Arc<io::Error>),
     #[error("incoming TCP connection failed: {0}")]
-    IncomingTcpError(#[source] io::Error),
+    IncomingTcpError(#[source] Arc<io::Error>),
     #[error("passthrough TCP connection failed: {0}")]
-    PassthroughTcpError(#[source] io::Error),
+    PassthroughTcpError(#[source] Arc<io::Error>),
     #[error("incoming HTTP connection failed: {0}")]
-    IncomingHttpError(#[source] hyper::Error),
+    IncomingHttpError(#[source] Arc<hyper::Error>),
     #[error("passthrough HTTP connection failed: {0}")]
-    PassthroughHttpError(#[source] hyper::Error),
+    PassthroughHttpError(#[source] Arc<hyper::Error>),
     #[error("upgraded HTTP connection failed: {0}")]
-    UpgradedError(#[source] io::Error),
+    UpgradedError(#[source] Arc<io::Error>),
     #[error("stealing client dropped the connection/request")]
     StealerDropped,
     #[error("connection task was dropped")]
     Dropped,
+    #[error("broadcast receiver lagged begind")]
+    BroadcastLag,
 }
