@@ -3,10 +3,12 @@ use std::{future::Future, ops::Not};
 use bytes::{Bytes, BytesMut};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::{broadcast, mpsc},
+    sync::mpsc,
 };
 
-use crate::incoming::{ConnError, IncomingStreamItem};
+use crate::incoming::{
+    connection::optional_broadcast::OptionalBroadcast, ConnError, IncomingStreamItem,
+};
 
 /// Copies data bidirectionally between an incoming stream and an outgoing destination.
 ///
@@ -102,7 +104,7 @@ pub trait OutgoingDestination {
 pub struct StealingClient {
     pub data_rx: mpsc::Receiver<Bytes>,
     pub data_tx: mpsc::Sender<IncomingStreamItem>,
-    pub mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+    pub mirror_data_tx: OptionalBroadcast,
 }
 
 impl OutgoingDestination for StealingClient {
@@ -117,7 +119,7 @@ impl OutgoingDestination for StealingClient {
             CowBytes::Owned(bytes) => IncomingStreamItem::Data(bytes),
             CowBytes::Borrowed(slice) => IncomingStreamItem::Data(slice.to_vec().into()),
         };
-        let _ = self.mirror_data_tx.send(item.clone());
+        self.mirror_data_tx.send_item(item.clone());
         self.data_tx
             .send(item)
             .await
@@ -125,7 +127,8 @@ impl OutgoingDestination for StealingClient {
     }
 
     async fn shutdown(&mut self) -> Result<(), ConnError> {
-        let _ = self.mirror_data_tx.send(IncomingStreamItem::NoMoreData);
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::NoMoreData);
         self.data_tx
             .send(IncomingStreamItem::NoMoreData)
             .await
@@ -137,7 +140,7 @@ impl OutgoingDestination for StealingClient {
 pub struct PassthroughConnection<IO> {
     pub stream: IO,
     pub buffer: BytesMut,
-    pub mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+    pub mirror_data_tx: OptionalBroadcast,
 }
 
 impl<IO> OutgoingDestination for PassthroughConnection<IO>
@@ -155,20 +158,18 @@ where
     }
 
     async fn send_data(&mut self, data: CowBytes<'_>) -> Result<(), ConnError> {
-        let bytes = match &data {
-            CowBytes::Owned(bytes) => bytes.clone(),
-            CowBytes::Borrowed(slice) => slice.to_vec().into(),
-        };
-        let _ = self.mirror_data_tx.send(IncomingStreamItem::Data(bytes));
         self.stream
             .write_all(data.as_ref())
             .await
             .map_err(From::from)
-            .map_err(ConnError::PassthroughIoError)
+            .map_err(ConnError::PassthroughIoError)?;
+        self.mirror_data_tx.send_data(data);
+        Ok(())
     }
 
     async fn shutdown(&mut self) -> Result<(), ConnError> {
-        let _ = self.mirror_data_tx.send(IncomingStreamItem::NoMoreData);
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::NoMoreData);
         self.stream
             .shutdown()
             .await

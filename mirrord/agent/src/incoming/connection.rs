@@ -29,6 +29,7 @@ use crate::{
 mod copy_bidirectional;
 pub mod http;
 mod http_task;
+mod optional_broadcast;
 pub mod tcp;
 
 /// Redirected connection info.

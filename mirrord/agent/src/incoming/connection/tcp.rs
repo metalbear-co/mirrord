@@ -12,7 +12,10 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use super::{ConnectionInfo, IncomingIO, IncomingStream};
 use crate::incoming::{
-    connection::copy_bidirectional::{self, PassthroughConnection, StealingClient},
+    connection::{
+        copy_bidirectional::{self, PassthroughConnection, StealingClient},
+        optional_broadcast::OptionalBroadcast,
+    },
     ConnError, IncomingStreamItem,
 };
 
@@ -23,7 +26,7 @@ use crate::incoming::{
 pub struct RedirectedTcp {
     io: Box<dyn IncomingIO>,
     info: ConnectionInfo,
-    mirror_tx: broadcast::Sender<IncomingStreamItem>,
+    mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
     ///
     /// Used to spawn the connection task.
@@ -40,7 +43,7 @@ impl RedirectedTcp {
         Self {
             io,
             info,
-            mirror_tx: broadcast::channel(32).0,
+            mirror_tx: None,
             runtime_handle: Handle::current(),
         }
     }
@@ -53,10 +56,19 @@ impl RedirectedTcp {
     ///
     /// For the data to flow, you must start the connection task with either [`Self::steal`] or
     /// [`Self::pass_through`].
-    pub fn mirror(&self) -> MirroredTcp {
+    pub fn mirror(&mut self) -> MirroredTcp {
+        let rx = match &self.mirror_tx {
+            Some(tx) => tx.subscribe(),
+            None => {
+                let (tx, rx) = broadcast::channel(32);
+                self.mirror_tx = Some(tx);
+                rx
+            }
+        };
+
         MirroredTcp {
             info: self.info.clone(),
-            stream: IncomingStream::Mirror(BroadcastStream::new(self.mirror_tx.subscribe())),
+            stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
         }
     }
 
@@ -73,7 +85,7 @@ impl RedirectedTcp {
             let mut outgoing = StealingClient {
                 data_tx: incoming_tx,
                 data_rx: outgoing_rx,
-                mirror_data_tx: self.mirror_tx,
+                mirror_data_tx: self.mirror_tx.into(),
             };
             let result = copy_bidirectional::copy_bidirectional(
                 &mut self.io,
@@ -81,9 +93,9 @@ impl RedirectedTcp {
                 Default::default(),
             )
             .await;
-            let _ = outgoing
+            outgoing
                 .mirror_data_tx
-                .send(IncomingStreamItem::Finished(result.clone()));
+                .send_item(IncomingStreamItem::Finished(result.clone()));
             let _ = outgoing
                 .data_tx
                 .send(IncomingStreamItem::Finished(result))
@@ -104,6 +116,8 @@ impl RedirectedTcp {
     pub fn pass_through(mut self) -> JoinHandle<()> {
         let handle = self.runtime_handle.clone();
         handle.spawn(async move {
+            let mut mirror_data_tx = OptionalBroadcast::from(self.mirror_tx.take());
+
             let stream = match self.make_pass_through_connection().await {
                 Ok(stream) => stream,
                 Err(error) => {
@@ -112,11 +126,7 @@ impl RedirectedTcp {
                         info = ?self.info,
                         "Failed to make a passthrough TCP connection to the original destination",
                     );
-
-                    let _ = self
-                        .mirror_tx
-                        .send(IncomingStreamItem::Finished(Err(error)));
-
+                    mirror_data_tx.send_item(IncomingStreamItem::Finished(Err(error)));
                     return;
                 }
             };
@@ -124,7 +134,7 @@ impl RedirectedTcp {
             let mut outgoing = PassthroughConnection {
                 stream,
                 buffer: BytesMut::with_capacity(64 * 1024),
-                mirror_data_tx: self.mirror_tx,
+                mirror_data_tx,
             };
             let result = copy_bidirectional::copy_bidirectional(
                 &mut self.io,
@@ -132,9 +142,9 @@ impl RedirectedTcp {
                 Default::default(),
             )
             .await;
-            let _ = outgoing
+            outgoing
                 .mirror_data_tx
-                .send(IncomingStreamItem::Finished(result));
+                .send_item(IncomingStreamItem::Finished(result));
         })
     }
 

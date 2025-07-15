@@ -15,7 +15,7 @@ use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{broadcast, mpsc, oneshot},
+    sync::{mpsc, oneshot},
     task::JoinHandle,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -31,6 +31,7 @@ use crate::{
     incoming::{
         connection::{
             copy_bidirectional::{self, CowBytes, OutgoingDestination},
+            optional_broadcast::OptionalBroadcast,
             ConnectionInfo, IncomingIO,
         },
         error::ConnError,
@@ -112,7 +113,7 @@ where
 impl HttpTask<PassthroughConnection> {
     pub fn new(
         info: ConnectionInfo,
-        mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+        mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
     ) -> Self {
         let (request_frame_tx, request_frame_rx) = request
@@ -242,7 +243,7 @@ pub trait RequestDestination {
 /// Implementation of [`RequestDestination`] for a stealing client.
 pub struct StealingClient {
     pub data_tx: mpsc::Sender<IncomingStreamItem>,
-    pub mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+    pub mirror_data_tx: OptionalBroadcast,
     pub upgrade_rx: oneshot::Receiver<Option<UpgradeDataRx>>,
 }
 
@@ -250,6 +251,7 @@ impl RequestDestination for StealingClient {
     type Upgraded = StolenUpgrade;
 
     async fn send_frame(&mut self, frame: Frame<Bytes>) -> Result<(), ConnError> {
+        self.mirror_data_tx.send_frame(&frame);
         let frame = frame
             .into_data()
             .map(Payload)
@@ -258,19 +260,17 @@ impl RequestDestination for StealingClient {
                 let trailers = frame.into_trailers().expect("malformed frame");
                 InternalHttpBodyFrame::Trailers(trailers)
             });
-        let item = IncomingStreamItem::Frame(frame);
-        let _ = self.mirror_data_tx.send(item.clone());
         self.data_tx
-            .send(item)
+            .send(IncomingStreamItem::Frame(frame))
             .await
             .map_err(|_| ConnError::StealerDropped)
     }
 
     async fn no_more_frames(&mut self) -> Result<(), ConnError> {
-        let item = IncomingStreamItem::NoMoreFrames;
-        let _ = self.mirror_data_tx.send(item.clone());
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::NoMoreFrames);
         self.data_tx
-            .send(item)
+            .send(IncomingStreamItem::NoMoreFrames)
             .await
             .map_err(|_| ConnError::StealerDropped)
     }
@@ -289,7 +289,7 @@ impl RequestDestination for StealingClient {
 
     async fn send_result(&mut self, result: Result<(), ConnError>) {
         let item = IncomingStreamItem::Finished(result);
-        let _ = self.mirror_data_tx.send(item.clone());
+        self.mirror_data_tx.send_item(item.clone());
         let _ = self.data_tx.send(item).await;
     }
 }
@@ -298,7 +298,7 @@ impl RequestDestination for StealingClient {
 pub struct StolenUpgrade {
     data_tx: mpsc::Sender<IncomingStreamItem>,
     data_rx: mpsc::Receiver<Bytes>,
-    mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+    mirror_data_tx: OptionalBroadcast,
 }
 
 impl OutgoingDestination for StolenUpgrade {
@@ -314,7 +314,7 @@ impl OutgoingDestination for StolenUpgrade {
             CowBytes::Borrowed(slice) => slice.to_vec().into(),
         };
         let item = IncomingStreamItem::Data(bytes);
-        let _ = self.mirror_data_tx.send(item.clone());
+        self.mirror_data_tx.send_item(item.clone());
         self.data_tx
             .send(item)
             .await
@@ -322,10 +322,10 @@ impl OutgoingDestination for StolenUpgrade {
     }
 
     async fn shutdown(&mut self) -> Result<(), ConnError> {
-        let item = IncomingStreamItem::NoMoreData;
-        let _ = self.mirror_data_tx.send(item.clone());
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::NoMoreData);
         self.data_tx
-            .send(item)
+            .send(IncomingStreamItem::NoMoreData)
             .await
             .map_err(|_| ConnError::StealerDropped)
     }
@@ -336,27 +336,14 @@ impl OutgoingDestination for StolenUpgrade {
 pub struct PassthroughConnection {
     request_frame_tx: Option<mpsc::Sender<Frame<Bytes>>>,
     upgrade: JoinHandle<Result<Option<Upgraded>, ConnError>>,
-    mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+    mirror_data_tx: OptionalBroadcast,
 }
 
 impl RequestDestination for PassthroughConnection {
     type Upgraded = UpgradedPassthroughConnection;
 
     async fn send_frame(&mut self, frame: Frame<Bytes>) -> Result<(), ConnError> {
-        let item = frame
-            .data_ref()
-            .cloned()
-            .map(Payload)
-            .map(InternalHttpBodyFrame::Data)
-            .or_else(|| {
-                frame
-                    .trailers_ref()
-                    .cloned()
-                    .map(InternalHttpBodyFrame::Trailers)
-            })
-            .map(IncomingStreamItem::Frame)
-            .expect("malformed frame");
-        let _ = self.mirror_data_tx.send(item);
+        self.mirror_data_tx.send_frame(&frame);
 
         let Some(tx) = &self.request_frame_tx else {
             return Ok(());
@@ -382,15 +369,15 @@ impl RequestDestination for PassthroughConnection {
     }
 
     async fn no_more_frames(&mut self) -> Result<(), ConnError> {
-        let _ = self.mirror_data_tx.send(IncomingStreamItem::NoMoreFrames);
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::NoMoreFrames);
         self.request_frame_tx = None;
         Ok(())
     }
 
     async fn send_result(&mut self, result: Result<(), ConnError>) {
-        let _ = self
-            .mirror_data_tx
-            .send(IncomingStreamItem::Finished(result));
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::Finished(result));
     }
 
     async fn wait_for_upgrade(&mut self) -> Result<Option<Self::Upgraded>, ConnError> {
@@ -411,7 +398,7 @@ impl RequestDestination for PassthroughConnection {
 pub struct UpgradedPassthroughConnection {
     upgraded: TokioIo<Upgraded>,
     buffer: BytesMut,
-    mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
+    mirror_data_tx: OptionalBroadcast,
 }
 
 impl OutgoingDestination for UpgradedPassthroughConnection {
@@ -426,11 +413,6 @@ impl OutgoingDestination for UpgradedPassthroughConnection {
     }
 
     async fn send_data(&mut self, data: CowBytes<'_>) -> Result<(), ConnError> {
-        let bytes = match &data {
-            CowBytes::Owned(bytes) => bytes.clone(),
-            CowBytes::Borrowed(slice) => slice.to_vec().into(),
-        };
-        let _ = self.mirror_data_tx.send(IncomingStreamItem::Data(bytes));
         self.upgraded
             .write_all(data.as_ref())
             .await
@@ -441,11 +423,13 @@ impl OutgoingDestination for UpgradedPassthroughConnection {
             .await
             .map_err(From::from)
             .map_err(ConnError::PassthroughIoError)?;
+        self.mirror_data_tx.send_data(data);
         Ok(())
     }
 
     async fn shutdown(&mut self) -> Result<(), ConnError> {
-        let _ = self.mirror_data_tx.send(IncomingStreamItem::NoMoreData);
+        self.mirror_data_tx
+            .send_item(IncomingStreamItem::NoMoreData);
         self.upgraded
             .shutdown()
             .await

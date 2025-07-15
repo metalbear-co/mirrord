@@ -32,7 +32,7 @@ use crate::{
 pub struct RedirectedHttp {
     request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
     info: ConnectionInfo,
-    mirror_tx: broadcast::Sender<IncomingStreamItem>,
+    mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
     ///
     /// Used to spawn the connection task.
@@ -52,7 +52,7 @@ impl RedirectedHttp {
         Self {
             request,
             info,
-            mirror_tx: broadcast::channel(32).0,
+            mirror_tx: None,
             runtime_handle: Handle::current(),
         }
     }
@@ -73,7 +73,16 @@ impl RedirectedHttp {
     ///
     /// For the data to flow, you must start the request task with either [`Self::steal`] or
     /// [`Self::pass_through`].
-    pub fn mirror(&self) -> MirroredHttp {
+    pub fn mirror(&mut self) -> MirroredHttp {
+        let rx = match &self.mirror_tx {
+            Some(tx) => tx.subscribe(),
+            None => {
+                let (tx, rx) = broadcast::channel(32);
+                self.mirror_tx = Some(tx);
+                rx
+            }
+        };
+
         MirroredHttp {
             info: self.info.clone(),
             request_head: RequestHead {
@@ -102,7 +111,7 @@ impl RedirectedHttp {
                     .collect(),
                 body_finished: self.request.body_tail.is_none(),
             },
-            stream: IncomingStream::Mirror(BroadcastStream::new(self.mirror_tx.subscribe())),
+            stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
         }
     }
 
@@ -133,7 +142,7 @@ impl RedirectedHttp {
             on_upgrade: self.request.upgrade,
             destination: StealingClient {
                 data_tx: tx,
-                mirror_data_tx: self.mirror_tx,
+                mirror_data_tx: self.mirror_tx.into(),
                 upgrade_rx,
             },
         };
@@ -154,7 +163,7 @@ impl RedirectedHttp {
     ///
     /// All data will be directed to the original destination.
     pub fn pass_through(self) {
-        let task = HttpTask::new(self.info, self.mirror_tx, self.request);
+        let task = HttpTask::new(self.info, self.mirror_tx.into(), self.request);
         self.runtime_handle.spawn(task.run());
     }
 }

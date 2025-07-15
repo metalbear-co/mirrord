@@ -176,7 +176,7 @@ where
         };
 
         let Some(http_version) = conn.http_version else {
-            let redirected = RedirectedTcp::new(conn.stream, conn.info);
+            let mut redirected = RedirectedTcp::new(conn.stream, conn.info);
 
             for mirror_tx in &port_state.mirror_txs {
                 if let Err(TrySendError::Full(..)) =
@@ -258,7 +258,7 @@ where
             return;
         };
 
-        let redirected = RedirectedHttp::new(info, request);
+        let mut redirected = RedirectedHttp::new(info, request);
 
         for mirror_tx in &port_state.mirror_txs {
             if let Err(TrySendError::Full(..)) =
