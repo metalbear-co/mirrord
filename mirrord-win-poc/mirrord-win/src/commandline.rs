@@ -23,7 +23,13 @@ impl CliConfig {
         CliConfig {
             layer_dll_path: {
                 let val = (&mut args_iter).next().expect("missing LayerDll path");
-                (&mut args_iter).next().expect("missing --"); // assuming -- exists for now
+                println!("{val:#?}");
+                assert!(
+                    val.ends_with(".dll"),
+                    "missing/invalid LayerDll (must end with .dll)"
+                );
+                // assuming -- exists for now
+                (&mut args_iter).next().expect("missing --");
                 val
             },
             target_commandline: TargetCommandline {
@@ -36,14 +42,6 @@ impl CliConfig {
 
 impl TargetCommandline {
     pub fn to_wstr_tup(&self) -> Result<(OwnedWSTR, OwnedWSTR), ()> {
-        // if commandline.len() < 1 {
-        //     return Err(());
-        // }
-
-        // let ([applicationname], commandline) = commandline.split_at(1) else {
-        //     return Err(());
-        // };
-
         let applicationname = OwnedWSTR::from_string(&self.applicationname);
         let commandline = OwnedWSTR::from_string(&self.commandline.join(" "));
         Ok((applicationname, commandline))
