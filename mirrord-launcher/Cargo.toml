@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 winapi = { version = "0.3.9", features = ["winreg", "winerror", "errhandlingapi", "handleapi", "processthreadsapi", "winbase"] }
+mirrord-win-str = { path = "../mirrord-win-str" }
 
 [dev-dependencies]
 rand = "0.9.1"

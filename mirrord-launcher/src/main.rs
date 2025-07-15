@@ -2,10 +2,8 @@ mod handle;
 mod launcher;
 mod process;
 mod registry;
-mod win_str;
 
-use core::time;
-use std::{io::Result, path::Path};
+use std::io::Result;
 
 use crate::process::{Suspended, create_process};
 use launcher::ifeo::start_ifeo;

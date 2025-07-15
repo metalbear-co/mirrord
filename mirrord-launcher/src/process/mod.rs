@@ -2,19 +2,14 @@
 
 use std::{mem::MaybeUninit, path::Path};
 
-use winapi::{
-    shared::winerror::ERROR_SUCCESS,
-    um::{
-        errhandlingapi::GetLastError,
-        processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW},
-        winbase::CREATE_SUSPENDED,
-    },
+use winapi::um::{
+    processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW},
+    winbase::CREATE_SUSPENDED,
 };
 
-use crate::{
-    handle::handle::SafeHandle,
-    win_str::{string_to_u16_buffer, u16_buffer_to_string},
-};
+use crate::handle::handle::SafeHandle;
+
+use mirrord_win_str::string_to_u16_buffer;
 
 /// Suspended state.
 #[derive(Debug, PartialEq, Eq)]

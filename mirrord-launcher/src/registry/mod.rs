@@ -25,7 +25,7 @@ use winapi::{
 
 use crate::handle::hkey::SafeHKey;
 
-use crate::win_str::*;
+use mirrord_win_str::*;
 
 /// Registry container.
 ///
