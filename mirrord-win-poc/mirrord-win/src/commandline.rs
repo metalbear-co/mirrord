@@ -12,6 +12,7 @@ pub struct TargetCommandline {
 
 #[derive(Debug)]
 pub struct CliConfig {
+    #[allow(dead_code)]
     layer_dll_path: String,
     pub target_commandline: TargetCommandline,
 }
