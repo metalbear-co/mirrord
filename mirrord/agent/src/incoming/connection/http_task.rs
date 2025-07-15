@@ -140,7 +140,7 @@ impl HttpTask<PassthroughConnection> {
                 Err(error) => {
                     let message = format!(
                         "failed to pass the request to its original destination: {}",
-                        Report::new(&error)
+                        Report::new(&error).pretty(true)
                     );
                     let error_response = MirrordErrorResponse::new(version, message);
                     let _ = request.response_tx.send(error_response.into());
