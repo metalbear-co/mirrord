@@ -63,12 +63,6 @@ pub struct HttpUpgrade<IO> {
     _io_type: PhantomData<fn() -> IO>,
 }
 
-impl<IO> HttpUpgrade<IO> {
-    pub fn into_inner(self) -> OnUpgrade {
-        self.upgrade
-    }
-}
-
 impl<IO> Future for HttpUpgrade<IO>
 where
     IO: 'static + hyper::rt::Read + hyper::rt::Write + Unpin,
@@ -286,7 +280,7 @@ mod test {
     use bytes::Bytes;
     use futures::StreamExt;
     use http_body_util::{BodyExt, Empty};
-    use hyper::{http::StatusCode, Request, Response};
+    use hyper::{http::StatusCode, upgrade::OnUpgrade, Request, Response};
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
     use tokio::{
@@ -294,7 +288,17 @@ mod test {
         sync::Notify,
     };
 
-    use crate::http::{extract_requests::ExtractedRequests, sender::HttpSender, HttpVersion};
+    use crate::http::{
+        extract_requests::{ExtractedRequests, HttpUpgrade},
+        sender::HttpSender,
+        HttpVersion,
+    };
+
+    impl<IO> HttpUpgrade<IO> {
+        pub fn into_inner(self) -> OnUpgrade {
+            self.upgrade
+        }
+    }
 
     /// Verifies that [`ExtractedRequests`] works correctly
     /// and can be gracefully shut down.

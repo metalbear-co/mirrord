@@ -366,9 +366,17 @@ impl RequestDestination for PassthroughConnection {
         }
 
         let error = match (&mut self.upgrade).await {
-            Err(..) => todo!("task panicked"),
+            Err(error) => ConnError::AgentBug(format!(
+                "passthrough request task failed: {error} [{}:{}]",
+                file!(),
+                line!()
+            )),
             Ok(Err(error)) => error,
-            Ok(Ok(..)) => todo!("unexpected finish"),
+            Ok(Ok(..)) => ConnError::AgentBug(format!(
+                "passthrough request task finished unexpectedly [{}:{}]",
+                file!(),
+                line!()
+            )),
         };
         Err(error)
     }

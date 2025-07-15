@@ -280,14 +280,23 @@ impl Stream for IncomingStream {
         let this = self.get_mut();
 
         let item = match this {
-            Self::Steal(rx) => std::task::ready!(rx.poll_recv(cx))
-                .unwrap_or(IncomingStreamItem::Finished(Err(ConnError::Dropped))),
+            Self::Steal(rx) => std::task::ready!(rx.poll_recv(cx)).unwrap_or(
+                IncomingStreamItem::Finished(Err(ConnError::AgentBug(format!(
+                    "connection task dropped the channel before sending the Finished item [{}:{}]",
+                    file!(),
+                    line!(),
+                )))),
+            ),
             Self::Mirror(rx) => match std::task::ready!(Pin::new(rx).poll_next(cx)) {
                 Some(Ok(item)) => item,
                 Some(Err(BroadcastStreamRecvError::Lagged(..))) => {
                     IncomingStreamItem::Finished(Err(ConnError::BroadcastLag))
                 }
-                None => IncomingStreamItem::Finished(Err(ConnError::Dropped)),
+                None => IncomingStreamItem::Finished(Err(ConnError::AgentBug(format!(
+                    "connection task dropped the channel before sending the Finished item [{}:{}]",
+                    file!(),
+                    line!(),
+                )))),
             },
             Self::Exhausted => return Poll::Ready(None),
         };

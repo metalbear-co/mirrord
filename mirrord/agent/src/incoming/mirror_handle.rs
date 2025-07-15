@@ -5,7 +5,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 
 use super::{
-    connection::ConnectionInfo,
     error::RedirectorTaskError,
     task::{RedirectRequest, TaskError},
 };
@@ -14,6 +13,8 @@ use crate::incoming::connection::{http::MirroredHttp, tcp::MirroredTcp};
 /// Handle to a running [`RedirectorTask`](super::task::RedirectorTask).
 ///
 /// Allows for mirroring incoming TCP connections.
+///
+/// Can be cloned to obtain more independent handles.
 pub struct MirrorHandle {
     /// For sending mirror requests to the task.
     message_tx: mpsc::Sender<RedirectRequest>,
@@ -87,19 +88,20 @@ impl MirrorHandle {
     }
 }
 
+impl Clone for MirrorHandle {
+    fn clone(&self) -> Self {
+        Self {
+            message_tx: self.message_tx.clone(),
+            task_error: self.task_error.clone(),
+            mirrored_ports: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum MirroredTraffic {
     Tcp(MirroredTcp),
     Http(MirroredHttp),
-}
-
-impl MirroredTraffic {
-    pub fn info(&self) -> &ConnectionInfo {
-        match self {
-            Self::Tcp(tcp) => &tcp.info,
-            Self::Http(http) => &http.info,
-        }
-    }
 }
 
 impl fmt::Debug for MirrorHandle {

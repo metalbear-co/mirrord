@@ -49,8 +49,8 @@ pub enum ConnError {
     PassthroughHttpError(#[source] Arc<hyper::Error>),
     #[error("stealing client dropped the connection/request")]
     StealerDropped,
-    #[error("connection task was dropped")]
-    Dropped,
-    #[error("broadcast receiver lagged begind")]
+    #[error("broadcast receiver lagged behind")]
     BroadcastLag,
+    #[error("bug in the mirrord-agent, please report it: {0}")]
+    AgentBug(String),
 }
