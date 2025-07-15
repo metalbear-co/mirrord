@@ -13,9 +13,5 @@ publish.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[dependencies]
-layer-win = { path = "C:/Users/Daniel/git/mirrord/mirrord-win-poc/layer-win"}
-
-
 [lints]
 workspace = true

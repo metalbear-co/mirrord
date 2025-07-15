@@ -12,29 +12,31 @@ pub struct TargetCommandline {
 
 #[derive(Debug)]
 pub struct CliConfig {
-    #[allow(dead_code)]
-    layer_dll_path: String,
+    pub layer_dll_path: String,
     pub target_commandline: TargetCommandline,
 }
 
 impl CliConfig {
     pub fn from(args: Args) -> CliConfig {
+        // println!("{:#?}", args);
         let mut args_iter = args.into_iter();
+
+        // skip argv[0] - process executable name
+        let _ = args_iter.next();
 
         CliConfig {
             layer_dll_path: {
-                let val = (&mut args_iter).next().expect("missing LayerDll path");
-                println!("{val:#?}");
+                let val = args_iter.next().expect("missing LayerDll path");
                 assert!(
                     val.ends_with(".dll"),
                     "missing/invalid LayerDll (must end with .dll)"
                 );
                 // assuming -- exists for now
-                (&mut args_iter).next().expect("missing --");
+                assert!(args_iter.next().expect("missing --") == "--");
                 val
             },
             target_commandline: TargetCommandline {
-                applicationname: (&mut args_iter).next().expect("missing application name"),
+                applicationname: args_iter.next().expect("missing application name"),
                 commandline: args_iter.collect(),
             },
         }
