@@ -5,7 +5,7 @@ mod registry;
 mod win_str;
 
 use core::time;
-use std::path::Path;
+use std::{io::Result, path::Path};
 
 use crate::process::{Suspended, create_process};
 use launcher::ifeo::start_ifeo;
@@ -18,11 +18,10 @@ fn start_notepad() {
     let _ = create_process(NOTEPAD, [], Suspended::No);
 }
 
-fn main() {
-    let success = start_ifeo(NOTEPAD, PAINT, [], Suspended::No);
+fn main() -> Result<()> {
+    let _ = start_ifeo(NOTEPAD, PAINT, [], Suspended::No)?;
+    println!("success!");
     start_notepad();
 
-    if success.is_some() {
-        println!("success!");
-    }
+    Ok(())
 }

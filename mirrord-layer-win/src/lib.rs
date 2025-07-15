@@ -1,14 +1,12 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod dll;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+use winapi::um::winnt::DLL_PROCESS_ATTACH;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+
+entry_point!(|_, reason_for_call| {
+    if reason_for_call != DLL_PROCESS_ATTACH {
+        return false;
     }
-}
+
+    true
+});

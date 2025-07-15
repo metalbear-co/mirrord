@@ -9,16 +9,19 @@
 //! Registering this should allow us to create a global override for our target process,
 //! and we have to mitigate the effect of that, to avoid capturing stray processes.
 
-use std::path::Path;
+use std::{
+    io::{Error, ErrorKind, Result},
+    path::Path,
+};
 
 use crate::{
     process::{CreateProcessHandles, Suspended, create_process, process_name_from_path},
     registry::Registry,
 };
 
-pub const IMAGE_FILE_EXECUTION_OPTIONS: &str =
+const IMAGE_FILE_EXECUTION_OPTIONS: &str =
     r#"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"#;
-pub const DEBUGGER_VALUE: &str = "Debugger";
+const DEBUGGER_VALUE: &str = "Debugger";
 
 fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
     let hklm = Registry::hklm();
@@ -71,22 +74,22 @@ pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>, V: AsRef<[String]>>(
     debug: U,
     args: V,
     suspended: Suspended,
-) -> Option<CreateProcessHandles> {
+) -> Result<CreateProcessHandles> {
     let program = program.as_ref();
 
-    let file_name = process_name_from_path(program)?;
+    let file_name = process_name_from_path(program).ok_or(ErrorKind::NotFound)?;
 
     let install = set_ifeo(&file_name, debug);
     if !install {
-        return None;
+        return Err(ErrorKind::PermissionDenied.into());
     }
 
-    let handles = create_process(program, args, suspended)?;
+    let handles = create_process(program, args, suspended).ok_or(Error::last_os_error())?;
 
     let uninstall = remove_ifeo(file_name);
-    if uninstall {
-        return None;
+    if !uninstall {
+        return Err(ErrorKind::PermissionDenied.into());
     }
 
-    Some(handles)
+    Ok(handles)
 }
