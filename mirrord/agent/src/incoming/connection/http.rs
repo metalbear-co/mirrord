@@ -65,6 +65,14 @@ impl RedirectedHttp {
         &mut self.request.parts
     }
 
+    /// Acquires a mirror handle to this request.
+    ///
+    /// For the data to flow, you must start the request task with either [`Self::steal`] or
+    /// [`Self::pass_through`].
+    pub fn mirror(&mut self) -> MirroredHttp {
+        todo!()
+    }
+
     /// Acquires a steal handle to this request,
     /// and starts the request task in the background.
     ///
@@ -202,5 +210,22 @@ impl ResponseBodyProvider {
         let (data_tx, data_rx) = self.has_upgrade.then(|| mpsc::channel(8)).unzip();
         let _ = self.upgrade_tx.send(data_rx);
         data_tx
+    }
+}
+
+/// Mirror handle to a redirected HTTP request.
+pub struct MirroredHttp {
+    pub info: ConnectionInfo,
+    pub request_head: RequestHead,
+    /// Will not return frames that are already in [`Self::request_head`].
+    pub stream: IncomingStream,
+}
+
+impl fmt::Debug for MirroredHttp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MirroredHttp")
+            .field("info", &self.info)
+            .field("request_head", &self.request_head)
+            .finish()
     }
 }

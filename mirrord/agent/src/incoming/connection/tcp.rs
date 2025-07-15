@@ -35,6 +35,14 @@ impl RedirectedTcp {
         &self.info
     }
 
+    /// Acquires a mirror handle to this connection.
+    ///
+    /// For the data to flow, you must start the connection task with either [`Self::steal`] or
+    /// [`Self::pass_through`].
+    pub fn mirror(&mut self) -> MirroredTcp {
+        todo!()
+    }
+
     /// Acquires a steal handle to this connection,
     /// and starts the connection task in the background.
     ///
@@ -114,6 +122,20 @@ pub struct StolenTcp {
 impl fmt::Debug for StolenTcp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StolenTcp")
+            .field("info", &self.info)
+            .finish()
+    }
+}
+
+/// Mirror handle to a redirected connection.
+pub struct MirroredTcp {
+    pub info: ConnectionInfo,
+    pub stream: IncomingStream,
+}
+
+impl fmt::Debug for MirroredTcp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MirroredTcp")
             .field("info", &self.info)
             .finish()
     }

@@ -444,7 +444,7 @@ impl TestSetup {
             None
         };
         let (redirector, _redirector_state, conn_tx) = DummyRedirector::new();
-        let (redirector, handle) = RedirectorTask::new(
+        let (redirector, handle, _) = RedirectorTask::new(
             redirector,
             tls_setup
                 .as_ref()
