@@ -118,7 +118,7 @@ impl StealTask {
                         peer_writes = false;
                         self.tx.send(IncomingStreamItem::NoMoreData).await.map_err(|_| ConnError::StealerDropped)?;
                     } else {
-                        self.tx.send(IncomingStreamItem::Data(buffer.to_vec())).await.map_err(|_| ConnError::StealerDropped)?;
+                        self.tx.send(IncomingStreamItem::Data(buffer.to_vec().into())).await.map_err(|_| ConnError::StealerDropped)?;
                         buffer.clear();
                     }
                 },

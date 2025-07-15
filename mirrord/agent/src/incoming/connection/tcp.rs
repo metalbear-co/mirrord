@@ -1,8 +1,14 @@
 use std::{error::Report, fmt};
 
-use tokio::{runtime::Handle, sync::mpsc, task::JoinHandle};
+use tokio::{
+    runtime::Handle,
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+};
+use tokio_stream::wrappers::BroadcastStream;
 
 use super::{tcp_task, ConnectionInfo, IncomingIO, IncomingStream};
+use crate::incoming::IncomingStreamItem;
 
 /// A redirected TCP connection.
 ///
@@ -11,6 +17,7 @@ use super::{tcp_task, ConnectionInfo, IncomingIO, IncomingStream};
 pub struct RedirectedTcp {
     io: Box<dyn IncomingIO>,
     info: ConnectionInfo,
+    mirror_tx: broadcast::Sender<IncomingStreamItem>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
     ///
     /// Used to spawn the connection task.
@@ -27,6 +34,7 @@ impl RedirectedTcp {
         Self {
             io,
             info,
+            mirror_tx: broadcast::channel(32).0,
             runtime_handle: Handle::current(),
         }
     }
@@ -40,7 +48,10 @@ impl RedirectedTcp {
     /// For the data to flow, you must start the connection task with either [`Self::steal`] or
     /// [`Self::pass_through`].
     pub fn mirror(&mut self) -> MirroredTcp {
-        todo!()
+        MirroredTcp {
+            info: self.info.clone(),
+            stream: IncomingStream::Mirror(BroadcastStream::new(self.mirror_tx.subscribe())),
+        }
     }
 
     /// Acquires a steal handle to this connection,
@@ -60,6 +71,7 @@ impl RedirectedTcp {
         let destination = tcp_task::Destination::StealingClient {
             data_tx: incoming_tx,
             data_rx: outgoing_rx,
+            mirror_tx: self.mirror_tx,
         };
         let task = tcp_task::TcpTask {
             incoming_io: self.io,
@@ -75,7 +87,9 @@ impl RedirectedTcp {
     /// All data will be directed to the original destination.
     pub fn pass_through(self) -> JoinHandle<()> {
         self.runtime_handle.spawn(async move {
-            let destination = match tcp_task::Destination::pass_through(&self.info).await {
+            let destination = match tcp_task::Destination::pass_through(&self.info, self.mirror_tx)
+                .await
+            {
                 Ok(destination) => destination,
                 Err(error) => {
                     tracing::warn!(

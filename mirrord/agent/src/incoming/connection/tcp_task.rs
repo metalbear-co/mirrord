@@ -5,7 +5,7 @@ use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::mpsc,
+    sync::{broadcast, mpsc},
 };
 
 use crate::incoming::{
@@ -26,10 +26,7 @@ impl TcpTask {
     /// the client.
     pub async fn run(mut self) {
         let result = self.run_inner().await;
-
-        if let Destination::StealingClient { data_tx, .. } = &self.destination {
-            let _ = data_tx.send(IncomingStreamItem::Finished(result)).await;
-        }
+        self.destination.send_result(result).await;
     }
 
     async fn run_inner(&mut self) -> Result<(), ConnError> {
@@ -88,15 +85,20 @@ pub enum Destination {
     PassThrough {
         stream: MaybeTls,
         buffer: BytesMut,
+        mirror_tx: broadcast::Sender<IncomingStreamItem>,
     },
     StealingClient {
         data_tx: mpsc::Sender<IncomingStreamItem>,
         data_rx: mpsc::Receiver<Vec<u8>>,
+        mirror_tx: broadcast::Sender<IncomingStreamItem>,
     },
 }
 
 impl Destination {
-    pub async fn pass_through(info: &ConnectionInfo) -> Result<Self, ConnError> {
+    pub async fn pass_through(
+        info: &ConnectionInfo,
+        mirror_tx: broadcast::Sender<IncomingStreamItem>,
+    ) -> Result<Self, ConnError> {
         let tcp_stream = TcpStream::connect(info.pass_through_address())
             .await
             .map_err(From::from)
@@ -113,12 +115,14 @@ impl Destination {
                 Ok(Self::PassThrough {
                     stream: MaybeTls::Tls(stream),
                     buffer: BytesMut::with_capacity(64 * 1024),
+                    mirror_tx,
                 })
             }
 
             None => Ok(Self::PassThrough {
                 stream: MaybeTls::NoTls(tcp_stream),
                 buffer: BytesMut::with_capacity(64 * 1024),
+                mirror_tx,
             }),
         }
     }
@@ -131,16 +135,22 @@ impl Destination {
                 .map_err(From::from)
                 .map_err(ConnError::PassthroughTcpError),
 
-            Self::StealingClient { data_tx, .. } => data_tx
-                .send(IncomingStreamItem::Data(data.into()))
-                .await
-                .map_err(|_| ConnError::StealerDropped),
+            Self::StealingClient {
+                data_tx, mirror_tx, ..
+            } => {
+                let item = IncomingStreamItem::Data(data.to_vec().into());
+                let _ = mirror_tx.send(item.clone());
+                data_tx
+                    .send(item)
+                    .await
+                    .map_err(|_| ConnError::StealerDropped)
+            }
         }
     }
 
     async fn recv(&mut self) -> Result<Cow<'_, [u8]>, ConnError> {
         match self {
-            Self::PassThrough { stream, buffer } => {
+            Self::PassThrough { stream, buffer, .. } => {
                 buffer.clear();
                 stream
                     .read_buf(buffer)
@@ -165,10 +175,30 @@ impl Destination {
                 .map_err(From::from)
                 .map_err(ConnError::PassthroughTcpError),
 
-            Self::StealingClient { data_tx, .. } => data_tx
-                .send(IncomingStreamItem::NoMoreData)
-                .await
-                .map_err(|_| ConnError::StealerDropped),
+            Self::StealingClient {
+                data_tx, mirror_tx, ..
+            } => {
+                let _ = mirror_tx.send(IncomingStreamItem::NoMoreData);
+                data_tx
+                    .send(IncomingStreamItem::NoMoreData)
+                    .await
+                    .map_err(|_| ConnError::StealerDropped)
+            }
+        }
+    }
+
+    async fn send_result(&mut self, result: Result<(), ConnError>) {
+        match self {
+            Self::PassThrough { mirror_tx, .. } => {
+                let _ = mirror_tx.send(IncomingStreamItem::Finished(result));
+            }
+            Self::StealingClient {
+                data_tx, mirror_tx, ..
+            } => {
+                let item = IncomingStreamItem::Finished(result);
+                let _ = mirror_tx.send(item.clone());
+                let _ = data_tx.send(item).await;
+            }
         }
     }
 }

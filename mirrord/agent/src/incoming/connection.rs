@@ -7,6 +7,7 @@ use std::{
 };
 
 use actix_codec::ReadBuf;
+use bytes::Bytes;
 use futures::Stream;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
@@ -265,7 +266,11 @@ impl fmt::Debug for MaybeHttp {
 /// This stream does not finish before returning the final [`IncomingStreamItem::Finished`] item.
 pub enum IncomingStream {
     Steal(mpsc::Receiver<IncomingStreamItem>),
-    Mirror(BroadcastStream<IncomingStreamItem>),
+    Mirror(
+        /// [`tokio::sync::broadcast::Receiver`] has no `poll` method,
+        /// we need to use a wrapper.
+        BroadcastStream<IncomingStreamItem>,
+    ),
     Exhausted,
 }
 
@@ -315,7 +320,7 @@ pub enum IncomingStreamItem {
     /// Request body finished.
     NoMoreFrames,
     /// Data after an HTTP upgrade.
-    Data(Vec<u8>),
+    Data(Bytes),
     /// No more data after an HTTP upgrade.
     NoMoreData,
     /// Connection/request finished.
