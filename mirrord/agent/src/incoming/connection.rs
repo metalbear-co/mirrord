@@ -26,11 +26,10 @@ use crate::{
     metrics::{MetricGuard, REDIRECTED_CONNECTIONS},
 };
 
+mod copy_bidirectional;
 pub mod http;
-mod http_passthrough;
-mod http_steal;
+mod http_task;
 pub mod tcp;
-mod tcp_task;
 
 /// Redirected connection info.
 #[derive(Clone, Debug)]

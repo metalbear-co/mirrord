@@ -258,7 +258,7 @@ where
             return;
         };
 
-        let mut redirected = RedirectedHttp::new(info, request);
+        let redirected = RedirectedHttp::new(info, request);
 
         for mirror_tx in &port_state.mirror_txs {
             if let Err(TrySendError::Full(..)) =

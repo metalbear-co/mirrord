@@ -95,7 +95,10 @@ pub enum MirroredTraffic {
 
 impl MirroredTraffic {
     pub fn info(&self) -> &ConnectionInfo {
-        todo!()
+        match self {
+            Self::Tcp(tcp) => &tcp.info,
+            Self::Http(http) => &http.info,
+        }
     }
 }
 

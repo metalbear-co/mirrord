@@ -39,16 +39,14 @@ pub enum ConnError {
     TcpConnectError(#[source] Arc<io::Error>),
     #[error("failed to make a passthrough TLS connection: {0}")]
     TlsConnectError(#[source] Arc<io::Error>),
-    #[error("incoming TCP connection failed: {0}")]
-    IncomingTcpError(#[source] Arc<io::Error>),
-    #[error("passthrough TCP connection failed: {0}")]
-    PassthroughTcpError(#[source] Arc<io::Error>),
-    #[error("incoming HTTP connection failed: {0}")]
+    #[error("incoming connection failed: {0}")]
+    IncomingIoError(#[source] Arc<io::Error>),
+    #[error("passthrough connection failed: {0}")]
+    PassthroughIoError(#[source] Arc<io::Error>),
+    #[error("incoming connection failed: {0}")]
     IncomingHttpError(#[source] Arc<hyper::Error>),
-    #[error("passthrough HTTP connection failed: {0}")]
+    #[error("passthrough connection failed: {0}")]
     PassthroughHttpError(#[source] Arc<hyper::Error>),
-    #[error("upgraded HTTP connection failed: {0}")]
-    UpgradedError(#[source] Arc<io::Error>),
     #[error("stealing client dropped the connection/request")]
     StealerDropped,
     #[error("connection task was dropped")]

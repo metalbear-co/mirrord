@@ -6,6 +6,7 @@ use std::{
     vec,
 };
 
+use bytes::Bytes;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::Response;
 use mirrord_protocol::{
@@ -515,7 +516,7 @@ impl TcpStealerApi {
                 let Some(connection) = self.connections.get_mut(&data.connection_id) else {
                     return Ok(());
                 };
-                connection.send_data(data.bytes.into_vec()).await;
+                connection.send_data(data.bytes.0).await;
             }
 
             LayerTcpSteal::HttpResponse(response) => {
@@ -592,19 +593,19 @@ impl fmt::Debug for TcpStealerApi {
 /// State of a stolen connection, from the perspective of the client.
 enum ClientConnectionState {
     /// TCP connection, client is sending data.
-    Tcp { data_tx: mpsc::Sender<Vec<u8>> },
+    Tcp { data_tx: mpsc::Sender<Bytes> },
     /// HTTP request sent, waiting for the response from the client.
     HttpRequestSent { response_provider: ResponseProvider },
     /// HTTP request sent, response received, client is sending response body frames.
     HttpResponseReceived { body_provider: ResponseBodyProvider },
     /// HTTP request finished, connection upgraded, client is sending data.
-    HttpUpgraded { data_tx: mpsc::Sender<Vec<u8>> },
+    HttpUpgraded { data_tx: mpsc::Sender<Bytes> },
     /// TCP connection or HTTP request, client is no longer sending data.
     Closed,
 }
 
 impl ClientConnectionState {
-    async fn send_data(&mut self, data: Vec<u8>) {
+    async fn send_data(&mut self, data: Bytes) {
         let sender = match self {
             Self::Tcp { data_tx } => data_tx,
             Self::HttpUpgraded { data_tx } => data_tx,

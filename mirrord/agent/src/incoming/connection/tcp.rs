@@ -1,14 +1,20 @@
 use std::{error::Report, fmt};
 
+use bytes::{Bytes, BytesMut};
+use mirrord_tls_util::MaybeTls;
 use tokio::{
+    net::TcpStream,
     runtime::Handle,
     sync::{broadcast, mpsc},
     task::JoinHandle,
 };
 use tokio_stream::wrappers::BroadcastStream;
 
-use super::{tcp_task, ConnectionInfo, IncomingIO, IncomingStream};
-use crate::incoming::IncomingStreamItem;
+use super::{ConnectionInfo, IncomingIO, IncomingStream};
+use crate::incoming::{
+    connection::copy_bidirectional::{self, PassthroughConnection, StealingClient},
+    ConnError, IncomingStreamItem,
+};
 
 /// A redirected TCP connection.
 ///
@@ -58,39 +64,48 @@ impl RedirectedTcp {
     /// and starts the connection task in the background.
     ///
     /// All data will be directed to this handle.
-    pub fn steal(self) -> StolenTcp {
+    pub fn steal(mut self) -> StolenTcp {
         let (incoming_tx, incoming_rx) = mpsc::channel(32);
         let (outgoing_tx, outgoing_rx) = mpsc::channel(32);
 
-        let stolen = StolenTcp {
-            info: self.info.clone(),
+        let handle = self.runtime_handle.clone();
+        let task = async move {
+            let mut outgoing = StealingClient {
+                data_tx: incoming_tx,
+                data_rx: outgoing_rx,
+                mirror_data_tx: self.mirror_tx,
+            };
+            let result = copy_bidirectional::copy_bidirectional(
+                &mut self.io,
+                &mut outgoing,
+                Default::default(),
+            )
+            .await;
+            let _ = outgoing
+                .mirror_data_tx
+                .send(IncomingStreamItem::Finished(result.clone()));
+            let _ = outgoing
+                .data_tx
+                .send(IncomingStreamItem::Finished(result))
+                .await;
+        };
+        handle.spawn(task);
+
+        StolenTcp {
+            info: self.info,
             stream: IncomingStream::Steal(incoming_rx),
             data_tx: outgoing_tx,
-        };
-
-        let destination = tcp_task::Destination::StealingClient {
-            data_tx: incoming_tx,
-            data_rx: outgoing_rx,
-            mirror_tx: self.mirror_tx,
-        };
-        let task = tcp_task::TcpTask {
-            incoming_io: self.io,
-            destination,
-        };
-        self.runtime_handle.spawn(task.run());
-
-        stolen
+        }
     }
 
     /// Starts the connection task in the background.
     ///
     /// All data will be directed to the original destination.
-    pub fn pass_through(self) -> JoinHandle<()> {
-        self.runtime_handle.spawn(async move {
-            let destination = match tcp_task::Destination::pass_through(&self.info, self.mirror_tx)
-                .await
-            {
-                Ok(destination) => destination,
+    pub fn pass_through(mut self) -> JoinHandle<()> {
+        let handle = self.runtime_handle.clone();
+        handle.spawn(async move {
+            let stream = match self.make_pass_through_connection().await {
+                Ok(stream) => stream,
                 Err(error) => {
                     tracing::warn!(
                         error = %Report::new(&error),
@@ -98,17 +113,48 @@ impl RedirectedTcp {
                         "Failed to make a passthrough TCP connection to the original destination",
                     );
 
+                    let _ = self
+                        .mirror_tx
+                        .send(IncomingStreamItem::Finished(Err(error)));
+
                     return;
                 }
             };
 
-            let task = tcp_task::TcpTask {
-                incoming_io: self.io,
-                destination,
+            let mut outgoing = PassthroughConnection {
+                stream,
+                buffer: BytesMut::with_capacity(64 * 1024),
+                mirror_data_tx: self.mirror_tx,
             };
-
-            task.run().await;
+            let result = copy_bidirectional::copy_bidirectional(
+                &mut self.io,
+                &mut outgoing,
+                Default::default(),
+            )
+            .await;
+            let _ = outgoing
+                .mirror_data_tx
+                .send(IncomingStreamItem::Finished(result));
         })
+    }
+
+    async fn make_pass_through_connection(&self) -> Result<MaybeTls, ConnError> {
+        let tcp_stream = TcpStream::connect(self.info.pass_through_address())
+            .await
+            .map_err(From::from)
+            .map_err(ConnError::TcpConnectError)?;
+
+        match &self.info.tls_connector {
+            Some(tls_connector) => {
+                let stream = tls_connector
+                    .connect(self.info.original_destination.ip(), None, tcp_stream)
+                    .await
+                    .map_err(From::from)
+                    .map_err(ConnError::TlsConnectError)?;
+                Ok(MaybeTls::Tls(stream))
+            }
+            None => Ok(MaybeTls::NoTls(tcp_stream)),
+        }
     }
 }
 
@@ -128,7 +174,7 @@ pub struct StolenTcp {
     /// Can be used to send data to the peer.
     ///
     /// Dropping this sender will be interpreted as a write shutdown.
-    pub data_tx: mpsc::Sender<Vec<u8>>,
+    pub data_tx: mpsc::Sender<Bytes>,
 }
 
 impl fmt::Debug for StolenTcp {
