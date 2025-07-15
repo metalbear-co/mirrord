@@ -8,6 +8,14 @@ use tokio::{
 
 use crate::incoming::{ConnError, IncomingStreamItem};
 
+/// Copies data bidirectionally between an incoming stream and an outgoing destination.
+///
+/// # Params
+///
+/// * `incoming` - an incoming data stream
+/// * `outgoing` - an outgoing data destination (e.g. a stealing client or a passthrough connection)
+/// * `ready_incoming_data` - incoming data that was already received and is ready to be sent to the
+///   outgoing destination
 pub async fn copy_bidirectional<I, O>(
     incoming: &mut I,
     outgoing: &mut O,
@@ -57,6 +65,9 @@ where
     Ok(())
 }
 
+/// Custom [`std::borrow::Cow`] implementation that uses [`Bytes`] for the owned variant.
+///
+/// Allows for efficient handling of both owned and borrowed data (no unnecessary cloning).
 pub enum CowBytes<'a> {
     Owned(Bytes),
     Borrowed(&'a [u8]),
@@ -71,14 +82,23 @@ impl AsRef<[u8]> for CowBytes<'_> {
     }
 }
 
+/// An outgoing destination for incoming data.
+///
+/// E.g. [`StealingClient`] or [`PassthroughConnection`].
 pub trait OutgoingDestination {
+    /// Sends the data to the destination.
     fn send_data(&mut self, data: CowBytes<'_>) -> impl Future<Output = Result<(), ConnError>>;
 
+    /// Shuts down writing to the destination.
     fn shutdown(&mut self) -> impl Future<Output = Result<(), ConnError>>;
 
+    /// Receives data from the destination.
+    ///
+    /// Returning empty data here will be interpreted as a write shutdown from the destination.
     fn recv(&mut self) -> impl Future<Output = Result<CowBytes<'_>, ConnError>>;
 }
 
+/// [`OutgoingDestination`] implementation for a stealing client.
 pub struct StealingClient {
     pub data_rx: mpsc::Receiver<Bytes>,
     pub data_tx: mpsc::Sender<IncomingStreamItem>,
@@ -113,6 +133,7 @@ impl OutgoingDestination for StealingClient {
     }
 }
 
+/// [`OutgoingDestination`] implementation for a passthrough connection to the original destination.
 pub struct PassthroughConnection<IO> {
     pub stream: IO,
     pub buffer: BytesMut,

@@ -40,12 +40,7 @@ use crate::{
 
 pub type UpgradeDataRx = mpsc::Receiver<Bytes>;
 
-/// Background task responsible for handling *some* of the IO on a redirected HTTP request.
-///
-/// This task handles:
-/// 1. Reading incoming request body frames from [`Self::body_tail`] and passing them to
-///    [`Self::destination`].
-/// 2. Passing data in both directions after an HTTP upgrade from [`Self::destination`].
+/// Background task responsible for handling IO on a redirected HTTP request.
 pub struct HttpTask<D> {
     /// Frames that we need to send to the request destination.
     pub body_tail: Option<Incoming>,
@@ -61,8 +56,8 @@ where
 {
     /// Runs this task until the request is finished.
     ///
-    /// This method must ensure that the final [`IncomingStreamItem::Finished`] is always sent to
-    /// the client.
+    /// This method must ensure that [`Self::destination`] is notified about the result with
+    /// [`RequestDestination::send_result`].
     pub async fn run(mut self) {
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
@@ -219,20 +214,32 @@ impl HttpTask<PassthroughConnection> {
     }
 }
 
+/// Destination of a redirected HTTP request, e.g. a stealing client or the original destination
+/// HTTP server.
+///
+/// Implementors are allowed to panic if any of the methods is called after an error was returned.
 pub trait RequestDestination {
+    /// Type of the HTTP-upgraded connection.
     type Upgraded: OutgoingDestination;
 
+    /// Sends the next HTTP body frame of the request.
     fn send_frame(&mut self, frame: Frame<Bytes>) -> impl Future<Output = Result<(), ConnError>>;
 
+    /// Signals that there are no more HTTP body frames of the request.
     fn no_more_frames(&mut self) -> impl Future<Output = Result<(), ConnError>>;
 
+    /// Waits for the HTTP exchange to finish and returns an optional HTTP-upgraded connection.
+    ///
+    /// Implementors are allowed to panic if this method is called more than once.
     fn wait_for_upgrade(
         &mut self,
     ) -> impl Future<Output = Result<Option<Self::Upgraded>, ConnError>>;
 
+    /// Sends the result of the whole exchange.
     fn send_result(&mut self, result: Result<(), ConnError>) -> impl Future<Output = ()>;
 }
 
+/// Implementation of [`RequestDestination`] for a stealing client.
 pub struct StealingClient {
     pub data_tx: mpsc::Sender<IncomingStreamItem>,
     pub mirror_data_tx: broadcast::Sender<IncomingStreamItem>,
@@ -287,6 +294,7 @@ impl RequestDestination for StealingClient {
     }
 }
 
+/// Implementation of [`OutgoingDestination`] for a stolen HTTP upgrade.
 pub struct StolenUpgrade {
     data_tx: mpsc::Sender<IncomingStreamItem>,
     data_rx: mpsc::Receiver<Bytes>,
@@ -323,6 +331,8 @@ impl OutgoingDestination for StolenUpgrade {
     }
 }
 
+/// Implementation of [`RequestDestination`] for a passthrough connection to the original
+/// destination.
 pub struct PassthroughConnection {
     request_frame_tx: Option<mpsc::Sender<Frame<Bytes>>>,
     upgrade: JoinHandle<Result<Option<Upgraded>, ConnError>>,
@@ -389,6 +399,7 @@ impl RequestDestination for PassthroughConnection {
     }
 }
 
+/// Implementation of [`OutgoingDestination`] for an upgraded HTTP passthrough connection.
 pub struct UpgradedPassthroughConnection {
     upgraded: TokioIo<Upgraded>,
     buffer: BytesMut,
