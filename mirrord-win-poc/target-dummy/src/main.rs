@@ -1,16 +1,6 @@
 use std::env;
 
-#[link(name = "layer_win.dll", kind = "raw-dylib", modifiers = "+verbatim")]
-unsafe extern "system" {
-    fn install();
-    // fn GetEnvironmentVariableW(lpName: *const PCWSTR, lpBuffer: *const PCWSTR, nSize: i32) ->
-    // i32;
-}
-
 fn main() {
-    println!("within target-dummy");
-    unsafe { install() };
-
     let test_env_key = "TEST";
     let expected_val = "legit";
 
