@@ -1,5 +1,4 @@
 use std::ffi::{OsStr, OsString};
-use std::io::Read;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
