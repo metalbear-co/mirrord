@@ -1,6 +1,12 @@
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
-use windows::{core as windows_core, Win32::System::Threading as Win32};
+use windows::{
+    core as windows_core,
+    Win32::{
+        Foundation::{HANDLE, WAIT_OBJECT_0},
+        System::Threading::{self as Win32, WaitForSingleObject},
+    },
+};
 
 use crate::commandline::TargetCommandline;
 
@@ -8,9 +14,7 @@ pub fn execute(
     target_commandline: TargetCommandline,
     suspended: bool,
 ) -> Result<Win32::PROCESS_INFORMATION, Box<dyn Error>> {
-    let (appname, mut cmdline) = target_commandline
-        .to_wstr_tup()
-        .expect("commandline should be parsable");
+    let (appname, mut cmdline) = target_commandline.to_wstr_tup();
 
     let startup_info = Win32::STARTUPINFOW::default();
     let creation_flags = {
@@ -42,9 +46,26 @@ pub fn execute(
 pub fn resume(process_info: &Win32::PROCESS_INFORMATION) -> windows_core::Result<()> {
     unsafe {
         // ResumeThread: If the function fails, the return value is (DWORD) -1 (u32::MAX)
-        if Win32::ResumeThread(process_info.hThread) == u32::MAX {
+        if Win32::ResumeThread(process_info.hThread) == (-1i32 as u32) {
             return Err(windows_core::Error::from_win32());
         }
     }
     Ok(())
+}
+
+pub fn wait(handle: HANDLE, duration: Duration) -> bool {
+    let res;
+    unsafe {
+        res = WaitForSingleObject(
+            handle,
+            duration
+                .as_millis()
+                .try_into()
+                .expect("duration must fit u32"),
+        );
+    }
+    match res {
+        WAIT_OBJECT_0 => true,
+        _ => false,
+    }
 }
