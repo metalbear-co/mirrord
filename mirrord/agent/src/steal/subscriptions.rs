@@ -280,7 +280,8 @@ mod test {
     #[tokio::test]
     async fn multiple_subscriptions_one_port() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle) = RedirectorTask::new(redirector, Default::default());
+        let (redirector_task, steal_handle, _) =
+            RedirectorTask::new(redirector, Default::default());
         tokio::spawn(redirector_task.run());
         let mut subscriptions = PortSubscriptions::new(steal_handle);
 
@@ -323,7 +324,8 @@ mod test {
     #[tokio::test]
     async fn multiple_subscriptions_multiple_ports() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle) = RedirectorTask::new(redirector, Default::default());
+        let (redirector_task, steal_handle, _) =
+            RedirectorTask::new(redirector, Default::default());
         tokio::spawn(redirector_task.run());
         let mut subscriptions = PortSubscriptions::new(steal_handle);
 
@@ -366,7 +368,8 @@ mod test {
     #[tokio::test]
     async fn remove_all_from_client() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (redirector_task, steal_handle) = RedirectorTask::new(redirector, Default::default());
+        let (redirector_task, steal_handle, _) =
+            RedirectorTask::new(redirector, Default::default());
         tokio::spawn(redirector_task.run());
         let mut subscriptions = PortSubscriptions::new(steal_handle);
 

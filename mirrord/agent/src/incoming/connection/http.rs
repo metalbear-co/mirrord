@@ -8,28 +8,30 @@ use hyper::{
     http::{request, response, HeaderMap, Method, StatusCode, Uri, Version},
     Response,
 };
-use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
-    sync::{mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot},
 };
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
-use super::{
-    http_passthrough::PassThroughTask,
-    http_steal::{StealTask, UpgradeDataRx},
-    ConnectionInfo, IncomingIO, IncomingStream,
+use super::{ConnectionInfo, IncomingStream};
+use crate::{
+    http::{body::RolledBackBody, extract_requests::ExtractedRequest, BoxResponse},
+    incoming::{
+        connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
+        IncomingStreamItem,
+    },
 };
-use crate::http::{body::RolledBackBody, extract_requests::ExtractedRequest, BoxResponse};
 
 /// A redirected HTTP request.
 ///
 /// No data is received nor sent via for this request until the connection task
 /// is started with either [`Self::steal`] or [`Self::pass_through`].
 pub struct RedirectedHttp {
-    request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+    request: ExtractedRequest,
     info: ConnectionInfo,
+    mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
     ///
     /// Used to spawn the connection task.
@@ -42,13 +44,11 @@ impl RedirectedHttp {
     /// Should be called in the target's Linux network namespace,
     /// as [`Handle::current()`] is stored in this struct.
     /// We might need to connect to the original destination in the future.
-    pub fn new(
-        info: ConnectionInfo,
-        request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
-    ) -> Self {
+    pub fn new(info: ConnectionInfo, request: ExtractedRequest) -> Self {
         Self {
             request,
             info,
+            mirror_tx: None,
             runtime_handle: Handle::current(),
         }
     }
@@ -63,6 +63,52 @@ impl RedirectedHttp {
 
     pub fn parts_mut(&mut self) -> &mut request::Parts {
         &mut self.request.parts
+    }
+
+    /// Acquires a mirror handle to this request.
+    ///
+    /// For the data to flow, you must start the request task with either [`Self::steal`] or
+    /// [`Self::pass_through`].
+    pub fn mirror(&mut self) -> MirroredHttp {
+        let rx = match &self.mirror_tx {
+            Some(tx) => tx.subscribe(),
+            None => {
+                let (tx, rx) = broadcast::channel(32);
+                self.mirror_tx = Some(tx);
+                rx
+            }
+        };
+
+        MirroredHttp {
+            info: self.info.clone(),
+            request_head: RequestHead {
+                uri: self.request.parts.uri.clone(),
+                method: self.request.parts.method.clone(),
+                headers: self.request.parts.headers.clone(),
+                version: self.request.parts.version,
+                body_head: self
+                    .request
+                    .body_head
+                    .iter()
+                    .map(|frame| {
+                        frame
+                            .data_ref()
+                            .cloned()
+                            .map(From::from)
+                            .map(InternalHttpBodyFrame::Data)
+                            .or_else(|| {
+                                frame
+                                    .trailers_ref()
+                                    .cloned()
+                                    .map(InternalHttpBodyFrame::Trailers)
+                            })
+                            .expect("malformed frame")
+                    })
+                    .collect(),
+                body_finished: self.request.body_tail.is_none(),
+            },
+            stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
+        }
     }
 
     /// Acquires a steal handle to this request,
@@ -87,18 +133,21 @@ impl RedirectedHttp {
             body_finished: self.request.body_tail.is_none(),
         };
 
-        let task = StealTask {
+        let task = HttpTask {
             body_tail: self.request.body_tail,
             on_upgrade: self.request.upgrade,
-            upgrade_rx,
-            tx,
+            destination: StealingClient {
+                data_tx: tx,
+                mirror_data_tx: self.mirror_tx.into(),
+                upgrade_rx,
+            },
         };
         self.runtime_handle.spawn(task.run());
 
         StolenHttp {
             info: self.info,
             request_head,
-            stream: IncomingStream { rx: Some(rx) },
+            stream: IncomingStream::Steal(rx),
             response_provider: ResponseProvider {
                 response_tx: self.request.response_tx,
                 upgrade_tx,
@@ -110,8 +159,8 @@ impl RedirectedHttp {
     ///
     /// All data will be directed to the original destination.
     pub fn pass_through(self) {
-        let task = PassThroughTask { info: self.info };
-        self.runtime_handle.spawn(task.run(self.request));
+        let task = HttpTask::new(self.info, self.mirror_tx.into(), self.request);
+        self.runtime_handle.spawn(task.run());
     }
 }
 
@@ -198,9 +247,26 @@ impl ResponseBodyProvider {
     ///
     /// Returns an optional channel to send data after an HTTP upgrade.
     /// Dropping this channel will be interpreted as a write shutdown.
-    pub fn finish(self) -> Option<mpsc::Sender<Vec<u8>>> {
+    pub fn finish(self) -> Option<mpsc::Sender<Bytes>> {
         let (data_tx, data_rx) = self.has_upgrade.then(|| mpsc::channel(8)).unzip();
         let _ = self.upgrade_tx.send(data_rx);
         data_tx
+    }
+}
+
+/// Mirror handle to a redirected HTTP request.
+pub struct MirroredHttp {
+    pub info: ConnectionInfo,
+    pub request_head: RequestHead,
+    /// Will not return frames that are already in [`Self::request_head`].
+    pub stream: IncomingStream,
+}
+
+impl fmt::Debug for MirroredHttp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MirroredHttp")
+            .field("info", &self.info)
+            .field("request_head", &self.request_head)
+            .finish()
     }
 }

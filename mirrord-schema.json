@@ -318,7 +318,7 @@
         },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
-          "description": "Disables specified Linux capabilities for the agent container. If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
+          "description": "If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `NET_RAW` (unless `passthrough_mirroring` is enabled), 3. `SYS_PTRACE`, 4. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
           "type": [
             "array",
             "null"
@@ -462,6 +462,14 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "passthrough_mirroring": {
+          "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
+          "description": "Enables an alternative implementation of traffic mirroring, based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",

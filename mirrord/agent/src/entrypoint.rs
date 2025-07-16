@@ -38,7 +38,9 @@ use crate::{
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
+    incoming::MirrorHandle,
     metrics,
+    mirror::TcpMirrorApi,
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
@@ -219,6 +221,7 @@ struct BackgroundTasks {
     sniffer: BackgroundTask<SnifferCommand>,
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
+    mirror_handle: Option<MirrorHandle>,
 }
 
 struct ClientConnectionHandler {
@@ -227,7 +230,7 @@ struct ClientConnectionHandler {
     file_manager: FileManager,
     connection: ClientConnection,
     /// [`None`] when targetless.
-    tcp_sniffer_api: Option<TcpSnifferApi>,
+    tcp_mirror_api: Option<TcpMirrorApi>,
     /// [`None`] when targetless.
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
@@ -261,7 +264,14 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
+        let mut tcp_mirror_api = bg_tasks
+            .mirror_handle
+            .map(|handle| TcpMirrorApi::passthrough(handle, protocol_version.clone()));
+        if tcp_mirror_api.is_none() {
+            tcp_mirror_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection)
+                .await
+                .map(TcpMirrorApi::sniffer);
+        }
         let tcp_stealer_api = Self::create_stealer_api(
             id,
             protocol_version.clone(),
@@ -278,7 +288,7 @@ impl ClientConnectionHandler {
             id,
             file_manager,
             connection,
-            tcp_sniffer_api,
+            tcp_mirror_api,
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
@@ -380,19 +390,15 @@ impl ClientConnectionHandler {
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
                 message = async {
-                    if let Some(ref mut sniffer_api) = self.tcp_sniffer_api {
-                        sniffer_api.recv().await
+                    if let Some(ref mut mirror_api) = self.tcp_mirror_api {
+                        mirror_api.recv().await
                     } else {
                         unreachable!()
                     }
-                }, if self.tcp_sniffer_api.is_some() => match message {
-                    Ok((message, Some(log))) if self.ready_for_logs => {
-                        self.respond(DaemonMessage::LogMessage(log)).await?;
-                        self.respond(DaemonMessage::Tcp(message)).await?;
+                }, if self.tcp_mirror_api.is_some() => match message {
+                    Ok(message) => {
+                        self.respond(message).await?;
                     }
-                    Ok((message, _)) => {
-                        self.respond(DaemonMessage::Tcp(message)).await?;
-                    },
                     Err(e) => break e,
                 },
                 message = async {
@@ -435,6 +441,10 @@ impl ClientConnectionHandler {
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
+        if matches!(&response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
+            return Ok(());
+        }
+
         self.connection.send(response).await.map_err(Into::into)
     }
 
@@ -489,8 +499,8 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
-                if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
-                    sniffer_api.handle_client_message(message).await?
+                if let Some(mirror_api) = &mut self.tcp_mirror_api {
+                    mirror_api.handle_client_message(message).await?
                 } else {
                     self.respond(DaemonMessage::Close(
                         "component responsible for mirroring incoming traffic is not running, \
@@ -699,15 +709,16 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let sniffer = if state.container_pid().is_some() {
+    let passthrough_mirroring_enabled = envs::PASSTHROUGH_MIRRORING.from_env_or_default();
+    let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
         setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
     } else {
         BackgroundTask::Disabled
     };
-    let stealer = match state.container_pid() {
-        None => BackgroundTask::Disabled,
+    let (stealer, mirror_handle) = match state.container_pid() {
+        None => (BackgroundTask::Disabled, None),
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(
+            let (steal_handle, mirror_handle) = setup::start_traffic_redirector(
                 &state.network_runtime,
                 pid,
                 state
@@ -715,7 +726,10 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                     .then(|| client_listener_address.port()),
             )
             .await?;
-            setup::start_stealer(&state.network_runtime, steal_handle)
+            (
+                setup::start_stealer(&state.network_runtime, steal_handle),
+                passthrough_mirroring_enabled.then_some(mirror_handle),
+            )
         }
     };
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
@@ -723,6 +737,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         sniffer,
         stealer,
         dns,
+        mirror_handle,
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -804,6 +819,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         sniffer,
         stealer,
         dns,
+        ..
     } = bg_tasks;
 
     tokio::join!(

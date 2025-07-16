@@ -48,7 +48,11 @@ impl Future for WaitForFullBody {
                     This is a bug, please report it."
                 );
                 this.0 = None;
-                Poll::Ready(Err(ConnError::Dropped))
+                Poll::Ready(Err(ConnError::AgentBug(format!(
+                    "connection task dropped the channel before sending the Finished item [{}:{}]",
+                    file!(),
+                    line!(),
+                ))))
             }
         }
     }

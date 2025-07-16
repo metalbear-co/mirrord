@@ -196,9 +196,11 @@ messages, the agent stays alive until there are no more heartbeat messages.
 
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
-Disables specified Linux capabilities for the agent container.
-If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
-`SYS_ADMIN`.
+If nothing is disabled here, agent uses:
+1. `NET_ADMIN`,
+2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
+3. `SYS_PTRACE`,
+4. `SYS_ADMIN`.
 
 Has no effect when using the targetless mode,
 as targetless agent containers have no capabilities.
@@ -364,6 +366,18 @@ as targeted agent always runs on the same node as its target container.
   "node_selector": { "kubernetes.io/hostname": "node1" }
 }
 ```
+
+### agent.passthrough_mirroring {#agent-passthrough_mirroring}
+
+Enables an alternative implementation of traffic mirroring,
+based on iptables redirects.
+
+When used with `agent.flush_connections`, it might fix issues
+with mirroring non HTTP/1 traffic.
+
+When this is set, `network_interface` setting is ignored.
+
+Defaults to `false`.
 
 ### agent.priority_class {#agent-priority_class}
 

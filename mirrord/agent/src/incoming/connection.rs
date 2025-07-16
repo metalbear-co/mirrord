@@ -7,12 +7,14 @@ use std::{
 };
 
 use actix_codec::ReadBuf;
+use bytes::Bytes;
 use futures::Stream;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc,
 };
+use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 
 use super::{
     error::{ConnError, HttpDetectError},
@@ -24,11 +26,11 @@ use crate::{
     metrics::{MetricGuard, REDIRECTED_CONNECTIONS},
 };
 
+mod copy_bidirectional;
 pub mod http;
-mod http_passthrough;
-mod http_steal;
+mod http_task;
+mod optional_broadcast;
 pub mod tcp;
-mod tcp_task;
 
 /// Redirected connection info.
 #[derive(Clone, Debug)]
@@ -262,8 +264,14 @@ impl fmt::Debug for MaybeHttp {
 /// [`Stream`] of data from a redirected TCP connection or an HTTP request.
 ///
 /// This stream does not finish before returning the final [`IncomingStreamItem::Finished`] item.
-pub struct IncomingStream {
-    rx: Option<mpsc::Receiver<IncomingStreamItem>>,
+pub enum IncomingStream {
+    Steal(mpsc::Receiver<IncomingStreamItem>),
+    Mirror(
+        /// [`tokio::sync::broadcast::Receiver`] has no `poll` method,
+        /// we need to use a wrapper.
+        BroadcastStream<IncomingStreamItem>,
+    ),
+    Exhausted,
 }
 
 impl Stream for IncomingStream {
@@ -272,14 +280,30 @@ impl Stream for IncomingStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        let Some(rx) = this.rx.as_mut() else {
-            return Poll::Ready(None);
+        let item = match this {
+            Self::Steal(rx) => std::task::ready!(rx.poll_recv(cx)).unwrap_or(
+                IncomingStreamItem::Finished(Err(ConnError::AgentBug(format!(
+                    "connection task dropped the channel before sending the Finished item [{}:{}]",
+                    file!(),
+                    line!(),
+                )))),
+            ),
+            Self::Mirror(rx) => match std::task::ready!(Pin::new(rx).poll_next(cx)) {
+                Some(Ok(item)) => item,
+                Some(Err(BroadcastStreamRecvError::Lagged(..))) => {
+                    IncomingStreamItem::Finished(Err(ConnError::BroadcastLag))
+                }
+                None => IncomingStreamItem::Finished(Err(ConnError::AgentBug(format!(
+                    "connection task dropped the channel before sending the Finished item [{}:{}]",
+                    file!(),
+                    line!(),
+                )))),
+            },
+            Self::Exhausted => return Poll::Ready(None),
         };
 
-        let item = std::task::ready!(rx.poll_recv(cx))
-            .unwrap_or(IncomingStreamItem::Finished(Err(ConnError::Dropped)));
         if matches!(item, IncomingStreamItem::Finished(..)) {
-            this.rx = None;
+            *this = Self::Exhausted;
         }
 
         Poll::Ready(Some(item))
@@ -288,21 +312,24 @@ impl Stream for IncomingStream {
 
 impl fmt::Debug for IncomingStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("IncomingStream")
-            .field("exhausted", &self.rx.is_none())
-            .finish()
+        let name = match self {
+            IncomingStream::Steal(_) => "Steal",
+            IncomingStream::Mirror(_) => "Mirror",
+            IncomingStream::Exhausted => "Exhausted",
+        };
+        f.write_str(name)
     }
 }
 
 /// Update from a redirected TCP connection or an HTTP request.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum IncomingStreamItem {
     /// Request body frame.
     Frame(InternalHttpBodyFrame),
     /// Request body finished.
     NoMoreFrames,
     /// Data after an HTTP upgrade.
-    Data(Vec<u8>),
+    Data(Bytes),
     /// No more data after an HTTP upgrade.
     NoMoreData,
     /// Connection/request finished.

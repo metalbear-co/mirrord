@@ -4,6 +4,7 @@ mod composed;
 mod connection;
 mod error;
 mod iptables;
+mod mirror_handle;
 mod steal_handle;
 mod task;
 pub mod tls;
@@ -23,6 +24,7 @@ pub use connection::{
 };
 pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;
+pub use mirror_handle::{MirrorHandle, MirroredTraffic};
 pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::RedirectorTask;
 use tokio::net::TcpStream;

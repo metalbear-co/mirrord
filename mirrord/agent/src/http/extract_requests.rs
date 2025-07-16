@@ -2,7 +2,6 @@ use std::{
     error::Report,
     fmt,
     future::Future,
-    marker::PhantomData,
     ops::Not,
     pin::Pin,
     task::{Context, Poll},
@@ -28,7 +27,7 @@ use crate::metrics::{MetricGuard, REDIRECTED_REQUESTS};
 
 /// An HTTP request extracted from an HTTP connection
 /// with [`ExtractedRequests`].
-pub struct ExtractedRequest<IO> {
+pub struct ExtractedRequest {
     /// Parts of the request.
     pub parts: Parts,
     /// First frames of the request body.
@@ -36,7 +35,7 @@ pub struct ExtractedRequest<IO> {
     /// Rest of the request body frames (if any).
     pub body_tail: Option<Incoming>,
     /// An HTTP upgrade extracted from the request.
-    pub upgrade: HttpUpgrade<IO>,
+    pub upgrade: OnUpgrade,
     /// Channel for sending the response back to the HTTP client.
     ///
     /// Try not to drop it without providing a meaningful error response
@@ -45,46 +44,13 @@ pub struct ExtractedRequest<IO> {
     pub response_tx: oneshot::Sender<BoxResponse>,
 }
 
-impl<IO> fmt::Debug for ExtractedRequest<IO> {
+impl fmt::Debug for ExtractedRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExtractedRequest")
             .field("parts", &self.parts)
             .field("body_head", &self.body_head)
             .field("has_more_body", &self.body_tail.is_some())
             .finish()
-    }
-}
-
-/// Wrapper over [`OnUpgrade`], that provides type safe downcasting.
-///
-/// Implements [`Future`].
-pub struct HttpUpgrade<IO> {
-    upgrade: OnUpgrade,
-    _io_type: PhantomData<fn() -> IO>,
-}
-
-impl<IO> HttpUpgrade<IO> {
-    pub fn into_inner(self) -> OnUpgrade {
-        self.upgrade
-    }
-}
-
-impl<IO> Future for HttpUpgrade<IO>
-where
-    IO: 'static + hyper::rt::Read + hyper::rt::Write + Unpin,
-{
-    type Output = hyper::Result<(IO, Bytes)>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        let upgraded = std::task::ready!(Pin::new(&mut this.upgrade).poll(cx));
-        match upgraded {
-            Ok(upgrade) => {
-                let parts = upgrade.downcast::<IO>().expect("io type is known");
-                Poll::Ready(Ok((parts.io, parts.read_buf)))
-            }
-            Err(error) => Poll::Ready(Err(error)),
-        }
     }
 }
 
@@ -100,10 +66,7 @@ where
 ///
 /// The metric is incremented when a new request is extracted, and decremented when hyper finishes
 /// processing the response.
-pub struct ExtractedRequests<IO>
-where
-    IO: 'static,
-{
+pub struct ExtractedRequests<IO> {
     request_rx: mpsc::Receiver<(Request<Incoming>, oneshot::Sender<BoxResponse>)>,
     connection: Option<Either<ConnV1<IO>, ConnV2<IO>>>,
 }
@@ -151,7 +114,7 @@ impl<IO> Stream for ExtractedRequests<IO>
 where
     IO: 'static + hyper::rt::Read + hyper::rt::Write + Unpin + Send,
 {
-    type Item = hyper::Result<ExtractedRequest<IO>>;
+    type Item = hyper::Result<ExtractedRequest>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -174,10 +137,7 @@ where
                     parts,
                     body_head: frames,
                     body_tail: is_last.not().then_some(body),
-                    upgrade: HttpUpgrade {
-                        upgrade,
-                        _io_type: Default::default(),
-                    },
+                    upgrade,
                     response_tx,
                 })));
             }
