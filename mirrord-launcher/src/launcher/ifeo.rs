@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use crate::{process::process_name_from_path, registry::Registry};
+use crate::{process::{absolute_path, process_name_from_path}, registry::Registry};
 
 const IMAGE_FILE_EXECUTION_OPTIONS: &str =
     r#"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"#;
@@ -23,9 +23,13 @@ fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
         .get_or_insert_key(program)
 }
 
+/// Sets IFEO entry for `program`, redirecting it's execution towards `debug`.
+/// 
+/// # Arguments
+/// 
+/// * `program` - Path, relative/absolute, towards program to be overriden.
+/// * `debug` - Path, relative/absolute, towards program to override.
 pub fn set_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
-    let debug = debug.as_ref();
-
     // Truncate any potential path to it's potential file name.
     let program = process_name_from_path(program);
     if program.is_none() {
@@ -34,17 +38,20 @@ pub fn set_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
 
     let program = program.unwrap();
 
-    // Remove IFEO before installing.
-    remove_ifeo(&program);
-
-    let debug = debug.to_str();
+    // Turn path into absolute path to have non-ambiguous override.
+    let debug = absolute_path(debug);
     if debug.is_none() {
         return false;
     }
 
+    let debug = debug.unwrap();
+
+    // Remove IFEO before installing.
+    remove_ifeo(&program);
+
     // Install IFEO.
     if let Some(mut ifeo) = get_ifeo(program) {
-        let inserted = ifeo.insert_value_string(DEBUGGER_VALUE, debug.unwrap().into());
+        let inserted = ifeo.insert_value_string(DEBUGGER_VALUE, debug);
         ifeo.flush();
         return inserted;
     }
@@ -52,6 +59,11 @@ pub fn set_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     false
 }
 
+/// Removes IFEO entry for `program`, re-establishing normal execution.
+/// 
+/// # Arguments
+/// 
+/// * `program` - Path, absolute/relative, towards program to remove IFEO for.
 pub fn remove_ifeo<T: AsRef<Path>>(program: T) -> bool {
     // Truncate any potential path to it's potential file name.
     let program = process_name_from_path(program);
