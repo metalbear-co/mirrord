@@ -72,6 +72,8 @@ impl StealHandle {
     ///
     /// If this port is not stolen, does nothing.
     pub fn stop_steal(&mut self, port: u16) {
+        // This drops our traffic `mpsc::Receiver`,
+        // which should be detected by the `RedirectorTask`.
         self.stolen_ports.remove(&port);
     }
 

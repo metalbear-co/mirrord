@@ -74,6 +74,8 @@ impl MirrorHandle {
     ///
     /// If this port is not mirrored, does nothing.
     pub fn stop_mirror(&mut self, port: u16) {
+        // This drops our traffic `mpsc::Receiver`,
+        // which should be detected by the `RedirectorTask`.
         self.mirrored_ports.remove(&port);
     }
 

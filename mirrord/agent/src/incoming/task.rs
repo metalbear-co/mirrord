@@ -31,6 +31,18 @@ use crate::{
 ///
 /// Has to run in the target's network namespace.
 /// Only one instance of this task should run in the agent.
+///
+/// # Implementation
+///
+/// This task is meant to be use via [`StealHandle`] and [`MirrorHandle`]s
+/// returned from [`Self::new`].
+///
+/// The handles use a common [`mpsc::channel`] to send port subscription requests.
+/// Each port subscription requests is represented by a separate [`mpsc::channel`],
+/// through which the task sends redirected traffic.
+///
+/// End of port subscription is signaled by dropping the [`mpsc::Receiver`]
+/// from the [`StealHandle`]/[`MirrorHandle`].
 pub struct RedirectorTask<R> {
     /// Implements traffic interception.
     redirector: R,
@@ -276,7 +288,10 @@ where
         }
     }
 
-    /// Handles a [`RedirectRequest`] coming from this task's handles.
+    /// Handles a [`RedirectRequest`] coming from one of this task's handles.
+    ///
+    /// Spawns a helper task that waits for the subscription channel to close,
+    /// and sends [`InternalMessage::DeadChannel`] back to the [`RedirectorTask`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_client_request(&mut self, message: RedirectRequest) -> Result<(), R::Error> {
         match message {
@@ -336,7 +351,9 @@ where
         Ok(())
     }
 
-    /// Called when one of the ports require inspection - the redirection might be stale.
+    /// Called when [`InternalMessage::DeadChannel`] is received from a helper task.
+    ///
+    /// One of the subscription channels is closed. We need to check the related [`PortState`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_dead_channel(&mut self, port: u16) -> Result<(), R::Error> {
         let Entry::Occupied(mut e) = self.ports.entry(port) else {
@@ -464,9 +481,19 @@ impl fmt::Debug for TaskError {
 
 /// Messages sent by [`RedirectorTask`]'s helper tasks.
 enum InternalMessage {
-    /// One of the clients' channels was closed for a port.
+    /// One of the clients' channels was closed for a certain port.
+    ///
+    /// This means an end of port subscription.
+    /// The related [`PortState`] should be inspected, adjusted, and possibly removed (if all
+    /// subscriptions are gone).
+    ///
+    /// Each port subscription results in spawning a separate helper task,
+    /// that waits for the subscription channel to close, and sends this message to the
+    /// [`RedirectorTask`].
     DeadChannel(u16),
+    /// HTTP detection finished on a redirected connection.
     ConnInitialized(MaybeHttp),
+    /// An HTTP request was extracted from a redirected connection.
     Request(ExtractedRequest, ConnectionInfo),
 }
 
