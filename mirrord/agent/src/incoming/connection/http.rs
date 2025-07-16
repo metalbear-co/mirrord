@@ -8,7 +8,6 @@ use hyper::{
     http::{request, response, HeaderMap, Method, StatusCode, Uri, Version},
     Response,
 };
-use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
@@ -16,7 +15,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
-use super::{ConnectionInfo, IncomingIO, IncomingStream};
+use super::{ConnectionInfo, IncomingStream};
 use crate::{
     http::{body::RolledBackBody, extract_requests::ExtractedRequest, BoxResponse},
     incoming::{
@@ -30,7 +29,7 @@ use crate::{
 /// No data is received nor sent via for this request until the connection task
 /// is started with either [`Self::steal`] or [`Self::pass_through`].
 pub struct RedirectedHttp {
-    request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+    request: ExtractedRequest,
     info: ConnectionInfo,
     mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
@@ -45,10 +44,7 @@ impl RedirectedHttp {
     /// Should be called in the target's Linux network namespace,
     /// as [`Handle::current()`] is stored in this struct.
     /// We might need to connect to the original destination in the future.
-    pub fn new(
-        info: ConnectionInfo,
-        request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
-    ) -> Self {
+    pub fn new(info: ConnectionInfo, request: ExtractedRequest) -> Self {
         Self {
             request,
             info,

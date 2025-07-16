@@ -6,7 +6,7 @@ use http_body_util::{combinators::BoxBody, BodyExt, StreamBody};
 use hyper::{
     body::{Body, Frame, Incoming},
     http::{StatusCode, Version},
-    upgrade::Upgraded,
+    upgrade::{OnUpgrade, Upgraded},
     Request, Response,
 };
 use hyper_util::rt::TokioIo;
@@ -22,17 +22,14 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     http::{
-        body::RolledBackBody,
-        error::MirrordErrorResponse,
-        extract_requests::{ExtractedRequest, HttpUpgrade},
-        sender::HttpSender,
-        HttpVersion,
+        body::RolledBackBody, error::MirrordErrorResponse, extract_requests::ExtractedRequest,
+        sender::HttpSender, HttpVersion,
     },
     incoming::{
         connection::{
             copy_bidirectional::{self, CowBytes, OutgoingDestination},
             optional_broadcast::OptionalBroadcast,
-            ConnectionInfo, IncomingIO,
+            ConnectionInfo,
         },
         error::ConnError,
         IncomingStreamItem,
@@ -46,7 +43,7 @@ pub struct HttpTask<D> {
     /// Frames that we need to send to the request destination.
     pub body_tail: Option<Incoming>,
     /// Extracted from the original request.
-    pub on_upgrade: HttpUpgrade<TokioIo<Box<dyn IncomingIO>>>,
+    pub on_upgrade: OnUpgrade,
     /// Destination of the request.
     pub destination: D,
 }
@@ -95,18 +92,13 @@ where
             return Ok(());
         };
 
-        let (upgraded_peer, read_buf) = (&mut self.on_upgrade)
+        let upgraded_peer = (&mut self.on_upgrade)
             .await
             .map_err(From::from)
             .map_err(ConnError::IncomingHttpError)?;
-        let mut upgraded_peer = upgraded_peer.into_inner();
+        let mut upgraded_peer = TokioIo::new(upgraded_peer);
 
-        copy_bidirectional::copy_bidirectional(
-            &mut upgraded_peer,
-            &mut upgraded_destination,
-            read_buf,
-        )
-        .await
+        copy_bidirectional::copy_bidirectional(&mut upgraded_peer, &mut upgraded_destination).await
     }
 }
 
@@ -114,7 +106,7 @@ impl HttpTask<PassthroughConnection> {
     pub fn new(
         info: ConnectionInfo,
         mirror_data_tx: OptionalBroadcast,
-        request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
+        request: ExtractedRequest,
     ) -> Self {
         let (request_frame_tx, request_frame_rx) = request
             .body_tail

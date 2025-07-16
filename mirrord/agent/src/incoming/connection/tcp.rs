@@ -87,12 +87,7 @@ impl RedirectedTcp {
                 data_rx: outgoing_rx,
                 mirror_data_tx: self.mirror_tx.into(),
             };
-            let result = copy_bidirectional::copy_bidirectional(
-                &mut self.io,
-                &mut outgoing,
-                Default::default(),
-            )
-            .await;
+            let result = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing).await;
             outgoing
                 .mirror_data_tx
                 .send_item(IncomingStreamItem::Finished(result.clone()));
@@ -136,12 +131,7 @@ impl RedirectedTcp {
                 buffer: BytesMut::with_capacity(64 * 1024),
                 mirror_data_tx,
             };
-            let result = copy_bidirectional::copy_bidirectional(
-                &mut self.io,
-                &mut outgoing,
-                Default::default(),
-            )
-            .await;
+            let result = copy_bidirectional::copy_bidirectional(&mut self.io, &mut outgoing).await;
             outgoing
                 .mirror_data_tx
                 .send_item(IncomingStreamItem::Finished(result));

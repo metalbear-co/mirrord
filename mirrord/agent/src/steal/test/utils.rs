@@ -440,7 +440,7 @@ impl TestRequest {
                 file!(),
                 line!()
             );
-            let upgraded = request.upgrade.into_inner().await.unwrap();
+            let upgraded = request.upgrade.await.unwrap();
             protocol.run(TokioIo::new(upgraded), true).await;
         }
 

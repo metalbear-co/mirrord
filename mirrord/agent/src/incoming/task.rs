@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
-    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo, IncomingIO, MaybeHttp},
+    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo, MaybeHttp},
     error::RedirectorTaskError,
     steal_handle::{StealHandle, StolenTraffic},
     tls::StealTlsHandlerStore,
@@ -244,11 +244,7 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_extracted_request(
-        &self,
-        request: ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
-        info: ConnectionInfo,
-    ) {
+    async fn handle_extracted_request(&self, request: ExtractedRequest, info: ConnectionInfo) {
         let Some(port_state) = self.ports.get(&info.original_destination.port()) else {
             tracing::warn!(
                 ?request,
@@ -471,10 +467,7 @@ enum InternalMessage {
     /// One of the clients' channels was closed for a port.
     DeadChannel(u16),
     ConnInitialized(MaybeHttp),
-    Request(
-        ExtractedRequest<TokioIo<Box<dyn IncomingIO>>>,
-        ConnectionInfo,
-    ),
+    Request(ExtractedRequest, ConnectionInfo),
 }
 
 /// State of a single port in the [`RedirectorTask`].

@@ -1,4 +1,4 @@
-use std::{future::Future, ops::Not};
+use std::future::Future;
 
 use bytes::{Bytes, BytesMut};
 use tokio::{
@@ -16,25 +16,12 @@ use crate::incoming::{
 ///
 /// * `incoming` - an incoming data stream
 /// * `outgoing` - an outgoing data destination (e.g. a stealing client or a passthrough connection)
-/// * `ready_incoming_data` - incoming data that was already received and is ready to be sent to the
-///   outgoing destination
-pub async fn copy_bidirectional<I, O>(
-    incoming: &mut I,
-    outgoing: &mut O,
-    ready_incoming_data: Bytes,
-) -> Result<(), ConnError>
+pub async fn copy_bidirectional<I, O>(incoming: &mut I, outgoing: &mut O) -> Result<(), ConnError>
 where
     I: AsyncRead + AsyncWrite + Unpin,
     O: OutgoingDestination,
 {
-    if ready_incoming_data.is_empty().not() {
-        outgoing
-            .send_data(CowBytes::Owned(ready_incoming_data))
-            .await?;
-    }
-
     let mut buffer = BytesMut::with_capacity(64 * 1024);
-
     let mut outgoing_writes = true;
     let mut incoming_writes = true;
 
