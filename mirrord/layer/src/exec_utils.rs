@@ -23,7 +23,7 @@ use crate::{
     error::HookError,
     exec_hooks::{hooks, *},
     hooks::HookManager,
-    replace,
+    replace, EXECUTABLE_ARGS,
 };
 
 /// Maximal number of items to expect in argv.
@@ -70,17 +70,31 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let skip_patch_binaries = SKIP_PATCH_BINARIES
         .get()
         .expect("skip patch binaries not set");
+    // use args for logging only, so no need to fail if they're not set
+    let args = EXECUTABLE_ARGS
+        .get()
+        .map(|exec_args| exec_args.args.clone())
+        .unwrap_or_default();
+    let log_info = match crate::setup()
+        .layer_config()
+        .experimental
+        .sip_log_destination
+        .as_ref()
+    {
+        None => None,
+        Some(log_destination) => Some(mirrord_sip::SipLogInfo {
+            log_destination,
+            args: &args,
+            load_type: "",
+        }),
+    };
     match sip_patch(
         path,
         SipPatchOptions {
             patch: patch_binaries,
             skip: skip_patch_binaries,
-            log_destination: crate::setup()
-                .layer_config()
-                .experimental
-                .sip_log_destination
-                .as_ref(),
         },
+        log_info,
     ) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),

@@ -307,6 +307,16 @@ impl MirrordExecution {
         );
 
         #[cfg(target_os = "macos")]
+        let log_info = match config.experimental.sip_log_destination.as_ref() {
+            None => None,
+            Some(log_destination) => Some(mirrord_sip::SipLogInfo {
+                log_destination,
+                args: &args,
+                load_type
+            })
+        };
+
+        #[cfg(target_os = "macos")]
         let patched_path = executable
             .and_then(|exe| {
                 sip_patch(
@@ -318,11 +328,12 @@ impl MirrordExecution {
                             .map(|x| x.to_vec())
                             .unwrap_or_default(),
                         skip: &config.skip_sip,
-                        log_destination: config
-                            .experimental
-                            .sip_log_destination
-                            .as_ref(),
+                        // log_destination: config
+                        //     .experimental
+                        //     .sip_log_destination
+                        //     .as_ref(),
                     },
+                    log_info
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.
