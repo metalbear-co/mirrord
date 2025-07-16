@@ -4,7 +4,7 @@ use std::thread;
 
 use windows::Win32::{Foundation::HINSTANCE, System::SystemServices::DLL_PROCESS_ATTACH};
 
-use crate::hooks::hook;
+use crate::hooks::install_hooks;
 
 #[unsafe(no_mangle)]
 #[allow(non_snake_case, unused_variables)]
@@ -17,24 +17,8 @@ pub unsafe extern "system" fn DllMain(dll_module: HINSTANCE, fdw_reason: u32, _:
 
     // todo setup tokio
     thread::spawn(move || {
-        hook().expect("Failed to install hooks");
+        install_hooks().expect("Failed to install hooks");
     });
 
     true
-}
-
-#[no_mangle]
-pub fn install() {
-    // install hooks - read/write envvar
-    println!("who called install?!");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        assert_eq!(1, 1);
-    }
 }

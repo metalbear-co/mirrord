@@ -44,9 +44,9 @@ impl CliConfig {
 }
 
 impl TargetCommandline {
-    pub fn to_wstr_tup(&self) -> Result<(OwnedWSTR, OwnedWSTR), ()> {
+    pub fn to_wstr_tup(&self) -> (OwnedWSTR, OwnedWSTR) {
         let applicationname = OwnedWSTR::from_string(&self.applicationname);
         let commandline = OwnedWSTR::from_string(&self.commandline.join(" "));
-        Ok((applicationname, commandline))
+        (applicationname, commandline)
     }
 }
