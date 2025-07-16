@@ -5,10 +5,10 @@ use tokio::sync::broadcast;
 
 use crate::incoming::{connection::copy_bidirectional::CowBytes, IncomingStreamItem};
 
-/// Utility wrapper over an optiona [`broadcast::Sender`].
+/// Utility wrapper over an optional [`broadcast::Sender`].
 ///
 /// 1. The sender is dropped as soon as we detect that there are no receivers left. This allows for
-///    dropping the whole channel as soon as its no longer needed.
+///    dropping the whole channel as soon as it's no longer needed.
 /// 2. Exposes methods that make it easier to do expensive cloning only when necessary
 ///    ([`Self::send_data`], [`Self::send_frame`]).
 #[derive(Clone)]
