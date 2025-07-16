@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.151.0](https://github.com/metalbear-co/mirrord/tree/3.151.0) - 2025-07-16
+
+
+### Added
+
+- Added a new traffic mirroring implementation, in which the connections are
+  redirected using iptables. The new implementation can be enabled in the
+  agent configuration with the `agent.passthrough_mirroring` flag.
+
 ## [3.150.0](https://github.com/metalbear-co/mirrord/tree/3.150.0) - 2025-07-14
 
 
