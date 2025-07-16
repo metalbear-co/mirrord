@@ -95,6 +95,11 @@ pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
     })
 }
 
+/// Resume possibly suspended thread by [`HANDLE`]. Returns operation result.
+/// 
+/// # Arguments
+/// 
+/// * `thread` - [`HANDLE`] to possibly suspended thread.
 pub fn resume_thread(thread: HANDLE) -> bool {
     let ret = unsafe { ResumeThread(thread) };
     ret != u32::MAX
