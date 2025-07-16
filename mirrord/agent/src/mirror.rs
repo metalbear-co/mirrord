@@ -1,4 +1,4 @@
-use std::{error::Report, ops::RangeInclusive};
+use std::{collections::VecDeque, error::Report, ops::RangeInclusive};
 
 use futures::StreamExt;
 use mirrord_protocol::{
@@ -30,7 +30,7 @@ pub enum TcpMirrorApi {
         incoming_streams: StreamMap<ConnectionId, IncomingStream>,
         protocol_version: ClientProtocolVersion,
         connection_ids_iter: RangeInclusive<ConnectionId>,
-        queued_message: Option<DaemonTcp>,
+        queued_messages: VecDeque<DaemonTcp>,
     },
     /// Wrapper over a [`TcpSnifferApi`].
     ///
@@ -59,7 +59,7 @@ impl TcpMirrorApi {
             incoming_streams: Default::default(),
             protocol_version,
             connection_ids_iter: 0..=ConnectionId::MAX,
-            queued_message: Default::default(),
+            queued_messages: Default::default(),
         }
     }
 
@@ -75,6 +75,7 @@ impl TcpMirrorApi {
             Self::Passthrough {
                 mirror_handle,
                 incoming_streams,
+                queued_messages,
                 ..
             } => match message {
                 LayerTcp::ConnectionUnsubscribe(id) => {
@@ -83,6 +84,7 @@ impl TcpMirrorApi {
 
                 LayerTcp::PortSubscribe(port) => {
                     mirror_handle.mirror(port).await?;
+                    queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
 
                 LayerTcp::PortUnsubscribe(port) => {
@@ -105,9 +107,9 @@ impl TcpMirrorApi {
                 incoming_streams,
                 protocol_version,
                 connection_ids_iter,
-                queued_message,
+                queued_messages,
             } => {
-                if let Some(message) = queued_message.take() {
+                if let Some(message) = queued_messages.pop_front() {
                     return Ok(DaemonMessage::Tcp(message));
                 }
 
@@ -147,7 +149,7 @@ impl TcpMirrorApi {
                             })
                         }
                         IncomingStreamItem::Finished(Err(error)) => {
-                            queued_message.replace(DaemonTcp::Close(TcpClose { connection_id: id }));
+                            queued_messages.push_back(DaemonTcp::Close(TcpClose { connection_id: id }));
                             return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!("Mirrored connection {id} failed: {}", Report::new(error)))));
                         }
                     },
