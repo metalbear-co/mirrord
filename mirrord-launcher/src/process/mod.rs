@@ -3,8 +3,9 @@
 use std::{mem::MaybeUninit, path::Path};
 
 use winapi::um::{
-    processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW},
+    processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW},
     winbase::CREATE_SUSPENDED,
+    winnt::HANDLE,
 };
 
 use crate::handle::handle::SafeHandle;
@@ -19,12 +20,13 @@ pub enum Suspended {
 }
 
 /// Structure containing the [`SafeHandle`]-s returned by
-/// [`CreateProcessW`]. Because RAII, you must wait on the handles,
-/// if you plan to wait out the process.
+/// [`CreateProcessW`]. Moreover, contains process and thread ID.
 #[derive(Debug)]
-pub struct CreateProcessHandles {
-    process: SafeHandle,
-    thread: SafeHandle,
+pub struct CreateProcessInformation {
+    pub process: SafeHandle,
+    pub thread: SafeHandle,
+    pub process_id: u32,
+    pub thread_id: u32,
 }
 
 /// Create a process found at path, with the specified arguments.
@@ -39,7 +41,7 @@ pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
     path: T,
     args: U,
     suspended: Suspended,
-) -> Option<CreateProcessHandles> {
+) -> Option<CreateProcessInformation> {
     let path = path.as_ref();
     let args = args.as_ref();
 
@@ -51,7 +53,8 @@ pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
 
     // Must reserve enough space for `out`.
     let mut os_command_line: Vec<u16> = vec![0u16; 1024];
-    os_command_line.extend(string_to_u16_buffer(command_line));
+    let to_os_command_line = string_to_u16_buffer(command_line);
+    os_command_line[..to_os_command_line.len()].copy_from_slice(&to_os_command_line);
 
     // Set flags.
     let mut flags = 0u32;
@@ -84,10 +87,17 @@ pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
         return None;
     }
 
-    Some(CreateProcessHandles {
+    Some(CreateProcessInformation {
         process: SafeHandle::from(process_info.hProcess),
         thread: SafeHandle::from(process_info.hThread),
+        process_id: process_info.dwProcessId,
+        thread_id: process_info.dwThreadId,
     })
+}
+
+pub fn resume_thread(thread: HANDLE) -> bool {
+    let ret = unsafe { ResumeThread(thread) };
+    ret != u32::MAX
 }
 
 /// Retrieves process name (file name) from path, if there is a file there.
@@ -104,6 +114,17 @@ pub fn process_name_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
     }
 
     None
+}
+
+/// Return absolute, resolved ("canonicalized") path from any path.
+///
+/// # Arguments
+///
+/// * `path` - Path to canonicalize.
+pub fn absolute_path<T: AsRef<Path>>(path: T) -> Option<String> {
+    let path = path.as_ref();
+
+    Some(std::fs::canonicalize(path).ok()?.to_str()?.to_string())
 }
 
 #[cfg(test)]

@@ -10,12 +10,11 @@ macro_rules! entry_point {
     ($f: expr) => {
         #[unsafe(no_mangle)]
         #[allow(non_snake_case)]
-        unsafe extern "stdcall" fn DllMain(
+        unsafe extern "system" fn DllMain(
             module: winapi::shared::minwindef::HMODULE,
             reason_for_call: winapi::shared::minwindef::DWORD,
             _: winapi::shared::minwindef::LPVOID,
         ) -> winapi::shared::minwindef::BOOL {
-            // Coerce values
             $f(module, reason_for_call as u32).into()
         }
     };

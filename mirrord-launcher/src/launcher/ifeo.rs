@@ -9,15 +9,9 @@
 //! Registering this should allow us to create a global override for our target process,
 //! and we have to mitigate the effect of that, to avoid capturing stray processes.
 
-use std::{
-    io::{Error, ErrorKind, Result},
-    path::Path,
-};
+use std::path::Path;
 
-use crate::{
-    process::{CreateProcessHandles, Suspended, create_process, process_name_from_path},
-    registry::Registry,
-};
+use crate::{process::process_name_from_path, registry::Registry};
 
 const IMAGE_FILE_EXECUTION_OPTIONS: &str =
     r#"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"#;
@@ -29,9 +23,18 @@ fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
         .get_or_insert_key(program)
 }
 
-fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
+pub fn set_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     let debug = debug.as_ref();
 
+    // Truncate any potential path to it's potential file name.
+    let program = process_name_from_path(program);
+    if program.is_none() {
+        return false;
+    }
+
+    let program = program.unwrap();
+
+    // Remove IFEO before installing.
     remove_ifeo(&program);
 
     let debug = debug.to_str();
@@ -39,6 +42,7 @@ fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
         return false;
     }
 
+    // Install IFEO.
     if let Some(mut ifeo) = get_ifeo(program) {
         let inserted = ifeo.insert_value_string(DEBUGGER_VALUE, debug.unwrap().into());
         ifeo.flush();
@@ -48,7 +52,15 @@ fn set_ifeo<T: AsRef<str>, U: AsRef<Path>>(program: T, debug: U) -> bool {
     false
 }
 
-fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
+pub fn remove_ifeo<T: AsRef<Path>>(program: T) -> bool {
+    // Truncate any potential path to it's potential file name.
+    let program = process_name_from_path(program);
+    if program.is_none() {
+        return false;
+    }
+
+    let program = program.unwrap();
+
     if let Some(mut ifeo) = get_ifeo(program) {
         let deleted = ifeo.delete_value(DEBUGGER_VALUE);
         ifeo.flush();
@@ -56,40 +68,4 @@ fn remove_ifeo<T: AsRef<str>>(program: T) -> bool {
     }
 
     false
-}
-
-/// Starts program in the context of IFEO "guard", registering IFEO override
-/// before the process creation, and removing it later.
-///
-/// Program may be started suspended depending on arguments.
-///
-/// # Arguments
-///
-/// * `program` - Path to program to be started, relative/absolute.
-/// * `debug` - Path to program to override execution, relatiev/absolute.
-/// * `args` - Arguments to be passed to process creation.
-/// * `suspended` - Whether the process should begin in a suspended state or not. Requires resuming.
-pub fn start_ifeo<T: AsRef<Path>, U: AsRef<Path>, V: AsRef<[String]>>(
-    program: T,
-    debug: U,
-    args: V,
-    suspended: Suspended,
-) -> Result<CreateProcessHandles> {
-    let program = program.as_ref();
-
-    let file_name = process_name_from_path(program).ok_or(ErrorKind::NotFound)?;
-
-    let install = set_ifeo(&file_name, debug);
-    if !install {
-        return Err(ErrorKind::PermissionDenied.into());
-    }
-
-    let handles = create_process(program, args, suspended).ok_or(Error::last_os_error())?;
-
-    let uninstall = remove_ifeo(file_name);
-    if !uninstall {
-        return Err(ErrorKind::PermissionDenied.into());
-    }
-
-    Ok(handles)
 }

@@ -81,7 +81,7 @@ impl RegistryValue {
     }
 
     /// Constructs [`Vec<u8>`] from [`RegistryValue`], consuming it by move.
-    pub fn to_vec(self) -> Vec<u8> {
+    pub fn into_vec(self) -> Vec<u8> {
         match self {
             RegistryValue::Binary(x) => x,
             RegistryValue::Dword(x) => u32::to_ne_bytes(x).into(),
@@ -450,7 +450,7 @@ impl Registry {
 
         // Get data type, buffer and length.
         let value_type = value.get_type();
-        let data = value.to_vec();
+        let data = value.into_vec();
         let data_len = data.len() as u32;
 
         if data.is_empty() {

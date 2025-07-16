@@ -20,7 +20,7 @@ use winapi::{
 };
 
 /// Whether [`AllocConsole`] should be called. Useful for debugging.
-const CONSOLE: bool = false;
+const CONSOLE: bool = true;
 
 fn get_file_name_by_handle(handle: HANDLE) -> String {
     let mut name = [0u16; 260];
@@ -30,8 +30,8 @@ fn get_file_name_by_handle(handle: HANDLE) -> String {
     u16_buffer_to_string(&name[..=name_len as usize])
 }
 
-type ReadFileHook = unsafe extern "stdcall" fn(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
-unsafe extern "stdcall" fn read_file_hook(
+type ReadFileHook = unsafe extern "system" fn(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+unsafe extern "system" fn read_file_hook(
     file: HANDLE,
     buffer: LPVOID,
     number_of_bytes_to_read: DWORD,
@@ -55,8 +55,8 @@ unsafe extern "stdcall" fn read_file_hook(
 static mut READ_FILE_ORIGINAL: Option<ReadFileHook> = None;
 
 type WriteFileHook =
-    unsafe extern "stdcall" fn(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED) -> BOOL;
-unsafe extern "stdcall" fn write_file_hook(
+    unsafe extern "system" fn(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED) -> BOOL;
+unsafe extern "system" fn write_file_hook(
     file: HANDLE,
     buffer: LPCVOID,
     number_of_bytes_to_write: DWORD,
@@ -89,9 +89,9 @@ entry_point!(|_, reason_for_call| {
     }
 
     unsafe {
-        let kernelbase = GetModuleHandleA(b"kernelbase\0".as_ptr() as _);
-        let read_file = GetProcAddress(kernelbase, b"ReadFile\0".as_ptr() as _);
-        let write_file = GetProcAddress(kernelbase, b"WriteFile\0".as_ptr() as _);
+        let kernelbase = GetModuleHandleA(c"kernelbase".as_ptr() as _);
+        let read_file = GetProcAddress(kernelbase, c"ReadFile".as_ptr() as _);
+        let write_file = GetProcAddress(kernelbase, c"WriteFile".as_ptr() as _);
 
         let read_file_original = MinHook::create_hook(read_file as _, read_file_hook as _)
             .expect("Failed ReadFile hook");
