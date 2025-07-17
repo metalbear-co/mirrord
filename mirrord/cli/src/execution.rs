@@ -1,6 +1,7 @@
+#[cfg(target_os = "macos")]
+use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
-    ffi::OsString,
     net::SocketAddr,
     time::Duration,
 };
@@ -183,7 +184,7 @@ impl MirrordExecution {
         config: &mut LayerConfig,
         // We only need the executable and args on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
-        #[cfg(target_os = "macos")] args: Option<&Vec<OsString>>,
+        #[cfg(target_os = "macos")] args: Option<&[OsString]>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
     ) -> CliResult<Self>

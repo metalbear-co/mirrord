@@ -1,5 +1,4 @@
 #![feature(iter_intersperse)]
-#![feature(file_lock)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
 #![deny(unused_crate_dependencies)]
@@ -145,9 +144,9 @@ mod main {
     /// Info for logging to `config.experimental.sip_log_destination`
     pub struct SipLogInfo<'a> {
         /// The file destination to write logs to
-        pub log_destination: &'a PathBuf,
+        pub log_destination: &'a Path,
         /// Args to the binary, if available
-        pub args: Option<&'a Vec<OsString>>,
+        pub args: Option<&'a [OsString]>,
         /// The load type, if available
         pub load_type: Option<&'a str>,
     }
@@ -649,47 +648,54 @@ mod main {
     }
 
     /// Write a log to the log file, if the file exists, in a thread-safe way
-    fn write_start_log_to_file(
-        file: &mut Option<File>,
+    fn try_write_start_log_to_file(
+        file: &mut File,
         binary_path: &str,
         status: &Result<SipStatus>,
         log_info: &SipLogInfo,
-    ) -> Result<()> {
-        if let Some(ref mut file) = file {
-            file.lock_exclusive().map_err(SipError::IO)?;
-            writeln!(
-                file,
-                "[{}] (pid {}, binary: {binary_path}, args: {:?}) SIP Status: {status:?}, layer load type: {:?}",
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("")
-                    .as_secs(),
-                std::process::id(),
-                log_info.args,
-                log_info.load_type
-            )
-            .map_err(SipError::IO)?;
-            file.unlock().map_err(SipError::IO)?;
-        };
-        Ok(())
+    ) {
+        let _ = file
+            .lock_exclusive()
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = writeln!(
+            file,
+            "[{}] (pid {}, binary: {binary_path}, args: {:?}) SIP Status: {status:?}, layer load type: {:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("")
+                .as_secs(),
+            std::process::id(),
+            log_info.args,
+            log_info.load_type
+        )
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = FileExt::unlock(file)
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
     }
 
-    fn write_result_to_file(file: &mut Option<File>, result: &str) -> Result<()> {
-        if let Some(ref mut file) = file {
-            file.lock_exclusive().map_err(SipError::IO)?;
-            writeln!(
-                file,
-                "[{}] (pid {}) SIP patch result: {result}",
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("")
-                    .as_secs(),
-                std::process::id()
-            )
-            .map_err(SipError::IO)?;
-            file.unlock().map_err(SipError::IO)?;
-        };
-        Ok(())
+    fn try_write_result_to_file(file: &mut File, result: &Result<Option<String>>) {
+        let _ = file
+            .lock_exclusive()
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let result = result.as_ref().map(|option| {
+            if option.is_some() {
+                "patched successfully"
+            } else {
+                "no patching occurred due to lack of SIP or error getting SIP status"
+            }
+        });
+        let _ = writeln!(
+            file,
+            "[{}] (pid {}) SIP patch result: {result:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("")
+                .as_secs(),
+            std::process::id()
+        )
+        .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = FileExt::unlock(file)
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
     }
 
     /// Check if the file that the user wants to execute is a SIP protected binary
@@ -715,10 +721,9 @@ mod main {
         };
 
         let status = get_sip_status(binary_path, opts);
-        if let Some(log_info) = log_info {
-            let _ = write_start_log_to_file(&mut log_file, binary_path, &status, &log_info)
-                .map_err(|error| warn!("Couldn't log SIP status to file: {error}"));
-        }
+        if let (Some(log_info), Some(log_file)) = (log_info, log_file.as_mut()) {
+            try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
+        };
 
         let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
@@ -751,13 +756,10 @@ mod main {
                 Ok(None)
             }
         };
-        let result_as_str = match &patch_result {
-            Ok(Some(_)) => "patched successfully",
-            Ok(None) => "no patching occurred due to lack of SIP or error getting SIP status",
-            Err(_) => "error while patching",
-        };
-        let _ = write_result_to_file(&mut log_file, result_as_str)
-            .map_err(|error| warn!("Couldn't log SIP status to file: {error}"));
+
+        if let Some(mut log_file) = log_file {
+            try_write_result_to_file(&mut log_file, &patch_result);
+        }
 
         patch_result
     }

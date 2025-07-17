@@ -225,7 +225,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             .as_ref()
             .map(|log_destination| mirrord_sip::SipLogInfo {
                 log_destination,
-                args: Some(&args),
+                args: Some(args.as_slice()),
                 load_type: Some(load_type),
             });
 

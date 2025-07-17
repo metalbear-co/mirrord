@@ -239,13 +239,11 @@
 #![deny(unused_crate_dependencies)]
 
 use std::{
-    collections::HashMap,
-    env::vars,
-    ffi::{CString, OsString},
-    net::SocketAddr,
-    os::unix::ffi::OsStrExt,
+    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
     time::Duration,
 };
+#[cfg(target_os = "macos")]
+use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -322,18 +320,21 @@ where
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
+    #[cfg(target_os = "macos")]
+    let binary_args = args
+        .binary_args
+        .iter()
+        .map(|string| {
+            let bytes = string.as_bytes().to_vec();
+            OsString::from_vec(bytes)
+        })
+        .collect::<Vec<_>>();
     let execution_info = MirrordExecution::start_internal(
         &mut config,
         #[cfg(target_os = "macos")]
         Some(&args.binary),
         #[cfg(target_os = "macos")]
-        Some(
-            &args
-                .binary_args
-                .iter()
-                .map(|str| str.parse::<OsString>().unwrap())
-                .collect(),
-        ),
+        Some(binary_args.as_slice()),
         &mut sub_progress,
         analytics,
     )

@@ -73,8 +73,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     // use args for logging only, so no need to fail if they're not set
     let args = EXECUTABLE_ARGS
         .get()
-        .map(|exec_args| exec_args.args.clone())
-        .unwrap_or_default();
+        .map(|exec_args| exec_args.args.clone());
     let log_info = crate::setup()
         .layer_config()
         .experimental
@@ -82,7 +81,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         .as_ref()
         .map(|log_destination| mirrord_sip::SipLogInfo {
             log_destination,
-            args: Some(&args),
+            args: args.as_deref(),
             load_type: None,
         });
     match sip_patch(
