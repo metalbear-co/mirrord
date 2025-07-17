@@ -1,12 +1,13 @@
 #![cfg(test)]
 
-use std::time::Duration;
+use std::{io::Write, time::Duration};
 
 use http_body_util::BodyExt;
 use hyper::{Method, Request};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use kube::Client;
 use rstest::*;
+use tempfile::NamedTempFile;
 use tokio::net::TcpStream;
 
 use crate::utils::{
@@ -68,6 +69,16 @@ async fn mirror_http_traffic(
     #[notrace]
     kube_client: Client,
 ) {
+    let mirrord_config = serde_json::json!({
+        "agent": {
+            "passthrough_mirroring": true,
+        }
+    });
+    let mut mirrord_config_file = NamedTempFile::with_suffix(".json").unwrap();
+    mirrord_config_file
+        .write_all(mirrord_config.to_string().as_bytes())
+        .unwrap();
+
     let kube_client = kube_client.await;
     let service = basic_service(
         &format!("E2E-mirror-http-traffic-{:x}", rand::random::<u16>()),
@@ -90,7 +101,7 @@ async fn mirror_http_traffic(
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
-            None,
+            Some(vec!["-f", mirrord_config_file.path().to_str().unwrap()]),
             None,
         )
         .await;
