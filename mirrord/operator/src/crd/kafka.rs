@@ -35,7 +35,7 @@ pub struct MirrordKafkaClientConfigSpec {
     /// Example value: `default/my-secret`
     pub load_from_secret: Option<String>,
 
-    /// Optional kind of SASL OAUTH token provider to use when authenticating with Kafka.
+    /// Optional kind of SASL Oauth token provider to use when authenticating with Kafka.
     ///
     /// When this is set, an implicit `sasl.mechanism=OAUTHBEARER` property is added.
     pub sasl_oauth_token_provider: Option<SaslOauthTokenProvider>,
@@ -53,19 +53,23 @@ pub struct MirrordKafkaClientProperty {
     pub value: Option<String>,
 }
 
-/// Kind of SASL OAUTH token provider to use when authenticating with Kafka.
+/// Configuration of a SASL OAuth token provider to use when authenticating with Kafka.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
-pub enum SaslOauthTokenProvider {
-    /// Amazon Managed Streaming.
-    Msk,
-    /// For future compatibility.
+pub struct SaslOauthTokenProvider {
+    /// Kind of the token provider.
     ///
-    /// Will prevent deserialization failure when new variants are added,
-    /// and [`MirrordKafkaClientConfig`] is fetched with an old version of this crate.
-    #[schemars(skip)]
-    #[serde(other, skip_serializing)]
-    Unsupported,
+    /// Right now the only supported value is `MSK`, which stands for Amazon Managed Streaming for
+    /// Apache Kafka.
+    pub kind: String,
+    /// AWS region of the MSK cluster.
+    ///
+    /// Required when `kind` is `MSK`.
+    pub aws_region: Option<String>,
+}
+
+impl SaslOauthTokenProvider {
+    pub const MSK: &'static str = "MSK";
 }
 
 /// Defines splittable Kafka topics consumed by some workload living in the same namespace.
