@@ -60,6 +60,11 @@ async fn make_http_conn(portforwarder: &PortForwarder, http2: bool) -> HttpSende
     }
 }
 
+/// Verifies that passthrough mirroring is able to mirror multiple HTTP requests from multiple
+/// connections.
+///
+/// In this test, [`hyper`] is used directly to send HTTP requests,
+/// as it gives us more control over the underlying TCP connections.
 #[cfg_attr(not(any(feature = "job", feature = "ephemeral")), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -144,6 +149,9 @@ async fn mirror_http_traffic(
     .unwrap();
 }
 
+/// Verifies that passthrough mirroring can handle multiple mirroring clients and a stealing client
+/// at the same time.
+///
 /// This test requires that the operator's agents use passthrough mirroring and connection flushing.
 #[cfg_attr(not(feature = "operator"), ignore)]
 #[rstest]
