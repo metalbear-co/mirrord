@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{io::Write, time::Duration};
+use std::{cmp::Ordering, io::Write, time::Duration};
 
 use http_body_util::BodyExt;
 use hyper::{Method, Request};
@@ -129,10 +129,14 @@ async fn mirror_http_traffic(
         loop {
             let stdout = process.get_stdout().await;
             let requests = stdout.lines().filter(|line| line.contains("GET")).count();
-            if requests == 4 {
-                break;
-            } else if requests > 4 {
-                panic!("Too many requests received by the local application: {requests}");
+            match requests.cmp(&4) {
+                Ordering::Equal => break,
+                Ordering::Less => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                Ordering::Greater => {
+                    panic!("too many requests were received by the local app: {requests}")
+                }
             }
         }
     })
@@ -180,9 +184,7 @@ async fn concurrent_mirror_and_steal(
 
     println!("Making the first HTTP connection and sending a request to the remote service...");
     let mut sender = make_http_conn(&portforwarder, true).await;
-    sender
-        .send(request.clone(), &format!("Echo [remote]: "))
-        .await;
+    sender.send(request.clone(), "Echo [remote]: ").await;
 
     println!("Request to the remote service succeeded, starting the first mirroring client...");
     let mirror_client_1 = Application::NodeHTTP2
@@ -268,12 +270,15 @@ async fn concurrent_mirror_and_steal(
                         .lines()
                         .filter(|line| line.starts_with("> Request "))
                         .count();
-                    if requests == 4 {
-                        break;
-                    } else if requests > 4 {
-                        panic!("The first mirroring client received too many requests: {requests}");
+                    match requests.cmp(&4) {
+                        Ordering::Equal => break,
+                        Ordering::Less => {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                        Ordering::Greater => {
+                            panic!("too many requests were received by the local app: {requests}")
+                        }
                     }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             },
             async {
@@ -283,12 +288,15 @@ async fn concurrent_mirror_and_steal(
                         .lines()
                         .filter(|line| line.starts_with("> Request "))
                         .count();
-                    if requests == 2 {
-                        break;
-                    } else if requests > 2 {
-                        panic!("The first second client received too many requests: {requests}");
+                    match requests.cmp(&2) {
+                        Ordering::Equal => break,
+                        Ordering::Less => {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                        Ordering::Greater => {
+                            panic!("too many requests were received by the local app: {requests}")
+                        }
                     }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             },
         )
