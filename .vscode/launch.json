@@ -43,6 +43,24 @@
       ],
     },
     {
+      "type": "lldb",
+      "request": "launch",
+      "name": "test mirrord-win",
+      "cargo": {
+        "args": [
+          "test", "-p", "mirrord-win", "--lib"
+        ],
+        "filter": {
+          "name": "mirrord-win"
+        }
+      },
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": [
+        "rust"
+      ],
+    },
+    {
       "name": "Launch golang file",
       "type": "go",
       "request": "launch",
