@@ -239,7 +239,11 @@
 #![deny(unused_crate_dependencies)]
 
 use std::{
-    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
+    collections::HashMap,
+    env::vars,
+    ffi::{CString, OsString},
+    net::SocketAddr,
+    os::unix::ffi::OsStrExt,
     time::Duration,
 };
 
@@ -322,6 +326,14 @@ where
         &mut config,
         #[cfg(target_os = "macos")]
         Some(&args.binary),
+        #[cfg(target_os = "macos")]
+        Some(
+            &args
+                .binary_args
+                .iter()
+                .map(|str| str.parse::<OsString>().unwrap())
+                .collect(),
+        ),
         &mut sub_progress,
         analytics,
     )

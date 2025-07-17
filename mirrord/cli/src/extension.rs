@@ -18,6 +18,8 @@ where
         &mut config,
         #[cfg(target_os = "macos")]
         executable,
+        #[cfg(target_os = "macos")]
+        None,
         &mut progress,
         analytics,
     )

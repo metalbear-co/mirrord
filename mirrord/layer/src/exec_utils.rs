@@ -84,8 +84,8 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         None => None,
         Some(log_destination) => Some(mirrord_sip::SipLogInfo {
             log_destination,
-            args: &args,
-            load_type: "",
+            args: Some(&args),
+            load_type: None,
         }),
     };
     match sip_patch(

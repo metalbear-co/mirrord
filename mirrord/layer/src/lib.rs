@@ -75,6 +75,7 @@ use std::{
     sync::OnceLock,
     time::Duration,
 };
+
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
@@ -222,9 +223,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             None => None,
             Some(log_destination) => Some(mirrord_sip::SipLogInfo {
                 log_destination,
-                args: &args,
-                load_type
-            })
+                args: Some(&args),
+                load_type: Some(load_type),
+            }),
         };
 
         if let Ok(Some(binary)) = mirrord_sip::sip_patch(
@@ -233,12 +234,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
             },
-            log_info
+            log_info,
         ) {
-            let err = exec::execvp(
-                binary,
-                args,
-            );
+            let err = exec::execvp(binary, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }

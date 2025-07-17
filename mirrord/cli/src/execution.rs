@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsString,
     net::SocketAddr,
     time::Duration,
 };
@@ -180,8 +181,9 @@ impl MirrordExecution {
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
         config: &mut LayerConfig,
-        // We only need the executable on macos, for SIP handling.
+        // We only need the executable and args on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
+        #[cfg(target_os = "macos")] args: Option<&Vec<OsString>>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
     ) -> CliResult<Self>
@@ -311,9 +313,9 @@ impl MirrordExecution {
             None => None,
             Some(log_destination) => Some(mirrord_sip::SipLogInfo {
                 log_destination,
-                args: &args,
-                load_type
-            })
+                args,
+                load_type: None,
+            }),
         };
 
         #[cfg(target_os = "macos")]
@@ -328,12 +330,8 @@ impl MirrordExecution {
                             .map(|x| x.to_vec())
                             .unwrap_or_default(),
                         skip: &config.skip_sip,
-                        // log_destination: config
-                        //     .experimental
-                        //     .sip_log_destination
-                        //     .as_ref(),
                     },
-                    log_info
+                    log_info,
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.
