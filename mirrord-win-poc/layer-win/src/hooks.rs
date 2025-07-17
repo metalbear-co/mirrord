@@ -3,7 +3,7 @@ use std::{ffi::OsString, os::windows::ffi::OsStrExt};
 use asdf_overlay_hook::DetourHook;
 use once_cell::sync::OnceCell;
 // use tracing::{debug, trace};
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::PCWSTR;
 
 #[link(name = "Kernel32.dll", kind = "raw-dylib", modifiers = "+verbatim")]
 unsafe extern "system" {
@@ -41,7 +41,6 @@ extern "system" fn hooked_get_environment_variable_w(
     lpBuffer: *mut u16,
     nSize: i32,
 ) -> i32 {
-    // trace!("GetEnvironmentVariableW called");
     let name = unsafe { PCWSTR::from_raw(lpName).to_string() }.unwrap();
     // println!("GetEnvironmentVariableW({name:}) called");
 
@@ -74,8 +73,6 @@ fn try_hijack_env_key(key_name: String, buffer_ptr: *mut u16, buffer_size: i32) 
     unsafe {
         std::ptr::copy(new_val.as_ptr(), buffer_ptr, buffer_size as usize);
     }
-    // let buffer_val = unsafe { PWSTR::from_raw(lpBuffer).to_string() }.unwrap();
-    // // println!("value of buffer {buffer_val:}");
 
     Ok(new_val.len() as i32)
 }
