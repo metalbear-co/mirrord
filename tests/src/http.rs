@@ -81,7 +81,7 @@ async fn mirror_http_traffic(
 
     let kube_client = kube_client.await;
     let service = basic_service(
-        &format!("E2E-mirror-http-traffic-{:x}", rand::random::<u16>()),
+        &format!("e2e-{:x}-mirror-http-traffic", rand::random::<u16>(),),
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
         "http-echo",
@@ -152,7 +152,10 @@ async fn concurrent_mirror_and_steal(
 ) {
     let kube_client = kube_client.await;
     let service = basic_service(
-        &format!("E2E-mirror-http-traffic-{:x}", rand::random::<u16>()),
+        &format!(
+            "e2e-{:x}-concurrent-mirror-and-steal",
+            rand::random::<u16>(),
+        ),
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
         "http-echo",
