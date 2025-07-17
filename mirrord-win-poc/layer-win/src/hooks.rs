@@ -53,18 +53,17 @@ extern "system" fn hooked_get_environment_variable_w(
 }
 
 fn try_hijack_env_key(key_name: String, buffer_ptr: *mut u16, buffer_size: i32) -> Result<i32, ()> {
-    if key_name.ne("TEST") {
+    const HIJACKED_KEY: &str = "HIJACK_ME";
+    if key_name.ne(HIJACKED_KEY) {
         return Err(());
     }
 
-    let new_val = {
-        let mut v = OsString::from("HIJACKED")
-            .as_os_str()
-            .encode_wide()
-            .collect::<Vec<u16>>();
-        v.push(0u16); // null-terminator
-        v
-    };
+    const HIJACKED_VAL: &str = "HIJACKED";
+    let new_val = OsString::from(HIJACKED_VAL)
+        .as_os_str()
+        .encode_wide()
+        .chain([0u16]) // null-terminator
+        .collect::<Vec<u16>>();
     if buffer_size < new_val.len() as i32 {
         println!("Could not hijack value, buffer too small, fallback to original impl.");
         return Err(());
