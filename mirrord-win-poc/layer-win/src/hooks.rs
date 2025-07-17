@@ -9,8 +9,6 @@ use windows::core::{PCWSTR, PWSTR};
 unsafe extern "system" {
     // DWORD GetEnvironmentVariableW(LPCWSTR lpName,LPWSTR  lpBuffer,DWORD   nSize);
     fn GetEnvironmentVariableW(lpName: *const u16, lpBuffer: *mut u16, nSize: i32) -> i32;
-    // fn GetEnvironmentVariableW(lpName: *const PCWSTR, lpBuffer: *const PCWSTR, nSize: i32) ->
-    // i32;
 }
 
 struct Hook {
@@ -22,7 +20,7 @@ type GetEnvironmentVariableWFn = unsafe extern "system" fn(*const u16, *mut u16,
 
 pub fn install_hooks() -> anyhow::Result<()> {
     HOOK.get_or_try_init(|| unsafe {
-        println!("hooking GetEnvironmentVariableW");
+        // println!("hooking GetEnvironmentVariableW");
         let get_environment_variable_w = DetourHook::attach(
             GetEnvironmentVariableW as _,
             hooked_get_environment_variable_w as _,
@@ -45,37 +43,39 @@ extern "system" fn hooked_get_environment_variable_w(
 ) -> i32 {
     // trace!("GetEnvironmentVariableW called");
     let name = unsafe { PCWSTR::from_raw(lpName).to_string() }.unwrap();
-    println!("GetEnvironmentVariableW({name:}) called");
+    // println!("GetEnvironmentVariableW({name:}) called");
 
-    if name.eq("TEST") {
-        println!("HIJACKING H4x0r");
-        // HIJACK TEST value
-        let new_val = {
-            let mut v = OsString::from("HIJACKED")
-                .as_os_str()
-                .encode_wide()
-                .collect::<Vec<u16>>();
-            v.push(0u16); // null-terminator
-            v
-        };
-        if nSize > new_val.len() as i32 {
-            unsafe {
-                std::ptr::copy(new_val.as_ptr(), lpBuffer, nSize as usize);
-            }
-        } else {
-            println!("Could not hijack value, unsupported buffer too small");
-        }
+    match try_hijack_env_key(name, lpBuffer, nSize) {
+        Ok(hijacked_val_len) => hijacked_val_len,
+        Err(_) => unsafe {
+            HOOK.wait().get_environment_variable_w.original_fn()(lpName, lpBuffer, nSize)
+        },
+    }
+}
 
-        let buffer_val = unsafe { PWSTR::from_raw(lpBuffer).to_string() }.unwrap();
-        println!("value of buffer {buffer_val:}");
-
-        return buffer_val.len() as i32;
+fn try_hijack_env_key(key_name: String, buffer_ptr: *mut u16, buffer_size: i32) -> Result<i32, ()> {
+    if key_name.ne("TEST") {
+        return Err(());
     }
 
-    let orig =
-        unsafe { HOOK.wait().get_environment_variable_w.original_fn()(lpName, lpBuffer, nSize) };
+    let new_val = {
+        let mut v = OsString::from("HIJACKED")
+            .as_os_str()
+            .encode_wide()
+            .collect::<Vec<u16>>();
+        v.push(0u16); // null-terminator
+        v
+    };
+    if buffer_size < new_val.len() as i32 {
+        println!("Could not hijack value, buffer too small, fallback to original impl.");
+        return Err(());
+    }
 
-    println!("GetEnvironmentVariableW orig returned: {orig}");
+    unsafe {
+        std::ptr::copy(new_val.as_ptr(), buffer_ptr, buffer_size as usize);
+    }
+    // let buffer_val = unsafe { PWSTR::from_raw(lpBuffer).to_string() }.unwrap();
+    // // println!("value of buffer {buffer_val:}");
 
-    orig
+    Ok(new_val.len() as i32)
 }
