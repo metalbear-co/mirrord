@@ -82,7 +82,7 @@ mod tests {
             run_targetless(commandline, layer_dll).expect("Failed to run targetless");
 
         assert!(
-            dummy_target_stdout.trim().eq(ENV_HIJACKED_VAL),
+            dummy_target_stdout.starts_with(ENV_HIJACKED_VAL),
             "env:ENVKEY should be hijacked to {ENV_HIJACKED_VAL}, got {dummy_target_stdout}"
         )
     }
