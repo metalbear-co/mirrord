@@ -75,19 +75,16 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         .get()
         .map(|exec_args| exec_args.args.clone())
         .unwrap_or_default();
-    let log_info = match crate::setup()
+    let log_info = crate::setup()
         .layer_config()
         .experimental
         .sip_log_destination
         .as_ref()
-    {
-        None => None,
-        Some(log_destination) => Some(mirrord_sip::SipLogInfo {
+        .map(|log_destination| mirrord_sip::SipLogInfo {
             log_destination,
             args: Some(&args),
             load_type: None,
-        }),
-    };
+        });
     match sip_patch(
         path,
         SipPatchOptions {

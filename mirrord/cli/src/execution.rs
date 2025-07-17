@@ -309,14 +309,15 @@ impl MirrordExecution {
         );
 
         #[cfg(target_os = "macos")]
-        let log_info = match config.experimental.sip_log_destination.as_ref() {
-            None => None,
-            Some(log_destination) => Some(mirrord_sip::SipLogInfo {
+        let log_info = config
+            .experimental
+            .sip_log_destination
+            .as_ref()
+            .map(|log_destination| mirrord_sip::SipLogInfo {
                 log_destination,
                 args,
                 load_type: None,
-            }),
-        };
+            });
 
         #[cfg(target_os = "macos")]
         let patched_path = executable

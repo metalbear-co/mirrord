@@ -81,7 +81,7 @@ async fn read_from_mirrord_bin(dylib_path: &Path) {
     // Make sure we write and read from different paths (this is "meta check").
     assert_ne!(file_path, path_in_mirrord_bin);
 
-    let executable = sip_patch("cat", SipPatchOptions::default())
+    let executable = sip_patch("cat", SipPatchOptions::default(), None)
         .unwrap()
         .unwrap();
 

@@ -656,7 +656,7 @@ mod main {
         log_info: &SipLogInfo,
     ) -> Result<()> {
         if let Some(ref mut file) = file {
-            file.lock_exclusive().map_err(|error| SipError::IO(error))?;
+            file.lock_exclusive().map_err(SipError::IO)?;
             writeln!(
                 file,
                 "[{}] (pid {}, binary: {binary_path}, args: {:?}) SIP Status: {status:?}, layer load type: {:?}",
@@ -668,15 +668,15 @@ mod main {
                 log_info.args,
                 log_info.load_type
             )
-            .map_err(|error| SipError::IO(error))?;
-            file.unlock().map_err(|error| SipError::IO(error))?;
+            .map_err(SipError::IO)?;
+            file.unlock().map_err(SipError::IO)?;
         };
         Ok(())
     }
 
     fn write_result_to_file(file: &mut Option<File>, result: &str) -> Result<()> {
         if let Some(ref mut file) = file {
-            file.lock_exclusive().map_err(|error| SipError::IO(error))?;
+            file.lock_exclusive().map_err(SipError::IO)?;
             writeln!(
                 file,
                 "[{}] (pid {}) SIP patch result: {result}",
@@ -686,8 +686,8 @@ mod main {
                     .as_secs(),
                 std::process::id()
             )
-            .map_err(|error| SipError::IO(error))?;
-            file.unlock().map_err(|error| SipError::IO(error))?;
+            .map_err(SipError::IO)?;
+            file.unlock().map_err(SipError::IO)?;
         };
         Ok(())
     }
@@ -709,7 +709,7 @@ mod main {
                 .create(true)
                 .append(true)
                 .open(log_info.log_destination)?;
-            Some(File::from(output_file))
+            Some(output_file)
         } else {
             None
         };

@@ -219,14 +219,15 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             LoadType::SIPOnly => "SIP only",
             LoadType::Skip => "skip",
         };
-        let log_info = match config.experimental.sip_log_destination.as_ref() {
-            None => None,
-            Some(log_destination) => Some(mirrord_sip::SipLogInfo {
+        let log_info = config
+            .experimental
+            .sip_log_destination
+            .as_ref()
+            .map(|log_destination| mirrord_sip::SipLogInfo {
                 log_destination,
                 args: Some(&args),
                 load_type: Some(load_type),
-            }),
-        };
+            });
 
         if let Ok(Some(binary)) = mirrord_sip::sip_patch(
             path,
