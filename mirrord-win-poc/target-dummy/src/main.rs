@@ -3,12 +3,9 @@
 //!
 //! sets Env Variable KeyName to KeyValue
 //! prints: Result of Env. Variable of setting (should be equal to KeyValue, or is it? :smug-face:)
-use std::{env, thread::sleep, time::Duration};
+use std::env;
 
 fn main() {
-    // sleep to delay printing
-    sleep(Duration::from_secs(1));
-
     let mut args = env::args();
     // print!("{:?}", &args);
 

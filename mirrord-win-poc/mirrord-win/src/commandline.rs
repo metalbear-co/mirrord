@@ -6,8 +6,8 @@ use common::OwnedWSTR;
 
 #[derive(Debug)]
 pub struct TargetCommandline {
-    applicationname: String,
-    commandline: Vec<String>,
+    pub applicationname: String,
+    pub commandline: Vec<String>,
 }
 
 #[derive(Debug)]
