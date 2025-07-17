@@ -250,6 +250,16 @@ impl StealTlsHandlerStore {
     }
 }
 
+impl Default for StealTlsHandlerStore {
+    fn default() -> Self {
+        Self(Arc::new(State {
+            by_port: Default::default(),
+            // Does not matter, will never be used.
+            path_resolver: InTargetPathResolver::new(0),
+        }))
+    }
+}
+
 impl fmt::Debug for StealTlsHandlerStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StealTlsHandlerStore")

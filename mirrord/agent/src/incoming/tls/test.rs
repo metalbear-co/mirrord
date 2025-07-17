@@ -13,13 +13,14 @@ use rustls::{
     server::WebPkiClientVerifier,
     ClientConfig, RootCertStore, ServerConfig,
 };
+use tempfile::TempDir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-use crate::{steal::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
+use crate::{incoming::tls::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
 
 pub struct CertChainWithKey {
     pub key: PrivateKeyDer<'static>,
@@ -404,70 +405,14 @@ async fn server_verification(
 async fn agent_connects_with_original_params() {
     let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 
-    let root_dir = tempfile::tempdir().unwrap();
-
-    let trusted_root = generate_cert("root", None, true).unwrap();
-    let root_pem = root_dir.path().join("root.pem");
-    fs::write(root_pem, trusted_root.cert.pem()).unwrap();
-
-    let agent_chain = CertChainWithKey::new("server", Some(&trusted_root));
-    let auth_pem = root_dir.path().join("auth.pem");
-    agent_chain.to_file(&auth_pem);
-
-    let store = StealTlsHandlerStore::new(
-        vec![StealPortTlsConfig {
-            port: 443,
-            agent_as_server: AgentServerConfig {
-                authentication: TlsAuthentication {
-                    cert_pem: "/auth.pem".into(),
-                    key_pem: "/auth.pem".into(),
-                },
-                alpn_protocols: vec!["h2".into(), "http/1.1".into()],
-                verification: Some(TlsClientVerification {
-                    allow_anonymous: false,
-                    accept_any_cert: false,
-                    trust_roots: vec!["/root.pem".into()],
-                }),
-            },
-            agent_as_client: AgentClientConfig {
-                authentication: Some(TlsAuthentication {
-                    cert_pem: "/auth.pem".into(),
-                    key_pem: "/auth.pem".into(),
-                }),
-                verification: TlsServerVerification {
-                    accept_any_cert: false,
-                    trust_roots: vec!["/root.pem".into()],
-                },
-            },
-        }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
-    );
-    let handler = store.get(443).await.unwrap().unwrap();
-
-    let mut root_store = RootCertStore::empty();
-    root_store.add(trusted_root.cert.der().clone()).unwrap();
-    let root_store = Arc::new(root_store);
+    let mut setup = SimpleStore::new(443, &["h2", "http/1.1"]).await;
 
     let connector = {
-        let chain = CertChainWithKey::new("client", Some(&trusted_root));
-        let mut config = ClientConfig::builder()
-            .with_root_certificates(root_store.clone())
-            .with_client_auth_cert(chain.certs, chain.key)
-            .unwrap();
-        config.alpn_protocols.push(b"http/1.1".into());
-        TlsConnector::from(Arc::new(config))
+        setup.client_config.alpn_protocols.push(b"http/1.1".into());
+        TlsConnector::from(Arc::new(setup.client_config))
     };
 
-    let acceptor = {
-        let verifier = WebPkiClientVerifier::builder(root_store).build().unwrap();
-        let server_chain = CertChainWithKey::new("server", Some(&trusted_root));
-        let mut config = ServerConfig::builder()
-            .with_client_cert_verifier(verifier)
-            .with_single_cert(server_chain.certs, server_chain.key)
-            .unwrap();
-        config.alpn_protocols = vec![b"h2".into(), b"http/1.1".into()];
-        TlsAcceptor::from(Arc::new(config))
-    };
+    let acceptor = TlsAcceptor::from(Arc::new(setup.server_config));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -482,6 +427,7 @@ async fn agent_connects_with_original_params() {
             .await
     });
 
+    let handler = setup.store.get(443).await.unwrap().unwrap();
     let agent_client = listener.accept().await.unwrap().0;
     let agent_client = handler.acceptor().accept(agent_client).await.unwrap();
     assert_eq!(
@@ -508,4 +454,104 @@ async fn agent_connects_with_original_params() {
         Some(b"http/1.1".as_slice())
     );
     assert_eq!(server_agent.get_ref().1.server_name(), Some("server"));
+}
+
+pub struct SimpleStore {
+    _certs_dir: TempDir,
+    pub store: StealTlsHandlerStore,
+    pub client_config: ClientConfig,
+    pub server_config: ServerConfig,
+}
+
+impl SimpleStore {
+    pub async fn new(port: u16, alpn_protocols: &[&str]) -> Self {
+        let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
+        let root_dir = tempfile::tempdir().unwrap();
+
+        let trusted_root = generate_cert("root", None, true).unwrap();
+        let root_pem = root_dir.path().join("root.pem");
+        fs::write(root_pem, trusted_root.cert.pem()).unwrap();
+
+        let agent_chain = CertChainWithKey::new("server", Some(&trusted_root));
+        let auth_pem = root_dir.path().join("auth.pem");
+        agent_chain.to_file(&auth_pem);
+
+        let store = StealTlsHandlerStore::new(
+            vec![StealPortTlsConfig {
+                port,
+                agent_as_server: AgentServerConfig {
+                    authentication: TlsAuthentication {
+                        cert_pem: "/auth.pem".into(),
+                        key_pem: "/auth.pem".into(),
+                    },
+                    alpn_protocols: alpn_protocols
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    verification: Some(TlsClientVerification {
+                        allow_anonymous: false,
+                        accept_any_cert: false,
+                        trust_roots: vec!["/root.pem".into()],
+                    }),
+                },
+                agent_as_client: AgentClientConfig {
+                    authentication: Some(TlsAuthentication {
+                        cert_pem: "/auth.pem".into(),
+                        key_pem: "/auth.pem".into(),
+                    }),
+                    verification: TlsServerVerification {
+                        accept_any_cert: false,
+                        trust_roots: vec!["/root.pem".into()],
+                    },
+                },
+            }],
+            InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        );
+
+        let mut root_store = RootCertStore::empty();
+        root_store.add(trusted_root.cert.der().clone()).unwrap();
+        let root_store = Arc::new(root_store);
+
+        let client_config = {
+            let chain = CertChainWithKey::new("client", Some(&trusted_root));
+            ClientConfig::builder()
+                .with_root_certificates(root_store.clone())
+                .with_client_auth_cert(chain.certs, chain.key)
+                .unwrap()
+        };
+
+        let server_config = {
+            let verifier = WebPkiClientVerifier::builder(root_store).build().unwrap();
+            let server_chain = CertChainWithKey::new("server", Some(&trusted_root));
+            let mut config = ServerConfig::builder()
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(server_chain.certs, server_chain.key)
+                .unwrap();
+            config.alpn_protocols = alpn_protocols
+                .iter()
+                .map(|p| p.as_bytes().to_vec())
+                .collect();
+            config
+        };
+
+        Self {
+            _certs_dir: root_dir,
+            store,
+            client_config,
+            server_config,
+        }
+    }
+
+    pub fn connector(&self, alpn_protocol: Option<&str>) -> TlsConnector {
+        let mut client_config = self.client_config.clone();
+        if let Some(alpn) = alpn_protocol {
+            client_config.alpn_protocols = vec![alpn.as_bytes().to_vec()];
+        }
+        TlsConnector::from(Arc::new(client_config))
+    }
+
+    pub fn acceptor(&self) -> TlsAcceptor {
+        TlsAcceptor::from(Arc::new(self.server_config.clone()))
+    }
 }

@@ -6,8 +6,6 @@ use core::time::Duration;
 use std::collections::HashSet;
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
-use k8s_openapi::api::core::v1::Pod;
-use kube::Api;
 use rstest::*;
 use tempfile::NamedTempFile;
 
@@ -16,22 +14,35 @@ use crate::utils::{
     kube_client,
     process::TestProcess,
     sqs_resources::{
-        await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
-        QueueInfo,
+        sqs_test_resources, wait_for_stable_state, write_sqs_messages, QueueInfo, TestMessage,
     },
-    watch::Watcher,
 };
 
 /// Produces a mirrord config file for an application run in the [`two_users`] test.
-fn get_config(with_regex: bool, (attribute, pattern): (&str, &str)) -> NamedTempFile {
+///
+/// # Arguments
+/// - `single_queue_id`: only one queue entry in the config.
+/// - `with_asterisk_queue_id`: ONLY USED if `single_queue_id`. Use `"*"` as queue-id.
+/// - `attribute`: a name of a message attribute to require.
+/// - `pattern`: a regex to match message attribute values.
+fn get_config(
+    single_queue_id: bool,
+    with_asterisk_queue_id: bool,
+    (attribute, pattern): (&str, &str),
+) -> NamedTempFile {
     let mut config = NamedTempFile::with_suffix(".json").unwrap();
 
-    let content = if with_regex {
+    let content = if single_queue_id {
+        let queue_id = if with_asterisk_queue_id {
+            "*"
+        } else {
+            "e2e-test-queues"
+        };
         serde_json::json!({
             "operator": true,
             "feature": {
                 "split_queues": {
-                    "e2e-test-queues": {
+                    queue_id: {
                         "queue_type": "SQS",
                         "message_filter": {
                             attribute: pattern,
@@ -79,7 +90,7 @@ async fn expect_output_lines<const N: usize, const M: usize>(
     let lines = test_process
         .await_exactly_n_lines(
             expected_lines.len() + expected_in_order_lines.len(),
-            Duration::from_secs(20),
+            Duration::from_secs(90),
         )
         .await;
     for expected_line in expected_lines.into_iter() {
@@ -206,17 +217,44 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// The remote application forwards the messages it receives to "echo" queues, so receive messages
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
-// #[case::with_regex(true)] uncomment this case when support for regex is merged
-#[case::without_regex(false)]
+#[case::with_regex_without_fallback_json(true, false, false, false, false)]
+#[case::without_regex_without_fallback_json(false, false, false, false, false)]
+#[case::without_regex_with_fallback_json(false, true, false, false, false)]
+#[case::without_regex_with_fallback_json_with_asterisk(false, true, true, false, false)]
+#[case::with_env_from(false, false, false, true, false)]
+#[case::with_value_from(false, false, false, false, true)]
+#[case::with_env_from_and_value_from(false, false, false, true, true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
-pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: bool) {
+pub async fn two_users(
+    #[future] kube_client: kube::Client,
+    #[case] with_regex: bool,
+    #[case] with_fallback_json: bool,
+    #[case] with_asterisk_queue_id: bool,
+    #[case] with_env_from: bool,
+    #[case] with_value_from: bool,
+) {
     let kube_client = kube_client.await;
-    let sqs_test_resources = sqs_test_resources(kube_client.clone(), with_regex).await;
+    let sqs_test_resources = sqs_test_resources(
+        kube_client.clone(),
+        with_regex,
+        with_fallback_json,
+        with_env_from,
+        with_value_from,
+    )
+    .await;
     let application = Application::RustSqs;
 
-    let config_a = get_config(with_regex, ("client", "^a$"));
-    let config_b = get_config(with_regex, ("client", "^b$"));
+    let config_a = get_config(
+        with_regex || with_fallback_json,
+        with_asterisk_queue_id,
+        ("client", "^a$"),
+    );
+    let config_b = get_config(
+        with_regex || with_fallback_json,
+        with_asterisk_queue_id,
+        ("client", "^b$"),
+    );
 
     println!("Starting first mirrord client");
     let mut client_a = application
@@ -230,34 +268,17 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
             )]),
         )
         .await;
-
-    tokio::time::timeout(Duration::from_secs(30), async {
-        await_registry_status(
-            sqs_test_resources.kube_client.clone(),
+    tokio::time::timeout(
+        Duration::from_secs(120),
+        wait_for_stable_state(
+            &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
-        )
-        .await;
-
-        Watcher::new(
-            Api::<Pod>::namespaced(kube_client.clone(), sqs_test_resources.namespace()),
-            Default::default(),
-            |pods| {
-                pods.values().all(|pod| {
-                    let Some(status) = &pod.status else {
-                        return false;
-                    };
-                    status.phase.as_deref() == Some("Running")
-                })
-            },
-        )
-        .run()
-        .await;
-    })
+            1,
+            1,
+        ),
+    )
     .await
-    .unwrap();
-
-    // TODO make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(20)).await;
+    .expect("timeout waiting for stable cluster state after starting the first client");
 
     println!("Starting second mirrord client");
     let mut client_b = application
@@ -271,40 +292,63 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
             )]),
         )
         .await;
-
-    println!("letting split time to start before writing messages");
     tokio::time::timeout(
         Duration::from_secs(30),
-        watch_sqs_sessions(
-            sqs_test_resources.kube_client.clone(),
+        wait_for_stable_state(
+            &sqs_test_resources.kube_client,
             sqs_test_resources.namespace(),
+            2,
+            1,
         ),
     )
     .await
-    .unwrap();
+    .expect("timeout waiting for stable cluster state after starting the second client");
 
-    // TODO: make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(60)).await;
-
+    let messages_queue_1 = [
+        ("a", "1"),
+        ("b", "2"),
+        ("c", "3"),
+        // test attribute value case-insensitivity
+        ("C", "4"),
+        ("B", "5"),
+        ("A", "6"),
+    ]
+    .map(|(attribute_value, body)| TestMessage {
+        body: body.into(),
+        attribute_name: "cliENT".into(), // test attribute name case-insensitivity
+        attribute_value: attribute_value.into(),
+    })
+    .into();
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue1,
-        "cliENT",                        // Test attribute name case-insensitivity
-        &["a", "b", "c", "C", "B", "A"], // Should also be case-insensitive
-        &["1", "2", "3", "4", "5", "6"],
+        messages_queue_1,
     )
     .await;
 
+    let messages_queue_2 = [
+        ("A", "10"),
+        ("B", "20"),
+        ("C", "30"),
+        // test attribute value case-insensitivity
+        ("c", "40"),
+        ("b", "50"),
+        ("a", "60"),
+    ]
+    .map(|(attribute_value, body)| TestMessage {
+        body: body.into(),
+        attribute_name: "CLIent".into(), // test attribute name case-insensitivity
+        attribute_value: attribute_value.into(),
+    })
+    .into();
     write_sqs_messages(
         &sqs_test_resources.sqs_client,
         &sqs_test_resources.queue2,
-        "CLIent",                        // Test attribute name case-insensitivity
-        &["A", "B", "C", "c", "b", "a"], // Should also be case-insensitive
-        &["10", "20", "30", "40", "50", "60"],
+        messages_queue_2,
     )
     .await;
 
-    // Test app prints 1: before messages from queue 1 and 2: before messages from queue 2.
+    // Test app prints `1:` before messages from queue 1 and `2:` before messages from queue 2.
     expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
     println!("Client a received the correct messages.");
     expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;
@@ -327,6 +371,7 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
     .await;
     println!("Queue 2 was split correctly!");
 
+    println!("Verifying the right number of temp queues were created.");
     let num_temp_queues = sqs_test_resources.count_temp_queues().await;
 
     assert_eq!(
@@ -338,8 +383,12 @@ pub async fn two_users(#[future] kube_client: kube::Client, #[case] with_regex: 
 
     // TODO: verify queue tags.
 
+    println!("Killing test clients (local mirrord runs).");
     client_a.child.kill().await.unwrap();
+    println!("...Killed first test client.");
     client_b.child.kill().await.unwrap();
+    println!("...Killed second test client.");
 
+    println!("Waiting for the temp queues to be deleted after the mirrord sessions ended.");
     sqs_test_resources.wait_for_temp_queue_deletion().await;
 }

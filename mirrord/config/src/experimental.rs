@@ -91,7 +91,7 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ browser_extension_config {#experimental-browser_extension_config}
     ///
-    /// mirrord will either open a URL for initiating mirrord browser extension to
+    /// mirrord will open a URL for initiating mirrord browser extension to
     /// automatically inject HTTP header that matches the HTTP filter configured in
     /// `feature.network.incoming.http_filter.header_filter`.
     #[config(default = false)]

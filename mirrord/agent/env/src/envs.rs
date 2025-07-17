@@ -70,3 +70,7 @@ pub const EPHEMERAL_TARGET_CONTAINER_ID: CheckedEnv<String> =
 
 /// Exclude agent's port from service mesh sidecar proxy.
 pub const EXCLUDE_FROM_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXCLUDE_FROM_MESH");
+
+/// Enables mirroring implementation based on iptables.
+pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_PASSTHROUGH_MIRRORING");

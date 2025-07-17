@@ -1,7 +1,9 @@
 use std::{io, ops::Not, time::Duration};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::future::OptionFuture;
+use http::Response;
+use http_body_util::combinators::BoxBody;
 use httparse::Status;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -10,6 +12,15 @@ use tokio::{
 use tracing::Level;
 
 use crate::util::rolledback_stream::RolledBackStream;
+
+pub mod body;
+pub mod error;
+pub mod extract_requests;
+pub mod filter;
+pub mod sender;
+
+/// [`Response`] type with a boxed body.
+pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;
 
 /// Helper enum for representing HTTP/1.x and HTTP/2, which are handled very differently in some
 /// parts of the code.

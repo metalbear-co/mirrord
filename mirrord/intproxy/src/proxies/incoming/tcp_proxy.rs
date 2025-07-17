@@ -10,6 +10,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     time,
 };
+use tokio_rustls::TlsStream;
 use tracing::Level;
 
 use super::{
@@ -66,7 +67,7 @@ impl LocalTcpConnection {
                                     .expect("'localhost' is a valid DNS name")
                             });
                         let stream = connector.connect(server_name, stream).await?;
-                        MaybeTls::Tls(Box::new(stream))
+                        MaybeTls::Tls(Box::new(TlsStream::Client(stream)))
                     }
                 };
 

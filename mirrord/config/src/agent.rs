@@ -241,9 +241,11 @@ pub struct AgentConfig {
 
     /// ### agent.disabled_capabilities {#agent-disabled_capabilities}
     ///
-    /// Disables specified Linux capabilities for the agent container.
-    /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
-    /// `SYS_ADMIN`.
+    /// If nothing is disabled here, agent uses:
+    /// 1. `NET_ADMIN`,
+    /// 2. `NET_RAW` (unless `passthrough_mirroring` is enabled),
+    /// 3. `SYS_PTRACE`,
+    /// 4. `SYS_ADMIN`.
     ///
     /// Has no effect when using the targetless mode,
     /// as targetless agent containers have no capabilities.
@@ -310,12 +312,12 @@ pub struct AgentConfig {
 
     /// ### agent.nftables {#agent-nftables}
     ///
-    /// Use iptables-nft instead of iptables-legacy.
-    /// Defaults to `false`.
+    /// Determines which iptables backend will be used for traffic redirection.
     ///
-    /// Needed if your mesh uses nftables instead of iptables-legacy,
-    #[config(default = false)]
-    pub nftables: bool,
+    /// If set to `true`, the agent will use iptables-nft.
+    /// If set to `false`, the agent will use iptables-legacy.
+    /// If not set, the agent will try to detect the correct backend at runtime.
+    pub nftables: Option<bool>,
 
     /// ### agent.dns {#agent-dns}
     #[config(nested)]
@@ -408,6 +410,20 @@ pub struct AgentConfig {
     /// priority class from your cluster to the agent pod, increasing its priority relative
     /// to other workloads.
     pub priority_class: Option<String>,
+
+    /// ### agent.passthrough_mirroring {#agent-passthrough_mirroring}
+    ///
+    /// Enables an alternative implementation of traffic mirroring,
+    /// based on iptables redirects.
+    ///
+    /// When used with `agent.flush_connections`, it might fix issues
+    /// with mirroring non HTTP/1 traffic.
+    ///
+    /// When this is set, `network_interface` setting is ignored.
+    ///
+    /// Defaults to `false`.
+    #[config(default = false)]
+    pub passthrough_mirroring: bool,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

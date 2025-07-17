@@ -1,7 +1,7 @@
 use k8s_openapi::{
     api::{
         apps::v1::Deployment,
-        core::v1::{Probe, Service, TCPSocketAction},
+        core::v1::{EnvFromSource, Probe, Service, TCPSocketAction},
     },
     apimachinery::pkg::util::intstr::IntOrString,
     Resource,
@@ -28,9 +28,13 @@ const TCP_SERVER_IMAGES: &[&str] = &[
     "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
 ];
 
-pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
+pub(super) fn deployment_from_json(
+    name: &str,
+    image: &str,
+    env: Value,
+    env_from: Option<Vec<EnvFromSource>>,
+) -> Deployment {
     let use_probe = TCP_SERVER_IMAGES.contains(&image);
-
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -68,6 +72,7 @@ pub(super) fn deployment_from_json(name: &str, image: &str, env: Value) -> Deplo
                                 }
                             ],
                             "env": env,
+                            "envFrom": serde_json::to_value(env_from).unwrap(),
                             "startupProbe": use_probe.then_some(Probe {
                                 tcp_socket: Some(TCPSocketAction {
                                     host: None,

@@ -1,7 +1,7 @@
 use std::{fmt, path::PathBuf, sync::Arc};
 
-use mirrord_config::feature::network::incoming::https_delivery::{
-    HttpsDeliveryProtocol, LocalHttpsDelivery,
+use mirrord_config::feature::network::incoming::tls_delivery::{
+    LocalTlsDelivery, TlsDeliveryProtocol,
 };
 use mirrord_tls_util::{
     best_effort_root_store, DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames,
@@ -53,10 +53,10 @@ impl LocalTlsSetup {
         }
     }
 
-    pub fn from_config(config: LocalHttpsDelivery) -> Option<Arc<Self>> {
+    pub fn from_config(config: LocalTlsDelivery) -> Option<Arc<Self>> {
         match config.protocol {
-            HttpsDeliveryProtocol::Tcp => None,
-            HttpsDeliveryProtocol::Tls => {
+            TlsDeliveryProtocol::Tcp => None,
+            TlsDeliveryProtocol::Tls => {
                 let server_name = config.server_name.and_then(|name| {
                     ServerName::try_from(name)
                         .inspect_err(|_| {

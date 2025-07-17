@@ -15,6 +15,7 @@ use tokio::{
     sync::Notify,
     time::{self, Instant},
 };
+use tokio_rustls::TlsStream;
 use tracing::Level;
 
 use super::{HttpSender, LocalHttpClient, LocalHttpError};
@@ -217,7 +218,7 @@ impl ClientStore {
                     .connect(name, stream)
                     .await
                     .map_err(LocalHttpError::ConnectTlsFailed)?;
-                MaybeTls::Tls(Box::new(stream))
+                MaybeTls::Tls(Box::new(TlsStream::Client(stream)))
             }
             None => MaybeTls::NoTls(stream),
         };

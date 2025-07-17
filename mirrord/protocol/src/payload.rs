@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Payload is a wrapper for bytes, is used as message body in the protocol and by agent and
 /// intproxy as zero copy message payload
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Default)]
 pub struct Payload(pub Bytes);
 
 impl Payload {

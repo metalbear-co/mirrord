@@ -4,20 +4,28 @@ mod composed;
 mod connection;
 mod error;
 mod iptables;
+mod mirror_handle;
 mod steal_handle;
 mod task;
+pub mod tls;
 
 use std::{
+    fmt,
     future::Future,
     io,
     net::{IpAddr, SocketAddr},
 };
 
 use composed::ComposedRedirector;
-pub use connection::RedirectedConnection;
-pub use error::RedirectorTaskError;
+pub use connection::{
+    http::{ResponseBodyProvider, ResponseProvider, StolenHttp},
+    tcp::StolenTcp,
+    IncomingStream, IncomingStreamItem,
+};
+pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;
-pub use steal_handle::StealHandle;
+pub use mirror_handle::{MirrorHandle, MirroredTraffic};
+pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::RedirectorTask;
 use tokio::net::TcpStream;
 
@@ -69,6 +77,15 @@ pub struct Redirected {
     ///
     /// Note that this address might be different than the local address of [`Self::stream`].
     destination: SocketAddr,
+}
+
+impl fmt::Debug for Redirected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Redirected")
+            .field("source", &self.source)
+            .field("destination", &self.destination)
+            .finish()
+    }
 }
 
 /// Creates a [`ComposedRedirector`] based on [`IpTablesRedirector`]s.
@@ -125,9 +142,17 @@ pub async fn create_iptables_redirector(
 
 #[cfg(test)]
 pub mod test {
-    use std::{collections::HashSet, error::Error, ops::Not};
+    use std::{
+        collections::HashSet,
+        error::Error,
+        net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+        ops::Not,
+    };
 
-    use tokio::sync::{mpsc, watch};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::{mpsc, watch},
+    };
 
     use super::{PortRedirector, Redirected};
 
@@ -166,7 +191,7 @@ pub mod test {
         pub fn new() -> (
             Self,
             watch::Receiver<DummyRedirectorState>,
-            mpsc::Sender<Redirected>,
+            DummyConnectionTx,
         ) {
             let (conn_tx, conn_rx) = mpsc::channel(8);
             let (state_tx, state_rx) = watch::channel(DummyRedirectorState::default());
@@ -177,7 +202,11 @@ pub mod test {
                     conn_rx,
                 },
                 state_rx,
-                conn_tx,
+                DummyConnectionTx {
+                    tx: conn_tx,
+                    v4_listener: None,
+                    v6_listener: None,
+                },
             )
         }
     }
@@ -230,6 +259,51 @@ pub mod test {
                 .recv()
                 .await
                 .ok_or_else(|| "channel closed".into())
+        }
+    }
+
+    pub struct DummyConnectionTx {
+        tx: mpsc::Sender<Redirected>,
+        v4_listener: Option<TcpListener>,
+        v6_listener: Option<TcpListener>,
+    }
+
+    impl DummyConnectionTx {
+        pub async fn make_connection(&mut self, original_destination: SocketAddr) -> TcpStream {
+            let (listener, addr) = if original_destination.is_ipv4() {
+                (
+                    &mut self.v4_listener,
+                    SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+                )
+            } else {
+                (
+                    &mut self.v6_listener,
+                    SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
+                )
+            };
+
+            let listener = match listener {
+                Some(listener) => listener,
+                None => {
+                    let new_listener = TcpListener::bind(addr).await.unwrap();
+                    listener.insert(new_listener)
+                }
+            };
+
+            let ((server_stream, peer_addr), client_stream) = tokio::try_join!(
+                listener.accept(),
+                TcpStream::connect(listener.local_addr().unwrap()),
+            )
+            .unwrap();
+
+            let redirected = Redirected {
+                stream: server_stream,
+                source: peer_addr,
+                destination: original_destination,
+            };
+            self.tx.send(redirected).await.unwrap();
+
+            client_stream
         }
     }
 }

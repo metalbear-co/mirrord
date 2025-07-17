@@ -15,11 +15,8 @@ use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{
-    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
-};
+use mirrord_agent_iptables::{error::IPTablesError, SafeIpTables};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -41,12 +38,14 @@ use crate::{
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
+    incoming::MirrorHandle,
     metrics,
+    mirror::TcpMirrorApi,
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
-    steal::{self, StealerCommand, TcpStealerApi},
+    steal::{StealerCommand, TcpStealerApi},
     util::{
         protocol_version::ClientProtocolVersion,
         remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
@@ -55,10 +54,6 @@ use crate::{
 };
 
 mod setup;
-
-/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
-/// task.
-const CHANNEL_SIZE: usize = 1024;
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
 /// when dirty iptables are detected.
@@ -226,6 +221,7 @@ struct BackgroundTasks {
     sniffer: BackgroundTask<SnifferCommand>,
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
+    mirror_handle: Option<MirrorHandle>,
 }
 
 struct ClientConnectionHandler {
@@ -234,7 +230,7 @@ struct ClientConnectionHandler {
     file_manager: FileManager,
     connection: ClientConnection,
     /// [`None`] when targetless.
-    tcp_sniffer_api: Option<TcpSnifferApi>,
+    tcp_mirror_api: Option<TcpMirrorApi>,
     /// [`None`] when targetless.
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
@@ -268,7 +264,14 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
+        let mut tcp_mirror_api = bg_tasks
+            .mirror_handle
+            .map(|handle| TcpMirrorApi::passthrough(handle, protocol_version.clone()));
+        if tcp_mirror_api.is_none() {
+            tcp_mirror_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection)
+                .await
+                .map(TcpMirrorApi::sniffer);
+        }
         let tcp_stealer_api = Self::create_stealer_api(
             id,
             protocol_version.clone(),
@@ -285,7 +288,7 @@ impl ClientConnectionHandler {
             id,
             file_manager,
             connection,
-            tcp_sniffer_api,
+            tcp_mirror_api,
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
@@ -335,15 +338,7 @@ impl ClientConnectionHandler {
         connection: &mut ClientConnection,
     ) -> AgentResult<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
-            match TcpStealerApi::new(
-                id,
-                protocol_version,
-                stealer_sender,
-                stealer_status,
-                CHANNEL_SIZE,
-            )
-            .await
-            {
+            match TcpStealerApi::new(id, protocol_version, stealer_sender, stealer_status).await {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
                     let _ = connection
@@ -395,19 +390,15 @@ impl ClientConnectionHandler {
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
                 message = async {
-                    if let Some(ref mut sniffer_api) = self.tcp_sniffer_api {
-                        sniffer_api.recv().await
+                    if let Some(ref mut mirror_api) = self.tcp_mirror_api {
+                        mirror_api.recv().await
                     } else {
                         unreachable!()
                     }
-                }, if self.tcp_sniffer_api.is_some() => match message {
-                    Ok((message, Some(log))) if self.ready_for_logs => {
-                        self.respond(DaemonMessage::LogMessage(log)).await?;
-                        self.respond(DaemonMessage::Tcp(message)).await?;
+                }, if self.tcp_mirror_api.is_some() => match message {
+                    Ok(message) => {
+                        self.respond(message).await?;
                     }
-                    Ok((message, _)) => {
-                        self.respond(DaemonMessage::Tcp(message)).await?;
-                    },
                     Err(e) => break e,
                 },
                 message = async {
@@ -417,8 +408,7 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(StealerMessage::TcpSteal(message)) => self.respond(DaemonMessage::TcpSteal(message)).await?,
-                    Ok(StealerMessage::LogMessage(log)) => self.respond(DaemonMessage::LogMessage(log)).await?,
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
@@ -451,6 +441,10 @@ impl ClientConnectionHandler {
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
+        if matches!(&response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
+            return Ok(());
+        }
+
         self.connection.send(response).await.map_err(Into::into)
     }
 
@@ -505,8 +499,8 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
-                if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
-                    sniffer_api.handle_client_message(message).await?
+                if let Some(mirror_api) = &mut self.tcp_mirror_api {
+                    mirror_api.handle_client_message(message).await?
                 } else {
                     self.respond(DaemonMessage::Close(
                         "component responsible for mirroring incoming traffic is not running, \
@@ -516,13 +510,21 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpSteal(message) => {
-                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api.handle_client_message(message).await?
+                let error = if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
+                    tcp_stealer_api
+                        .handle_client_message(message)
+                        .await
+                        .err()
+                        .map(|error| error.to_string())
                 } else {
-                    self.respond(DaemonMessage::Close(
-                        "incoming traffic stealing is not available in the targetless mode".into(),
-                    ))
-                    .await?;
+                    Some(
+                        "incoming traffic stealing is not available in the targetless mode"
+                            .to_string(),
+                    )
+                };
+
+                if let Some(error) = error {
+                    self.respond(DaemonMessage::Close(error)).await?;
                 }
             }
             ClientMessage::Close => {
@@ -644,39 +646,50 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
 
-    // check that chain names won't conflict with another agent or failed cleanup
-    let leftover_rules = state
-        .network_runtime
-        .spawn(async move {
-            let rules_v4 =
-                SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(new_iptables())).await?;
-            let rules_v6 = if args.ipv6 {
-                SafeIpTables::list_mirrord_rules(&IPTablesWrapper::from(new_ip6tables())).await?
-            } else {
-                vec![]
-            };
+    // Check that chain names won't conflict with another agent or failed cleanup.
+    // This check is only relevant if we have a target.
+    // If we don't have any target, the agent should be running in a fresh network namespace,
+    // and you should **not** expect that it can access iptables.
+    if state.container_pid().is_some() {
+        let leftover_rules = state
+            .network_runtime
+            .spawn(async move {
+                let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
+                let rules_v4 = SafeIpTables::list_mirrord_rules(
+                    &mirrord_agent_iptables::get_iptables(nftables, false)?,
+                )
+                .await?;
+                let rules_v6 = if args.ipv6 {
+                    SafeIpTables::list_mirrord_rules(&mirrord_agent_iptables::get_iptables(
+                        nftables, true,
+                    )?)
+                    .await?
+                } else {
+                    vec![]
+                };
 
-            Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
-        })
-        .await
-        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
-        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+                Ok::<_, IPTablesError>([rules_v4, rules_v6].concat())
+            })
+            .await
+            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+            .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
-    if !leftover_rules.is_empty() {
-        error!(
-            leftover_rules = ?leftover_rules,
-            "Detected dirty iptables. Either some other mirrord agent is running \
-            or the previous agent failed to clean up before exit. \
-            If no other mirrord agent is targeting this pod, please delete the pod. \
-            If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
-        );
-        let _ = notify_client_about_dirty_iptables(
-            listener,
-            args.communication_timeout,
-            state.tls_connector.clone(),
-        )
-        .await;
-        return Err(AgentError::IPTablesDirty);
+        if !leftover_rules.is_empty() {
+            error!(
+                leftover_rules = ?leftover_rules,
+                "Detected dirty iptables. Either some other mirrord agent is running \
+                or the previous agent failed to clean up before exit. \
+                If no other mirrord agent is targeting this pod, please delete the pod. \
+                If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
+            );
+            let _ = notify_client_about_dirty_iptables(
+                listener,
+                args.communication_timeout,
+                state.tls_connector.clone(),
+            )
+            .await;
+            return Err(AgentError::IPTablesDirty);
+        }
     }
 
     let cancellation_token = CancellationToken::new();
@@ -696,26 +709,26 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let sniffer = if state.container_pid().is_some() {
+    let passthrough_mirroring_enabled = envs::PASSTHROUGH_MIRRORING.from_env_or_default();
+    let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
         setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
     } else {
         BackgroundTask::Disabled
     };
-    let stealer = match state.container_pid() {
-        None => BackgroundTask::Disabled,
+    let (stealer, mirror_handle) = match state.container_pid() {
+        None => (BackgroundTask::Disabled, None),
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(
+            let (steal_handle, mirror_handle) = setup::start_traffic_redirector(
                 &state.network_runtime,
+                pid,
                 state
                     .is_with_mesh_exclusion()
                     .then(|| client_listener_address.port()),
             )
             .await?;
-            setup::start_stealer(
-                &state.network_runtime,
-                pid,
-                steal_handle,
-                cancellation_token.clone(),
+            (
+                setup::start_stealer(&state.network_runtime, steal_handle),
+                passthrough_mirroring_enabled.then_some(mirror_handle),
             )
         }
     };
@@ -724,6 +737,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         sniffer,
         stealer,
         dns,
+        mirror_handle,
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -805,6 +819,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         sniffer,
         stealer,
         dns,
+        ..
     } = bg_tasks;
 
     tokio::join!(
@@ -840,8 +855,10 @@ async fn clear_iptable_chain(
     ipv6_enabled: bool,
     with_mesh_exclusion: bool,
 ) -> Result<(), IPTablesError> {
+    let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
+
     let v4_result: Result<(), IPTablesError> = try {
-        let ipt = IPTablesWrapper::from(new_iptables());
+        let ipt = mirrord_agent_iptables::get_iptables(nftables, false)?;
         if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
             trace!("No iptables mirrord rules found, skipping iptables cleanup.");
         } else {
@@ -852,7 +869,7 @@ async fn clear_iptable_chain(
 
     let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
         try {
-            let ipt = IPTablesWrapper::from(new_ip6tables());
+            let ipt = mirrord_agent_iptables::get_iptables(nftables, true)?;
             if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
                 trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
             } else {

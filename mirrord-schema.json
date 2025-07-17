@@ -318,7 +318,7 @@
         },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
-          "description": "Disables specified Linux capabilities for the agent container. If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
+          "description": "If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `NET_RAW` (unless `passthrough_mirroring` is enabled), 3. `SYS_PTRACE`, 4. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
           "type": [
             "array",
             "null"
@@ -446,7 +446,7 @@
         },
         "nftables": {
           "title": "agent.nftables {#agent-nftables}",
-          "description": "Use iptables-nft instead of iptables-legacy. Defaults to `false`.\n\nNeeded if your mesh uses nftables instead of iptables-legacy,",
+          "description": "Determines which iptables backend will be used for traffic redirection.\n\nIf set to `true`, the agent will use iptables-nft. If set to `false`, the agent will use iptables-legacy. If not set, the agent will try to detect the correct backend at runtime.",
           "type": [
             "boolean",
             "null"
@@ -462,6 +462,14 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "passthrough_mirroring": {
+          "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
+          "description": "Enables an alternative implementation of traffic mirroring, based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",
@@ -860,7 +868,7 @@
       "properties": {
         "browser_extension_config": {
           "title": "_experimental_ browser_extension_config {#experimental-browser_extension_config}",
-          "description": "mirrord will either open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.",
+          "description": "mirrord will open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.",
           "type": [
             "boolean",
             "null"
@@ -1234,24 +1242,6 @@
       },
       "additionalProperties": false
     },
-    "HttpsDeliveryProtocol": {
-      "oneOf": [
-        {
-          "description": "HTTPS requests will be delivered over TCP, as plain HTTP.",
-          "type": "string",
-          "enum": [
-            "tcp"
-          ]
-        },
-        {
-          "description": "HTTPS requests will be delivered over TLS, as HTTPS.",
-          "type": "string",
-          "enum": [
-            "tls"
-          ]
-        }
-      ]
-    },
     "IncomingAdvancedFileConfig": {
       "title": "incoming (advanced setup)",
       "description": "Advanced user configuration for network incoming traffic.",
@@ -1271,16 +1261,13 @@
         },
         "https_delivery": {
           "title": "https_delivery",
-          "description": "(Operator Only): configures how mirrord delivers stolen HTTPS requests to the local application.",
-          "default": {
-            "protocol": "tls",
-            "server_cert": null,
-            "server_name": null,
-            "trust_roots": null
-          },
-          "allOf": [
+          "description": "DEPRECATED: use `tls_delivery` instead.",
+          "anyOf": [
             {
-              "$ref": "#/definitions/LocalHttpsDelivery"
+              "$ref": "#/definitions/LocalTlsDelivery"
+            },
+            {
+              "type": "null"
             }
           ]
         },
@@ -1391,6 +1378,18 @@
             "format": "uint16",
             "minimum": 0.0
           }
+        },
+        "tls_delivery": {
+          "title": "tls_delivery",
+          "description": "(Operator Only): configures how mirrord delivers stolen TLS traffic to the local application.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalTlsDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1557,31 +1556,31 @@
         "NET_ADMIN"
       ]
     },
-    "LocalHttpsDelivery": {
-      "description": "Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP requests. Note that stealing HTTPS requests requires mirrord Operator support.\n\nTo have the stolen HTTPS requests delivered with plain HTTP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the requests delivered with HTTPS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local application's HTTP server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be used as a trust anchor. 2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots: ```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nExample with certificate chain: ```json { \"protocol\": \"tls\", \"server_cert\": \"/path/to/cert.pem\" } ```\n\nTo make a TLS connection to the local application's HTTPS server, mirrord's TLS client needs a server name. You can supply it manually like this: ```json { \"protocol\": \"tls\", \"server_name\": \"my.test.server.name\" } ```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be used; 4. Otherwise, `localhost` will be used.",
+    "LocalTlsDelivery": {
+      "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP. Note that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the traffic delivered with TLS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local application's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be used as a trust anchor. 2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots: ```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nExample with certificate chain: ```json { \"protocol\": \"tls\", \"server_cert\": \"/path/to/cert.pem\" } ```\n\nTo make a TLS connection to the local application's server, mirrord's TLS client needs a server name. You can supply it manually like this: ```json { \"protocol\": \"tls\", \"server_name\": \"my.test.server.name\" } ```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be used; 4. Otherwise, `localhost` will be used.",
       "type": "object",
       "required": [
         "protocol"
       ],
       "properties": {
         "protocol": {
-          "title": "feature.network.incoming.https_delivery.protocol {#feature-network-incoming-https_delivery-protocol}",
-          "description": "Protocol to use when delivering the HTTPS requests locally.",
+          "title": "feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}",
+          "description": "Protocol to use when delivering the TLS traffic locally.",
           "allOf": [
             {
-              "$ref": "#/definitions/HttpsDeliveryProtocol"
+              "$ref": "#/definitions/TlsDeliveryProtocol"
             }
           ]
         },
         "server_cert": {
-          "description": "Path to a PEM file containing the certificate chain used by the local application's HTTPS server.\n\nThis file must contain at least one certificate. It can contain entries of other types, e.g private keys, which are ignored.",
+          "description": "Path to a PEM file containing the certificate chain used by the local application's TLS server.\n\nThis file must contain at least one certificate. It can contain entries of other types, e.g private keys, which are ignored.",
           "type": [
             "string",
             "null"
           ]
         },
         "server_name": {
-          "title": "feature.network.incoming.https_delivery.server_name {#feature-network-incoming-https_delivery-server_name}",
+          "title": "feature.network.incoming.tls_delivery.server_name {#feature-network-incoming-tls_delivery-server_name}",
           "description": "Server name to use when making a connection.\n\nMust be a valid DNS name or an IP address.",
           "type": [
             "string",
@@ -1589,7 +1588,7 @@
           ]
         },
         "trust_roots": {
-          "title": "feature.network.incoming.https_delivery.trust_roots {#feature-network-incoming-https_delivery-trust_roots}",
+          "title": "feature.network.incoming.tls_delivery.trust_roots {#feature-network-incoming-tls_delivery-trust_roots}",
           "description": "Paths to PEM files and directories with PEM files containing allowed root certificates.\n\nDirectories are not traversed recursively.\n\nEach certificate found in the files is treated as an allowed root. The files can contain entries of other types, e.g private keys, which are ignored.",
           "type": [
             "array",
@@ -2002,6 +2001,24 @@
             }
           },
           "additionalProperties": false
+        }
+      ]
+    },
+    "TlsDeliveryProtocol": {
+      "oneOf": [
+        {
+          "description": "TLS traffic will be delivered over TCP.",
+          "type": "string",
+          "enum": [
+            "tcp"
+          ]
+        },
+        {
+          "description": "TLS traffic will be delivered over TLS.",
+          "type": "string",
+          "enum": [
+            "tls"
+          ]
         }
       ]
     },

@@ -4,6 +4,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    ops::Not,
     time::Duration,
 };
 
@@ -12,27 +13,36 @@ use aws_credential_types::provider::{
     future::ProvideCredentials as ProvideCredentialsFuture, ProvideCredentials,
 };
 use aws_sdk_sqs::types::{
+    builders::SendMessageBatchRequestEntryBuilder,
     MessageAttributeValue,
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
 use futures_util::FutureExt;
-use k8s_openapi::api::{
-    apps::v1::Deployment,
-    core::v1::{EnvVar, Service},
+use k8s_openapi::{
+    api::{
+        apps::v1::Deployment,
+        core::v1::{
+            ConfigMap, ConfigMapEnvSource, ConfigMapKeySelector, EnvFromSource, EnvVar,
+            EnvVarSource, Pod, Service,
+        },
+    },
+    apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
-use kube::{api::PostParams, runtime::wait::await_condition, Api, Client};
+use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_operator::{
     crd::{
-        is_session_ready, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        MirrordWorkloadQueueRegistrySpec, QueueConsumer, QueueConsumerType, QueueNameSource,
-        SplitQueue, SqsQueueDetails,
+        MirrordSqsSession, MirrordWorkloadQueueRegistry, MirrordWorkloadQueueRegistrySpec,
+        QueueConsumer, QueueConsumerType, QueueNameSource, SplitQueue, SqsQueueDetails,
+        SqsSessionStatus,
     },
     setup::OPERATOR_NAME,
 };
+use serde::Serialize;
 
-use super::{port_forwarder::PortForwarder, watch::Watcher};
+use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
-    kube_service::KubeService, resource_guard::ResourceGuard, services::service_with_env,
+    kube_service::KubeService, resource_guard::ResourceGuard,
+    services::service_with_env_and_env_from,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -43,6 +53,15 @@ const QUEUE2_URL_ENV_VAR: &str = "SQS_TEST_Q2_URL";
 
 /// Regex pattern that matches both [`QUEUE_NAME_ENV_VAR1`] and [`QUEUE2_URL_ENV_VAR`].
 const BOTH_QUEUES_REGEX_PATTERN: &str = "SQS_TEST_Q.+";
+
+/// Name of the environment variable that holds a json object with the names/urls of the queues to
+/// use. If this env var is set, the application will use the names from the json and will ignore
+/// the two env vars.
+const QUEUE_JSON_ENV_VAR: &str = "SQS_TEST_Q_JSON";
+
+/// The keys inside the json object.
+const QUEUE1_NAME_KEY: &str = "queue1_name";
+const QUEUE2_URL_KEY: &str = "queue2_url";
 
 /// Name of the environment variable that holds the name of the first SQS queue the deployed
 /// application will write to.
@@ -87,17 +106,27 @@ impl SqsTestResources {
 
     /// Count the temp queues created by the SQS-operator for this test instance.
     pub async fn count_temp_queues(&self) -> usize {
-        self.sqs_client
+        println!("Counting temporary queues created by the SQS operator for this test.");
+
+        let urls = self
+            .sqs_client
             .list_queues()
             .queue_name_prefix("mirrord-")
             .send()
             .await
             .unwrap()
             .queue_urls
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let count = urls
             .iter()
             .filter(|q_url| q_url.contains(&self.queue1.name) || q_url.contains(&self.queue2.name))
-            .count()
+            .count();
+
+        println!(
+            "Found {count} queues. TEST_QUEUE_NAMES=[{}, {}], ALL_QUEUE_URLS={urls:?}.",
+            self.queue1.name, self.queue2.name
+        );
+        count
     }
 
     /// Wait for all the temp queues created by the SQS operator
@@ -124,6 +153,12 @@ const AWS_CREDS_ENVS: &[&str] = &[
     AWS_SECRET_ACCESS_KEY_ENV,
     AWS_ACCESS_KEY_ID_ENV,
 ];
+
+/// The name of the config map that will be used in an `envFrom` field.
+const CONFIG_MAP_FOR_ENV_FROM: &str = "for-env-from";
+
+/// The name of the config map that will be used in a `valueFrom` field.
+const CONFIG_MAP_FOR_VALUE_FROM: &str = "for-value-from";
 
 /// A credential provider that makes the SQS SDK use localstack.
 #[derive(Debug)]
@@ -228,17 +263,43 @@ async fn sqs_queue(
     QueueInfo { name, url }
 }
 
-/// Create the `MirrordWorkloadQueueRegistry` K8s resource.
-/// No ResourceGuard needed, the namespace is guarded.
+/// Create the [`MirrordWorkloadQueueRegistry`] K8s resource.
+/// No [`ResourceGuard`] is created, assuming that the whole namespace is guared.
+///
+/// # Arguments:
+/// * `fallback_queues` - if not `None`, then a fallback will be set using the given queues.
 pub async fn create_queue_registry_resource(
     kube_client: &Client,
     namespace: &str,
     deployment_name: &str,
     use_regex: bool,
+    fallback_queues: Option<(&QueueInfo, &QueueInfo)>,
 ) {
     println!("Creating MirrordWorkloadQueueRegistry resource");
 
-    let queues = if use_regex {
+    let queues = if let Some((queue1, queue2)) = fallback_queues {
+        if use_regex {
+            panic!(
+                "Not implemented: creating a test queue registry with RegexPattern + json object"
+            );
+        }
+        BTreeMap::from([(
+            "e2e-test-queues".to_string(),
+            SplitQueue::Sqs(SqsQueueDetails {
+                name_source: QueueNameSource::EnvVar(QUEUE_JSON_ENV_VAR.to_string()),
+                tags: None,
+                fallback_name: Some(
+                    serde_json::json!({
+                        QUEUE1_NAME_KEY: &queue1.name,
+                        QUEUE2_URL_KEY: &queue2.url
+                    })
+                    .to_string(),
+                ),
+                names_from_json_map: Some(true),
+                sns: None,
+            }),
+        )])
+    } else if use_regex {
         BTreeMap::from([(
             "e2e-test-queues".to_string(),
             SplitQueue::Sqs(SqsQueueDetails {
@@ -293,6 +354,54 @@ pub async fn create_queue_registry_resource(
     println!("MirrordWorkloadQueueRegistry resource created at namespace {namespace} with name {QUEUE_REGISTRY_RESOURCE_NAME}");
 }
 
+/// Name of the environment variable that holds the configuration for this app.
+///
+/// The configuration is expected to be a JSON array of [`SqsQueueEnv`] objects.
+/// If the variable is not set, the app will use [`legacy_config`].
+/// This is to maintain backwards compatibility with mirrord Operator E2E.
+pub const CONFIGURATION_ENV_NAME: &str = "SQS_FORWARDER_CONFIG";
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardingConfig {
+    /// Queue from which we should read messages.
+    pub from: SqsQueueEnv,
+    /// Queue to which we should echo messages.
+    pub to: SqsQueueEnv,
+}
+
+/// Describes a source of SQS queue name/URL for this app.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SqsQueueEnv {
+    /// Name of the environment variable that holds the SQS queue name or URL.
+    pub var_name: String,
+    /// Whether the environment variable holds a URL or a queue name.
+    #[serde(default)]
+    pub is_url: bool,
+    /// If set, the value of the environment variable will be parsed into a JSON object.
+    /// The queue name/URL will be extracted from the field with this name.
+    pub json_key: Option<String>,
+}
+
+async fn config_map_resource(name: &str, map: BTreeMap<String, String>) -> ConfigMap {
+    ConfigMap {
+        data: Some(map),
+        metadata: ObjectMeta {
+            name: Some(name.to_string()),
+            labels: Some(get_test_resource_label_map()),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+struct SqsConsumerServiceConfig {
+    with_fallback_json: bool,
+    with_env_from: bool,
+    with_value_from: bool,
+}
+
 /// Create a microservice for the sqs test application.
 /// That service will be configured to use the "localstack" service in the "default" namespace for
 /// all AWS stuff.
@@ -303,25 +412,149 @@ async fn sqs_consumer_service(
     echo_queue1: &QueueInfo,
     echo_queue2: &QueueInfo,
     aws_creds: HashMap<String, String>,
+    SqsConsumerServiceConfig {
+        with_fallback_json,
+        with_env_from,
+        with_value_from,
+    }: SqsConsumerServiceConfig,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
 
+    let mut config_maps = Vec::new();
+    if with_value_from {
+        config_maps.push(
+            config_map_resource(
+                CONFIG_MAP_FOR_VALUE_FROM,
+                BTreeMap::from_iter([(QUEUE_NAME_ENV_VAR1.into(), queue1.name.clone())]),
+            )
+            .await,
+        );
+    }
+    if with_env_from {
+        config_maps.push(
+            config_map_resource(
+                CONFIG_MAP_FOR_ENV_FROM,
+                BTreeMap::from_iter([(QUEUE2_URL_ENV_VAR.into(), queue2.url.clone())]),
+            )
+            .await,
+        );
+    }
+    let config_maps = config_maps.is_empty().not().then_some(config_maps);
+
+    let env_var_from_tuple = |(name, value)| EnvVar {
+        name,
+        value: Some(value),
+        value_from: None,
+    };
+
+    let queue_name_env_vars = if with_fallback_json {
+        if with_env_from || with_value_from {
+            panic!("envFrom + fallback_json test case not implemented")
+        }
+        // Configuration for the deployed test app, to make it expect the queues as a json object.
+        let test_service_config = vec![
+            ForwardingConfig {
+                from: SqsQueueEnv {
+                    var_name: QUEUE_JSON_ENV_VAR.to_string(),
+                    is_url: false,
+                    json_key: Some(QUEUE1_NAME_KEY.to_string()),
+                },
+                to: SqsQueueEnv {
+                    var_name: "SQS_TEST_ECHO_Q_NAME1".into(),
+                    is_url: false,
+                    json_key: None,
+                },
+            },
+            ForwardingConfig {
+                from: SqsQueueEnv {
+                    var_name: QUEUE_JSON_ENV_VAR.to_string(),
+                    is_url: true,
+                    json_key: Some(QUEUE2_URL_KEY.to_string()),
+                },
+                to: SqsQueueEnv {
+                    var_name: "SQS_TEST_ECHO_Q_NAME2".into(),
+                    is_url: false,
+                    json_key: None,
+                },
+            },
+        ];
+        let test_service_config_string = serde_json::to_string(&test_service_config).unwrap();
+
+        let json_for_deployed_app = serde_json::json!({
+            QUEUE1_NAME_KEY: queue1.name,
+            QUEUE2_URL_KEY: queue2.url
+        });
+
+        [
+            (
+                QUEUE_JSON_ENV_VAR.to_string(),
+                serde_json::to_string(&json_for_deployed_app).unwrap(),
+            ),
+            (
+                CONFIGURATION_ENV_NAME.to_string(),
+                test_service_config_string,
+            ),
+        ]
+        .into_iter()
+        .map(env_var_from_tuple)
+        .collect()
+    } else {
+        let mut env_vars = Vec::new();
+        let var1 = if with_value_from {
+            EnvVar {
+                name: QUEUE_NAME_ENV_VAR1.into(),
+                value: None,
+                value_from: Some(EnvVarSource {
+                    config_map_key_ref: Some(ConfigMapKeySelector {
+                        key: QUEUE_NAME_ENV_VAR1.to_string(),
+                        name: CONFIG_MAP_FOR_VALUE_FROM.to_string(),
+                        optional: Some(false),
+                    }),
+                    field_ref: None,
+                    resource_field_ref: None,
+                    secret_key_ref: None,
+                }),
+            }
+        } else {
+            EnvVar {
+                name: QUEUE_NAME_ENV_VAR1.into(),
+                value: Some(queue1.name.clone()),
+                value_from: None,
+            }
+        };
+        env_vars.push(var1);
+        if with_env_from.not() {
+            env_vars.push(EnvVar {
+                name: QUEUE2_URL_ENV_VAR.into(),
+                value: Some(queue2.url.clone()),
+                value_from: None,
+            })
+        }
+        env_vars
+    };
+    // env vars that are already needed, in all test cases.
     let env = [
-        (QUEUE_NAME_ENV_VAR1.into(), queue1.name.clone()),
-        (QUEUE2_URL_ENV_VAR.into(), queue2.url.clone()),
         (ECHO_QUEUE_NAME_ENV_VAR1.into(), echo_queue1.name.clone()),
         (ECHO_QUEUE_NAME_ENV_VAR2.into(), echo_queue2.name.clone()),
     ]
     .into_iter()
     .chain(aws_creds)
-    .map(|(name, value)| EnvVar {
-        name,
-        value: Some(value),
-        value_from: None,
-    })
+    .map(env_var_from_tuple)
+    .chain(queue_name_env_vars)
     .collect::<Vec<_>>();
 
-    service_with_env(
+    let env_from = with_env_from.then(|| {
+        vec![EnvFromSource {
+            config_map_ref: Some(ConfigMapEnvSource {
+                name: CONFIG_MAP_FOR_ENV_FROM.to_string(),
+                optional: Some(false),
+            }),
+            prefix: None,
+            secret_ref: None,
+        }]
+    });
+
+    service_with_env_and_env_from(
         &namespace,
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
@@ -329,6 +562,8 @@ async fn sqs_consumer_service(
         false,
         kube_client.clone(),
         serde_json::to_value(env).unwrap(),
+        env_from,
+        config_maps,
     )
     .await
 }
@@ -339,32 +574,117 @@ async fn get_localstack_service(kube_client: &Client) -> Option<Service> {
     service_api.get("localstack").await.ok()
 }
 
-/// Watch [`MirrordSqsSession`] resources in the given namespace and return once two unique sessions
-/// are ready.
+/// Waits until the SQS test namespace reaches stable state.
 ///
-/// Return `Err(())` if there was an error while watching or if a session was deleted before 2 were
-/// ready.
-pub async fn watch_sqs_sessions(kube_client: Client, namespace: &str) {
-    let api = Api::<MirrordSqsSession>::namespaced(kube_client, namespace);
-    Watcher::new(api, Default::default(), |sessions| {
-        sessions
-            .values()
-            .filter(|s| is_session_ready(Some(s)))
-            .count()
-            == 2
+/// This check includes:
+/// 1. Waiting for the [`MirrordWorkloadQueueRegistry`] [`QUEUE_REGISTRY_RESOURCE_NAME`] to have a
+///    non-empty status.
+/// 2. Waiting for `expected_sessions` [`MirrordSqsSession`] resources to be ready.
+/// 3. Waiting for all pods in the namespace to be ready (phase is `Running` and all containers are
+///    ready).
+pub async fn wait_for_stable_state(
+    kube_client: &Client,
+    namespace: &str,
+    expected_sessions: usize,
+    expected_pods: usize,
+) {
+    println!(
+        "Waiting for {} {} to have status.",
+        MirrordWorkloadQueueRegistry::kind(&()),
+        QUEUE_REGISTRY_RESOURCE_NAME
+    );
+    let api = Api::<MirrordWorkloadQueueRegistry>::namespaced(kube_client.clone(), namespace);
+    Watcher::new(api, Default::default(), |registries| {
+        let registry = registries
+            .get(QUEUE_REGISTRY_RESOURCE_NAME)
+            .expect("queue registry was not found in the test namespace");
+        let queue_names = registry
+            .status
+            .as_ref()
+            .and_then(|status| status.sqs_details.as_ref())
+            .map(|details| details.queue_names.clone())
+            .unwrap_or_default();
+        let ready = queue_names.is_empty().not();
+        if ready {
+            println!(
+                "{} {} has status, queue_names={:?}",
+                MirrordWorkloadQueueRegistry::kind(&()),
+                QUEUE_REGISTRY_RESOURCE_NAME,
+                queue_names
+            )
+        }
+        ready
     })
     .run()
     .await;
-}
 
-pub async fn await_registry_status(kube_client: Client, namespace: &str) {
-    let api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client, namespace);
-    let has_status =
-        |qr: Option<&MirrordWorkloadQueueRegistry>| qr.is_some_and(|qr| qr.status.is_some());
+    println!(
+        "Waiting for exactly {expected_sessions} ready {}.",
+        MirrordSqsSession::plural(&())
+    );
+    let api = Api::<MirrordSqsSession>::namespaced(kube_client.clone(), namespace);
+    Watcher::new(api, Default::default(), move |sessions| {
+        if sessions.len() != expected_sessions {
+            return false;
+        }
+        sessions.values().for_each(|session| {
+            if session.metadata.deletion_timestamp.is_some() {
+                panic!(
+                    "{} {} is being deleted",
+                    MirrordSqsSession::kind(&()),
+                    session.metadata.name.as_deref().unwrap_or("<no-name>")
+                );
+            }
+        });
+        let ready = sessions.values().all(|session| match &session.status {
+            Some(SqsSessionStatus::Ready(..)) => true,
+            Some(
+                SqsSessionStatus::StartError(error) | SqsSessionStatus::CleanupError { error, .. },
+            ) => {
+                panic!(
+                    "{} {} failed: {error}",
+                    MirrordSqsSession::kind(&()),
+                    session.metadata.name.as_deref().unwrap_or("<no-name>")
+                )
+            }
+            _ => false,
+        });
+        if ready {
+            println!(
+                "{expected_sessions} {} are ready: {sessions:?}",
+                MirrordSqsSession::plural(&())
+            );
+        }
+        ready
+    })
+    .run()
+    .await;
 
-    await_condition(api, QUEUE_REGISTRY_RESOURCE_NAME, has_status)
-        .await
-        .unwrap();
+    println!("Waiting for exactly {expected_pods} pods to be ready.");
+    let api = Api::<Pod>::namespaced(kube_client.clone(), namespace);
+    Watcher::new(api, Default::default(), move |pods| {
+        if pods.len() != expected_pods {
+            return false;
+        }
+        let ready = pods.values().all(|pod| {
+            let Some(status) = &pod.status else {
+                return false;
+            };
+            if status.phase.as_deref() != Some("Running") {
+                return false;
+            }
+            let Some(container_statuses) = &status.container_statuses else {
+                return false;
+            };
+            container_statuses.iter().all(|status| status.ready)
+        });
+        if ready {
+            println!("{expected_pods} pods are ready.");
+        }
+        ready
+    })
+    .run()
+    .await;
 }
 
 /// - Fetch AWS credentials from the operator container.
@@ -375,7 +695,13 @@ pub async fn await_registry_status(kube_client: Client, namespace: &str) {
 /// - Start a task that waits for 2 SQS Sessions to be ready.
 /// - Deploy a consumer service in a new guarded namespace with a partially random name.
 /// - Create a `MirrordWorkloadQueueRegistry` resource in the test's namespace.
-pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTestResources {
+pub async fn sqs_test_resources(
+    kube_client: Client,
+    use_regex: bool,
+    with_fallback_json: bool,
+    with_env_from: bool,
+    with_value_from: bool,
+) -> SqsTestResources {
     let mut guards = Vec::new();
 
     let aws_creds = fetch_aws_creds(kube_client.clone()).await;
@@ -405,6 +731,11 @@ pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTest
         &echo_queue1,
         &echo_queue2,
         aws_creds,
+        SqsConsumerServiceConfig {
+            with_fallback_json,
+            with_env_from,
+            with_value_from,
+        },
     )
     .await;
 
@@ -413,6 +744,7 @@ pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTest
         &k8s_service.namespace,
         &k8s_service.name,
         use_regex,
+        with_fallback_json.then_some((&queue1, &queue2)),
     )
     .await;
 
@@ -432,36 +764,36 @@ pub async fn sqs_test_resources(kube_client: Client, use_regex: bool) -> SqsTest
 pub async fn write_sqs_messages(
     sqs_client: &aws_sdk_sqs::Client,
     queue: &QueueInfo,
-    message_attribute_name: &str,
-    message_attributes: &[&str],
-    messages: &[&str],
+    messages: Vec<TestMessage>,
 ) {
     println!("Sending messages {messages:?} to queue {}.", queue.name);
+
     let fifo = queue.name.ends_with(".fifo");
     let group_id = fifo.then_some("e2e-tests".to_string());
-    for (i, (body, attr)) in messages.iter().zip(message_attributes).enumerate() {
-        println!(
-            r#"Sending message "{body}" with attribute "{message_attribute_name}: {attr}" to queue {}"#,
-            queue.name
-        );
-        sqs_client
-            .send_message()
-            .queue_url(&queue.url)
-            .message_body(*body)
+
+    let mut batch_send = sqs_client.send_message_batch().queue_url(&queue.url);
+    for (index, message) in messages.into_iter().enumerate() {
+        let entry = SendMessageBatchRequestEntryBuilder::default()
+            .id(index.to_string())
+            .message_body(message.body)
             .message_attributes(
-                message_attribute_name,
+                message.attribute_name,
                 MessageAttributeValue::builder()
-                    .string_value(*attr)
+                    .string_value(message.attribute_value)
                     .data_type("String")
                     .build()
                     .unwrap(),
             )
             .set_message_group_id(group_id.clone())
-            .set_message_deduplication_id(fifo.then_some(i.to_string()))
-            .send()
-            .await
-            .expect("Sending SQS message failed.");
+            .set_message_deduplication_id(fifo.then_some(index.to_string()))
+            .build()
+            .unwrap();
+        batch_send = batch_send.entries(entry);
     }
+    batch_send
+        .send()
+        .await
+        .expect("Sending SQS messages failed.");
 }
 
 /// Fetches AWS client environment from the operator container spec.
@@ -498,4 +830,11 @@ async fn fetch_aws_creds(client: Client) -> HashMap<String, String> {
     );
 
     env_map
+}
+
+#[derive(Debug)]
+pub struct TestMessage {
+    pub body: String,
+    pub attribute_name: String,
+    pub attribute_value: String,
 }
