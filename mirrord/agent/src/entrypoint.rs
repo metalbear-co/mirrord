@@ -621,12 +621,6 @@ pub async fn notify_client_about_dirty_iptables(
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    // listen for client connections with SO_REUSEADDR
-    use std::{
-        net::{SocketAddr as StdSocketAddr, TcpListener as StdTcpListener},
-        os::{fd::FromRawFd, unix::io::AsRawFd},
-    };
-
     let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
         let (socket, addr) = if ipv6 {
             (
@@ -640,12 +634,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             )
         };
         // SO_REUSEADDR is required to handle rapid agent restarts.
-        socket.set_reuseaddr(true)?;
-        socket.bind(addr)?;
-        socket.listen(1024).map_err(From::from)
+        socket.set_reuse_address(true)?;
+        socket.bind(addr.into())?;
+        Ok(socket.listen(1024)?.into())
     };
 
-    let listener = setup_listener(args.ipv6).await?;
+    let listener = setup_listener(args.ipv6)?;
     let client_listener_address = listener.local_addr()?;
 
     debug!(%client_listener_address, "Created the client listener.");
