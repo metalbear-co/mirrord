@@ -17,6 +17,7 @@ use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{error::IPTablesError, SafeIpTables};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use socket2::{Domain, SockAddr, Socket, Type};
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -621,35 +622,28 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
     // listen for client connections with SO_REUSEADDR
-    use std::net::{TcpListener as StdTcpListener, SocketAddr as StdSocketAddr};
-    use std::os::fd::FromRawFd;
-    use std::os::unix::io::AsRawFd;
-    use socket2::{Socket, Domain, Type, SockAddr};
+    use std::{
+        net::{SocketAddr as StdSocketAddr, TcpListener as StdTcpListener},
+        os::{fd::FromRawFd, unix::io::AsRawFd},
+    };
 
-    let ipv4_listener_result = (|| {
-        let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
-        socket.set_reuse_address(true)?;
-        let addr = SockAddr::from(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, args.communicate_port));
-        socket.bind(&addr)?;
-        socket.listen(1024)?;
-        let std_listener: StdTcpListener = socket.into();
-        std_listener.set_nonblocking(true)?;
-        Ok(tokio::net::TcpListener::from_std(std_listener)?)
-    })();
-
-    let listener = if args.ipv6 && ipv4_listener_result.is_err() {
-        debug!("IPv6 Support enabled, and IPv4 bind failed, binding IPv6 listener");
-        let socket = Socket::new(Domain::IPV6, Type::STREAM, None)?;
-        socket.set_reuse_address(true)?;
-        let addr = SockAddr::from(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, args.communicate_port, 0, 0));
-        socket.bind(&addr)?;
-        socket.listen(1024)?;
-        let std_listener: StdTcpListener = socket.into();
-        std_listener.set_nonblocking(true)?;
-        tokio::net::TcpListener::from_std(std_listener)
-    } else {
-        ipv4_listener_result
-    }?;
+    let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
+        let (socket, addr) = if ipv6 {
+            (
+                TcpSocket::new_v6()?,
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), args.communicate_port),
+            )
+        } else {
+            (
+                TcpSocket::new_v4()?,
+                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), args.communicate_port),
+            )
+        };
+        // SO_REUSEADDR is required to handle rapid agent restarts.
+        socket.set_reuseaddr(true)?;
+        socket.bind(addr)?;
+        socket.listen(1024).map_err(From::from)
+    };
 
     let client_listener_address = listener.local_addr()?;
 
