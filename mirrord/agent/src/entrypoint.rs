@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::{
@@ -18,7 +18,7 @@ use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{error::IPTablesError, SafeIpTables};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use tokio::{
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
     select,
     signal::unix::SignalKind,
@@ -620,29 +620,32 @@ pub async fn notify_client_about_dirty_iptables(
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    // listen for client connections
-    let ipv4_listener_result = TcpListener::bind(SocketAddrV4::new(
-        Ipv4Addr::UNSPECIFIED,
-        args.communicate_port,
-    ))
-    .await;
+    // Prepares a TCP listener for accepting client connections.
+    let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
+        let (socket, ip) = if ipv6 {
+            (TcpSocket::new_v6()?, Ipv6Addr::UNSPECIFIED.into())
+        } else {
+            (TcpSocket::new_v4()?, Ipv4Addr::UNSPECIFIED.into())
+        };
+        // SO_REUSEADDR is required to handle rapid agent restarts.
+        socket.set_reuseaddr(true)?;
+        socket.bind(SocketAddr::new(ip, args.communicate_port))?;
+        socket.listen(1024).map_err(From::from)
+    };
 
-    let listener = if args.ipv6 && ipv4_listener_result.is_err() {
-        debug!("IPv6 Support enabled, and IPv4 bind failed, binding IPv6 listener");
-        TcpListener::bind(SocketAddrV6::new(
-            Ipv6Addr::UNSPECIFIED,
-            args.communicate_port,
-            0,
-            0,
-        ))
-        .await
-    } else {
-        ipv4_listener_result
-    }?;
-
+    // Listen for client connections
+    let listener = setup_listener(false).or_else(|error| {
+        if args.ipv6.not() {
+            return Err(error);
+        }
+        debug!(
+            "IPv6 support is enabled, and IPv4 bind failed. \
+            Creating an IPv6 listener for accepting client connections.",
+        );
+        setup_listener(true)
+    })?;
     let client_listener_address = listener.local_addr()?;
-
-    debug!(%client_listener_address, "Created the client listener.");
+    debug!(address = %client_listener_address, "Created the client listener.");
 
     let state = State::new(&args).await?;
 
