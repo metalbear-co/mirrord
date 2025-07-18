@@ -620,22 +620,33 @@ pub async fn notify_client_about_dirty_iptables(
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    // listen for client connections
-    let ipv4_listener_result = TcpListener::bind(SocketAddrV4::new(
-        Ipv4Addr::UNSPECIFIED,
-        args.communicate_port,
-    ))
-    .await;
+    // listen for client connections with SO_REUSEADDR
+    use std::net::{TcpListener as StdTcpListener, SocketAddr as StdSocketAddr};
+    use std::os::fd::FromRawFd;
+    use std::os::unix::io::AsRawFd;
+    use socket2::{Socket, Domain, Type, SockAddr};
+
+    let ipv4_listener_result = (|| {
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+        socket.set_reuse_address(true)?;
+        let addr = SockAddr::from(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, args.communicate_port));
+        socket.bind(&addr)?;
+        socket.listen(1024)?;
+        let std_listener: StdTcpListener = socket.into();
+        std_listener.set_nonblocking(true)?;
+        Ok(tokio::net::TcpListener::from_std(std_listener)?)
+    })();
 
     let listener = if args.ipv6 && ipv4_listener_result.is_err() {
         debug!("IPv6 Support enabled, and IPv4 bind failed, binding IPv6 listener");
-        TcpListener::bind(SocketAddrV6::new(
-            Ipv6Addr::UNSPECIFIED,
-            args.communicate_port,
-            0,
-            0,
-        ))
-        .await
+        let socket = Socket::new(Domain::IPV6, Type::STREAM, None)?;
+        socket.set_reuse_address(true)?;
+        let addr = SockAddr::from(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, args.communicate_port, 0, 0));
+        socket.bind(&addr)?;
+        socket.listen(1024)?;
+        let std_listener: StdTcpListener = socket.into();
+        std_listener.set_nonblocking(true)?;
+        tokio::net::TcpListener::from_std(std_listener)
     } else {
         ipv4_listener_result
     }?;
