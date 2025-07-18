@@ -222,6 +222,10 @@ where
                 let result = tokio::select! {
                     result = requests.next() => result,
                     _ = token.cancelled() => {
+                        tracing::debug!(
+                            connection = ?conn.info,
+                            "Gracefully shutting down a redirected HTTP connection",
+                        );
                         requests.graceful_shutdown();
                         continue;
                     },
@@ -300,6 +304,10 @@ where
 
                 match self.ports.entry(port) {
                     Entry::Vacant(e) => {
+                        tracing::debug!(
+                            from_port = port,
+                            "Creating a new port redirection for a mirroring client"
+                        );
                         self.redirector.add_redirection(port).await?;
                         e.insert_entry(PortState {
                             steal_tx: None,
@@ -326,6 +334,10 @@ where
 
                 match self.ports.entry(port) {
                     Entry::Vacant(e) => {
+                        tracing::debug!(
+                            from_port = port,
+                            "Creating a new port redirection for a stealing client"
+                        );
                         self.redirector.add_redirection(port).await?;
                         e.insert_entry(PortState {
                             steal_tx: Some(conn_tx.clone()),
