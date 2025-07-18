@@ -656,7 +656,7 @@ mod main {
     ) {
         let _ = file
             .lock_exclusive()
-            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+            .map_err(|error| eprintln!("Failed to lock SIP logfile: {error}"));
         let _ = writeln!(
             file,
             "[{}] (pid {}, binary: {binary_path}, args: {:?}) SIP Status: {status:?}, layer load type: {:?}",
@@ -670,20 +670,13 @@ mod main {
         )
             .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
         let _ = FileExt::unlock(file)
-            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+            .map_err(|error| eprintln!("Failed to unlock SIP logfile: {error}"));
     }
 
     fn try_write_result_to_file(file: &mut File, result: &Result<Option<String>>) {
         let _ = file
             .lock_exclusive()
-            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
-        let result = result.as_ref().map(|option| {
-            if option.is_some() {
-                "patched successfully"
-            } else {
-                "no patching occurred due to lack of SIP or error getting SIP status"
-            }
-        });
+            .map_err(|error| eprintln!("Failed to lock SIP logfile: {error}"));
         let _ = writeln!(
             file,
             "[{}] (pid {}) SIP patch result: {result:?}",
@@ -695,7 +688,7 @@ mod main {
         )
         .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
         let _ = FileExt::unlock(file)
-            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+            .map_err(|error| eprintln!("Failed to unlock SIP logfile: {error}"));
     }
 
     /// Check if the file that the user wants to execute is a SIP protected binary
@@ -711,11 +704,12 @@ mod main {
     ) -> Result<Option<String>> {
         // set up logging to a file if present in config
         let mut log_file = if let Some(log_info) = &log_info {
-            let output_file = OpenOptions::new()
+            OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(log_info.log_destination)?;
-            Some(output_file)
+                .open(log_info.log_destination)
+                .inspect_err(|error| eprintln!("Fail to open SIP logfile: {error}"))
+                .ok()
         } else {
             None
         };
