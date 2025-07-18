@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.152.0](https://github.com/metalbear-co/mirrord/tree/3.152.0) - 2025-07-18
+
+
+### Added
+
+- Added the config option `experimmental.sip_log_destination` to write basic SIP logs to a file.
+  [#3407](https://github.com/metalbear-co/mirrord/issues/3407)
+
 ## [3.151.0](https://github.com/metalbear-co/mirrord/tree/3.151.0) - 2025-07-16
 
 
