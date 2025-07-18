@@ -55,7 +55,7 @@ pub struct MirrordKafkaClientProperty {
 
 /// Configuration of a SASL OAuth token provider to use when authenticating with Kafka.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 pub struct SaslOauthTokenProvider {
     /// Kind of the token provider.
     ///
