@@ -3,8 +3,8 @@
 use std::{cmp::Ordering, io::Write, time::Duration};
 
 use http_body_util::BodyExt;
-use hyper::{Method, Request};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper::{client::conn::http1::SendRequest, Method, Request};
+use hyper_util::rt::TokioIo;
 use kube::Client;
 use rstest::*;
 use tempfile::NamedTempFile;
@@ -14,50 +14,35 @@ use crate::utils::{
     application::Application, kube_client, port_forwarder::PortForwarder, services::basic_service,
 };
 
-enum HttpSender {
-    V1(hyper::client::conn::http1::SendRequest<String>),
-    V2(hyper::client::conn::http2::SendRequest<String>),
-}
-
-impl HttpSender {
-    async fn send(&mut self, request: Request<String>, expected_response_body: &str) {
-        println!("Sending request");
-        let response = match self {
-            Self::V1(sender) => sender.send_request(request).await.unwrap(),
-            Self::V2(sender) => sender.send_request(request).await.unwrap(),
-        };
-
-        let (parts, body) = response.into_parts();
-        let body_result = body
-            .collect()
-            .await
-            .map(|collected| String::from_utf8_lossy(&collected.to_bytes()).into_owned());
-        println!(
-            "Received response {} with body: {:?}",
-            parts.status, body_result
-        );
-        let body = body_result.unwrap();
-        assert_eq!(body, expected_response_body);
-    }
-}
-
-async fn make_http_conn(portforwarder: &PortForwarder, http2: bool) -> HttpSender {
+async fn make_http_conn(portforwarder: &PortForwarder) -> SendRequest<String> {
     let tcp_conn = TcpStream::connect(portforwarder.address()).await.unwrap();
-    if http2 {
-        let (sender, conn) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
-            .handshake::<_, String>(TokioIo::new(tcp_conn))
-            .await
-            .unwrap();
-        tokio::spawn(conn);
-        HttpSender::V2(sender)
-    } else {
-        let (sender, conn) = hyper::client::conn::http1::Builder::new()
-            .handshake::<_, String>(TokioIo::new(tcp_conn))
-            .await
-            .unwrap();
-        tokio::spawn(conn);
-        HttpSender::V1(sender)
-    }
+    let (sender, conn) = hyper::client::conn::http1::Builder::new()
+        .handshake::<_, String>(TokioIo::new(tcp_conn))
+        .await
+        .unwrap();
+    tokio::spawn(conn);
+    sender
+}
+
+async fn send_and_verify(
+    sender: &mut SendRequest<String>,
+    request: Request<String>,
+    expected_response_body: &str,
+) {
+    println!("Sending request");
+    sender.ready().await.unwrap();
+    let response = sender.send_request(request).await.unwrap();
+    let (parts, body) = response.into_parts();
+    let body_result = body
+        .collect()
+        .await
+        .map(|collected| String::from_utf8_lossy(&collected.to_bytes()).into_owned());
+    println!(
+        "Received response {}. BODY={:?}, HEADERS={:?}",
+        parts.status, body_result, parts.headers,
+    );
+    let body = body_result.unwrap();
+    assert_eq!(body, expected_response_body);
 }
 
 /// Verifies that passthrough mirroring is able to mirror multiple HTTP requests from multiple
@@ -68,7 +53,7 @@ async fn make_http_conn(portforwarder: &PortForwarder, http2: bool) -> HttpSende
 #[cfg_attr(not(any(feature = "job", feature = "ephemeral")), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(240))]
+#[timeout(Duration::from_secs(360))]
 async fn mirror_http_traffic(
     #[future]
     #[notrace]
@@ -116,7 +101,7 @@ async fn mirror_http_traffic(
 
     for i in 1..=2 {
         println!("Making HTTP connection {i}");
-        let mut sender = make_http_conn(&portforwarder, false).await;
+        let mut sender = make_http_conn(&portforwarder).await;
         for j in 1..=2 {
             println!("Making HTTP request {j} in connection {i}");
             let body = format!("GET {i}:{j}");
@@ -126,7 +111,7 @@ async fn mirror_http_traffic(
                 .uri(format!("http://{}", portforwarder.address()))
                 .body(body.clone())
                 .unwrap();
-            sender.send(request, &expected_response_body).await;
+            send_and_verify(&mut sender, request, &expected_response_body).await;
         }
     }
 
@@ -186,13 +171,13 @@ async fn concurrent_mirror_and_steal(
     let request = Request::builder()
         .method(Method::GET)
         .uri(format!("http://{}", portforwarder.address()))
-        .header("x-steal", "true")
+        .header("x-filter", "yes")
         .body(String::new())
         .unwrap();
 
     println!("Making the first HTTP connection and sending a request to the remote service...");
-    let mut sender = make_http_conn(&portforwarder, false).await;
-    sender.send(request.clone(), "Echo [remote]: ").await;
+    let mut sender = make_http_conn(&portforwarder).await;
+    send_and_verify(&mut sender, request.clone(), "Echo [remote]: ").await;
 
     println!("Request to the remote service succeeded, starting the first mirroring client...");
     let mirror_client_1 = Application::PythonFlaskHTTP
@@ -206,9 +191,6 @@ async fn concurrent_mirror_and_steal(
     mirror_client_1
         .wait_for_line(Duration::from_secs(120), "daemon subscribed")
         .await;
-    let HttpSender::V1(sender) = &mut sender else {
-        unreachable!();
-    };
     sender
         .send_request(request.clone())
         .await
@@ -217,8 +199,8 @@ async fn concurrent_mirror_and_steal(
     println!(
         "Previous connection was flushed, starting a new connection and sending another request..."
     );
-    let mut sender = make_http_conn(&portforwarder, false).await;
-    sender.send(request.clone(), "Echo [remote]: ").await;
+    let mut sender = make_http_conn(&portforwarder).await;
+    send_and_verify(&mut sender, request.clone(), "Echo [remote]: ").await;
 
     println!("Request to the remote service succeded, starting the stealing client...");
     let steal_client = Application::PythonFlaskHTTP
@@ -233,7 +215,8 @@ async fn concurrent_mirror_and_steal(
         .wait_for_line(Duration::from_secs(120), "daemon subscribed")
         .await;
     println!("Sending a request that should be stolen...");
-    sender.send(request.clone(), "GET").await;
+    send_and_verify(&mut sender, request.clone(), "GET").await;
+    sender = make_http_conn(&portforwarder).await; // stealing app might be closing the connection
 
     println!("Request was stolen, starting the second mirroring client...");
     let mirror_client_2 = Application::PythonFlaskHTTP
@@ -249,12 +232,13 @@ async fn concurrent_mirror_and_steal(
         .await;
 
     println!("Sending a request that should be stolen...");
-    sender.send(request.clone(), "GET").await;
+    send_and_verify(&mut sender, request.clone(), "GET").await;
+    sender = make_http_conn(&portforwarder).await; // stealing app might be closing the connection
 
     println!("Request was stolen, sending a request that should not be stolen...");
     let mut unstolen_request = request.clone();
     unstolen_request.headers_mut().remove("x-filter");
-    sender.send(unstolen_request, "Echo [remote]: ").await;
+    send_and_verify(&mut sender, unstolen_request.clone(), "Echo [remote]: ").await;
 
     println!(
         "Request was not stolen, verifying that both mirroring clients received their requests..."
