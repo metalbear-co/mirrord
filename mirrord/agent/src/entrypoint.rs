@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
     sync::{
@@ -645,6 +645,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         socket.listen(1024).map_err(From::from)
     };
 
+    let listener = setup_listener(args.ipv6).await?;
     let client_listener_address = listener.local_addr()?;
 
     debug!(%client_listener_address, "Created the client listener.");
