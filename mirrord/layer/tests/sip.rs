@@ -23,7 +23,7 @@ use mirrord_sip::{sip_patch, SipPatchOptions};
 async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;
     let executable = application.get_executable().await;
-    let executable = sip_patch(&executable, SipPatchOptions::default())
+    let executable = sip_patch(&executable, SipPatchOptions::default(), None)
         .unwrap()
         .unwrap();
     println!("Using executable: {}", &executable);

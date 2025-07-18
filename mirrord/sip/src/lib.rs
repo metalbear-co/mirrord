@@ -42,14 +42,17 @@ mod rpath;
 mod main {
     use std::{
         env,
-        ffi::OsStr,
-        io::{self, BufRead},
+        ffi::{OsStr, OsString},
+        fs::{File, OpenOptions},
+        io::{self, BufRead, Write},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use apple_codesign::{CodeSignatureFlags, MachFile};
+    use fs4::fs_std::FileExt;
     use object::{
         macho::{self, MachHeader64, LC_RPATH},
         read::{
@@ -136,6 +139,16 @@ mod main {
         pub patch: &'a [String],
         /// A list of binaries to skip patching.
         pub skip: &'a [String],
+    }
+
+    /// Info for logging to `config.experimental.sip_log_destination`
+    pub struct SipLogInfo<'a> {
+        /// The file destination to write logs to
+        pub log_destination: &'a Path,
+        /// Args to the binary, if available
+        pub args: Option<&'a [OsString]>,
+        /// The load type, if available
+        pub load_type: Option<&'a str>,
     }
 
     struct BinaryInfo {
@@ -534,7 +547,7 @@ mod main {
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
-    /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
+    /// If file is a script with shebang, the SipStatus is derived from the SipStatus of the
     /// file the shebang points to.
     fn get_sip_status(path: &str, opts: SipPatchOptions) -> Result<SipStatus> {
         let complete_path = get_complete_path(path)?;
@@ -634,14 +647,79 @@ mod main {
         Ok(output)
     }
 
+    /// Write a log to the log file, if the file exists, in a thread-safe way
+    fn try_write_start_log_to_file(
+        file: &mut File,
+        binary_path: &str,
+        status: &Result<SipStatus>,
+        log_info: &SipLogInfo,
+    ) {
+        let _ = file
+            .lock_exclusive()
+            .map_err(|error| eprintln!("Failed to lock SIP logfile: {error}"));
+        let _ = writeln!(
+            file,
+            "[{}] (pid {}, binary: {binary_path}, args: {:?}) SIP Status: {status:?}, layer load type: {:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("")
+                .as_secs(),
+            std::process::id(),
+            log_info.args,
+            log_info.load_type
+        )
+            .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = FileExt::unlock(file)
+            .map_err(|error| eprintln!("Failed to unlock SIP logfile: {error}"));
+    }
+
+    fn try_write_result_to_file(file: &mut File, result: &Result<Option<String>>) {
+        let _ = file
+            .lock_exclusive()
+            .map_err(|error| eprintln!("Failed to lock SIP logfile: {error}"));
+        let _ = writeln!(
+            file,
+            "[{}] (pid {}) SIP patch result: {result:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("")
+                .as_secs(),
+            std::process::id()
+        )
+        .map_err(|error| eprintln!("Couldn't log SIP status to file: {error}"));
+        let _ = FileExt::unlock(file)
+            .map_err(|error| eprintln!("Failed to unlock SIP logfile: {error}"));
+    }
+
     /// Check if the file that the user wants to execute is a SIP protected binary
     ///
     /// (or a script starting with a shebang that leads to a SIP protected binary).
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &str, opts: SipPatchOptions) -> Result<Option<String>> {
-        match get_sip_status(binary_path, opts) {
+    pub fn sip_patch(
+        binary_path: &str,
+        opts: SipPatchOptions,
+        log_info: Option<SipLogInfo>,
+    ) -> Result<Option<String>> {
+        // set up logging to a file if present in config
+        let mut log_file = if let Some(log_info) = &log_info {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_info.log_destination)
+                .inspect_err(|error| eprintln!("Fail to open SIP logfile: {error}"))
+                .ok()
+        } else {
+            None
+        };
+
+        let status = get_sip_status(binary_path, opts);
+        if let (Some(log_info), Some(log_file)) = (log_info, log_file.as_mut()) {
+            try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
+        };
+
+        let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
@@ -671,7 +749,13 @@ mod main {
                 // just its valid flow.
                 Ok(None)
             }
+        };
+
+        if let Some(mut log_file) = log_file {
+            try_write_result_to_file(&mut log_file, &patch_result);
         }
+
+        patch_result
     }
 
     #[cfg(test)]
@@ -744,7 +828,7 @@ mod main {
         /// binary is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with
         /// it.
         fn patch_sip_and_verify_dyld_print(executable_path: &str) {
-            let patched_bin_path = sip_patch(executable_path, SipPatchOptions::default())
+            let patched_bin_path = sip_patch(executable_path, SipPatchOptions::default(), None)
                 .unwrap()
                 .unwrap();
             assert!(matches!(
@@ -840,6 +924,7 @@ mod main {
             let patched_path = sip_patch(
                 original_file.path().to_str().unwrap(),
                 SipPatchOptions::default(),
+                None,
             )
             .unwrap()
             .unwrap();
@@ -915,10 +1000,13 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write_all(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path =
-                sip_patch(script.path().to_str().unwrap(), SipPatchOptions::default())
-                    .unwrap()
-                    .unwrap();
+            let changed_script_path = sip_patch(
+                script.path().to_str().unwrap(),
+                SipPatchOptions::default(),
+                None,
+            )
+            .unwrap()
+            .unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
@@ -948,10 +1036,10 @@ mod main {
             std::fs::set_permissions(path, permissions).unwrap();
 
             let path_str = path.to_str().unwrap();
-            let _ = sip_patch(path_str, SipPatchOptions::default())
+            let _ = sip_patch(path_str, SipPatchOptions::default(), None)
                 .unwrap()
                 .unwrap();
-            let _ = sip_patch(path_str, SipPatchOptions::default())
+            let _ = sip_patch(path_str, SipPatchOptions::default(), None)
                 .unwrap()
                 .unwrap();
         }
@@ -964,7 +1052,11 @@ mod main {
             let contents = "#!".to_string() + script.path().to_str().unwrap();
             script.write_all(contents.as_bytes()).unwrap();
             script.flush().unwrap();
-            let res = sip_patch(script.path().to_str().unwrap(), SipPatchOptions::default());
+            let res = sip_patch(
+                script.path().to_str().unwrap(),
+                SipPatchOptions::default(),
+                None,
+            );
             assert!(matches!(res, Ok(None)));
         }
 

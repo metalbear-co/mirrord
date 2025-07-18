@@ -209,21 +209,35 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         let path = EXECUTABLE_PATH
             .get()
             .expect("EXECUTABLE_PATH needs to be set!");
+        let args = EXECUTABLE_ARGS
+            .get()
+            .expect("EXECUTABLE_ARGS needs to be set!")
+            .args
+            .clone();
+        let load_type = match &given_process.load_type(&config) {
+            LoadType::Full => "full",
+            LoadType::SIPOnly => "SIP only",
+            LoadType::Skip => "skip",
+        };
+        let log_info = config
+            .experimental
+            .sip_log_destination
+            .as_ref()
+            .map(|log_destination| mirrord_sip::SipLogInfo {
+                log_destination,
+                args: Some(args.as_slice()),
+                load_type: Some(load_type),
+            });
+
         if let Ok(Some(binary)) = mirrord_sip::sip_patch(
             path,
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
                 skip: &skip_patch_binaries,
             },
+            log_info,
         ) {
-            let err = exec::execvp(
-                binary,
-                EXECUTABLE_ARGS
-                    .get()
-                    .expect("EXECUTABLE_ARGS needs to be set!")
-                    .args
-                    .clone(),
-            );
+            let err = exec::execvp(binary, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }

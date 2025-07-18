@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -180,8 +182,9 @@ impl MirrordExecution {
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
         config: &mut LayerConfig,
-        // We only need the executable on macos, for SIP handling.
+        // We only need the executable and args on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
+        #[cfg(target_os = "macos")] args: Option<&[OsString]>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
     ) -> CliResult<Self>
@@ -307,6 +310,17 @@ impl MirrordExecution {
         );
 
         #[cfg(target_os = "macos")]
+        let log_info = config
+            .experimental
+            .sip_log_destination
+            .as_ref()
+            .map(|log_destination| mirrord_sip::SipLogInfo {
+                log_destination,
+                args,
+                load_type: None,
+            });
+
+        #[cfg(target_os = "macos")]
         let patched_path = executable
             .and_then(|exe| {
                 sip_patch(
@@ -319,6 +333,7 @@ impl MirrordExecution {
                             .unwrap_or_default(),
                         skip: &config.skip_sip,
                     },
+                    log_info,
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.

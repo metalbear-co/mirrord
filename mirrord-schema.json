@@ -934,6 +934,14 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "sip_log_destination": {
+          "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
+          "description": "Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tcp_ping4_mock": {
           "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
           "description": "<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>",

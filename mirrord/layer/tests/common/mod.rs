@@ -1287,7 +1287,7 @@ impl Application {
     pub async fn get_test_process(&self, env: HashMap<String, String>) -> TestProcess {
         let executable = self.get_executable().await;
         #[cfg(target_os = "macos")]
-        let executable = sip_patch(&executable, SipPatchOptions::default())
+        let executable = sip_patch(&executable, SipPatchOptions::default(), None)
             .unwrap()
             .unwrap_or(executable);
         println!("Using executable: {}", &executable);
