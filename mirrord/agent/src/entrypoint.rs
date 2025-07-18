@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::{
@@ -630,12 +630,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
         let (socket, addr) = if ipv6 {
             (
-                TcpSocket::new_v6()?,
+                Socket::new(Domain::IPV6, Type::STREAM, Protocol::TCP)?,
                 SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), args.communicate_port),
             )
         } else {
             (
-                TcpSocket::new_v4()?,
+                Socket::new(Domain::IPV4, Type::STREAM, Protocol::TCP)?,
                 SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), args.communicate_port),
             )
         };
