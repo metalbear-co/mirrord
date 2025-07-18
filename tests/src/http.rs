@@ -191,11 +191,11 @@ async fn concurrent_mirror_and_steal(
         .unwrap();
 
     println!("Making the first HTTP connection and sending a request to the remote service...");
-    let mut sender = make_http_conn(&portforwarder, true).await;
+    let mut sender = make_http_conn(&portforwarder, false).await;
     sender.send(request.clone(), "Echo [remote]: ").await;
 
     println!("Request to the remote service succeeded, starting the first mirroring client...");
-    let mirror_client_1 = Application::NodeHTTP2
+    let mirror_client_1 = Application::PythonFlaskHTTP
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -206,7 +206,7 @@ async fn concurrent_mirror_and_steal(
     mirror_client_1
         .wait_for_line(Duration::from_secs(120), "daemon subscribed")
         .await;
-    let HttpSender::V2(sender) = &mut sender else {
+    let HttpSender::V1(sender) = &mut sender else {
         unreachable!();
     };
     sender
@@ -217,11 +217,11 @@ async fn concurrent_mirror_and_steal(
     println!(
         "Previous connection was flushed, starting a new connection and sending another request..."
     );
-    let mut sender = make_http_conn(&portforwarder, true).await;
+    let mut sender = make_http_conn(&portforwarder, false).await;
     sender.send(request.clone(), "Echo [remote]: ").await;
 
     println!("Request to the remote service succeded, starting the stealing client...");
-    let steal_client = Application::NodeHTTP2
+    let steal_client = Application::PythonFlaskHTTP
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -233,15 +233,10 @@ async fn concurrent_mirror_and_steal(
         .wait_for_line(Duration::from_secs(120), "daemon subscribed")
         .await;
     println!("Sending a request that should be stolen...");
-    sender
-        .send(
-            request.clone(),
-            "<h1>Hello HTTP/2: <b>from local app</b></h1>",
-        )
-        .await;
+    sender.send(request.clone(), "GET").await;
 
     println!("Request was stolen, starting the second mirroring client...");
-    let mirror_client_2 = Application::NodeHTTP2
+    let mirror_client_2 = Application::PythonFlaskHTTP
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -254,12 +249,7 @@ async fn concurrent_mirror_and_steal(
         .await;
 
     println!("Sending a request that should be stolen...");
-    sender
-        .send(
-            request.clone(),
-            "<h1>Hello HTTP/2: <b>from local app</b></h1>",
-        )
-        .await;
+    sender.send(request.clone(), "GET").await;
 
     println!("Request was stolen, sending a request that should not be stolen...");
     let mut unstolen_request = request.clone();
@@ -274,10 +264,7 @@ async fn concurrent_mirror_and_steal(
             async {
                 loop {
                     let stdout = mirror_client_1.get_stdout().await;
-                    let requests = stdout
-                        .lines()
-                        .filter(|line| line.starts_with("> Request "))
-                        .count();
+                    let requests = stdout.lines().filter(|line| line.contains("GET")).count();
                     match requests.cmp(&4) {
                         Ordering::Equal => break,
                         Ordering::Less => {
@@ -292,10 +279,7 @@ async fn concurrent_mirror_and_steal(
             async {
                 loop {
                     let stdout = mirror_client_2.get_stdout().await;
-                    let requests = stdout
-                        .lines()
-                        .filter(|line| line.starts_with("> Request "))
-                        .count();
+                    let requests = stdout.lines().filter(|line| line.contains("GET")).count();
                     match requests.cmp(&2) {
                         Ordering::Equal => break,
                         Ordering::Less => {
