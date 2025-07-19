@@ -3,7 +3,6 @@
 
 pub use pem;
 pub use x509_certificate;
-
 /// Silences `deny(unused_crate_dependencies)`.
 ///
 /// Although we don't use these dependencies directly, we need them here.
@@ -17,6 +16,8 @@ mod compilation_deps {
 
 /// X509 Certificate abstraction for serialization and deserialization
 pub mod certificate;
+#[cfg(feature = "client")]
+pub mod cluster_api;
 /// FileSystem based storage for multiple credentials (default contents "~/.mirrord/credentials")
 #[cfg(feature = "client")]
 pub mod credential_store;
@@ -27,3 +28,5 @@ pub mod credentials;
 pub mod error;
 /// Public/Private key abstraction for serialization and deserialization
 pub mod key_pair;
+#[cfg(feature = "client")]
+pub use cluster_api::AuthClient;
