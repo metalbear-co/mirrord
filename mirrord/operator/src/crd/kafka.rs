@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
     namespaced,
     printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#,
     printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#,
-    printcolumn = r#"{"name":"SASL_OAUTH_TOKEN_PROVIDER", "type":"string", "description":"Kind of SASL OAUTH token provider.", "jsonPath":".spec.saslOauthTokenProvider"}"#
+    printcolumn = r#"{"name":"AUTHENTICATION_EXTRA", "type":"string", "description":"Additional authentication config.", "jsonPath":".spec.authenticationExtra"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaClientConfigSpec {
