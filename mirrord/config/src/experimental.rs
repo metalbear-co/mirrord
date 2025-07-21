@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -96,6 +98,13 @@ pub struct ExperimentalConfig {
     /// `feature.network.incoming.http_filter.header_filter`.
     #[config(default = false)]
     pub browser_extension_config: bool,
+
+    /// ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
+    ///
+    /// Writes basic fork-safe SIP patching logs to a destination file.
+    /// Useful for seeing the state of SIP when `stdout` may be affected by another process.
+    #[config(default = None)]
+    pub sip_log_destination: Option<PathBuf>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {

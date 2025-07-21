@@ -23,6 +23,11 @@ mod issue1317_tests {
     /// agent up yet), and keeps this stream alive. Then it starts mirrord in _mirror_ mode, and
     /// sends another request that should start the sniffing/subscribe/mirror flow, even though this
     /// is not the first packet (not TCP handshake) of this connection.
+    ///
+    /// # Deprecation notice
+    ///
+    /// This test is not compatible with the new mirroring mode (passthrough mirroring).
+    /// It should be removed once the old mirroring mode (raw socket sniffing) is removed.
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
