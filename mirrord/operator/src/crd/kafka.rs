@@ -35,10 +35,8 @@ pub struct MirrordKafkaClientConfigSpec {
     /// Example value: `default/my-secret`
     pub load_from_secret: Option<String>,
 
-    /// Optional kind of SASL Oauth token provider to use when authenticating with Kafka.
-    ///
-    /// When this is set, an implicit `sasl.mechanism=OAUTHBEARER` property is added.
-    pub sasl_oauth_token_provider: Option<SaslOauthTokenProvider>,
+    /// Additional authentication configuration.
+    pub authentication_extra: Option<MirrordKafkaClientAuthExtra>,
 }
 
 /// Property to use when creating operator's Kafka client.
@@ -53,23 +51,27 @@ pub struct MirrordKafkaClientProperty {
     pub value: Option<String>,
 }
 
-/// Configuration of a SASL OAuth token provider to use when authenticating with Kafka.
+/// Additional authentication configuration for Kafka splitting.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SaslOauthTokenProvider {
-    /// Kind of the token provider.
+pub struct MirrordKafkaClientAuthExtra {
+    /// Authentication kind.
     ///
-    /// Right now the only supported value is `MSK`, which stands for Amazon Managed Streaming for
-    /// Apache Kafka.
+    /// Right now the only supported value is `MSK_IAM`, which enables IAM/OAUTHBEARER
+    /// authentication with Amazon Managed Streaming for Apache Kafka.
+    ///
+    /// When this is set to `MSK_IAM`, additional properties are merged into the configuration:
+    /// 1. `sasl.mechanism=OAUTHBEARER`
+    /// 2. `security.protocol=SASL_SSL`
     pub kind: String,
     /// AWS region of the MSK cluster.
     ///
-    /// Required when `kind` is `MSK`.
+    /// Required when `kind` is `MSK_IAM`.
     pub aws_region: Option<String>,
 }
 
-impl SaslOauthTokenProvider {
-    pub const MSK: &'static str = "MSK";
+impl MirrordKafkaClientAuthExtra {
+    pub const MSK_IAM: &'static str = "MSK_IAM";
 }
 
 /// Defines splittable Kafka topics consumed by some workload living in the same namespace.
