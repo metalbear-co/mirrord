@@ -6,9 +6,11 @@
 use std::env;
 
 fn main() {
-    let mut args = env::args();
+    let mut args = env::args().peekable();
     // print!("{:?}", &args);
 
+    // consume executable if exists
+    let _ = args.next_if(|arg| arg.ends_with("exe"));
     let env_key = args.next().expect("missing Env. Key");
     let val = args.next().expect("missing Value to set");
 

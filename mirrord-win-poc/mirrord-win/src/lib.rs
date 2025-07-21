@@ -16,17 +16,24 @@ pub fn run_targetless(
     commandline: TargetCommandline,
     layer_dll_path: String,
 ) -> Result<String, Box<dyn Error>> {
-    println!("Running headless target with {commandline:#?}");
+    println!("* Running target with {commandline:#?}");
 
     // CreateProcess(SUSPENDED)
     let mut process = TargetProcess::execute(commandline, true)?;
-    println!("Execute Success!\n{:#?}", process.process_information);
+    println!(
+        "* Target spwaned as paused: {:#?}",
+        process.process_information
+    );
 
     // inject LayerDll
+    println!("* Injecting layer-win");
     process.inject_dll(layer_dll_path)?;
 
     // ResumeProcess
+    println!("* Resuming target");
     process.resume()?;
+
+    println!("* Waiting for target output");
     process.join(Duration::from_secs(30));
 
     Ok(process.output()?)
