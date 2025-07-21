@@ -34,8 +34,6 @@ pub fn run_targetless(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-
     use super::*;
 
     const DUMMY_TARGET: &str = concat!(
@@ -62,7 +60,7 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect(),
         };
-        let layer_dll = OsString::from(LAYER_DLL_PATH).into_string().expect("");
+        let layer_dll = String::from(LAYER_DLL_PATH);
 
         let dummy_target_stdout =
             run_targetless(commandline, layer_dll).expect("Failed to run targetless");
@@ -82,7 +80,7 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect(),
         };
-        let layer_dll = OsString::from(LAYER_DLL_PATH).into_string().expect("");
+        let layer_dll = String::from(LAYER_DLL_PATH);
 
         let dummy_target_stdout =
             run_targetless(commandline, layer_dll).expect("Failed to run targetless");
