@@ -1,0 +1,1 @@
+When the user is not logged in to the cluster, the error is more informative.

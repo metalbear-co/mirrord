@@ -384,6 +384,12 @@ pub(crate) enum CliError {
     "))]
     KubeAuthExecFailed(String),
 
+    #[error("Failed to access the Kube API, request was forbidden: {0}")]
+    #[diagnostic(help(
+        "mirrord failed to communicate with the cluster, you may need to log in first."
+    ))]
+    KubeApiErrorForbidden(String),
+
     #[error("Failed while resolving target while using the mirrord-operator: {0}")]
     #[diagnostic(help(
         "
@@ -446,6 +452,9 @@ impl CliError {
                 if format!("{fail:?}").contains("InvalidCertificate") =>
             {
                 Self::InvalidCertificate(error)
+            }
+            KubeApiError::KubeError(Error::Api(error_res)) if error_res.code == 403 => {
+                Self::KubeApiErrorForbidden(error_res.message)
             }
             error => fallback(error),
         }
