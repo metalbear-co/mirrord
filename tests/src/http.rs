@@ -15,11 +15,13 @@ use crate::utils::{
 };
 
 async fn make_http_conn(portforwarder: &PortForwarder) -> SendRequest<String> {
-    let tcp_conn = TcpStream::connect(portforwarder.address()).await.unwrap();
+    let tcp_conn = TcpStream::connect(portforwarder.address())
+        .await
+        .expect("failed to make a TCP connection to the remote app");
     let (sender, conn) = hyper::client::conn::http1::Builder::new()
         .handshake::<_, String>(TokioIo::new(tcp_conn))
         .await
-        .unwrap();
+        .expect("failed to make an HTTP/1 connection to the remote app");
     tokio::spawn(conn);
     sender
 }
@@ -30,8 +32,14 @@ async fn send_and_verify(
     expected_response_body: &str,
 ) {
     println!("Sending request");
-    sender.ready().await.unwrap();
-    let response = sender.send_request(request).await.unwrap();
+    sender
+        .ready()
+        .await
+        .expect("failed to wait for the HTTP connection to be ready");
+    let response = sender
+        .send_request(request)
+        .await
+        .expect("failed to make an HTTP request to the remote app");
     let (parts, body) = response.into_parts();
     let body_result = body
         .collect()
@@ -41,7 +49,7 @@ async fn send_and_verify(
         "Received response {}. BODY={:?}, HEADERS={:?}",
         parts.status, body_result, parts.headers,
     );
-    let body = body_result.unwrap();
+    let body = body_result.expect("failed to read body of the HTTP response from the remote app");
     assert_eq!(body, expected_response_body);
 }
 
@@ -131,7 +139,7 @@ async fn mirror_http_traffic(
         }
     })
     .await
-    .unwrap();
+    .expect("local mirroring app did not print expected request logs on time");
 }
 
 /// Verifies that passthrough mirroring can handle multiple mirroring clients and a stealing client
@@ -278,5 +286,5 @@ async fn concurrent_mirror_and_steal(
         )
     })
     .await
-    .unwrap();
+    .expect("one of the local mirroring apps did not print expected request logs on time");
 }
