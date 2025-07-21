@@ -38,9 +38,15 @@ mod tests {
 
     use super::*;
 
-    const DUMMY_TARGET: &str = "C:/Users/Daniel/git/mirrord/target/debug/target-dummy.exe";
-    // layer-win must be in release to prevent Detours
-    const LAYER_DLL_PATH: &str = "C:/Users/Daniel/git/mirrord/target/release/layer_win.dll";
+    const DUMMY_TARGET: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "\\..\\..\\target\\debug\\target-dummy.exe"
+    );
+    // layer-win must be in release to prevent Detours prints
+    const LAYER_DLL_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "\\..\\..\\target\\release\\layer_win.dll"
+    );
 
     // from layer-win/hooks.rs:try_hijack_env_key
     const ENV_HIJACKED_KEY: &str = "HIJACK_ME";

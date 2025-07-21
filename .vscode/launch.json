@@ -32,9 +32,9 @@
       },
       "args": [
         // running release version to prevent detours prints (from within asdf-overlay-hook)
-        "C:/Users/Daniel/git/mirrord/target/release/layer_win.dll", 
+        "target/release/layer_win.dll", 
         "--", // seperator between mirrord-win exec and commandline to executre
-        "C:/Users/Daniel/git/mirrord/target/debug/target-dummy.exe", "TEST", "VAL"
+        "target/debug/target-dummy.exe", "HIJACK_ME", "VAL"
       ],
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
@@ -49,10 +49,7 @@
       "cargo": {
         "args": [
           "test", "-p", "mirrord-win", "--lib"
-        ],
-        "filter": {
-          "name": "mirrord-win"
-        }
+        ]
       },
       "cwd": "${workspaceFolder}",
       "sourceMap": {},

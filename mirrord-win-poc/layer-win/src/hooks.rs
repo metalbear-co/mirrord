@@ -54,7 +54,7 @@ extern "system" fn hooked_get_environment_variable_w(
 
 fn try_hijack_env_key(key_name: String, buffer_ptr: *mut u16, buffer_size: i32) -> Result<i32, ()> {
     const HIJACKED_KEY: &str = "HIJACK_ME";
-    if key_name.starts_with(HIJACKED_KEY) {
+    if !key_name.starts_with(HIJACKED_KEY) {
         return Err(());
     }
 
