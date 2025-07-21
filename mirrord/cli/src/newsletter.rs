@@ -1,11 +1,12 @@
-use std::{path::PathBuf, sync::LazyLock};
+use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt},
+    process::Command,
 };
-use tokio::process::Command;
 use tracing::trace;
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
@@ -34,55 +35,39 @@ static DATA_STORE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
 /// "~/.mirrord/data.json"
 static DATA_STORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| DATA_STORE_DIR.join("data.json"));
 
-struct NewsletterPrompt {
-    pub runs: u32,
-    message: String,
-}
-
-impl NewsletterPrompt {
-    pub fn get_full_message(&self) -> String {
-        format!(
-            "\n\n{}\n>> To subscribe to the mirrord newsletter, run:\n\
-        >> mirrord subscribe\n\
+/// Convert a partial newsletter invite message into a full message to print to the user.
+fn get_full_message(message: &str, runs: u32) -> String {
+    format!(
+        "\n\n{}\n>> To subscribe to the mirrord newsletter, run:\n\
+        >> mirrord newsletter\n\
         >> or sign up here: {NEWSLETTER_SIGNUP_URL}{}\n",
-            self.message, self.runs
-        )
-    }
+        message, runs
+    )
 }
 
 /// Called during normal execution, suggests newsletter signup if the user has run mirrord a certain
 /// number of times.
 pub async fn suggest_newsletter_signup() {
-    let newsletter_invites = [
-        NewsletterPrompt {
-            runs: NEWSLETTER_INVITE_FIRST,
-            message: "Join thousands of devs using mirrord!".to_string(),
-        },
-        NewsletterPrompt {
-            runs: NEWSLETTER_INVITE_SECOND,
-            message: "Liking what mirrord can do?".to_string(),
-        },NewsletterPrompt {
-            runs: NEWSLETTER_INVITE_THIRD,
-            message: "Looks like you're doing some serious work with mirrord!".to_string(),
-        }
-    ];
+    let newsletter_invites = HashMap::from([
+        (
+            NEWSLETTER_INVITE_FIRST,
+            "Join thousands of devs using mirrord!".to_string(),
+        ),
+        (
+            NEWSLETTER_INVITE_SECOND,
+            "Liking what mirrord can do?".to_string(),
+        ),
+        (
+            NEWSLETTER_INVITE_THIRD,
+            "Looks like you're doing some serious work with mirrord!".to_string(),
+        ),
+    ]);
 
     let current_sessions = bump_session_count().await;
-    let invite: Vec<_> = newsletter_invites
-        .iter()
-        .filter(|invite| invite.runs == current_sessions)
-        .collect();
-    let invite = match invite.len() {
-        1 => invite
-            .first()
-            .expect("vec should not be empty if its length is one"),
-        _ => {
-            return;
-        }
-    };
-
-    // print the chosen invite to the user
-    println!("{}", invite.get_full_message());
+    if let Some(message) = newsletter_invites.get(&current_sessions) {
+        // print the chosen invite to the user
+        println!("{}", get_full_message(message, current_sessions));
+    }
 }
 
 /// Increases the session count by one and returns the number.
@@ -167,8 +152,7 @@ impl UserData {
     }
 }
 
-/// Errors from [`CredentialStore`](crate::credential_store::CredentialStore) and
-/// [`CredentialStoreSync`](crate::credential_store::CredentialStoreSync) operations
+/// Errors from [`UserData`] operations.
 #[derive(Debug, Error)]
 pub enum DataStoreError {
     #[error("failed to parent directory for data store file: {0}")]
