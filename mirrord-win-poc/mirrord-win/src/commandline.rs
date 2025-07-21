@@ -1,6 +1,6 @@
 mod common;
 
-use std::env::Args;
+use std::{env::Args, fmt};
 
 use common::OwnedWSTR;
 
@@ -16,30 +16,56 @@ pub struct CliConfig {
     pub target_commandline: TargetCommandline,
 }
 
+pub struct CliError {
+    err: &'static str,
+}
+impl fmt::Debug for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:}.\nUsage: {:}\n",
+            self.err,
+            CliConfig::CLI_COMMANDLINE
+        )
+    }
+}
+impl From<&'static str> for CliError {
+    fn from(value: &'static str) -> Self {
+        Self { err: value }
+    }
+}
+
 impl CliConfig {
-    pub fn from(args: Args) -> CliConfig {
+    pub const CLI_COMMANDLINE: &str =
+        "mirrord-win.exe LAYER_DLL_PATH -- TARGET_APP (TARGET_CMD_ARGS...)";
+
+    pub fn from(args: Args) -> Result<CliConfig, CliError> {
         // println!("{:#?}", args);
-        let mut args_iter = args.into_iter();
+        let mut args_iter = args.into_iter().peekable();
 
         // skip argv[0] - process executable name
-        let _ = args_iter.next();
+        let _ = args_iter.next().ok_or(CliError {
+            err: "empty commandline",
+        })?;
 
-        CliConfig {
+        Ok(CliConfig {
             layer_dll_path: {
-                let val = args_iter.next().expect("missing LayerDll path");
-                assert!(
-                    val.ends_with(".dll"),
-                    "missing/invalid LayerDll (must end with .dll)"
-                );
-                // assuming -- exists for now
-                assert!(args_iter.next().expect("missing --") == "--");
+                let val = args_iter.next().ok_or("missing LAYER_DLL_PATH")?;
+                if !val.ends_with(".dll") {
+                    return Err("invalid LAYER_DLL_PATH (must end with .dll)".into());
+                }
+
+                // consume required separator but ignore it
+                let _ = args_iter
+                    .next_if(|val| val.eq("--"))
+                    .ok_or("expected '--' separator before target commandline")?;
                 val
             },
             target_commandline: TargetCommandline {
-                applicationname: args_iter.next().expect("missing application name"),
+                applicationname: args_iter.next().ok_or("missing TARGET_APP")?,
                 commandline: args_iter.collect(),
             },
-        }
+        })
     }
 }
 
