@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub fn read_config() -> CliConfig {
-    CliConfig::from(env::args())
+    CliConfig::from(env::args()).expect("Failed parsing commandline")
 }
 
 pub fn run_targetless(
