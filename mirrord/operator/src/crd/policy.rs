@@ -104,6 +104,9 @@ pub struct MirrordPolicySpec {
     /// Defaults to `false`.
     #[serde(default)]
     pub applies_to_copy_targets: bool,
+
+    #[serde(default)]
+    pub split_queues: SplitQueuesPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -166,6 +169,9 @@ pub struct MirrordClusterPolicySpec {
     /// Defaults to `false`.
     #[serde(default)]
     pub applies_to_copy_targets: bool,
+
+    #[serde(default)]
+    pub split_queues: SplitQueuesPolicy,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
@@ -249,6 +255,58 @@ pub struct HttpFilterPolicy {
     /// When the user requests an `any_of` HTTP filter, all nested header filters must match this
     /// regex. At least one nested header filter is required.
     pub header_filter: Option<String>,
+}
+
+/// Split queues policy that defines requirements for mirrord `feature.split_queues` config.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitQueuesPolicy {
+    /// When set to true, require message filter being used in split queues.
+    pub require_filter: bool,
+    /// A set of queue filter policies that need to be satisfied in a mirrord session.
+    pub filters: Vec<QueueFilterPolicy>,
+}
+
+/// Filter rules for matching queues. Queues are matched using `queue_id` regex
+/// and `queue_type`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueFilterPolicy {
+    /// A regex used for matching queue ids.
+    pub queue_id: String,
+    /// The queue type this policy applies to.
+    pub queue_type: QueueType,
+    /// A set of rules for filters used against the matching queues.
+    pub filter_rules: QueueFilterRules,
+}
+
+/// Type of queues supported by queue filter policy.
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, Eq, PartialEq, JsonSchema)]
+pub enum QueueType {
+    #[serde(rename = "SQS")]
+    Sqs,
+    #[serde(rename = "Kafka")]
+    Kafka,
+}
+
+/// Defines either one or all of the queue filter rules need to be met.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum QueueFilterRules {
+    AllOf(Vec<QueueFilterRule>),
+    AnyOf(Vec<QueueFilterRule>),
+}
+
+/// A single filter rule.
+/// When `value` is none, a filter with the specified `key` is required.
+/// When `value` is specified, the filter value under `key` must match the rule in `value`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueFilterRule {
+    /// Key of the filter.
+    pub key: String,
+    /// Regex that's used to match against the filter value.
+    pub value: Option<String>,
 }
 
 #[test]
