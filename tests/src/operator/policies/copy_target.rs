@@ -42,7 +42,7 @@ pub async fn create_policy_and_try_scale_down_deployment(
     )
     .await;
 
-    let application = Application::NodeFsPolicy;
+    let application = Application::NodeHTTP;
     println!("Running mirrord {application:?} against {}", &service.name);
 
     let mirrord_config = serde_json::json!({
