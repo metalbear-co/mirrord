@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.152.1](https://github.com/metalbear-co/mirrord/tree/3.152.1) - 2025-07-22
+
+
+### Fixed
+
+- Agent communication port now uses the `SO_REUSEADDR` flag, fixing cases where agent
+  port is reused in a fast consecutive manner and fails.
+- Fixed a bug where mirrord-agents were lingering after all client connections
+  were gone.
+
+
+### Internal
+
+- Added more traffic mirroring tests.
+
 ## [3.152.0](https://github.com/metalbear-co/mirrord/tree/3.152.0) - 2025-07-18
 
 
