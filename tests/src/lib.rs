@@ -3,6 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 
 mod argo_rollout;
+mod cleanup;
 #[cfg(feature = "cli")]
 mod cli;
 mod env;

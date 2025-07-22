@@ -1,0 +1,1 @@
+Fixed a bug where mirrord-agents were lingering after all client connections were gone.
