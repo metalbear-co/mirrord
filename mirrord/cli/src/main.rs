@@ -395,9 +395,7 @@ where
     // as the subtask title.
     sub_progress_config.success(Some("config summary"));
 
-    // print an invitation to the newsletter on certain run count numbers, unless we're running in a
-    // test
-    #[cfg(not(test))]
+    // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup().await;
 
     let args = binary_args
