@@ -1,0 +1,48 @@
+[package]
+name = "mirrord-intproxy"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mirrord-config = { path = "../config" }
+mirrord-kube = { path = "../kube", features = ["portforward"] }
+mirrord-operator = { path = "../operator", features = ["client"] }
+mirrord-protocol = { path = "../protocol" }
+mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
+mirrord-analytics = { path = "../analytics" }
+mirrord-tls-util = { path = "../tls-util" }
+
+futures.workspace = true
+semver.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tokio-stream.workspace = true
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+rand.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+tokio-retry.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+rstest.workspace = true

@@ -1,3 +1,192 @@
 [workspace]
-resolver = "3"
-members = [ "mirrord-launcher","mirrord-layer-win", "mirrord-target-dummy", "mirrord-win-str"]
+
+members = [
+    "mirrord/*",
+    "mirrord/agent/env",
+    "mirrord/agent/iptables",
+    "mirrord/layer/tests/apps/fileops",
+    "mirrord/layer/tests/apps/outgoing",
+    "mirrord/layer/tests/apps/listen_ports",
+    "mirrord/layer/tests/apps/dns_resolve",
+    "mirrord/layer/tests/apps/recv_from",
+    "mirrord/layer/tests/apps/issue1776",
+    "mirrord/layer/tests/apps/issue1776portnot53",
+    "mirrord/layer/tests/apps/issue1899",
+    "mirrord/layer/tests/apps/issue2001",
+    "mirrord/layer/tests/apps/issue2438",
+    "mirrord/layer/tests/apps/issue3248",
+    "mirrord/layer/tests/apps/rebind0",
+    "sample/rust",
+    "medschool",
+    "tests",
+    "tests/rust-e2e-fileops",
+    "tests/rust-unix-socket-client",
+    "tests/rust-bypassed-unix-socket",
+    "tests/issue1317",
+    "tests/rust-websockets",
+    "tests/rust-sqs-printer",
+]
+resolver = "2"
+
+# latest commits on rustls suppress certificate verification
+[workspace.package]
+version = "3.152.0"
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/metalbear/mirrord"
+documentation = "https://metalbear.co/mirrord/docs"
+authors = ["MetalBear <hi@metalbear.co>"]
+description = "Run a local process in the context of a cloud environment"
+homepage = "https://metalbear.co/mirrord"
+publish = false
+keywords = [
+    "cli",
+    "backend",
+    "debug",
+    "test",
+    "kubernetes",
+    "cloud",
+    "native",
+    "local",
+    "ide",
+    "devtool",
+    "developer",
+    "tool",
+]
+categories = ["development-tools", "backend", "devtool"]
+
+[workspace.dependencies]
+actix-codec = "0.5"
+
+# Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`.
+bincode = { version = "2", features = ["serde"] }
+bytes = "1"
+
+tokio = { version = "1" }
+tokio-stream = { version = "0.1", features = ["sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+nix = { version = "0.29", features = ["net"] }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+futures = "0.3"
+thiserror = "2"
+k8s-openapi = { version = "0.24", features = ["earliest"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls-native-roots",
+    "json",
+    "socks",
+    "http2",
+] }
+kube = { version = "0.99", default-features = false, features = [
+    "runtime",
+    "derive",
+    "client",
+    "ws",
+    "rustls-tls",
+    "aws-lc-rs",
+    "oidc",
+    "socks5",
+    "http-proxy",
+] }
+hickory-resolver = { version = "0.24.3", features = [
+    "serde",
+    "tokio-runtime",
+] }
+hickory-proto = "0.24.3"
+tokio-util = { version = "0.7", features = ["net", "codec"] }
+
+# Used by `layer`, `intproxy`, `tests`, `medschool`, `cli`, `agent`, `operator`.
+rand = "0.9"
+streammap-ext = "0.1"
+regex = { version = "1", features = ["unicode-case"] }
+fancy-regex = { version = "0.14" }
+enum_dispatch = "0.3"
+dotenvy = "0.15"
+
+# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
+# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1" }
+http-body = "1"
+http-body-util = "0.1"
+libc = "0.2"
+socket2 = { version = "0.5", features = ["all"] }
+which = "7"
+semver = "1"
+exec = "0.3"
+drain = "0.1"
+base64 = "0.22"
+rustls = "0.23"
+
+# Used by `operator`, `tests`.
+tokio-tungstenite = { version = "0.24" }
+
+# Used by `operator`, `agent`.
+http = { version = "1" }
+
+# Used by `intproxy`, `cli`.
+rustls-pemfile = "2"
+
+# Used by `tests`, `layer`, `cli`, `kube`, `agent`, `config`, `operator`.
+rstest = "0.23"
+
+# Used by `layer`, `tests`, `sip`, `cli`.
+tempfile = "3"
+
+# Used by `cli`, `vpn`.
+tun2 = { version = "4", features = ["async"] }
+
+# Used by `layer`, `operator`, `tests`, `auth`.
+chrono = "0.4"
+
+# Used by `kube`, `agent`, `layer`.
+tower = "0.5"
+
+# Used by `agent`, `intproxy`, `cli`.
+tokio-rustls = "0.26"
+
+# Used by `agent`, `cli`.
+rcgen = "0.13"
+
+# Used by `config`, `operator`.
+schemars = { version = "0.8.11" }
+
+# Used by `config`, `vpn`.
+ipnet = "2.8"
+
+# Used by `macros`, `layer-macro`, `config-derive`.
+proc-macro2 = "1"
+
+# Used by `macros`, `config-derive`.
+proc-macro2-diagnostics = "0.10"
+
+# Used by `macros`, `layer-macro`, `config-derive`, `medschool`.
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+# Used by `layer-macro`, `config-derive`.
+quote = "1"
+
+# Used by `console`, `cli`.
+miette = "7"
+
+# Used by `kube`, `intproxy`.
+tokio-retry = "0.3"
+
+# Used by `agent`, `tls-util`.
+x509-parser = "0.17"
+
+# Used by `agent`, `auth`, `tls-util`, `tests`
+pem = "3"
+
+[workspace.lints.rustdoc]
+private_intra_doc_links = "allow"
+
+[profile.release]
+strip = "debuginfo"
+# Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
+lto = false

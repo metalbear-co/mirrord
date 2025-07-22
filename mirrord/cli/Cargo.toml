@@ -1,0 +1,82 @@
+[package]
+name = "mirrord"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mirrord-console = { path = "../console", features = ["async-logger"] }
+mirrord-operator = { path = "../operator", features = [
+    "client",
+    "setup",
+] }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+mirrord-progress = { path = "../progress" }
+mirrord-kube = { path = "../kube", features = ["portforward"] }
+mirrord-config = { path = "../config" }
+mirrord-protocol = { path = "../protocol" }
+mirrord-analytics = { path = "../analytics" }
+mirrord-intproxy = { path = "../intproxy" }
+mirrord-vpn = { path = "../vpn" }
+mirrord-tls-util = { path = "../tls-util" }
+
+actix-codec.workspace = true
+base64.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+tracing-subscriber.workspace = true
+futures.workspace = true
+which.workspace = true
+semver.workspace = true
+reqwest.workspace = true
+const-random = "0.1.15"
+tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+kube.workspace = true
+k8s-openapi.workspace = true
+miette = { workspace = true, features = ["fancy"] }
+thiserror.workspace = true
+humantime = "2"
+nix = { workspace = true, features = ["process", "resource"] }
+tokio-util.workspace = true
+socket2.workspace = true
+drain.workspace = true
+prettytable-rs = "0.10"
+clap_complete = "4.4.1"
+rustls.workspace = true
+local-ip-address = "0.6"
+tokio-rustls.workspace = true
+tokio-stream = { workspace = true, features = ["io-util", "net"] }
+regex.workspace = true
+mid = "3.0.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mirrord-sip = { path = "../sip" }
+
+[build-dependencies]
+mirrord-layer = { artifact = "cdylib", path = "../layer" }
+
+[dev-dependencies]
+rstest.workspace = true
+hyper.workspace = true
+hyper-util = { workspace = true, "features" = ["server"] }
+http-body-util.workspace = true
+kube.workspace = true
+rcgen.workspace = true
+

@@ -1,0 +1,10 @@
+{
+    "feature": {
+        "fs": false,
+        "network": {
+            "outgoing": {
+                "udp": false
+            }
+        }
+    }
+}

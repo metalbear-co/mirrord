@@ -1,0 +1,12 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "mode": "steal",
+                "http_filter": {
+                    "header_filter": "this is just to trigger a wrong warning log, there are no requests in the test"
+                }
+            }
+        }
+    }
+}

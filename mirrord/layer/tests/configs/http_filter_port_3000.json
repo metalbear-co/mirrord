@@ -1,0 +1,15 @@
+{
+  "feature": {
+    "network": {
+      "incoming": {
+        "mode": "steal",
+        "http_filter": {
+          "ports": [
+            3000
+          ],
+          "header_filter": "whatever"
+        }
+      }
+    }
+  }
+}

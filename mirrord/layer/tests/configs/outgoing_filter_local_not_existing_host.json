@@ -1,0 +1,14 @@
+{
+    "feature": {
+        "network": {
+            "dns": true,
+            "outgoing": {
+                "tcp": true,
+                "filter": {
+                    "local": ["i-do-not-exist-at-all"]
+                }
+            }
+        },
+        "fs": "local"
+    }
+}

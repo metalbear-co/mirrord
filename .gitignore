@@ -1,1 +1,35 @@
-target/
+out
+dist
+node_modules
+package-lock.json
+package.json
+__pycache__
+.vscode-test/
+*.vsix
+.DS_Store
+**/.DS_Store
+/target
+build/
+.mirrord
+
+### go tests ###
+*.go_test_app
+
+### c test apps ###
+*.c_test_app
+
+### other test apps ###
+*.test_app
+
+### VSCode ###
+vscode-ext/bin
+.vscode/settings.json
+
+### Intellij ###
+intellij-ext/.gradle
+intellij-ext/.idea
+intellij-ext/.qodana
+intellij-ext/build
+intellij-ext/libmirrord_layer.*
+intellij-ext/bin
+.idea/

@@ -1,0 +1,12 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "mode": "steal",
+                "http_filter": {
+                    "header_filter": "x-filter: no"
+                }
+            }
+        }
+    }
+}
