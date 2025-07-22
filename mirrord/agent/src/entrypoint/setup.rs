@@ -87,11 +87,12 @@ pub(super) async fn start_sniffer(
 pub(super) fn start_stealer(
     runtime: &BgTaskRuntime,
     steal_handle: StealHandle,
+    cancellation_token: CancellationToken,
 ) -> BackgroundTask<StealerCommand> {
     let (command_tx, command_rx) = mpsc::channel::<StealerCommand>(1000);
 
     let task_status = runtime
-        .spawn(TcpStealerTask::new(command_rx, steal_handle).run())
+        .spawn(TcpStealerTask::new(command_rx, steal_handle).run(cancellation_token))
         .into_status("TcpStealerTask");
 
     BackgroundTask::Running(task_status, command_tx)

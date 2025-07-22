@@ -15,6 +15,7 @@ use rstest::rstest;
 use rustls::pki_types::ServerName;
 use tokio::{net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
+use tokio_util::sync::CancellationToken;
 use utils::{StealingClient, TestHttpKind, TestRequest, TestTcpProtocol};
 
 use super::{StealerCommand, TcpStealerTask};
@@ -455,7 +456,7 @@ impl TestSetup {
         let stealer_task = TcpStealerTask::new(stealer_rx, handle);
         tokio::spawn(redirector.run());
         let stealer_status = BgTaskRuntime::Local
-            .spawn(stealer_task.run())
+            .spawn(stealer_task.run(CancellationToken::new()))
             .into_status("stealer");
 
         Self {

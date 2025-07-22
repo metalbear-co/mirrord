@@ -730,7 +730,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             )
             .await?;
             (
-                setup::start_stealer(&state.network_runtime, steal_handle),
+                setup::start_stealer(
+                    &state.network_runtime,
+                    steal_handle,
+                    cancellation_token.clone(),
+                ),
                 passthrough_mirroring_enabled.then_some(mirror_handle),
             )
         }
