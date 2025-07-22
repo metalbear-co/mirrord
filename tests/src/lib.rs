@@ -3,6 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 
 mod argo_rollout;
+mod cleanup;
 #[cfg(feature = "cli")]
 mod cli;
 mod env;
@@ -11,7 +12,6 @@ mod http;
 mod issue1317;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
-mod misc;
 mod operator;
 mod targetless;
 mod traffic;
