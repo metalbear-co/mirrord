@@ -30,9 +30,9 @@ async fn agent_container_exits(
     let mut process = run_exec_with_target(
         application.command(),
         &service.pod_container_target(),
-        None,
+        Some(&service.namespace),
         application.mirrord_args(),
-        None,
+        Some(vec![("MIRRORD_EPHEMERAL_CONTAINER", "true")]),
     )
     .await;
     let res = process.wait().await;
@@ -48,7 +48,6 @@ async fn agent_container_exits(
         |pods| {
             assert_eq!(pods.len(), 1, "unexpected number of pods");
             let pod = pods.values().next().unwrap();
-            println!("POD: {pod:?}");
             let agent_status = pod
                 .status
                 .as_ref()
