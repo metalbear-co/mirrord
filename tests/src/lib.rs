@@ -11,6 +11,7 @@ mod http;
 mod issue1317;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
+mod misc;
 mod operator;
 mod targetless;
 mod traffic;
