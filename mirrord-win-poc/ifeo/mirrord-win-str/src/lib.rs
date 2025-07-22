@@ -1,5 +1,7 @@
-use std::ffi::{OsStr, OsString};
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::{
+    ffi::{OsStr, OsString},
+    os::windows::ffi::{OsStrExt, OsStringExt},
+};
 
 pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();

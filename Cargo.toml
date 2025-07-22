@@ -1,8 +1,7 @@
 [workspace]
 
 members = [
-    "mirrord-win-poc/manual-exec/*",
-		"mirrord-win-poc/ifeo/*"
+    "mirrord-win-poc/ifeo/*"
 ]
 resolver = "2"
 

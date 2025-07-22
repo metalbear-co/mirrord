@@ -133,10 +133,10 @@ fn hkcu_set_get_values() {
     let inserted = key.insert_value_string("String", "Hello!".to_string());
     assert!(inserted);
 
-    let inserted = key.insert_value_multi_string(
-        "MultiString",
-        vec!["Hello".to_string(), "world!".to_string()],
-    );
+    let inserted = key.insert_value_multi_string("MultiString", vec![
+        "Hello".to_string(),
+        "world!".to_string(),
+    ]);
     assert!(inserted);
 
     // --------------------------------

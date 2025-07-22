@@ -19,8 +19,7 @@ fn string_to_u8() {
 
     let bytes = string_to_u8_buffer(str);
     assert_eq!(bytes.len(), 5);
-    assert_eq!(
-        bytes.as_slice(),
-        &['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8, 0u8]
-    );
+    assert_eq!(bytes.as_slice(), &[
+        'a' as u8, 'b' as u8, 'c' as u8, 'd' as u8, 0u8
+    ]);
 }

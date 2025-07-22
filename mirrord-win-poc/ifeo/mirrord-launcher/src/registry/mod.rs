@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use mirrord_win_str::*;
 use winapi::{
     shared::{
         minwindef::{DWORD, HKEY},
@@ -24,8 +25,6 @@ use winapi::{
 };
 
 use crate::handle::hkey::SafeHKey;
-
-use mirrord_win_str::*;
 
 /// Registry container.
 ///

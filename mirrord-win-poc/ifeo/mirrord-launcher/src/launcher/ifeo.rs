@@ -11,7 +11,10 @@
 
 use std::path::Path;
 
-use crate::{process::{absolute_path, process_name_from_path}, registry::Registry};
+use crate::{
+    process::{absolute_path, process_name_from_path},
+    registry::Registry,
+};
 
 const IMAGE_FILE_EXECUTION_OPTIONS: &str =
     r#"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"#;
@@ -24,9 +27,9 @@ fn get_ifeo<T: AsRef<str>>(program: T) -> Option<Registry> {
 }
 
 /// Sets IFEO entry for `program`, redirecting it's execution towards `debug`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `program` - Path, relative/absolute, towards program to be overriden.
 /// * `debug` - Path, relative/absolute, towards program to override.
 pub fn set_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
@@ -60,9 +63,9 @@ pub fn set_ifeo<T: AsRef<Path>, U: AsRef<Path>>(program: T, debug: U) -> bool {
 }
 
 /// Removes IFEO entry for `program`, re-establishing normal execution.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `program` - Path, absolute/relative, towards program to remove IFEO for.
 pub fn remove_ifeo<T: AsRef<Path>>(program: T) -> bool {
     // Truncate any potential path to it's potential file name.

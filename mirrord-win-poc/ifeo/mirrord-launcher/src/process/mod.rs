@@ -1,7 +1,9 @@
 //! Simple utilities for interacting with processes.
 
-use std::{mem::MaybeUninit, path::Path};
+use std::{io::Result, mem::MaybeUninit, path::Path};
 
+use dll_syringe::{Syringe, process::OwnedProcess};
+use mirrord_win_str::string_to_u16_buffer;
 use winapi::um::{
     processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW},
     winbase::CREATE_SUSPENDED,
@@ -9,8 +11,6 @@ use winapi::um::{
 };
 
 use crate::handle::handle::SafeHandle;
-
-use mirrord_win_str::string_to_u16_buffer;
 
 /// Suspended state.
 #[derive(Debug, PartialEq, Eq)]
@@ -96,9 +96,9 @@ pub fn create_process<T: AsRef<Path>, U: AsRef<[String]>>(
 }
 
 /// Resume possibly suspended thread by [`HANDLE`]. Returns operation result.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `thread` - [`HANDLE`] to possibly suspended thread.
 pub fn resume_thread(thread: HANDLE) -> bool {
     let ret = unsafe { ResumeThread(thread) };
@@ -130,6 +130,13 @@ pub fn absolute_path<T: AsRef<Path>>(path: T) -> Option<String> {
     let path = path.as_ref();
 
     Some(std::fs::canonicalize(path).ok()?.to_str()?.to_string())
+}
+
+pub fn inject_dll<T: AsRef<Path>>(pid: u32, dll: T) -> Result<()> {
+    let process = OwnedProcess::from_pid(pid)?;
+    let syringe = Syringe::for_process(process);
+    let _ = syringe.inject(dll).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]

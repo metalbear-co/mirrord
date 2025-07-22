@@ -3,18 +3,30 @@ mod launcher;
 mod process;
 mod registry;
 
-use std::io::{ErrorKind, Result};
+use std::{
+    io::{ErrorKind, Result},
+    path::PathBuf,
+};
 
 use crate::{
     launcher::ifeo::{remove_ifeo, set_ifeo},
-    process::{Suspended, absolute_path, create_process, resume_thread},
+    process::{Suspended, absolute_path, create_process, inject_dll, resume_thread},
 };
-use dll_syringe::{Syringe, process::OwnedProcess};
-
-const DLL_PATH: &str = r#"C:\dev\rust\mirrord\target\debug\mirrord_layer_win.dll"#;
 
 const WATCH: &str = "watch";
 const FORGET: &str = "forget";
+
+pub fn get_files_path() -> PathBuf {
+    let mut files = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    files.push(r#"..\..\..\target\debug"#);
+    files
+}
+
+pub fn get_dll_path() -> PathBuf {
+    let mut dll = get_files_path();
+    dll.push("mirrord_layer_win.dll");
+    dll
+}
 
 fn help<T: AsRef<str>>(program_name: T) {
     let program_name = program_name.as_ref();
@@ -27,13 +39,6 @@ fn help<T: AsRef<str>>(program_name: T) {
         "\t{FORGET} [process.exe] -- remove override for process creation, will stop capturing execution.\n"
     );
     println!("\t[process.exe] [arguments] -- start process with layer loaded.");
-}
-
-fn inject_dll(pid: u32) -> Result<()> {
-    let process = OwnedProcess::from_pid(pid)?;
-    let syringe = Syringe::for_process(process);
-    let _ = syringe.inject(DLL_PATH).unwrap();
-    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -97,9 +102,12 @@ fn main() -> Result<()> {
 
         // Inject DLL.
         let info = info?;
-        inject_dll(info.process_id)?;
+        inject_dll(info.process_id, get_dll_path())?;
         resume_thread(info.thread.get());
     }
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

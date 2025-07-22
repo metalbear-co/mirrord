@@ -3,8 +3,10 @@
 ///
 /// # Arguments
 ///
-/// * `module` - [`winapi::shared::minwindef::HMODULE`] given to `DllMain`. Points towards the base address of DLL in virtual memory.
-/// * `reason_for_call` - The reason for call ([`winapi::um::winnt::DLL_PROCESS_ATTACH`], [`winapi::um::winnt::DLL_PROCESS_DETACH`], ...) given to `DllMain`.
+/// * `module` - [`winapi::shared::minwindef::HMODULE`] given to `DllMain`. Points towards the base
+///   address of DLL in virtual memory.
+/// * `reason_for_call` - The reason for call ([`winapi::um::winnt::DLL_PROCESS_ATTACH`],
+///   [`winapi::um::winnt::DLL_PROCESS_DETACH`], ...) given to `DllMain`.
 #[macro_export]
 macro_rules! entry_point {
     ($f: expr) => {
