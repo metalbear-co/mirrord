@@ -48,6 +48,7 @@ async fn agent_container_exits(
         |pods| {
             assert_eq!(pods.len(), 1, "unexpected number of pods");
             let pod = pods.values().next().unwrap();
+            println!("POD: {pod:?}");
             let agent_status = pod
                 .status
                 .as_ref()
