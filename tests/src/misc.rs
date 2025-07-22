@@ -48,20 +48,22 @@ async fn agent_container_exits(
         |pods| {
             assert_eq!(pods.len(), 1, "unexpected number of pods");
             let pod = pods.values().next().unwrap();
-            let agent_state = pod
+            let Some(ephemeral_containers) = pod
                 .status
                 .as_ref()
-                .unwrap()
-                .ephemeral_container_statuses
-                .as_ref()
-                .unwrap()
+                .and_then(|status| status.ephemeral_container_statuses.as_deref())
+            else {
+                return false;
+            };
+            let agent_status = ephemeral_containers
                 .iter()
                 .find(|status| status.name.starts_with("mirrord-agent"))
-                .expect("status of the agent ephemeral container was not found")
+                .expect("status of the agent ephemeral container was not found");
+            let Some(terminated) = agent_status
                 .state
                 .as_ref()
-                .unwrap();
-            let Some(terminated) = &agent_state.terminated else {
+                .and_then(|state| state.terminated.as_ref())
+            else {
                 return false;
             };
             assert_eq!(terminated.exit_code, 0, "agent container failed");
