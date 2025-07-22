@@ -1,24 +1,25 @@
 use std::{io::Write, time::Duration};
 
-use mirrord_kube::resolved::service;
 use mirrord_operator::crd::policy::{BlockedFeature, MirrordPolicy, MirrordPolicySpec};
 use rstest::rstest;
 use tempfile::NamedTempFile;
 
 use crate::{
     operator::policies::PolicyGuard,
-    utils::{application::Application, kube_client, kube_service::KubeService},
+    utils::{
+        application::Application, kube_client, kube_service::KubeService, services::basic_service,
+    },
 };
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
 pub async fn create_policy_and_try_scale_down_deployment(
-    #[future] service: KubeService,
+    #[future] basic_service: KubeService,
     #[future] kube_client: kube::Client,
 ) {
     let kube_client = kube_client.await;
-    let service = service.await;
+    let service = basic_service.await;
 
     // Create policy, delete it when test exits.
     let _policy_guard = PolicyGuard::namespaced(
@@ -60,7 +61,7 @@ pub async fn create_policy_and_try_scale_down_deployment(
 
     let test_proc = application
         .run(
-            &service.pod_container_target(),
+            &service.deployment_target(),
             Some(&service.namespace),
             Some(vec![
                 "--config-file",
