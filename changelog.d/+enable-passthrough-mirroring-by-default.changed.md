@@ -1,0 +1,1 @@
+Passthrough mirroring is now enabled by default, unless mirrord for Teams is used.
