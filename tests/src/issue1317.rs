@@ -1,7 +1,7 @@
 /// Tests for mirroring existing connections.
 #[cfg(test)]
 mod issue1317_tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::{io::Write, path::PathBuf, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::{BodyExt, Full};
@@ -12,6 +12,7 @@ mod issue1317_tests {
     use hyper_util::rt::TokioIo;
     use kube::Client;
     use rstest::*;
+    use tempfile::NamedTempFile;
     use tokio::net::TcpStream;
 
     use crate::utils::{
@@ -47,6 +48,17 @@ mod issue1317_tests {
         #[notrace]
         kube_client: Client,
     ) {
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        let config = serde_json::json!({
+            "agent": {
+                "passthrough_mirroring": false
+            },
+        });
+        config_file
+            .as_file_mut()
+            .write_all(config.to_string().as_bytes())
+            .unwrap();
+
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
@@ -88,7 +100,7 @@ mod issue1317_tests {
             executable,
             &service.pod_container_target(),
             None,
-            None,
+            Some(vec!["-f", config_file.path().to_str().unwrap()]),
             None,
         )
         .await;
