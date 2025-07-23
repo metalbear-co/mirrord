@@ -183,6 +183,9 @@ x509-parser = "0.17"
 # Used by `agent`, `auth`, `tls-util`, `tests`
 pem = "3"
 
+# Used by `cli`, `auth`
+home = "0.5"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
