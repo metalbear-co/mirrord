@@ -29,7 +29,10 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
         .iter()
         .copied()
         .filter(|c| disabled.contains(c).not())
-        .filter(|c| matches!(c, LinuxCapability::NetRaw if agent.passthrough_mirroring).not())
+        .filter(|c| {
+            matches!(c, LinuxCapability::NetRaw if agent.passthrough_mirroring.unwrap_or_default())
+                .not()
+        })
         .collect()
 }
 
@@ -40,7 +43,7 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
         envs::JSON_LOG.as_k8s_spec(&agent.json_log),
         envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
-        envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&agent.passthrough_mirroring),
+        envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&agent.passthrough_mirroring.unwrap_or_default()),
     ];
 
     if let Some(nftables) = agent.nftables {

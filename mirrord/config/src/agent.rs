@@ -413,17 +413,16 @@ pub struct AgentConfig {
 
     /// ### agent.passthrough_mirroring {#agent-passthrough_mirroring}
     ///
-    /// Enables an alternative implementation of traffic mirroring,
-    /// based on iptables redirects.
+    /// Enables an implementation of traffic mirroring based on iptables redirects.
     ///
     /// When used with `agent.flush_connections`, it might fix issues
     /// with mirroring non HTTP/1 traffic.
     ///
     /// When this is set, `network_interface` setting is ignored.
     ///
-    /// Defaults to `false`.
-    #[config(default = false)]
-    pub passthrough_mirroring: bool,
+    /// Defaults to `false` in mirrord for Teams.
+    /// Otherwise, defaults to `true`.
+    pub passthrough_mirroring: Option<bool>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

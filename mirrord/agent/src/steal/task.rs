@@ -14,6 +14,7 @@ use mirrord_protocol::{
     LogMessage,
 };
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
@@ -50,7 +51,7 @@ impl TcpStealerTask {
         }
     }
 
-    pub async fn run(mut self) -> Result<(), RedirectorTaskError> {
+    pub async fn run(mut self, token: CancellationToken) -> Result<(), RedirectorTaskError> {
         loop {
             tokio::select! {
                 command = self.command_rx.recv() => {
@@ -68,6 +69,8 @@ impl TcpStealerTask {
                 Some(client_id) = self.disconnected_clients.next() => {
                     self.handle_client_disconnected(client_id);
                 }
+
+                _ = token.cancelled() => break,
             }
         }
 
