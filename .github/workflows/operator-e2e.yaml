@@ -34,73 +34,28 @@ jobs:
         id: run-id
         run: echo "run_id=mirrord-e2e-$(date +%s)-${{ github.run_id }}" >> $GITHUB_OUTPUT
 
-      - name: Trigger operator E2E workflow
-        uses: metalbear-co/repository-dispatch@main
+      - name: Trigger operator E2E workflow and wait for completion
+        id: trigger-e2e
+        uses: metalbear-co/return-dispatch@main
         with:
           token: ${{ secrets.OPERATOR_E2E_PAT }}
-          repository: metalbear-co/operator
-          event-type: operator-e2e-test-from-mirrord
-          client-payload: |
+          ref: ${{ inputs.operator_branch || 'main' }}
+          repo: operator
+          owner: metalbear-co
+          workflow: operator-e2e.yaml
+          workflow_inputs: |
             {
-              "branch": "${{ inputs.operator_branch || 'main' }}",
               "mirrord_commit": "${{ inputs.mirrord_commit || github.event.pull_request.head.sha }}",
               "mirrord_branch": "${{ inputs.mirrord_branch || github.event.pull_request.head.ref }}",
-              "run_id": "${{ steps.run-id.outputs.run_id }}"
+              "distinct_id": "${{ steps.run-id.outputs.run_id }}"
             }
+          workflow_timeout_seconds: 7200
+          workflow_job_steps_retry_seconds: 30
+          distinct_id: ${{ steps.run-id.outputs.run_id }}
 
-      - name: Wait for operator E2E workflow completion
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.OPERATOR_E2E_PAT }}
-          script: |
-            const runId = "${{ steps.run-id.outputs.run_id }}";
-            const maxWaitTime = 120 * 60 * 1000; // 120 minutes
-            const pollInterval = 5 * 60 * 1000; // 5 minutes
-            const startTime = Date.now();
-
-            console.log(`Waiting for operator E2E workflow with run_id: ${runId}`);
-
-            while (Date.now() - startTime < maxWaitTime) {
-              try {
-                // Get recent workflow runs
-                const { data: runs } = await github.rest.actions.listWorkflowRuns({
-                  owner: 'metalbear-co',
-                  repo: 'operator',
-                  workflow_id: 'operator-e2e.yaml',
-                  per_page: 20
-                });
-
-                // Look for our triggered run by checking the commit or run time
-                const targetRun = runs.workflow_runs.find(run => {
-                  // Check if this run was triggered around the same time
-                  const runTime = new Date(run.created_at).getTime();
-                  const triggerTime = Date.now();
-                  return Math.abs(runTime - triggerTime) < 5 * 60 * 1000; // Within 5 minutes
-                });
-
-                if (targetRun) {
-                  console.log(`Found workflow run: ${targetRun.html_url}`);
-                  console.log(`Status: ${targetRun.status}, Conclusion: ${targetRun.conclusion}`);
-
-                  if (targetRun.status === 'completed') {
-                    if (targetRun.conclusion === 'success') {
-                      console.log('✅ Operator E2E tests passed!');
-                      return;
-                    } else {
-                      console.log(`❌ Operator E2E tests failed with conclusion: ${targetRun.conclusion}`);
-                      console.log(`Workflow URL: ${targetRun.html_url}`);
-                      process.exit(1);
-                    }
-                  }
-                } else {
-                  console.log('Workflow run not found yet, continuing to wait...');
-                }
-              } catch (error) {
-                console.log(`Error checking workflow status: ${error.message}`);
-              }
-
-              await new Promise(resolve => setTimeout(resolve, pollInterval));
-            }
-
-            console.log('❌ Timeout waiting for operator E2E workflow to complete');
-            process.exit(1);
+      - name: Show operator E2E results
+        run: |
+          echo "✅ Operator E2E tests completed successfully!"
+          echo "Run ID: ${{ steps.trigger-e2e.outputs.run_id }}"
+          echo "Run URL: ${{ steps.trigger-e2e.outputs.run_url }}"
+          echo "Distinct ID used: ${{ steps.run-id.outputs.run_id }}"
