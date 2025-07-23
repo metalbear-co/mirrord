@@ -369,8 +369,7 @@ as targeted agent always runs on the same node as its target container.
 
 ### agent.passthrough_mirroring {#agent-passthrough_mirroring}
 
-Enables an alternative implementation of traffic mirroring,
-based on iptables redirects.
+Enables an implementation of traffic mirroring based on iptables redirects.
 
 When used with `agent.flush_connections`, it might fix issues
 with mirroring non HTTP/1 traffic.
