@@ -369,15 +369,15 @@ as targeted agent always runs on the same node as its target container.
 
 ### agent.passthrough_mirroring {#agent-passthrough_mirroring}
 
-Enables an alternative implementation of traffic mirroring,
-based on iptables redirects.
+Enables an implementation of traffic mirroring based on iptables redirects.
 
 When used with `agent.flush_connections`, it might fix issues
 with mirroring non HTTP/1 traffic.
 
 When this is set, `network_interface` setting is ignored.
 
-Defaults to `false`.
+Defaults to `false` in mirrord for Teams.
+Otherwise, defaults to `true`.
 
 ### agent.priority_class {#agent-priority_class}
 
@@ -580,6 +580,11 @@ DEPRECATED, WILL BE REMOVED
 
 DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
 stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
+
+### _experimental_ sip_log_destination {#experimental-sip_log_destination}
+
+Writes basic fork-safe SIP patching logs to a destination file.
+Useful for seeing the state of SIP when `stdout` may be affected by another process.
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 

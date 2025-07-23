@@ -465,7 +465,7 @@
         },
         "passthrough_mirroring": {
           "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
-          "description": "Enables an alternative implementation of traffic mirroring, based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to `false`.",
+          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to `false` in mirrord for Teams. Otherwise, defaults to `true`.",
           "type": [
             "boolean",
             "null"
