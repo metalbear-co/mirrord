@@ -134,6 +134,9 @@ pub(super) enum Commands {
     /// Run mirrord vpn (alpha).
     #[command(hide = true)]
     Vpn(Box<VpnArgs>),
+
+    /// Subscribe to the mirrord newsletter
+    Newsletter,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

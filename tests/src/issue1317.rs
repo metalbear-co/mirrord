@@ -1,7 +1,7 @@
 /// Tests for mirroring existing connections.
 #[cfg(test)]
 mod issue1317_tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::{io::Write, path::PathBuf, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::{BodyExt, Full};
@@ -12,6 +12,7 @@ mod issue1317_tests {
     use hyper_util::rt::TokioIo;
     use kube::Client;
     use rstest::*;
+    use tempfile::NamedTempFile;
     use tokio::net::TcpStream;
 
     use crate::utils::{
@@ -23,6 +24,11 @@ mod issue1317_tests {
     /// agent up yet), and keeps this stream alive. Then it starts mirrord in _mirror_ mode, and
     /// sends another request that should start the sniffing/subscribe/mirror flow, even though this
     /// is not the first packet (not TCP handshake) of this connection.
+    ///
+    /// # Deprecation notice
+    ///
+    /// This test is not compatible with the new mirroring mode (passthrough mirroring).
+    /// It should be removed once the old mirroring mode (raw socket sniffing) is removed.
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -42,6 +48,17 @@ mod issue1317_tests {
         #[notrace]
         kube_client: Client,
     ) {
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        let config = serde_json::json!({
+            "agent": {
+                "passthrough_mirroring": false
+            },
+        });
+        config_file
+            .as_file_mut()
+            .write_all(config.to_string().as_bytes())
+            .unwrap();
+
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
@@ -83,7 +100,7 @@ mod issue1317_tests {
             executable,
             &service.pod_container_target(),
             None,
-            None,
+            Some(vec!["-f", config_file.path().to_str().unwrap()]),
             None,
         )
         .await;
