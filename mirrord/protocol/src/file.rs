@@ -6,8 +6,13 @@ use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
 use std::{
-    fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf, sync::LazyLock,
+    fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock,
 };
+
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::prelude::MetadataExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::MetadataExt;
 
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]
@@ -64,11 +69,11 @@ pub struct MetadataInternal {
     /// file size, st_size
     pub size: u64,
     /// time is in nano seconds, can be converted to seconds by dividing by 1e9
-    /// access time, st_atime_ns
+    /// access time, st_atime_ns or FILETIME (windows)
     pub access_time: i64,
-    /// modification time, st_mtime_ns
+    /// modification time, st_mtime_ns (unix) or FILETIME (windows)
     pub modification_time: i64,
-    /// creation time, st_ctime_ns
+    /// creation time, st_ctime_ns (unix) or FILETIME (windows) 
     pub creation_time: i64,
     /// block size, st_blksize
     pub block_size: u64,
@@ -76,6 +81,8 @@ pub struct MetadataInternal {
     pub blocks: u64,
 }
 
+
+#[cfg(not(windows))]
 impl From<Metadata> for MetadataInternal {
     fn from(metadata: Metadata) -> Self {
         Self {
@@ -92,6 +99,31 @@ impl From<Metadata> for MetadataInternal {
             creation_time: metadata.ctime_nsec(),
             block_size: metadata.blksize(),
             blocks: metadata.blocks(),
+        }
+    }
+}
+
+
+#[cfg(windows)]
+impl From<Metadata> for MetadataInternal {
+    
+    fn from(metadata: Metadata) -> Self {
+        // let file_id = file_id::get_low_res_file_id(metadata.path()).unwrap();
+        Self {
+            device_id: metadata.volume_serial_number().unwrap() as u64,
+            inode: metadata.file_index().unwrap(), // On Windows, true inode is not exposed directly from std
+                                          // You could return 0 or use Windows APIs like `GetFileInformationByHandle`
+            mode: metadata.file_attributes(),
+            hard_links: metadata.number_of_links().unwrap() as u64,
+            user_id: 0, // requires File
+            group_id: 0, // requires File
+            rdevice_id: 0, 
+            size: metadata.file_size(),
+            access_time: metadata.last_access_time() as i64,
+            modification_time: metadata.change_time().or(Some(0)).unwrap() as i64, // or last_write_time()?,
+            creation_time: metadata.creation_time() as i64,
+            block_size: 0,
+            blocks: 0,
         }
     }
 }
