@@ -2,6 +2,7 @@
 
 members = [
     "mirrord/intproxy",
+    "mirrord/cli",
     #"mirrord/agent/env",
     #"mirrord/agent/iptables",
     #"mirrord/layer/tests/apps/fileops",
@@ -25,6 +26,8 @@ members = [
     #"tests/issue1317",
     #"tests/rust-websockets",
     #"tests/rust-sqs-printer",
+    "mirrord-win-poc/ifeo/*",
+    "mirrord-win-poc/manual-exec/*",
 ]
 resolver = "2"
 
