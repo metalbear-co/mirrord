@@ -9,9 +9,9 @@ use std::{
     fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock,
 };
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(windows))]
 use std::os::unix::prelude::MetadataExt;
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 
 use bincode::{Decode, Encode};

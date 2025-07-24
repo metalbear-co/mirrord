@@ -169,6 +169,7 @@ impl PreparedSocket {
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
                 SocketAddress::Unix(UnixAddr::Pathname(pathname))
             }
+            #[cfg(windows)]
             Self::UnixListener(_) => {
                 return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Unsupported UnixListener").into());
             }

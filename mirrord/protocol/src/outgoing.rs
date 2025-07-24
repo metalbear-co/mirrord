@@ -97,7 +97,7 @@ impl TryFrom<OsSockAddr> for SocketAddress {
                 addr.as_abstract_namespace()
                     .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
             })
-            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)))
+            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)));
         }
         res.ok_or(SerializationError::SocketAddress)
     }

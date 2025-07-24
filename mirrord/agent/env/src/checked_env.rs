@@ -7,10 +7,10 @@ use std::{
     str::{FromStr, Utf8Error}
 };
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(windows))]
 use std::os::unix::ffi::OsStrExt;
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 #[allow(unused_imports)]
 use std::os::windows::ffi::OsStrExt;
 
@@ -95,6 +95,9 @@ impl<V: EnvValue> CheckedEnv<V> {
     pub fn try_from_env(self) -> Result<Option<V>, V::FromReprError> {
         match std::env::var_os(self.name) {
             Some(repr) => {
+                #[cfg(not(windows))]
+                let value = V::from_repr(repr.as_bytes())?;
+                #[cfg(windows)]
                 let value = V::from_repr(repr.as_encoded_bytes())?;
                 Ok(Some(value))
             }

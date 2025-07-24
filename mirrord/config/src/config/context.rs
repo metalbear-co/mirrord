@@ -5,10 +5,10 @@ use std::{
     ops::Not,
 };
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(windows))]
 use std::os::unix::ffi::OsStrExt;
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 #[allow(unused_imports)]
 use std::os::windows::ffi::OsStrExt;
 
