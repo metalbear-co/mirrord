@@ -104,6 +104,10 @@ impl SqsTestResources {
         self.k8s_service.deployment_target()
     }
 
+    pub fn target(&self) -> String {
+        self.k8s_service.rollout_or_deployment_target()
+    }
+
     /// Count the temp queues created by the SQS-operator for this test instance.
     pub async fn count_temp_queues(&self) -> usize {
         println!("Counting temporary queues created by the SQS operator for this test.");
