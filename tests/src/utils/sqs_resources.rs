@@ -274,8 +274,7 @@ async fn sqs_queue(
 /// * `fallback_queues` - if not `None`, then a fallback will be set using the given queues.
 pub async fn create_queue_registry_resource(
     kube_client: &Client,
-    namespace: &str,
-    deployment_name: &str,
+    kube_service: &KubeService,
     use_regex: bool,
     fallback_queues: Option<(&QueueInfo, &QueueInfo)>,
 ) {
@@ -339,15 +338,21 @@ pub async fn create_queue_registry_resource(
         ])
     };
 
-    let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client.clone(), namespace);
+    let qr_api: Api<MirrordWorkloadQueueRegistry> =
+        Api::namespaced(kube_client.clone(), &kube_service.namespace);
+    let workload_type = if kube_service.rollout.is_some() {
+        QueueConsumerType::Rollout
+    } else {
+        QueueConsumerType::Deployment
+    };
     let queue_registry = MirrordWorkloadQueueRegistry::new(
         QUEUE_REGISTRY_RESOURCE_NAME,
         MirrordWorkloadQueueRegistrySpec {
             queues,
             consumer: QueueConsumer {
-                name: deployment_name.to_string(),
+                name: kube_service.name.clone(),
                 container: None,
-                workload_type: QueueConsumerType::Deployment,
+                workload_type,
             },
         },
     );
@@ -355,7 +360,7 @@ pub async fn create_queue_registry_resource(
         .create(&PostParams::default(), &queue_registry)
         .await
         .expect("Could not create queue splitter in E2E test.");
-    println!("MirrordWorkloadQueueRegistry resource created at namespace {namespace} with name {QUEUE_REGISTRY_RESOURCE_NAME}");
+    println!("MirrordWorkloadQueueRegistry resource created at namespace {} with name {QUEUE_REGISTRY_RESOURCE_NAME}", kube_service.namespace);
 }
 
 /// Name of the environment variable that holds the configuration for this app.
@@ -745,8 +750,7 @@ pub async fn sqs_test_resources(
 
     create_queue_registry_resource(
         &kube_client,
-        &k8s_service.namespace,
-        &k8s_service.name,
+        &k8s_service,
         use_regex,
         with_fallback_json.then_some((&queue1, &queue2)),
     )

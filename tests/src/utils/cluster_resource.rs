@@ -150,7 +150,8 @@ pub(super) fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rol
             "workloadRef": {
                 "apiVersion": Deployment::API_VERSION,
                 "kind": Deployment::KIND,
-                "name": deployment.name().unwrap()
+                "name": deployment.name().unwrap(),
+                "scaleDown": "progressively"
             },
             "strategy": {
                 "canary": {}
