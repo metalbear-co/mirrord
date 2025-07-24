@@ -39,12 +39,14 @@ mod rpath;
 /// - A shebang is added to scripts without one in order to point it to the patched binary.
 /// - When checking a script, only the first line of the file is checked for a shebang, in case the
 ///   script is encoded unusually.
+/// - Some errors may prevent logs from printing out, making it harder to diagnose the issue. In
+///   this case, use the `experimental.sip_log_destination` config to print SIP logs to a file.
 mod main {
     use std::{
         env,
         ffi::{OsStr, OsString},
         fs::{File, OpenOptions},
-        io::{self, BufRead, Write},
+        io::{self, BufRead, ErrorKind, Write},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -62,7 +64,7 @@ mod main {
         Architecture, Endianness, FileKind,
     };
     use once_cell::sync::Lazy;
-    use tracing::{trace, warn};
+    use tracing::{debug, error, trace, warn};
     use which::which;
 
     use super::*;
@@ -739,14 +741,36 @@ mod main {
                 trace!("No SIP detected on {:?}", binary_path);
                 Ok(None)
             }
-            Err(err) => {
+            Err(SipError::IO(err)) if err.raw_os_error() == Some(24) => {
+                // The full error is: `{ code: 24, kind: Uncategorized, message: "Too many open
+                // files" }`. This error was encountered in the past when using mirrord with Air
+                // (hot reloader).
+                error!(
+                    "Too many files open when trying to patch {binary_path}. Try increasing the \
+                    file limit using `ulimit`."
+                );
+                Err(SipError::IO(err))
+            }
+            Err(SipError::IO(err)) if err.kind() == ErrorKind::NotFound => {
                 trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
                     This is not necessarily an error."
                 );
-                // E.g. `env` tries to execute a bunch of non-existing files and fails, and that's
-                // just its valid flow.
+                // E.g. `env` tries to execute a bunch of non-existing files and fails, and
+                // that's just its valid flow.
+                Ok(None)
+            }
+            Err(err) => {
+                debug!(
+                    "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
+                    applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
+                    This is not necessarily an error."
+                );
+                // We know that `NotFound` errors may occur here as part of normal execution, and
+                // that other errors may also occur normally, hence why we discard this error. In
+                // the case that tracing logs are not being printed, the configuration for
+                // `experimental.sip_log_destination` can be used to print this error to a file.
                 Ok(None)
             }
         };
