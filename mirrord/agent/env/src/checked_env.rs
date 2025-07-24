@@ -4,7 +4,7 @@ use std::{
     fmt,
     marker::PhantomData,
     net::{AddrParseError, IpAddr, SocketAddr},
-    str::{FromStr, Utf8Error}
+    str::{FromStr, Utf8Error},
 };
 
 #[cfg(not(windows))]
