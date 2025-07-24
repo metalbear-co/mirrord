@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
     kind = "MirrordKafkaClientConfig",
     namespaced,
     printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#,
-    printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#
+    printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#,
+    printcolumn = r#"{"name":"AUTHENTICATION_EXTRA", "type":"string", "description":"Additional authentication config.", "jsonPath":".spec.authenticationExtra"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaClientConfigSpec {
@@ -33,6 +34,9 @@ pub struct MirrordKafkaClientConfigSpec {
     ///
     /// Example value: `default/my-secret`
     pub load_from_secret: Option<String>,
+
+    /// Additional authentication configuration.
+    pub authentication_extra: Option<MirrordKafkaClientAuthExtra>,
 }
 
 /// Property to use when creating operator's Kafka client.
@@ -45,6 +49,29 @@ pub struct MirrordKafkaClientProperty {
     /// Value for the property, e.g `kafka.default.svc.cluster.local:9092`.
     /// `null` clears the property from parent resource when resolving the final configuration.
     pub value: Option<String>,
+}
+
+/// Additional authentication configuration for Kafka splitting.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordKafkaClientAuthExtra {
+    /// Authentication kind.
+    ///
+    /// Right now the only supported value is `MSK_IAM`, which enables IAM/OAUTHBEARER
+    /// authentication with Amazon Managed Streaming for Apache Kafka.
+    ///
+    /// When this is set to `MSK_IAM`, additional properties are merged into the configuration:
+    /// 1. `sasl.mechanism=OAUTHBEARER`
+    /// 2. `security.protocol=SASL_SSL`
+    pub kind: String,
+    /// AWS region of the MSK cluster.
+    ///
+    /// Required when `kind` is `MSK_IAM`.
+    pub aws_region: Option<String>,
+}
+
+impl MirrordKafkaClientAuthExtra {
+    pub const MSK_IAM: &'static str = "MSK_IAM";
 }
 
 /// Defines splittable Kafka topics consumed by some workload living in the same namespace.
