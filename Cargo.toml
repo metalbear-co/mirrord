@@ -186,6 +186,9 @@ pem = "3"
 # Used by `cli`, `auth`
 home = "0.5"
 
+# Used by `cli`, `analytics`
+uuid = { version = "1.17", features = ["v4", "serde"] }
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
