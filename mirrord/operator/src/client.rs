@@ -489,7 +489,7 @@ where
         })?;
 
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(
+            .get_client_certificate::<MirrordOperatorCrd, Client>(
                 &self.client,
                 fingerprint,
                 subscription_id,
