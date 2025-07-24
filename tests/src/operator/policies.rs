@@ -19,6 +19,7 @@ use crate::utils::{
     resource_guard::ResourceGuard, services::basic_service, TestProcess,
 };
 
+mod copy_target;
 mod fs;
 
 /// Guard that deletes a mirrord policy when dropped.
