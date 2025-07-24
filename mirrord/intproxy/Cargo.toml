@@ -38,10 +38,14 @@ hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
-rand.workspace = true
 tokio-rustls.workspace = true
 rustls.workspace = true
 tokio-retry.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rand.workspace = true
+[target.'cfg(target_os = "macos")'.dependencies]
+rand.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true

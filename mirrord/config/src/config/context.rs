@@ -3,8 +3,15 @@ use std::{
     env::VarError,
     ffi::{OsStr, OsString},
     ops::Not,
-    os::unix::ffi::OsStrExt,
 };
+
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
+
+#[cfg(target_os = "windows")]
+#[allow(unused_imports)]
+use std::os::windows::ffi::OsStrExt;
+
 
 /// Context for generating and verifying a [`MirrordConfig`](super::MirrordConfig).
 ///
@@ -94,7 +101,10 @@ impl ConfigContext {
     ///
     /// This is the only way we should read environment when generating or verifying configuration.
     pub fn get_env(&self, name: &str) -> Result<String, VarError> {
+        #[cfg(not(windows))]
         let name = OsStr::from_bytes(name.as_bytes());
+        #[cfg(windows)]
+        let name = OsStr::new(name);
 
         let os_value = match self.env_override.get(name) {
             Some(value) => Ok(value.clone()),
@@ -102,9 +112,12 @@ impl ConfigContext {
             None => std::env::var_os(name).ok_or(VarError::NotPresent),
         }?;
 
-        std::str::from_utf8(os_value.as_bytes())
-            .map(ToString::to_string)
-            .map_err(|_| VarError::NotUnicode(os_value))
+        #[cfg(not(windows))]
+        let s = std::str::from_utf8(os_value.as_bytes()).map(ToString::to_string);
+        #[cfg(windows)]
+        let s = os_value.clone().into_string();
+        
+        s.map_err(|_| VarError::NotUnicode(os_value))
     }
 
     /// Returns the mark previously set with [`ConfigContext::empty_target_final`].
