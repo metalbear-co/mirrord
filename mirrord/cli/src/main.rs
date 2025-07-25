@@ -239,10 +239,10 @@
 #![deny(unused_crate_dependencies)]
 
 use std::{
-    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
+    collections::HashMap, env::vars, net::SocketAddr,
     time::Duration,
 };
-#[cfg(target_os = "macos")]
+#[cfg(not(windows))]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use clap::{CommandFactory, Parser};
@@ -308,6 +308,8 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 use crate::{newsletter::suggest_newsletter_signup, util::get_user_git_branch};
+#[cfg(windows)]
+use crate::execution::windows::WindowsProcess;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -354,7 +356,7 @@ where
     };
 
     #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
+    let (_did_sip_patch, binary) = (false, args.binary.clone());
 
     let mut env_vars: HashMap<String, String> = vars().collect();
     env_vars.extend(execution_info.environment.clone());
@@ -370,14 +372,12 @@ where
         .collect::<Vec<_>>();
 
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
-    let binary_path = match which(&binary) {
-        Ok(pathbuf) => pathbuf,
-        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
-    };
-    let path = CString::new(binary_path.as_os_str().as_bytes())?;
+    #[cfg(not(windows))]
+    let _ = process_which(&binary)?;
 
     sub_progress.success(Some("ready to launch process"));
 
+    #[cfg(not(windows))]
     if config.experimental.browser_extension_config {
         browser::init_browser_extension(&config.feature.network, progress);
     }
@@ -398,6 +398,25 @@ where
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup().await;
 
+    execve_process(binary, binary_args, env_vars, _did_sip_patch)
+}
+
+#[cfg(not(windows))]
+fn process_which(binary: String) -> Result<>{
+    match which(&binary) {
+        Ok(pathbuf) => pathbuf,
+        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
+    }
+}
+
+#[cfg(not(windows))]
+fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
+
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = process_which(&binary)?;
+
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
+    
     let args = binary_args
         .clone()
         .into_iter()
@@ -408,7 +427,7 @@ where
     let env = env_vars
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
-        .collect::<CliResult<Vec<_>, _>>()?;
+        .collect::<CliResult<Vec<_>, _>>()?; 
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -429,6 +448,17 @@ where
     }
 
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+#[cfg(windows)]
+fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
+    let _child_process = WindowsProcess::execute(binary, binary_args, env_vars, true);
+
+    // Inject
+    // Resume
+    // Exit
+
+    Ok(())
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].

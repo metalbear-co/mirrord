@@ -37,10 +37,11 @@ use crate::extract::extract_arm64;
 use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
     error::CliError,
-    extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
     CliResult,
 };
+#[cfg(not(windows))]
+use crate::extract::extract_library;
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -54,6 +55,9 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+
+#[cfg(windows)]
+pub mod windows;
 
 /// A handle to a running mirrord proxy (either internal proxy or external proxy).
 #[derive(Debug, Serialize)]
@@ -191,6 +195,9 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
+        // Extract Layer from exe
+        // currently disabled for windows
+        #[cfg(not(windows))]
         let lib_path = extract_library(None, progress, true)?;
 
         if !config.use_proxy {
@@ -250,14 +257,17 @@ impl MirrordExecution {
             );
         }
 
-        let lib_path = lib_path.to_string_lossy().into_owned();
-        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
-        // If already exists, we append.
-        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
-        } else {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
-        };
+        #[cfg(not(windows))]
+        {
+            let lib_path = lib_path.to_string_lossy().into_owned();
+            // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
+            // If already exists, we append.
+            if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+            } else {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+            };
+        }
 
         let encoded_config = config.encode()?;
 

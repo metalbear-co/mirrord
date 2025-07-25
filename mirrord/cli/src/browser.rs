@@ -1,3 +1,6 @@
+#![cfg(not(windows))]
+// Currently browser only supported on not(windows)
+
 use std::{process::Command, sync::LazyLock};
 
 use base64::engine::{general_purpose::STANDARD, Engine};
@@ -76,6 +79,15 @@ fn is_chrome_installed() -> bool {
 fn is_chrome_installed() -> bool {
     Command::new("which")
         .arg("google-chrome")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_chrome_installed() -> bool {
+    Command::new("cmd")
+        .args(&["/c", "where", "chrome"])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)

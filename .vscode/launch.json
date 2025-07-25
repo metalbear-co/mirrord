@@ -19,6 +19,45 @@
       ],
     },
     {
+      "type": "lldb",
+      "request": "launch",
+      "name": "debug mirrord-win",
+      "cargo": {
+        "args": [
+          "build"
+        ],
+        "filter": {
+          "name": "mirrord-win"
+        }
+      },
+      "args": [
+        // running release version to prevent detours prints (from within asdf-overlay-hook)
+        "target/release/layer_win.dll", 
+        "--", // seperator between mirrord-win exec and commandline to executre
+        "target/debug/target-dummy.exe", "HIJACK_ME", "VAL"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": [
+        "rust"
+      ],
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "test mirrord-win",
+      "cargo": {
+        "args": [
+          "test", "-p", "mirrord-win", "--lib"
+        ]
+      },
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": [
+        "rust"
+      ],
+    },
+    {
       "name": "Launch golang file",
       "type": "go",
       "request": "launch",

@@ -57,6 +57,8 @@
 #![feature(io_error_more)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+#![feature(windows_change_time)]
+#![feature(windows_by_handle)]
 
 pub mod batched_body;
 pub mod codec;
