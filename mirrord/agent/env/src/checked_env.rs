@@ -4,9 +4,11 @@ use std::{
     fmt,
     marker::PhantomData,
     net::{AddrParseError, IpAddr, SocketAddr},
-    os::unix::ffi::OsStrExt,
     str::{FromStr, Utf8Error},
 };
+
+#[cfg(not(windows))]
+use std::os::unix::ffi::OsStrExt;
 
 use base64::{engine::general_purpose, Engine};
 #[cfg(feature = "k8s-openapi")]
@@ -89,7 +91,10 @@ impl<V: EnvValue> CheckedEnv<V> {
     pub fn try_from_env(self) -> Result<Option<V>, V::FromReprError> {
         match std::env::var_os(self.name) {
             Some(repr) => {
+                #[cfg(not(windows))]
                 let value = V::from_repr(repr.as_bytes())?;
+                #[cfg(windows)]
+                let value = V::from_repr(repr.as_encoded_bytes())?;
                 Ok(Some(value))
             }
             None => Ok(None),
