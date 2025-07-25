@@ -42,9 +42,7 @@ tokio-rustls.workspace = true
 rustls.workspace = true
 tokio-retry.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-rand.workspace = true
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rand.workspace = true
 
 [dev-dependencies]

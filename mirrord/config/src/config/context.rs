@@ -8,10 +8,6 @@ use std::{
 #[cfg(not(windows))]
 use std::os::unix::ffi::OsStrExt;
 
-#[cfg(windows)]
-#[allow(unused_imports)]
-use std::os::windows::ffi::OsStrExt;
-
 
 /// Context for generating and verifying a [`MirrordConfig`](super::MirrordConfig).
 ///
@@ -103,6 +99,7 @@ impl ConfigContext {
     pub fn get_env(&self, name: &str) -> Result<String, VarError> {
         #[cfg(not(windows))]
         let name = OsStr::from_bytes(name.as_bytes());
+
         #[cfg(windows)]
         let name = OsStr::new(name);
 

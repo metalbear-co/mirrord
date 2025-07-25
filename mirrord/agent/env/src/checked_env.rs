@@ -10,10 +10,6 @@ use std::{
 #[cfg(not(windows))]
 use std::os::unix::ffi::OsStrExt;
 
-#[cfg(windows)]
-#[allow(unused_imports)]
-use std::os::windows::ffi::OsStrExt;
-
 use base64::{engine::general_purpose, Engine};
 #[cfg(feature = "k8s-openapi")]
 use k8s_openapi::api::core::v1::EnvVar;
