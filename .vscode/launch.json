@@ -7,6 +7,22 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "mirrord-cli",
+      "program": "${workspaceFolder}/target/debug/mirrord",
+      "args": [
+        "exec",
+        "ls",
+      ],
+      "env": {
+        "MIRRORD_TELEMETRY": "true",
+        "MIRRORD_PROGRESS_MODE": "off",
+        "RUST_LOG": "mirrord=debug,warn",
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "cargo test",
       "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
       "args": [
