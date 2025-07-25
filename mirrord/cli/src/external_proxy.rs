@@ -47,6 +47,7 @@ use crate::{
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
+    user_data::UserData,
     util::{create_listen_socket, detach_io},
 };
 
@@ -59,7 +60,12 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
-pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -> CliResult<()> {
+pub async fn proxy(
+    config: LayerConfig,
+    listen_port: u16,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     tracing::info!(
         ?config,
         listen_port,
@@ -81,7 +87,12 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
         .and_then(|execution_kind| execution_kind.parse().ok())
         .unwrap_or_default();
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry, execution_kind, watch);
+    let mut analytics = AnalyticsReporter::new(
+        config.telemetry,
+        execution_kind,
+        watch,
+        user_data.machine_id(),
+    );
     (&config).collect_analytics(analytics.get_mut());
 
     // This connection is just to keep the agent alive as long as the client side is running.

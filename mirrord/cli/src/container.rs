@@ -22,6 +22,7 @@ use crate::{
     error::{CliResult, ContainerError},
     execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
     logging::pipe_intproxy_sidecar_logs,
+    user_data::UserData,
     util::MIRRORD_CONSOLE_ADDR_ENV,
     wsl::adjust_container_config_for_wsl,
 };
@@ -65,13 +66,18 @@ async fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
     mut cfg_context: ConfigContext,
     watch: drain::Watch,
+    user_data: &UserData,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
-    let analytics =
-        AnalyticsReporter::only_error(config.telemetry, ExecutionKind::Container, watch);
+    let analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        ExecutionKind::Container,
+        watch,
+        user_data.machine_id(),
+    );
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
@@ -165,6 +171,7 @@ pub async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
+    user_data: &UserData,
 ) -> CliResult<i32> {
     let mut progress = ProgressTracker::from_env("mirrord container");
 
@@ -180,7 +187,7 @@ pub async fn container_command(
 
     let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
     let (mut config, mut analytics) =
-        create_config_and_analytics(&mut progress, cfg_context, watch).await?;
+        create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
@@ -229,6 +236,7 @@ pub async fn container_ext_command(
     config_file: Option<PathBuf>,
     target: Option<String>,
     watch: drain::Watch,
+    user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
@@ -237,7 +245,7 @@ pub async fn container_ext_command(
         .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
-        create_config_and_analytics(&mut progress, cfg_context, watch).await?;
+        create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()

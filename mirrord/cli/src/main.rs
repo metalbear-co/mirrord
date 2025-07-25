@@ -277,7 +277,7 @@ use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::Version;
-use tracing::{error, info, warn};
+use tracing::{error, info, trace, warn};
 use which::which;
 
 mod browser;
@@ -299,6 +299,7 @@ mod operator;
 mod port_forward;
 mod profile;
 mod teams;
+mod user_data;
 mod util;
 mod verify_config;
 mod vpn;
@@ -307,7 +308,9 @@ mod wsl;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
-use crate::{newsletter::suggest_newsletter_signup, util::get_user_git_branch};
+use crate::{
+    newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
+};
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -315,6 +318,7 @@ async fn exec_process<P>(
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
+    user_data: &mut UserData,
 ) -> CliResult<()>
 where
     P: Progress + Send + Sync,
@@ -330,6 +334,7 @@ where
             OsString::from_vec(bytes)
         })
         .collect::<Vec<_>>();
+
     let execution_info = MirrordExecution::start_internal(
         &mut config,
         #[cfg(target_os = "macos")]
@@ -396,7 +401,7 @@ where
     sub_progress_config.success(Some("config summary"));
 
     // print an invitation to the newsletter on certain run count numbers
-    suggest_newsletter_signup().await;
+    suggest_newsletter_signup(user_data).await;
 
     let args = binary_args
         .clone()
@@ -594,7 +599,7 @@ fn print_config<P>(
     ));
 }
 
-async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
+async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -619,7 +624,12 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
+    let mut analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        Default::default(),
+        watch,
+        user_data.machine_id(),
+    );
     (&config).collect_analytics(analytics.get_mut());
 
     let result = config.verify(&mut cfg_context);
@@ -634,6 +644,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         args,
         &progress,
         &mut analytics,
+        user_data,
     )
     .await;
 
@@ -644,7 +655,11 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     execution_result
 }
 
-async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<()> {
+async fn port_forward(
+    args: &PortForwardArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     fn hash_port_mappings(
         args: &PortForwardArgs,
     ) -> CliResult<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
@@ -712,7 +727,12 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
+    let mut analytics = AnalyticsReporter::new(
+        config.telemetry,
+        ExecutionKind::PortForward,
+        watch,
+        user_data.machine_id(),
+    );
     (&config).collect_analytics(analytics.get_mut());
 
     let result = config.verify(&mut cfg_context);
@@ -790,9 +810,14 @@ fn main() -> miette::Result<()> {
     let res: CliResult<(), CliError> = rt.block_on(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
+        let mut user_data = UserData::from_default_path()
+            .await
+            .inspect_err(|fail| trace!(?fail, "Failed initializing `UserData`!"))
+            .unwrap_or_default();
+
         match cli.commands {
-            Commands::Exec(args) => exec(&args, watch).await?,
-            Commands::Dump(args) => dump_command(&args, watch).await?,
+            Commands::Exec(args) => exec(&args, watch, &mut user_data).await?,
+            Commands::Dump(args) => dump_command(&args, watch, &user_data).await?,
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),
@@ -810,12 +835,12 @@ fn main() -> miette::Result<()> {
             }
             Commands::Operator(args) => operator_command(*args).await?,
             Commands::ExtensionExec(args) => {
-                extension_exec(*args, watch).await?;
+                extension_exec(*args, watch, &user_data).await?;
             }
             Commands::InternalProxy { port } => {
                 let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_intproxy_tracing_registry(&config)?;
-                internal_proxy::proxy(config, port, watch).await?
+                internal_proxy::proxy(config, port, watch, &user_data).await?
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
@@ -827,21 +852,22 @@ fn main() -> miette::Result<()> {
             Commands::Container(args) => {
                 let (runtime_args, exec_params) = args.into_parts();
 
-                let exit_code = container_command(runtime_args, exec_params, watch).await?;
+                let exit_code =
+                    container_command(runtime_args, exec_params, watch, &user_data).await?;
 
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
             }
             Commands::ExtensionContainer(args) => {
-                container_ext_command(args.config_file, args.target, watch).await?
+                container_ext_command(args.config_file, args.target, watch, &user_data).await?
             }
             Commands::ExternalProxy { port } => {
                 let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_extproxy_tracing_registry(&config)?;
-                external_proxy::proxy(config, port, watch).await?
+                external_proxy::proxy(config, port, watch, &user_data).await?
             }
-            Commands::PortForward(args) => port_forward(&args, watch).await?,
+            Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
             Commands::Newsletter => newsletter::newsletter_command().await,
         };

@@ -11,6 +11,7 @@ use super::config::DumpArgs;
 use crate::{
     connection::{create_and_connect, AgentConnection},
     error::{CliError, CliResult},
+    user_data::UserData,
 };
 
 /// Implements the `mirrord dump` command.
@@ -18,14 +19,23 @@ use crate::{
 /// This command starts a mirrord session using the given config file and target arguments,
 /// subscribes to mirror traffic from the specified ports, and prints any traffic that comes
 /// to the screen with the connection ID.
-pub async fn dump_command(args: &DumpArgs, watch: drain::Watch) -> CliResult<()> {
+pub async fn dump_command(
+    args: &DumpArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     // Set up configuration similar to exec command
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
 
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
-    let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::Dump, watch);
+    let mut analytics = AnalyticsReporter::new(
+        config.telemetry,
+        ExecutionKind::Dump,
+        watch,
+        user_data.machine_id(),
+    );
 
     if !args.params.disable_version_check {
         super::prompt_outdated_version(&progress).await;
