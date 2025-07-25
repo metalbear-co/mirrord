@@ -3,7 +3,7 @@ use k8s_openapi::api::{apps::v1::Deployment, core::v1::Service};
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 
 use super::resource_guard::ResourceGuard;
-use crate::utils::{cluster_resource::argo_rollout_from_deployment, watch, CONTAINER_NAME};
+use crate::utils::{cluster_resource::argo_rollout_from_json, watch, CONTAINER_NAME};
 
 /// A service deployed to the kubernetes cluster.
 ///
@@ -49,7 +49,7 @@ impl KubeService {
     /// available.
     /// Add the rollout to this service
     pub async fn add_rollout(&mut self, kube_client: kube::Client, delete_after_fail: bool) {
-        let rollout = argo_rollout_from_deployment(&self.name, &self.deployment);
+        let rollout = argo_rollout_from_json(&self.name, &self.deployment);
         let rollout_api: kube::Api<Rollout> =
             kube::Api::namespaced(kube_client.clone(), &self.namespace);
         let (rollout_guard, rollout) =
