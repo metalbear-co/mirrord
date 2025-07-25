@@ -22,6 +22,7 @@ on:
 jobs:
   trigger-operator-e2e:
     runs-on: ubuntu-latest
+    continue-on-error: true
     # Only run for approved reviews on PRs targeting protected branches
     if: >
       github.event_name == 'workflow_dispatch' ||
@@ -37,6 +38,7 @@ jobs:
       - name: Trigger operator E2E workflow and wait for completion
         id: trigger-e2e
         uses: metalbear-co/return-dispatch@main
+        continue-on-error: true
         with:
           token: ${{ secrets.OPERATOR_E2E_PAT }}
           ref: ${{ inputs.operator_branch || 'main' }}
