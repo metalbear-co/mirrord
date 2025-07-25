@@ -35,7 +35,6 @@ mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 
 actix-codec.workspace = true
-base64.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
@@ -53,7 +52,6 @@ k8s-openapi.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime = "2"
-nix = { workspace = true, features = ["process", "resource"] }
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
@@ -67,11 +65,25 @@ regex.workspace = true
 mid = "3.0.0"
 home.workspace = true
 
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+nix = { workspace = true, features = ["process", "resource"] }
+base64.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
 
-[build-dependencies]
+[target.'cfg(target_os = "macos")'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+layer-win = { artifact = "cdylib", path = "../../mirrord-win-poc/manual-exec/layer-win" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 rstest.workspace = true
