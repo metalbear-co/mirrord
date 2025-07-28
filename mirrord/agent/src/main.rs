@@ -5,6 +5,9 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+// TODO(alex): It's coming from our `fancy_regex::Error` conversion.
+#![allow(clippy::result_large_err)]
+
 use std::process::ExitCode;
 
 use crate::{entrypoint::IPTABLES_DIRTY_EXIT_CODE, error::AgentError};
