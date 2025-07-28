@@ -224,7 +224,7 @@ impl From<HookError> for i64 {
             }
             HookError::ProxyError(ref err) => {
                 let reason = match err {
-                    &ProxyError::ProxyFailure(ref err) => {
+                    ProxyError::ProxyFailure(err) => {
                         format!("Proxy encountered an error: {err}")
                     }
                     err => format!("Proxy error, connectivity issue or a bug: {err}"),
