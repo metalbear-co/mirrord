@@ -623,7 +623,7 @@ mod main {
                 } else {
                     frameworks_dir
                 };
-                env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value);
+                unsafe { env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value) };
                 break;
             }
         }
