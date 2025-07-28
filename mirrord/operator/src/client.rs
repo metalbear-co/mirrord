@@ -199,6 +199,9 @@ impl OperatorApi<NoClientCert> {
     /// step to confirm that the operator is not installed.
     ///
     /// If certain that the operator is not installed, returns [`None`].
+    ///
+    /// NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
+    /// authentication with the cluster, for example via the kubelogin tool
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     pub async fn try_new<R>(
         config: &LayerConfig,

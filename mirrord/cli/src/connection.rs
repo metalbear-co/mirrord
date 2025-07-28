@@ -164,6 +164,8 @@ where
         _ => (),
     };
 
+    // NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
+    // authentication with the cluster, for example via the kubelogin tool
     let k8s_api = KubernetesAPI::create(config)
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
