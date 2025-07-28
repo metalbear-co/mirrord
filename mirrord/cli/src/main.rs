@@ -624,17 +624,13 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
-    // let mut analytics = AnalyticsReporter::only_error(
-    //     config.telemetry,
-    //     Default::default(),
-    //     watch,
-    //     user_data.machine_id(),
-    // );
-    let mut analytics =
-        AnalyticsReporter::new(true, Default::default(), watch, user_data.machine_id());
+    let mut analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        Default::default(),
+        watch,
+        user_data.machine_id(),
+    );
     (&config).collect_analytics(analytics.get_mut());
-
-    analytics.send().await;
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
