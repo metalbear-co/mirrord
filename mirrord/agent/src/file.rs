@@ -3,7 +3,7 @@ use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap, VecDeque},
     fs::{read_link, File, OpenOptions, ReadDir},
-    io::{self, prelude::*, BufReader, SeekFrom},
+    io::{self, prelude::*, SeekFrom},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
@@ -34,7 +34,7 @@ fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryIntern
 }
 
 #[derive(Debug)]
-struct GetDEnts64Stream {
+pub(crate) struct GetDEnts64Stream {
     inner: std::fs::ReadDir,
     current_and_parent: VecDeque<io::Result<DirEntryInternal>>,
     current_index: usize,
@@ -336,50 +336,6 @@ impl FileManager {
                     };
 
                     Ok(response)
-                } else {
-                    Err(ResponseError::NotFile(fd))
-                }
-            })
-    }
-
-    /// Remote implementation of `fgets`.
-    ///
-    /// Uses `BufReader::read_line` to read a line (including `"\n"`) from a file with `fd`. The
-    /// file cursor position has to be moved manually due to this.
-    ///
-    /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
-    /// on it (even though we return the full `Vec` of bytes).
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn read_line(
-        &mut self,
-        fd: u64,
-        buffer_size: u64,
-    ) -> RemoteResult<ReadFileResponse> {
-        self.open_files
-            .get_mut(&fd)
-            .ok_or(ResponseError::NotFound(fd))
-            .and_then(|remote_file| {
-                if let RemoteFile::File(file) = remote_file {
-                    let original_position = file.stream_position()?;
-                    // limit bytes read using take
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
-                    let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
-                    Ok(reader
-                        .read_until(b'\n', &mut buffer)
-                        .and_then(|read_amount| {
-                            // Revert file to original position + bytes read (in case the
-                            // bufreader advanced too much)
-                            file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
-
-                            // We handle the extra bytes in the `fgets` hook, so here we can
-                            // just return the full buffer.
-                            let response = ReadFileResponse {
-                                bytes: buffer.into(),
-                                read_amount: read_amount as u64,
-                            };
-
-                            Ok(response)
-                        })?)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
