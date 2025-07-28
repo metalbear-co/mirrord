@@ -1,5 +1,6 @@
 use std::{path::PathBuf, sync::LazyLock};
 
+use fs4::tokio::AsyncFileExt;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -66,7 +67,7 @@ impl UserData {
                 .read(true)
                 .write(true)
                 .create(true)
-                .truncate(false)
+                .truncate(true)
                 .open(DATA_STORE_PATH.as_path())
                 .await?;
 
@@ -113,12 +114,16 @@ impl UserData {
             .read(true)
             .write(true)
             .create(true)
-            .truncate(false)
+            .truncate(true)
             .open(DATA_STORE_PATH.as_path())
             .await?;
 
-        let contents = serde_json::to_vec(&self)?;
-        store_file.write_all(contents.as_slice()).await?;
+        if store_file.try_lock_exclusive()? {
+            let contents = serde_json::to_vec(&self)?;
+            store_file.write_all(contents.as_slice()).await?;
+
+            store_file.unlock_async().await?;
+        }
         Ok(())
     }
 

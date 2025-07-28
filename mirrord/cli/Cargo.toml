@@ -67,6 +67,7 @@ regex.workspace = true
 mid = "3.0.0"
 home.workspace = true
 uuid.workspace = true
+fs4.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
