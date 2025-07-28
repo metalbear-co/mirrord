@@ -23,12 +23,16 @@ use k8s_openapi::{
         apps::v1::Deployment,
         core::v1::{
             ConfigMap, ConfigMapEnvSource, ConfigMapKeySelector, EnvFromSource, EnvVar,
-            EnvVarSource, Pod, Service,
+            EnvVarSource, Namespace, Pod, Service,
         },
     },
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
-use kube::{api::PostParams, Api, Client, Resource};
+use kube::{
+    api::{Patch, PatchParams, PostParams},
+    Api, Client, Resource,
+};
+use mirrord_kube::api::kubernetes::rollout::Rollout;
 use mirrord_operator::{
     crd::{
         MirrordSqsSession, MirrordWorkloadQueueRegistry, MirrordWorkloadQueueRegistrySpec,
@@ -38,13 +42,18 @@ use mirrord_operator::{
     setup::OPERATOR_NAME,
 };
 use serde::Serialize;
+use serde_json::Value;
 
 use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
-    kube_service::KubeService, resource_guard::ResourceGuard,
-    services::service_with_env_and_env_from,
+    cluster_resource::{
+        argo_rollout_from_json, argo_rollout_with_template_from_json, deployment_from_json,
+        service_from_json,
+    },
+    kube_service::KubeService,
+    resource_guard::ResourceGuard,
+    watch,
 };
-use crate::utils::cluster_resource::{argo_rollout_from_json, argo_rollout_with_template_from_json};
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
@@ -572,19 +581,13 @@ async fn sqs_consumer_service(
         }]
     });
 
-    use kube::Api;
-    use k8s_openapi::api::core::v1::Namespace;
-    use mirrord_kube::api::kubernetes::rollout::Rollout;
-    use crate::utils::resource_guard::ResourceGuard;
-    use crate::utils::watch;
-    use crate::utils::cluster_resource::{deployment_from_json, service_from_json};
-    use serde_json::Value;
-
     let delete_after_fail = std::env::var_os("PRESERVE_FAILED_ENV_NAME").is_none();
     let kube_client = kube_client.clone();
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let deployment_api: Api<k8s_openapi::api::apps::v1::Deployment> = Api::namespaced(kube_client.clone(), &namespace);
-    let service_api: Api<k8s_openapi::api::core::v1::Service> = Api::namespaced(kube_client.clone(), &namespace);
+    let deployment_api: Api<k8s_openapi::api::apps::v1::Deployment> =
+        Api::namespaced(kube_client.clone(), &namespace);
+    let service_api: Api<k8s_openapi::api::core::v1::Service> =
+        Api::namespaced(kube_client.clone(), &namespace);
     let rollout_api: Api<Rollout> = Api::namespaced(kube_client.clone(), &namespace);
 
     let name = format!("queue-forwarder-{}", crate::utils::random_string());
@@ -599,40 +602,72 @@ async fn sqs_consumer_service(
                 crate::utils::TEST_RESOURCE_LABEL.0: crate::utils::TEST_RESOURCE_LABEL.1,
             }
         },
-    })).unwrap();
+    }))
+    .unwrap();
     let namespace_guard = ResourceGuard::create(
         namespace_api.clone(),
         &namespace_resource,
         delete_after_fail,
-    ).await.ok();
+    )
+    .await
+    .ok();
 
     // Create deployment
-    let deployment = deployment_from_json(&name, "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest", serde_json::to_value(env).unwrap(), env_from.clone());
-    let (deployment_guard, deployment) = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail).await.unwrap();
+    let deployment = deployment_from_json(
+        &name,
+        "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
+        serde_json::to_value(env).unwrap(),
+        env_from.clone(),
+    );
+    let (deployment_guard, deployment) =
+        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+            .await
+            .unwrap();
 
     // Create service
     let service = service_from_json(&name, "ClusterIP");
-    let (service_guard, service) = ResourceGuard::create(service_api.clone(), &service, delete_after_fail).await.unwrap();
+    let (service_guard, service) =
+        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+            .await
+            .unwrap();
 
     // Wait for pod
-    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.clone()).await.into_iter().next().unwrap().metadata.name.unwrap();
+    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
+        .await
+        .into_iter()
+        .next()
+        .unwrap()
+        .metadata
+        .name
+        .unwrap();
 
     match workload_type {
-        TestWorkload::Deployment => {
-            KubeService {
-                name: name.clone(),
-                namespace: namespace.to_string(),
-                service,
-                deployment,
-                rollout: None,
-                pod_name,
-                guards: vec![deployment_guard, service_guard],
-                namespace_guard: namespace_guard.map(|(guard, _)| guard),
-            }
-        }
+        TestWorkload::Deployment => KubeService {
+            name: name.clone(),
+            namespace: namespace.to_string(),
+            service,
+            deployment,
+            rollout: None,
+            pod_name,
+            guards: vec![deployment_guard, service_guard],
+            namespace_guard: namespace_guard.map(|(guard, _)| guard),
+        },
         TestWorkload::ArgoRolloutWithWorkloadRef => {
             let rollout = argo_rollout_from_json(&name, &deployment);
-            let (rollout_guard, rollout) = ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail).await.unwrap();
+            let (rollout_guard, rollout) =
+                ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
+                    .await
+                    .unwrap();
+            // Scale deployment to zero replicas so only the rollout manages pods
+            let patch = serde_json::json!({ "spec": { "replicas": 0 } });
+            deployment_api
+                .patch(
+                    &name,
+                    &PatchParams::apply("mirrord-test"),
+                    &Patch::Merge(&patch),
+                )
+                .await
+                .expect("Failed to scale deployment to zero replicas");
             watch::wait_until_rollout_available(&name, &namespace, 1, kube_client.clone()).await;
             KubeService {
                 name: name.clone(),
@@ -647,7 +682,10 @@ async fn sqs_consumer_service(
         }
         TestWorkload::ArgoRolloutWithTemplate => {
             let rollout = argo_rollout_with_template_from_json(&name, &deployment);
-            let (rollout_guard, rollout) = ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail).await.unwrap();
+            let (rollout_guard, rollout) =
+                ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
+                    .await
+                    .unwrap();
             watch::wait_until_rollout_available(&name, &namespace, 1, kube_client.clone()).await;
             KubeService {
                 name: name.clone(),
