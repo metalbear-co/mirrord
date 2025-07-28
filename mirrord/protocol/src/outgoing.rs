@@ -11,8 +11,10 @@ use bincode::{Decode, Encode};
 use socket2::SockAddr as OsSockAddr;
 
 use crate::{
-    outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
-    ConnectionId, Payload, SerializationError,
+    ConnectionId,
+    Payload,
+    // outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
+    SerializationError,
 };
 
 pub mod tcp;
@@ -48,6 +50,7 @@ impl From<StdIpSocketAddr> for SocketAddress {
     }
 }
 
+#[cfg(not(windows))]
 impl TryFrom<UnixAddr> for OsSockAddr {
     type Error = io::Error;
 
@@ -70,6 +73,7 @@ impl TryFrom<SocketAddress> for StdIpSocketAddr {
     type Error = io::Error;
 
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
+        #[allow(irrefutable_let_patterns)]
         if let SocketAddress::Ip(socket_addr) = addr {
             Ok(socket_addr)
         } else {
@@ -82,18 +86,21 @@ impl TryFrom<OsSockAddr> for SocketAddress {
     type Error = SerializationError;
 
     fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
-        addr.as_socket()
-            .map(SocketAddress::Ip)
-            .or_else(|| {
-                addr.as_pathname()
-                    .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
-            })
-            .or_else(|| {
-                addr.as_abstract_namespace()
-                    .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
-            })
-            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)))
-            .ok_or(SerializationError::SocketAddress)
+        let res = addr.as_socket().map(SocketAddress::Ip);
+        #[cfg(not(windows))]
+        {
+            res = res
+                .or_else(|| {
+                    addr.as_pathname()
+                        .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
+                })
+                .or_else(|| {
+                    addr.as_abstract_namespace()
+                        .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
+                })
+                .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)));
+        }
+        res.ok_or(SerializationError::SocketAddress)
     }
 }
 
@@ -103,7 +110,12 @@ impl TryFrom<SocketAddress> for OsSockAddr {
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
         match addr {
             SocketAddress::Ip(socket_addr) => Ok(socket_addr.into()),
+            #[cfg(not(windows))]
             SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
+            #[cfg(windows)]
+            _ => Err(
+                Self::Error::new(ErrorKind::InvalidInput, SerializationError::SocketAddress),
+            ),
         }
     }
 }
@@ -113,11 +125,16 @@ impl Display for SocketAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let addr = match self {
             SocketAddress::Ip(ip_address) => ip_address.to_string(),
+            #[cfg(not(windows))]
             SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
+            #[cfg(not(windows))]
             SocketAddress::Unix(Abstract(name)) => {
                 String::from_utf8_lossy(name.as_ref()).to_string()
             }
+            #[cfg(not(windows))]
             SocketAddress::Unix(Unnamed) => "<UNNAMED-UNIX-ADDRESS>".to_string(),
+            #[cfg(windows)]
+            _ => "<UNSUPPORTED-UNIX-ADDRESS>".to_string(),
         };
         write!(f, "{addr}")
     }
