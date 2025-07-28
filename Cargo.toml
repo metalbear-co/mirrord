@@ -189,6 +189,17 @@ pem = "3"
 # Used by `cli`, `auth`
 home = "0.5"
 
+# Used by `cli`
+dll-syringe = "0.16.0"
+
+# Used by `cli`, `intproxy`
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

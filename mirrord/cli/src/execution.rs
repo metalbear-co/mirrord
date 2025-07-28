@@ -43,6 +43,9 @@ use crate::{
 #[cfg(not(windows))]
 use crate::extract::extract_library;
 
+#[cfg(windows)]
+pub mod windows;
+
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 
@@ -55,9 +58,6 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
-
-#[cfg(windows)]
-pub mod windows;
 
 /// A handle to a running mirrord proxy (either internal proxy or external proxy).
 #[derive(Debug, Serialize)]

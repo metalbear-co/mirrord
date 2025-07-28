@@ -309,7 +309,7 @@ use verify_config::verify_config;
 
 use crate::{newsletter::suggest_newsletter_signup, util::get_user_git_branch};
 #[cfg(windows)]
-use crate::execution::windows::WindowsProcess;
+use crate::execution::windows::command::WindowsCommand;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -452,12 +452,20 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
 
 #[cfg(windows)]
 fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
-    let _child_process = WindowsProcess::execute(binary, binary_args, env_vars, true);
 
-    // Inject
-    // Resume
-    // Exit
+    let cmd = WindowsCommand::new(&binary)
+        .args(&binary_args)
+        .envs(env_vars)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
+    match cmd.inject_and_spawn("C:\\Users\\Daniel\\git\\mirrord\\target\\release\\layer_win.dll".to_string()) {
+        Ok(_) => Ok(()),
+        _ => Err(CliError::BinaryExecuteFailed(binary, binary_args))
+    }?;
+
+    // exit from this process?
     Ok(())
 }
 

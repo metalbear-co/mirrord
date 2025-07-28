@@ -72,18 +72,15 @@ base64.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows.workspace = true
+dll-syringe.workspace = true
+
 [target.'cfg(target_os = "macos")'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 layer-win = { artifact = "cdylib", path = "../../mirrord-win-poc/manual-exec/layer-win" }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = [
-    "Win32_Security",
-    "Win32_System_Pipes",
-    "Win32_System_Threading",
-] }
 
 [dev-dependencies]
 rstest.workspace = true

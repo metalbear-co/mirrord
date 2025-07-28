@@ -21,19 +21,20 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "debug mirrord-win",
+      "name": "debug cli [win]",
       "cargo": {
         "args": [
-          "build"
+          "build", "-p", "mirrord", "--target", "x86_64-pc-windows-msvc"
         ],
         "filter": {
-          "name": "mirrord-win"
-        }
+          "name": "mirrord"
+        },
+        "env": {
+          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/release/layer_win.dll",
+        },
       },
       "args": [
-        // running release version to prevent detours prints (from within asdf-overlay-hook)
-        "target/release/layer_win.dll", 
-        "--", // seperator between mirrord-win exec and commandline to executre
+        "exec",
         "target/debug/target-dummy.exe", "HIJACK_ME", "VAL"
       ],
       "cwd": "${workspaceFolder}",
