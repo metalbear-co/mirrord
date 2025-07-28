@@ -335,13 +335,13 @@ struct AnalyticsReport {
     error: Option<AnalyticsError>,
 }
 
-const ANALYTICS_ADDRESS: &str = "https://analytics.metalbear.co/api/v1/event";
+const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.co/api/v1/event";
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
 #[tracing::instrument(level = Level::TRACE)]
 async fn send_analytics(report: AnalyticsReport) {
     let client = reqwest::Client::new();
-    let res = client.post(ANALYTICS_ADDRESS).json(&report).send().await;
+    let res = client.post(ANALYTICS_ENDPOINT).json(&report).send().await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }
