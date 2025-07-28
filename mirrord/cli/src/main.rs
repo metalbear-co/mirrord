@@ -233,7 +233,6 @@
 //!
 //! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
 //! prints a nice little message to stdout.
-#![feature(let_chains)]
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]

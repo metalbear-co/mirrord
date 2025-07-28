@@ -34,8 +34,8 @@ on:
   workflow_dispatch:
   push:
   pull_request:
-    branches: [ main, '*staging*' ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
+    branches: [main, "*staging*"]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Cancel previous runs on the same PR.
 concurrency:
@@ -152,7 +152,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-01-22
+          toolchain: nightly-2025-07-28
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
@@ -189,7 +189,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: metalbear-co/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1
         with:
-          rust-version: nightly-2025-01-22
+          rust-version: nightly-2025-07-28
 
   check-rust-docs:
     runs-on: ubuntu-24.04
@@ -205,7 +205,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-01-22
+          toolchain: nightly-2025-07-28
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -222,7 +222,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
-      - run: rustup default nightly-2025-01-22
+      - run: rustup default nightly-2025-07-28
       - name: mirrord-agent UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
@@ -271,7 +271,7 @@ jobs:
 
   integration_tests:
     runs-on: ubuntu-24.04
-    needs: [ changed_files ]
+    needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -413,7 +413,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2025-01-22
+          toolchain: nightly-2025-07-28
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
@@ -537,9 +537,9 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        container-runtime: [ "docker", "containerd" ]
+        container-runtime: ["docker", "containerd"]
     name: e2e
-    needs: [ test_agent_image, changed_files ]
+    needs: [test_agent_image, changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -617,14 +617,14 @@ jobs:
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [ build_mirrord_on_release_branch, test_agent_image ]
+    needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [ build_mirrord_on_release_branch, test_agent_image ]
+    needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true

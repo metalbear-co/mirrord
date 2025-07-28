@@ -1,7 +1,5 @@
 #![feature(c_variadic)]
-#![feature(naked_functions)]
 #![feature(io_error_uncategorized)]
-#![feature(let_chains)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
