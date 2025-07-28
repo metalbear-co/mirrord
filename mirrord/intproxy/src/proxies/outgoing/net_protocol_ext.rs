@@ -192,8 +192,7 @@ impl ConnectedSocket {
                 let bytes_sent = socket.send(bytes).await?;
 
                 if bytes_sent != bytes.len() {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    Err(io::Error::other(
                         "failed to send all bytes",
                     ))?;
                 }

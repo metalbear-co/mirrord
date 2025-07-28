@@ -588,9 +588,7 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::Open(open) => {
-                let additional_data = (self.buffer_reads() && open.open_options.is_read_only())
-                    .then_some(AdditionalRequestData::OpenBuffered)
-                    .unwrap_or_default();
+                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() { AdditionalRequestData::OpenBuffered } else { Default::default() };
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
@@ -600,9 +598,7 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::OpenRelative(open) => {
-                let additional_data = (self.buffer_reads() && open.open_options.is_read_only())
-                    .then_some(AdditionalRequestData::OpenBuffered)
-                    .unwrap_or_default();
+                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() { AdditionalRequestData::OpenBuffered } else { Default::default() };
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus

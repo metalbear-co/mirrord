@@ -866,12 +866,11 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
 
-    if check_version {
-        if let Ok(client) = reqwest::Client::builder()
+    if check_version
+        && let Ok(client) = reqwest::Client::builder()
             .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
             .build()
-        {
-            if let Ok(result) = client
+            && let Ok(result) = client
                 .get(format!(
                     "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
                     CURRENT_VERSION,
@@ -879,8 +878,7 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await
-            {
-                if let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
+                && let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                         let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
                         let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
@@ -891,9 +889,6 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                         progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
                     }
                 }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

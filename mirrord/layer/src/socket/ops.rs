@@ -658,13 +658,12 @@ pub(super) fn connect(
         }
 
         let ip = ip_address.ip();
-        if ip.is_loopback() || ip.is_unspecified() {
-            if let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
+        if (ip.is_loopback() || ip.is_unspecified())
+            && let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
                 // `result` here is always a success, as error and bypass are returned on the `?`
                 // above.
                 return Detour::Success(result);
             }
-        }
 
         if is_ignored_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));

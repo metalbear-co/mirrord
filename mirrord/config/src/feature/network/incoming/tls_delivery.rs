@@ -122,15 +122,14 @@ impl LocalTlsDelivery {
             _ => {}
         }
 
-        if let Some(server_name) = self.server_name.as_deref() {
-            if ServerName::try_from(server_name).is_err() {
+        if let Some(server_name) = self.server_name.as_deref()
+            && ServerName::try_from(server_name).is_err() {
                 return Err(ConfigError::InvalidValue {
                     name: ".feature.network.incoming.tls_delivery.server_name",
                     provided: server_name.into(),
                     error: "must be a valid DNS name or an IP address".into(),
                 });
             }
-        }
 
         Ok(())
     }

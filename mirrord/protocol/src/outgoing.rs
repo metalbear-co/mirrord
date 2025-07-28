@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     fmt::{Display, Formatter},
     io,
-    io::ErrorKind,
     net::SocketAddr as StdIpSocketAddr,
     path::PathBuf,
 };
@@ -56,8 +55,7 @@ impl TryFrom<UnixAddr> for OsSockAddr {
             Pathname(path) => OsSockAddr::unix(path),
             // We could use a `socket2::SockAddr::from_abstract_name` but it does not have it yet.
             Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
-                io::Error::new(
-                    ErrorKind::Other,
+                io::Error::other(
                     "Unprintable abstract addresses not supported.",
                 )
             })?),
@@ -73,7 +71,7 @@ impl TryFrom<SocketAddress> for StdIpSocketAddr {
         if let SocketAddress::Ip(socket_addr) = addr {
             Ok(socket_addr)
         } else {
-            Err(io::Error::new(ErrorKind::Other, "Not an IP address"))
+            Err(io::Error::other("Not an IP address"))
         }
     }
 }

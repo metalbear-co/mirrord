@@ -113,8 +113,7 @@ async fn create_raw_socket() -> io::Result<AsyncRawSocket> {
         Some(Protocol::from(libc::ETH_P_IP.to_be())),
     )?;
     let sock_addr = interface_index_to_sock_addr(i32::try_from(index).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("invalid interface index {index}"),
         )
     })?)?;
@@ -144,15 +143,14 @@ async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
                 .map(|addr| addr == raw_local_address)
                 .unwrap_or(false)
         })
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no usable interface"))?;
+        .ok_or_else(|| io::Error::other("no usable interface"))?;
 
     let ip = usable_interface
         .address
         .as_ref()
         .and_then(SockaddrStorage::as_sockaddr_in)
         .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 "usable_interface.address.as_sockaddr_in",
             )
         })?
@@ -163,8 +161,7 @@ async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
         .as_ref()
         .and_then(SockaddrStorage::as_sockaddr_in)
         .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 "usable_interface.netmask.as_sockaddr_in",
             )
         })?
@@ -176,8 +173,7 @@ async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
         .as_ref()
         .and_then(SockaddrStorage::as_sockaddr_in)
         .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 "usable_interface.address.as_sockaddr_in",
             )
         })?
@@ -211,13 +207,13 @@ impl fmt::Debug for VpnTask {
 fn interface_index_to_sock_addr(index: i32) -> io::Result<SockAddr> {
     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
-    let macs = procfs::net::arp().map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+    let macs = procfs::net::arp().map_err(|error| io::Error::other(error))?;
     tracing::debug!(?macs, "arp entries");
 
     let hw_addr = macs
         .into_iter()
         .find_map(|entry| entry.hw_address)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no entry with hw address"))?;
+        .ok_or_else(|| io::Error::other("no entry with hw address"))?;
 
     unsafe {
         let sock_addr = std::ptr::addr_of_mut!(addr_storage) as *mut libc::sockaddr_ll;
@@ -296,7 +292,7 @@ impl VpnTask {
                                 self.daemon_tx
                                     .send(ServerVpn::Packet(packet.into()))
                                     .await
-                                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+                                    .map_err(|err| io::Error::other(err))?;
 
                                 buffer[..len].fill(0);
                             }
@@ -326,7 +322,7 @@ impl VpnTask {
                         network_configuration.clone(),
                     ))
                     .await
-                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+                    .map_err(|err| io::Error::other(err))?;
             }
             ClientVpn::Packet(packet) => {
                 match self.socket.as_mut() { Some(socket) => {

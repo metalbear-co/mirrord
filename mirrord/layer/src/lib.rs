@@ -479,16 +479,14 @@ fn fetch_env_vars() -> HashMap<String, String> {
         (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
     };
 
-    let mut env_vars = (!env_vars_exclude.is_empty() || !env_vars_include.is_empty())
-        .then(|| {
+    let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() { {
             make_proxy_request_with_response(GetEnvVarsRequest {
                 env_vars_filter: env_vars_exclude,
                 env_vars_select: env_vars_include,
             })
             .expect("failed to make request to proxy")
             .expect("failed to fetch remote env")
-        })
-        .unwrap_or_default();
+        } } else { Default::default() };
 
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
