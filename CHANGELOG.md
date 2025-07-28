@@ -8,7 +8,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
-## [3.152.2](https://github.com/metalbear-co/mirrord/tree/3.152.2) - 2025-07-28
+## [3.153.0](https://github.com/metalbear-co/mirrord/tree/3.153.0) - 2025-07-28
 
 
 ### Added
