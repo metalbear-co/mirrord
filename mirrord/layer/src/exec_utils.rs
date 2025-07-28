@@ -233,7 +233,8 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     attrp: *const c_void,
     argv: *const *const c_char,
     envp: *const *const c_char,
-) -> c_int {
+) -> c_int {unsafe {
+
     match patch_sip_for_new_process(path, argv, envp) {
         Detour::Success((path, argv, envp)) => {
             match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
@@ -257,13 +258,14 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
-}
+}}
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     path: *mut c_char,
     buflen: *mut u32,
-) -> c_int {
+) -> c_int {unsafe {
+
     let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
@@ -295,7 +297,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
         }
     }
     res
-}
+}}
 
 /// Just strip the sip patch dir out of the path if there.
 /// Don't use guard since we want the original function to be able to call back to our detours.
@@ -306,7 +308,8 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
 pub(crate) unsafe extern "C" fn dlopen_detour(
     raw_path: *const c_char,
     mode: c_int,
-) -> *const c_void {
+) -> *const c_void {unsafe {
+
     // we hold the guard manually for tracing/internal code
     let guard = crate::detour::DetourGuard::new();
     let detour: Detour<PathBuf> = raw_path.checked_into();
@@ -320,4 +323,4 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     drop(guard);
     // call dlopen guardless
     FN_DLOPEN(raw_path, mode)
-}
+}}

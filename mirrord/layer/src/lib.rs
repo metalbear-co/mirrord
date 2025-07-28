@@ -680,17 +680,19 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 ///
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {unsafe {
+
     let res = FN_CLOSE(fd);
     close_layer_fd(fd);
     res
-}
+}}
 
 /// Hook for `libc::fork`.
 ///
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {unsafe {
+
     tracing::debug!("Process {} forking!.", std::process::id());
 
     let res = FN_FORK();
@@ -699,7 +701,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
             #[allow(static_mut_refs)]
-            let parent_connection = match unsafe { PROXY_CONNECTION.take() } {
+            let parent_connection = match  PROXY_CONNECTION.take()  {
                 Some(conn) => conn,
                 None => {
                     tracing::debug!("Skipping new inptroxy connection (trace only)");
@@ -731,7 +733,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     }
 
     res
-}
+}}
 
 /// No need to guard because we call another detour which will do the guard for us.
 ///
@@ -760,13 +762,15 @@ pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int { unsafe {
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close_detour(
+
     a: usize,
     b: usize,
     fd: c_int,
     c: usize,
-) -> c_int {
+) -> c_int {unsafe {
+
     // In this case we call `close_layer_fd` before the original close function, because execution
     // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
-}
+}}

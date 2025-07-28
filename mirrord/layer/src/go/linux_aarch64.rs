@@ -21,7 +21,8 @@ struct SyscallArgs {
 }
 
 /// asmcgocall can pass a pointer, so this is a conversion call to `c_abi_syscall6_handler`
-unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs) -> i64 {
+unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs) -> i64 {unsafe {
+
     c_abi_syscall6_handler(
         (*syscall_struct).syscall,
         (*syscall_struct).arg1,
@@ -31,14 +32,15 @@ unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs)
         (*syscall_struct).arg5,
         (*syscall_struct).arg6,
     )
-}
+}}
 
 /// Detour for Go >= 1.19
 /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
 /// so syscall6 handler need to handle syscall3 detours as well.
 // We're using asmcogcall to avoid re-implementing it and doing it badly.
 #[naked]
-unsafe extern "C" fn go_syscall_new_detour() {
+unsafe extern "C" fn go_syscall_new_detour() {unsafe {
+
     naked_asm!(
         // save fp and lr to stack and reserve that memory.
         // if we don't do it and remember to load it back before ret
@@ -77,7 +79,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         asmcgocall = sym FN_ASMCGOCALL,
         syscall_handler = sym mirrord_syscall_handler
     )
-}
+}}
 
 /// Hooks for when hooking a go binary between 1.19 and 1.23
 fn post_go1_19(hook_manager: &mut HookManager) {

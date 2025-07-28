@@ -26,35 +26,39 @@ pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,
     type_: c_int,
     protocol: c_int,
-) -> c_int {
+) -> c_int {unsafe {
+
     socket(domain, type_, protocol).unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
-}
+}}
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     raw_address: *const sockaddr,
     address_length: socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     bind(sockfd, raw_address, address_length)
         .unwrap_or_bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
-}
+}}
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {unsafe {
+
     listen(sockfd, backlog).unwrap_or_bypass_with(|_| FN_LISTEN(sockfd, backlog))
-}
+}}
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
     address_length: socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     connect(sockfd, raw_address, address_length)
         .map(From::from)
         .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
-}
+}}
 
 /// Hook for `_connect$NOCANCEL` (for macos, see
 /// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
@@ -63,31 +67,34 @@ pub(super) unsafe extern "C" fn _connect_nocancel_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
     address_length: socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     connect(sockfd, raw_address, address_length)
         .map(From::from)
         .unwrap_or_bypass_with(|_| FN__CONNECT_NOCANCEL(sockfd, raw_address, address_length))
-}
+}}
 
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     getpeername(sockfd, address, address_len)
         .unwrap_or_bypass_with(|_| FN_GETPEERNAME(sockfd, address, address_len))
-}
+}}
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     getsockname(sockfd, address, address_len)
         .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
-}
+}}
 
 /// Hook for `libc::gethostname`.
 ///
@@ -97,7 +104,8 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
 pub(crate) unsafe extern "C" fn gethostname_detour(
     raw_name: *mut c_char,
     name_length: usize,
-) -> c_int {
+) -> c_int {unsafe {
+
     gethostname()
         .map(|host| {
             let host_len = host.as_bytes_with_nul().len();
@@ -112,7 +120,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
             }
         })
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
-}
+}}
 
 /// Hook for `libc::gethostbyname` (you won't find this in rust's `libc` as it's been deprecated and
 /// removed).
@@ -121,17 +129,19 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 /// inner values whenever this function is called. The address itself of `*mut hostent` has to
 /// remain the same (thus why it's a `static`).
 #[hook_guard_fn]
-unsafe extern "C" fn gethostbyname_detour(raw_name: *const c_char) -> *mut hostent {
+unsafe extern "C" fn gethostbyname_detour(raw_name: *const c_char) -> *mut hostent {unsafe {
+
     let rawish_name = (!raw_name.is_null()).then(|| CStr::from_ptr(raw_name));
     gethostbyname(rawish_name).unwrap_or_bypass_with(|_| FN_GETHOSTBYNAME(raw_name))
-}
+}}
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     let accept_result = FN_ACCEPT(sockfd, address, address_len);
 
     if accept_result == -1 {
@@ -139,7 +149,7 @@ pub(crate) unsafe extern "C" fn accept_detour(
     } else {
         accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
-}
+}}
 
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
@@ -148,7 +158,8 @@ pub(crate) unsafe extern "C" fn accept4_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     flags: c_int,
-) -> c_int {
+) -> c_int {unsafe {
+
     let accept_result = FN_ACCEPT4(sockfd, address, address_len, flags);
 
     if accept_result == -1 {
@@ -156,7 +167,7 @@ pub(crate) unsafe extern "C" fn accept4_detour(
     } else {
         accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
-}
+}}
 
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
@@ -166,11 +177,12 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     flags: c_int,
-) -> c_int {
+) -> c_int {unsafe {
+
     tracing::trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
 
     accept4_detour(sockfd, address, address_len, flags)
-}
+}}
 
 /// Hook for `_accept$NOCANCEL` (for macos, see
 /// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
@@ -179,7 +191,8 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> c_int {
+) -> c_int {unsafe {
+
     let accept_result = FN__ACCEPT_NOCANCEL(sockfd, address, address_len);
 
     if accept_result == -1 {
@@ -187,7 +200,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     } else {
         accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
-}
+}}
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
 #[hook_fn]
@@ -210,7 +223,8 @@ pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 }}
 
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
+pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {unsafe {
+
     let dup_result = FN_DUP(fd);
 
     if dup_result == -1 {
@@ -221,10 +235,11 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
             Err(e) => e.into(),
         }
     }
-}
+}}
 
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
+pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {unsafe {
+
     if oldfd == newfd {
         return newfd;
     }
@@ -239,11 +254,12 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
             Err(e) => e.into(),
         }
     }
-}
+}}
 
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
+pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {unsafe {
+
     let dup3_result = FN_DUP3(oldfd, newfd, flags);
 
     if dup3_result == -1 {
@@ -254,7 +270,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
             Err(e) => e.into(),
         }
     }
-}
+}}
 
 /// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.
 ///
@@ -266,7 +282,8 @@ unsafe extern "C" fn getaddrinfo_detour(
     raw_service: *const c_char,
     raw_hints: *const libc::addrinfo,
     out_addr_info: *mut *mut libc::addrinfo,
-) -> c_int {
+) -> c_int {unsafe {
+
     let rawish_node = (!raw_node.is_null()).then(|| CStr::from_ptr(raw_node));
     let rawish_service = (!raw_service.is_null()).then(|| CStr::from_ptr(raw_service));
     let rawish_hints = raw_hints.as_ref();
@@ -281,7 +298,7 @@ unsafe extern "C" fn getaddrinfo_detour(
             0
         })
         .unwrap_or_bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
-}
+}}
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
 /// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`. Same thing must also
@@ -304,7 +321,8 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// if crashes occur on getaddrinfo - check this case.
 /// This can be solved probably by adding each pointer in the linked list to our HashSet.
 #[hook_guard_fn]
-unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
+unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {unsafe {
+
     let mut managed_addr_info = MANAGED_ADDRINFO
         .lock()
         .expect("MANAGED_ADDRINFO lock failed");
@@ -326,7 +344,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     } else {
         FN_FREEADDRINFO(addrinfo);
     }
-}
+}}
 
 /// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
 #[hook_guard_fn]
@@ -337,12 +355,13 @@ pub(super) unsafe extern "C" fn recv_from_detour(
     flags: c_int,
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
-) -> ssize_t {
+) -> ssize_t {unsafe {
+
     // Equivalent to just calling `recv`.
     if raw_source.is_null() {
         libc::recv(sockfd, out_buffer, buffer_length, flags)
     } else {
-        let recv_from_result = unsafe {
+        let recv_from_result = 
             FN_RECV_FROM(
                 sockfd,
                 out_buffer,
@@ -351,7 +370,7 @@ pub(super) unsafe extern "C" fn recv_from_detour(
                 raw_source,
                 source_length,
             )
-        };
+        ;
 
         if recv_from_result == -1 {
             recv_from_result
@@ -360,7 +379,7 @@ pub(super) unsafe extern "C" fn recv_from_detour(
                 .unwrap_or_bypass(recv_from_result)
         }
     }
-}
+}}
 
 /// Not a faithful reproduction of what [`libc::sendto`] is supposed to do, see [`send_to`].
 #[hook_guard_fn]
@@ -371,7 +390,8 @@ pub(super) unsafe extern "C" fn send_to_detour(
     flags: c_int,
     raw_destination: *const sockaddr,
     destination_length: socklen_t,
-) -> ssize_t {
+) -> ssize_t {unsafe {
+
     // Equivalent to just calling `send`.
     if raw_destination.is_null() {
         libc::send(sockfd, raw_message, message_length, flags)
@@ -395,7 +415,7 @@ pub(super) unsafe extern "C" fn send_to_detour(
             )
         })
     }
-}
+}}
 
 /// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
 ///
@@ -405,7 +425,8 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
     sockfd: i32,
     message_header: *mut libc::msghdr,
     flags: c_int,
-) -> ssize_t {
+) -> ssize_t {unsafe {
+
     let recvmsg_result = FN_RECVMSG(sockfd, message_header, flags);
 
     if recvmsg_result == -1 {
@@ -420,7 +441,7 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
         )
         .unwrap_or_bypass(recvmsg_result)
     }
-}
+}}
 
 /// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`sendmsg`].
 //
@@ -430,7 +451,8 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     sockfd: RawFd,
     message_header: *const libc::msghdr,
     flags: c_int,
-) -> ssize_t {
+) -> ssize_t {unsafe {
+
     // When the whole header is null, the operation happens, but does basically nothing (afaik).
     //
     // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
@@ -443,13 +465,14 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
         sendmsg(sockfd, message_header, flags)
             .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
     }
-}
+}}
 
 /// Not a faithful reproduction of what [`FN_DNS_CONFIGURATION_COPY`] is supposed to do, see
 /// [`remote_dns_configuration_copy`].
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
-unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
+unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {unsafe {
+
     remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
         Box::into_raw(Box::new(dns_config_t {
             n_resolver: 0,
@@ -459,14 +482,15 @@ unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
             reserved: [0; 5],
         }))
     })
-}
+}}
 
 /// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
 /// drop everthing is just to recreate back the boxes that we casted into C structs as part of
 /// [`dns_configuration_copy_detour`]
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
-unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
+unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {unsafe {
+
     // It should drop it automatically after recreating the boxes and vecs
 
     let config = Box::from_raw(config);
@@ -474,10 +498,11 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
     Vec::from_raw_parts(config.resolver, config.n_resolver as usize, 0)
         .into_iter()
         .for_each(|resolver| free_dns_resolver_t(resolver));
-}
+}}
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifaddrs) -> c_int {
+pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifaddrs) -> c_int {unsafe {
+
     match getifaddrs() {
         Ok(got_ifaddrs) => {
             *ifaddrs = got_ifaddrs;
@@ -485,15 +510,16 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
         }
         Err(error) => error.into(),
     }
-}
+}}
 
 #[cfg(target_os = "macos")]
 #[allow(non_snake_case)]
 #[hook_guard_fn]
 unsafe extern "C-unwind" fn CFNetworkCopySystemProxySettings_detour(
-) -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFDictionary>> {
+) -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFDictionary>> {unsafe {
+
     None
-}
+}}
 
 pub(crate) unsafe fn enable_socket_hooks(
     hook_manager: &mut HookManager,

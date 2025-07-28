@@ -119,7 +119,8 @@ pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
-) -> c_int {
+) -> c_int {unsafe {
+
     match patch_sip_for_new_process(path, argv, envp) {
         Detour::Success((path, argv, envp)) => {
             match prepare_execve_envp(Detour::Success(envp.clone())) {
@@ -131,7 +132,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
         }
         _ => FN_EXECVE(path, argv, envp),
     }
-}
+}}
 
 /// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) { unsafe {
