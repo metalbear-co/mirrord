@@ -415,7 +415,7 @@ pub trait RuntimeDataFromLabels {
         }
     }
 
-    fn name(&self) -> Cow<str>;
+    fn name(&self) -> Cow<'_, str>;
 
     fn container(&self) -> Option<&str>;
 }

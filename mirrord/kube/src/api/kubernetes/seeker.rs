@@ -1,4 +1,5 @@
 use std::{fmt, time::Instant};
+use std::ops::Not;
 
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use k8s_openapi::{
@@ -150,7 +151,7 @@ impl KubeResourceSeeker<'_> {
                 .as_ref()?
                 .containers
                 .iter()
-                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
+                .filter(|&container| SKIP_NAMES.contains(container.name.as_str()).not())
                 .map(|container| container.name.clone())
                 .collect();
 

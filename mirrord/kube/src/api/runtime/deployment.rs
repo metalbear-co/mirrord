@@ -9,7 +9,7 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for DeploymentTarget {
     type Resource = Deployment;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         Cow::from(&self.deployment)
     }
 

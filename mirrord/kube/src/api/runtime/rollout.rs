@@ -13,7 +13,7 @@ use crate::{
 impl RuntimeDataFromLabels for RolloutTarget {
     type Resource = Rollout;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         Cow::from(&self.rollout)
     }
 

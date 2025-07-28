@@ -508,10 +508,6 @@ impl From<OperatorApiError> for CliError {
     }
 }
 
-#[derive(Debug, Error)]
-#[error("unsupported runtime version")]
-pub struct UnsupportedRuntimeVariant;
-
 #[cfg(test)]
 mod tests {
     use std::{

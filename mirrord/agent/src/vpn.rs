@@ -89,7 +89,7 @@ impl AsyncRawSocket {
         })
     }
 
-    pub async fn readable(&self) -> std::io::Result<AsyncFdReadyGuard<Socket>> {
+    pub async fn readable(&self) -> std::io::Result<AsyncFdReadyGuard<'_, Socket>> {
         self.inner.readable().await
     }
 
