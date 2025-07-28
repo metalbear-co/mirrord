@@ -160,3 +160,35 @@ pub(super) fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rol
     }))
     .expect("Failed creating `rollout` from json spec!")
 }
+
+/// Creates an Argo Rollout resource with the given name, using a template (not workloadRef)
+///
+/// The template is copied from the given deployment's pod template.
+pub(super) fn argo_rollout_with_template_from_json(name: &str, deployment: &Deployment) -> Rollout {
+    let pod_template = &deployment.spec.as_ref().unwrap().template;
+    serde_json::from_value(json!({
+        "apiVersion": Rollout::API_VERSION,
+        "kind": Rollout::KIND,
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-rollouts": format!("rollout-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": name
+                }
+            },
+            "template": pod_template,
+            "strategy": {
+                "canary": {}
+            }
+        }
+    }))
+    .expect("Failed creating `rollout` with template from json spec!")
+}
