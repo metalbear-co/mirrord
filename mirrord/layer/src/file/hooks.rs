@@ -89,7 +89,7 @@ pub(super) unsafe extern "C" fn open_detour(
     raw_path: *const c_char,
     open_flags: c_int,
     mut args: ...
-) -> RawFd {
+) -> RawFd { unsafe {
     let mode: c_int = args.arg();
     let guard = DetourGuard::new();
     if guard.is_none() {
@@ -100,7 +100,7 @@ pub(super) unsafe extern "C" fn open_detour(
             FN_OPEN(raw_path, open_flags, mode)
         })
     }
-}
+}}
 
 /// Hook for `libc::open64`.
 ///
@@ -111,7 +111,7 @@ pub(super) unsafe extern "C" fn open64_detour(
     raw_path: *const c_char,
     open_flags: c_int,
     mut args: ...
-) -> RawFd {
+) -> RawFd { unsafe {
     let mode: c_int = args.arg();
     let guard = DetourGuard::new();
     if guard.is_none() {
@@ -122,7 +122,7 @@ pub(super) unsafe extern "C" fn open64_detour(
             FN_OPEN64(raw_path, open_flags, mode)
         })
     }
-}
+}}
 
 /// Hook for `libc::open$NOCANCEL`.
 #[hook_fn]
@@ -130,7 +130,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     raw_path: *const c_char,
     open_flags: c_int,
     mut args: ...
-) -> RawFd {
+) -> RawFd { unsafe {
     let mode: c_int = args.arg();
     let guard = DetourGuard::new();
     if guard.is_none() {
@@ -141,7 +141,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
         })
     }
-}
+}}
 
 /// Hook for [`libc::opendir`].
 ///
@@ -170,9 +170,9 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
 
 /// see below, to have nice code we also implement it for other archs.
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
+unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize { unsafe {
     FN_OPENDIR(raw_filename)
-}
+}}
 
 /// on macOS aarch, for some reason when hooking it it crashes with illegal instruction on bypass
 /// so we implement our own bypass
@@ -311,7 +311,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
     mut args: ...
-) -> RawFd {
+) -> RawFd { unsafe {
     let mode: c_int = args.arg();
 
     let guard = DetourGuard::new();
@@ -325,7 +325,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
             FN_OPENAT(fd, raw_path, open_flags, mode)
         })
     }
-}
+}}
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
 ///
@@ -574,7 +574,7 @@ unsafe fn pwrite_logic(
     in_buffer: *const c_void,
     amount_to_write: size_t,
     offset: off_t,
-) -> Detour<ssize_t> {
+) -> Detour<ssize_t> { unsafe {
     // Convert the given buffer into a u8 slice, upto the amount to write.
     let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
 
@@ -582,7 +582,7 @@ unsafe fn pwrite_logic(
         let WriteFileResponse { written_amount } = write_response;
         written_amount as ssize_t
     })
-}
+}}
 
 /// ## Note on go hook for this
 ///
@@ -626,14 +626,14 @@ pub(crate) unsafe extern "C" fn write_logic(
     fd: RawFd,
     buffer: *const c_void,
     count: size_t,
-) -> ssize_t {
+) -> ssize_t { unsafe {
     // WARN: Be veeery careful here, you cannot construct the `Vec` directly, as the buffer
     // allocation is handled on the C side.
     let write_bytes =
         (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
 
     write(fd, write_bytes).unwrap_or_bypass_with(|_| FN_WRITE(fd, buffer, count))
-}
+}}
 
 /// Hook for `libc::write`.
 ///
@@ -662,12 +662,12 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
 }
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
-unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
+unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int { unsafe {
     access(raw_path.checked_into(), mode).unwrap_or_bypass_with(|bypass| {
         let raw_path = update_ptr_from_bypass(raw_path, &bypass);
         FN_ACCESS(raw_path, mode)
     })
-}
+}}
 
 /// Hook for `libc::access`.
 #[hook_guard_fn]
@@ -715,7 +715,7 @@ fn nano_to_secs(nano: i64) -> i64 {
 }
 
 /// Fills the `stat` struct with the metadata
-unsafe extern "C" fn fill_stat(out_stat: *mut stat64, metadata: &MetadataInternal) {
+unsafe extern "C" fn fill_stat(out_stat: *mut stat64, metadata: &MetadataInternal) { unsafe {
     out_stat.write_bytes(0, 1);
     let out = &mut *out_stat;
     // on macOS the types might be different, so we try to cast and do our best..
@@ -735,10 +735,10 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat64, metadata: &MetadataInterna
     out.st_rdev = best_effort_cast(metadata.rdevice_id);
     out.st_blksize = best_effort_cast(metadata.block_size);
     out.st_blocks = best_effort_cast(metadata.blocks);
-}
+}}
 
 /// Fills the `statfs` struct with the metadata
-unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternalV2) {
+unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternalV2) { unsafe {
     // Acording to linux documentation "Fields that are undefined for a particular file system are
     // set to 0."
     out_stat.write_bytes(0, 1);
@@ -757,11 +757,11 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
         out.f_namelen = metadata.name_len;
         out.f_frsize = metadata.fragment_size;
     }
-}
+}}
 
 /// Fills the `statfs` struct with the metadata
 #[cfg(target_os = "linux")]
-unsafe extern "C" fn fill_statfs64(out_stat: *mut libc::statfs64, metadata: &FsMetadataInternalV2) {
+unsafe extern "C" fn fill_statfs64(out_stat: *mut libc::statfs64, metadata: &FsMetadataInternalV2) { unsafe {
     // Acording to linux documentation "Fields that are undefined for a particular file system are
     // set to 0."
     out_stat.write_bytes(0, 1);
@@ -781,7 +781,7 @@ unsafe extern "C" fn fill_statfs64(out_stat: *mut libc::statfs64, metadata: &FsM
         out.f_frsize = metadata.fragment_size;
         out.f_flags = metadata.flags;
     }
-}
+}}
 
 fn stat_logic<const FOLLOW_SYMLINK: bool>(
     _ver: c_int,
@@ -909,7 +909,7 @@ pub(crate) unsafe fn fstatat_logic(
     raw_path: *const c_char,
     out_stat: *mut stat,
     flag: c_int,
-) -> Detour<i32> {
+) -> Detour<i32> { unsafe {
     if out_stat.is_null() {
         return Detour::Error(HookError::BadPointer);
     }
@@ -920,7 +920,7 @@ pub(crate) unsafe fn fstatat_logic(
         fill_stat(out_stat as *mut _, &res);
         0
     })
-}
+}}
 
 /// Hook for `libc::fstatat`.
 #[hook_guard_fn]
@@ -1011,7 +1011,7 @@ pub(crate) unsafe extern "C" fn statfs64_detour(
 unsafe fn realpath_logic(
     source_path: *const c_char,
     output_path: *mut c_char,
-) -> Detour<*mut c_char> {
+) -> Detour<*mut c_char> { unsafe {
     let path = source_path.checked_into();
 
     realpath(path).map(|res| {
@@ -1031,7 +1031,7 @@ unsafe fn realpath_logic(
             .copy_from_nonoverlapping(path.as_ptr(), usize::min(libc::PATH_MAX as usize, path_len));
         output
     })
-}
+}}
 
 /// When path is handled by us, just make it absolute and return, since resolving it remotely
 /// doesn't really matter for our case atm (might be in the future)
@@ -1215,7 +1215,7 @@ pub(crate) unsafe extern "C" fn unlinkat_detour(
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
+pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) { unsafe {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
     replace!(hook_manager, "open64", open64_detour, FnOpen64, FN_OPEN64);
     replace!(
@@ -1554,4 +1554,4 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_OPENDIR
         );
     }
-}
+}}

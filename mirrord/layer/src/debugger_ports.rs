@@ -243,7 +243,7 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::NodeInspector => {
-                if let Some(value) = get_env("NODE_OPTIONS") {
+                match get_env("NODE_OPTIONS") { Some(value) => {
                     // matching specific flags so we avoid matching on, for example,
                     // `--inspect-publish-uid=http`
                     value.split_ascii_whitespace()
@@ -254,16 +254,16 @@ impl DebuggerType {
                     })
                     .map(|port| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
                     .collect::<Vec<_>>()
-                } else if let Some(value) = get_env("NODE_INSPECTOR_INFO") {
+                } _ => { match get_env("NODE_INSPECTOR_INFO") { Some(value) => {
                     value.split(',').filter_map(|var| match var.split_once(':')? {
                         ("inspectorURL", url) => url.parse::<Uri>().ok()?.port_u16(),
                         _ => None,
                     })
                     .map(|port| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
                     .collect::<Vec<_>>()
-                }  else {
+                } _ => {
                     vec![]
-                }
+                }}}}
             }
         }.iter().filter_map(|addr| match addr.ip() {
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST) => Some(addr.port()),
@@ -394,12 +394,15 @@ impl DebuggerPorts {
             }
             let dbg_ports = dbg_ports.into_iter().flatten().collect::<Vec<_>>();
             let dbg_port = Self::Combination(dbg_ports);
-            env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, dbg_port.to_string());
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, dbg_port.to_string()) };
 
             if let Some(next_type) = next {
-                env::set_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV, next_type.to_string());
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                unsafe { env::set_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV, next_type.to_string()) };
             } else {
-                env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                unsafe { env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV) };
             }
             return dbg_port;
         }

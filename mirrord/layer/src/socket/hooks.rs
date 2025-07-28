@@ -191,7 +191,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
 #[hook_fn]
-pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
+pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int { unsafe {
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
     let guard = DetourGuard::new();
@@ -207,7 +207,7 @@ pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
             Err(e) => e.into(),
         }
     }
-}
+}}
 
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
@@ -499,7 +499,7 @@ pub(crate) unsafe fn enable_socket_hooks(
     hook_manager: &mut HookManager,
     enabled_remote_dns: bool,
     experimental: &ExperimentalConfig,
-) {
+) { unsafe {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
     replace!(
@@ -669,4 +669,4 @@ pub(crate) unsafe fn enable_socket_hooks(
             FN_GETIFADDRS
         );
     }
-}
+}}

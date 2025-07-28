@@ -105,11 +105,11 @@ impl ProxyConnection {
 
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
         let response = self.responses.lock()?.receive(response_id)?;
-        if let ProxyToLayerMessage::ProxyFailed(error_msg) = response {
+        match response { ProxyToLayerMessage::ProxyFailed(error_msg) => {
             Err(ProxyError::ProxyFailure(error_msg))
-        } else {
+        } _ => {
             Ok(response)
-        }
+        }}
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]

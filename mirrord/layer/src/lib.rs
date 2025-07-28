@@ -436,17 +436,20 @@ fn layer_start(mut config: LayerConfig) {
     if fetch_env {
         let env = fetch_env_vars();
         for (key, value) in env {
-            std::env::set_var(key, value);
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(key, value) };
         }
 
-        std::env::set_var(REMOTE_ENV_FETCHED, "true");
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(REMOTE_ENV_FETCHED, "true") };
     }
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
         std::env::vars().for_each(|(key, _)| {
             if unset.contains(&key.to_lowercase()) {
-                std::env::remove_var(&key);
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                unsafe { std::env::remove_var(&key) };
             }
         });
     }
@@ -654,16 +657,16 @@ fn enable_hooks(state: &LayerSetup) {
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) { Some(socket) => {
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();
-    } else if setup().fs_config().is_active() {
+    } _ => if setup().fs_config().is_active() {
         OPEN_FILES
             .lock()
             .expect("OPEN_FILES lock failed")
             .remove(&fd);
-    }
+    }}
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
@@ -736,19 +739,19 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 ///
 /// One of the many [`libc::close`]-ish functions.
 #[hook_fn]
-pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int { unsafe {
     close_detour(fd)
-}
+}}
 
 #[hook_fn]
-pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int { unsafe {
     close_detour(fd)
-}
+}}
 
 #[hook_fn]
-pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int { unsafe {
     close_detour(fd)
-}
+}}
 
 /// ## Hook
 ///

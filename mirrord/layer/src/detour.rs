@@ -71,12 +71,12 @@ impl DetourGuard {
                 && *bypass
             {
                 None
-            } else if let Ok(mut bypass) = enabled.try_borrow_mut() {
+            } else { match enabled.try_borrow_mut() { Ok(mut bypass) => {
                 *bypass = true;
                 Some(Self)
-            } else {
+            } _ => {
                 None
-            }
+            }}}
         })
     }
 }

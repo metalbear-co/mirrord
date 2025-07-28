@@ -50,13 +50,13 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 }
 
 #[cfg(not(target_os = "macos"))]
-unsafe fn environ() -> *const *const c_char {
-    extern "C" {
+unsafe fn environ() -> *const *const c_char { unsafe {
+    unsafe extern "C" {
         static environ: *const *const c_char;
     }
 
     environ
-}
+}}
 
 /// Hook for `libc::execv` for linux only.
 ///
@@ -64,14 +64,14 @@ unsafe fn environ() -> *const *const c_char {
 /// [`execve_detour`].
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
-unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
+unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int { unsafe {
     let envp = environ();
-    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
+    match prepare_execve_envp(envp.checked_into()) { Detour::Success(envp) => {
         FN_EXECVE(path, argv, envp.leak())
-    } else {
+    } _ => {
         FN_EXECVE(path, argv, envp)
-    }
-}
+    }}
+}}
 
 /// Hook for `libc::execve`.
 ///
@@ -82,13 +82,13 @@ pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
-) -> c_int {
-    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
+) -> c_int { unsafe {
+    match prepare_execve_envp(envp.checked_into()) { Detour::Success(envp) => {
         FN_EXECVE(path, argv, envp.leak())
-    } else {
+    } _ => {
         FN_EXECVE(path, argv, envp)
-    }
-}
+    }}
+}}
 
 /// Hook for `libc::execve`.
 ///
@@ -134,9 +134,9 @@ pub(crate) unsafe extern "C" fn execve_detour(
 }
 
 /// Enables `exec` hooks.
-pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
+pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) { unsafe {
     #[cfg(not(target_os = "macos"))]
     replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
 
     replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
-}
+}}

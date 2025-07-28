@@ -19,7 +19,7 @@ pub(crate) mod go_hooks;
 
 /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
 /// accept4 Note: Depending on success/failure Syscall may or may not call this handler
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn c_abi_syscall6_handler(
     syscall: i64,
     param1: i64,
@@ -28,7 +28,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     param4: i64,
     param5: i64,
     param6: i64,
-) -> i64 {
+) -> i64 { unsafe {
     trace!(
         "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
         syscall, param1, param2, param3, param4, param5, param6
@@ -168,4 +168,4 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     } else {
         syscall_result
     }
-}
+}}
