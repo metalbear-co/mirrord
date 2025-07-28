@@ -207,7 +207,7 @@ impl fmt::Debug for VpnTask {
 fn interface_index_to_sock_addr(index: i32) -> io::Result<SockAddr> {
     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
-    let macs = procfs::net::arp().map_err(|error| io::Error::other(error))?;
+    let macs = procfs::net::arp().map_err(io::Error::other)?;
     tracing::debug!(?macs, "arp entries");
 
     let hw_addr = macs
@@ -292,7 +292,7 @@ impl VpnTask {
                                 self.daemon_tx
                                     .send(ServerVpn::Packet(packet.into()))
                                     .await
-                                    .map_err(|err| io::Error::other(err))?;
+                                    .map_err(io::Error::other)?;
 
                                 buffer[..len].fill(0);
                             }
@@ -322,7 +322,7 @@ impl VpnTask {
                         network_configuration.clone(),
                     ))
                     .await
-                    .map_err(|err| io::Error::other(err))?;
+                    .map_err(io::Error::other)?;
             }
             ClientVpn::Packet(packet) => {
                 match self.socket.as_mut() { Some(socket) => {
