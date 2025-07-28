@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
-use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
+use schemars::{r#gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumString};
 
@@ -51,10 +51,10 @@ pub enum TargetFileConfig {
     },
 }
 
-fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+fn make_simple_target_custom_schema(r#gen: &mut SchemaGenerator) -> schemars::schema::Schema {
     // generate the schema for the Option<Target> like usual, then just push a string type to the
     // any_of.
-    let mut schema: SchemaObject = <Option<Target>>::json_schema(gen).into();
+    let mut schema: SchemaObject = <Option<Target>>::json_schema(r#gen).into();
     let subschema = schema.subschemas();
 
     let mut any_ofs = subschema.any_of.clone().unwrap();

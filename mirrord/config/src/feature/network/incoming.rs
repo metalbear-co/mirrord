@@ -524,11 +524,11 @@ impl IncomingConfig {
             }
         } else if self.ignore_ports.contains(&port) {
             false
-        } else if let Some(ports) = &self.ports {
+        } else { match &self.ports { Some(ports) => {
             ports.contains(&port)
-        } else {
+        } _ => {
             true
-        }
+        }}}
     }
 
     /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target and
@@ -553,11 +553,11 @@ impl IncomingConfig {
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
                     // Avoid conflicts with `incoming.ports`.
-                    if let Some(ports) = &self.ports {
+                    match &self.ports { Some(ports) => {
                         ports.contains(port).not()
-                    } else {
+                    } _ => {
                         true
-                    }
+                    }}
                 })
                 .copied()
                 .collect::<HashSet<_>>();
