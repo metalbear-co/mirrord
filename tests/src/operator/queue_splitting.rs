@@ -14,7 +14,7 @@ use crate::utils::{
     kube_client,
     process::TestProcess,
     sqs_resources::{
-        sqs_test_resources, wait_for_stable_state, write_sqs_messages, QueueInfo, TestMessage,
+        sqs_test_resources, wait_for_stable_state, write_sqs_messages, QueueInfo, TestMessage, TestWorkload,
     },
 };
 
@@ -233,6 +233,12 @@ pub async fn two_users(
     #[case] with_asterisk_queue_id: bool,
     #[case] with_env_from: bool,
     #[case] with_value_from: bool,
+    #[values(
+        TestWorkload::Deployment,
+        TestWorkload::ArgoRolloutWithWorkloadRef,
+        TestWorkload::ArgoRolloutWithTemplate
+    )]
+    test_workload_type: TestWorkload,
 ) {
     let kube_client = kube_client.await;
     let sqs_test_resources = sqs_test_resources(
@@ -241,6 +247,7 @@ pub async fn two_users(
         with_fallback_json,
         with_env_from,
         with_value_from,
+        test_workload_type,
     )
     .await;
     let application = Application::RustSqs;
