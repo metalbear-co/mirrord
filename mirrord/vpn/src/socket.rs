@@ -6,7 +6,7 @@ use crate::packet::patch_packet_checksum;
 
 pub fn create_vpn_socket(
     network: &NetworkConfiguration,
-) -> impl Stream<Item = io::Result<Vec<u8>>> + Sink<Vec<u8>, Error = io::Error> {
+) -> impl Stream<Item = io::Result<Vec<u8>>> + Sink<Vec<u8>, Error = io::Error> + use<> {
     let mut config = tun2::Configuration::default();
     config
         .address(network.ip)

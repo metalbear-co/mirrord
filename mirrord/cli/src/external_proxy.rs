@@ -123,7 +123,7 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                if let Ok((stream, peer_addr)) = conn {
+                match conn { Ok((stream, peer_addr)) => {
                     tracing::debug!(?peer_addr, "new connection");
 
                     let tls_acceptor = tls_acceptor.clone();
@@ -161,9 +161,9 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
                             tracing::debug!(?peer_addr, "final connection, closing listener");
                         }
                     });
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
 
             message = own_agent_conn.agent_rx.recv() => {
@@ -261,15 +261,15 @@ async fn handle_connection(
                 }
             }
             daemon_message = agent_conn.agent_rx.recv() => {
-                if let Some(daemon_message) = daemon_message {
+                match daemon_message { Some(daemon_message) => {
                     if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(?peer_addr, %error, "unable to send message to intproxy");
 
                         break;
                     }
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
             _ = cancellation_token.cancelled() => {
                 tracing::debug!(?peer_addr, "closing connection due to cancellation_token");

@@ -25,11 +25,11 @@ pub struct ConfigField {
 impl ConfigField {
     /// Check if field is `Option<T>` and if so return type of `T`
     fn is_option(field: &Field) -> Option<Type> {
-        let seg = if let Type::Path(ty) = &field.ty {
+        let seg = match &field.ty { Type::Path(ty) => {
             ty.path.segments.first()
-        } else {
+        } _ => {
             None
-        }?;
+        }}?;
 
         (seg.ident == "Option").then(|| match &seg.arguments {
             PathArguments::AngleBracketed(generics) => match generics.args.first() {
@@ -72,7 +72,7 @@ impl ConfigField {
     /// #[serde(rename = "test2")]
     /// pub test: Option<String>
     /// ```
-    pub fn definition(&self) -> impl ToTokens {
+    pub fn definition(&self) -> impl ToTokens + use<> {
         let ConfigField {
             ident,
             vis,
@@ -124,7 +124,7 @@ impl ConfigField {
     ///           .source_value().transpose()?
     ///           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
     /// ```
-    pub fn implmentation(&self, parent: &Ident) -> impl ToTokens {
+    pub fn implmentation(&self, parent: &Ident) -> impl ToTokens + use<> {
         let ConfigField {
             ident,
             option,
@@ -166,11 +166,11 @@ impl ConfigField {
             };
 
             // unwrap to default if exists
-            if let Some(default) = flags.default.as_ref() {
+            match flags.default.as_ref() { Some(default) => {
                 quote! {#default}
-            } else {
+            } _ => {
                 quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
-            }
+            }}
         });
 
         let impls = impls

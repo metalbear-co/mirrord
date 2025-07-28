@@ -191,16 +191,16 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
         .await;
     tokio::join!(
         async {
-            let conn = if let Some(tls_setup) = &setup.tls {
+            let conn = match &setup.tls { Some(tls_setup) => {
                 let connector = tls_setup.connector(None);
                 let conn = connector
                     .connect(ServerName::try_from("server").unwrap(), conn)
                     .await
                     .unwrap();
                 MaybeTls::Tls(Box::new(TlsStream::Client(conn)))
-            } else {
+            } _ => {
                 MaybeTls::NoTls(conn)
-            };
+            }};
             TestTcpProtocol::Echo.run(conn, false).await;
         },
         async {
@@ -223,13 +223,13 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
                     .await;
             } else {
                 let (conn, _) = setup.original_server.accept().await.unwrap();
-                let conn = if let Some(tls_setup) = &setup.tls {
+                let conn = match &setup.tls { Some(tls_setup) => {
                     let acceptor = tls_setup.acceptor();
                     let conn = acceptor.accept(conn).await.unwrap();
                     MaybeTls::Tls(Box::new(TlsStream::Server(conn)))
-                } else {
+                } _ => {
                     MaybeTls::NoTls(conn)
-                };
+                }};
                 TestTcpProtocol::Echo.run(conn, true).await;
             }
         },

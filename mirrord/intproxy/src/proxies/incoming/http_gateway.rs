@@ -312,12 +312,12 @@ impl HttpGatewayTask {
             return Ok(());
         }
 
-        if let Some(on_upgrade) = on_upgrade {
+        match on_upgrade { Some(on_upgrade) => {
             message_bus.send(HttpOut::Upgraded(on_upgrade)).await;
-        } else {
+        } _ => {
             // If there was no upgrade and no error, the client can be reused.
             self.client_store.push_idle(client);
-        }
+        }}
 
         Ok(())
     }

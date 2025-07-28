@@ -164,18 +164,18 @@ impl FailoverStrategy {
     }
 
     async fn send_error_to_layer(&self, layer_id: LayerId, message_id: MessageId) {
-        if let Some(layer) = self.layers.get(&layer_id) {
+        match self.layers.get(&layer_id) { Some(layer) => {
             layer
                 .send(LocalMessage {
                     message_id,
                     inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
                 })
                 .await;
-        } else {
+        } _ => {
             tracing::warn!(
                 "Layer {:?} not found, but it was waiting for proxy to respond!",
                 layer_id
             );
-        }
+        }}
     }
 }

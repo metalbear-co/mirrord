@@ -177,14 +177,14 @@ where
     ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
-        let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
+        let mut redirect = match MeshVendor::detect(ipt.as_ref())? { Some(vendor) => {
             match &vendor {
                 MeshVendor::IstioAmbient => {
                     Redirects::Ambient(AmbientRedirect::create(ipt.clone(), pod_ips)?)
                 }
                 _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
             }
-        } else {
+        } _ => {
             tracing::trace!(ipv6 = ipv6, "creating standard redirect");
             match StandardRedirect::create(ipt.clone(), pod_ips) {
                 Err(err) => {
@@ -194,7 +194,7 @@ where
                 }
                 Ok(standard) => Redirects::Standard(standard),
             }
-        };
+        }};
 
         if flush_connections {
             redirect = Redirects::FlushConnections(FlushConnections::create(Box::new(redirect))?)
@@ -238,12 +238,12 @@ where
     ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
-        let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
+        let mut redirect = match MeshVendor::detect(ipt.as_ref())? { Some(vendor) => {
             match &vendor {
                 MeshVendor::IstioAmbient => Redirects::Ambient(AmbientRedirect::load(ipt.clone())?),
                 _ => Redirects::Mesh(MeshRedirect::load(ipt.clone(), vendor)?),
             }
-        } else {
+        } _ => {
             match StandardRedirect::load(ipt.clone()) {
                 Err(err) => {
                     warn!("Unable to load StandardRedirect chain: {err}");
@@ -252,7 +252,7 @@ where
                 }
                 Ok(standard) => Redirects::Standard(standard),
             }
-        };
+        }};
 
         if flush_connections {
             redirect = Redirects::FlushConnections(FlushConnections::load(Box::new(redirect))?)

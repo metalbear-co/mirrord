@@ -680,15 +680,15 @@ impl FileManager {
             (Some(path), None) => path,
             // fstatat
             (Some(path), Some(fd)) => {
-                if let RemoteFile::Directory(parent_path) = self
+                match self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
-                {
+                { RemoteFile::Directory(parent_path) => {
                     parent_path.join(path)
-                } else {
+                } _ => {
                     return Err(ResponseError::NotDirectory(fd));
-                }
+                }}
             }
             // fstat
             (None, Some(fd)) => {
@@ -853,13 +853,13 @@ impl FileManager {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
-        let result = if let Some(offset_entry_pair) = dir_stream.next() {
+        let result = match dir_stream.next() { Some(offset_entry_pair) => {
             ReadDirResponse {
                 direntry: Some(offset_entry_pair.try_into()?),
             }
-        } else {
+        } _ => {
             ReadDirResponse { direntry: None }
-        };
+        }};
 
         Ok(result)
     }

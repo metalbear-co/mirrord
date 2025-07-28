@@ -11,7 +11,7 @@ use socket2::SockAddr;
 unsafe fn address_from_raw(
     raw_address: *const libc::sockaddr,
     address_length: libc::socklen_t,
-) -> Option<SocketAddr> {
+) -> Option<SocketAddr> { unsafe {
     SockAddr::try_init(|storage, len| {
         storage.copy_from_nonoverlapping(raw_address.cast(), 1);
         len.copy_from_nonoverlapping(&address_length, 1);
@@ -20,7 +20,7 @@ unsafe fn address_from_raw(
     })
     .ok()
     .and_then(|((), address)| address.as_socket())
-}
+}}
 
 /// Test that C# `mongodb+srv` protocol can resolve DNS with udp `sendmsg` and `recvmsg`.
 fn main() {

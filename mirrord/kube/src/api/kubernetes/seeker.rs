@@ -252,7 +252,7 @@ impl KubeResourceSeeker<'_> {
     pub fn list_all_namespaced<R>(
         &self,
         field_selector: Option<&str>,
-    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send
+    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send + use<R>
     where
         R: 'static
             + Resource<DynamicType = (), Scope = NamespaceResourceScope>
@@ -301,7 +301,7 @@ impl KubeResourceSeeker<'_> {
     pub fn list_all_clusterwide<R>(
         &self,
         field_selector: Option<&str>,
-    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send
+    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send + use<R>
     where
         R: 'static
             + Resource<DynamicType = (), Scope = ClusterResourceScope>

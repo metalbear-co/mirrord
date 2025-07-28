@@ -321,7 +321,7 @@ impl ClientConnectionHandler {
         task: BackgroundTask<SnifferCommand>,
         connection: &mut ClientConnection,
     ) -> Option<TcpSnifferApi> {
-        if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
+        match task { BackgroundTask::Running(sniffer_status, sniffer_sender) => {
             match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
                 Ok(api) => Some(api),
                 Err(e) => {
@@ -339,9 +339,9 @@ impl ClientConnectionHandler {
                     None
                 }
             }
-        } else {
+        } _ => {
             None
-        }
+        }}
     }
 
     async fn create_stealer_api(
@@ -350,7 +350,7 @@ impl ClientConnectionHandler {
         task: BackgroundTask<StealerCommand>,
         connection: &mut ClientConnection,
     ) -> AgentResult<Option<TcpStealerApi>> {
-        if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
+        match task { BackgroundTask::Running(stealer_status, stealer_sender) => {
             match TcpStealerApi::new(id, protocol_version, stealer_sender, stealer_status).await {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
@@ -363,9 +363,9 @@ impl ClientConnectionHandler {
                     Err(e)?
                 }
             }
-        } else {
+        } _ => {
             Ok(None)
-        }
+        }}
     }
 
     fn create_dns_api(task: BackgroundTask<DnsCommand>) -> DnsApi {
@@ -403,11 +403,11 @@ impl ClientConnectionHandler {
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
                 message = async {
-                    if let Some(ref mut mirror_api) = self.tcp_mirror_api {
+                    match self.tcp_mirror_api { Some(ref mut mirror_api) => {
                         mirror_api.recv().await
-                    } else {
+                    } _ => {
                         unreachable!()
-                    }
+                    }}
                 }, if self.tcp_mirror_api.is_some() => match message {
                     Ok(message) => {
                         self.respond(message).await?;
@@ -415,11 +415,11 @@ impl ClientConnectionHandler {
                     Err(e) => break e,
                 },
                 message = async {
-                    if let Some(ref mut stealer_api) = self.tcp_stealer_api {
+                    match self.tcp_stealer_api { Some(ref mut stealer_api) => {
                         stealer_api.recv().await
-                    } else {
+                    } _ => {
                         unreachable!()
-                    }
+                    }}
                 }, if self.tcp_stealer_api.is_some() => match message {
                     Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
@@ -512,29 +512,29 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
-                if let Some(mirror_api) = &mut self.tcp_mirror_api {
+                match &mut self.tcp_mirror_api { Some(mirror_api) => {
                     mirror_api.handle_client_message(message).await?
-                } else {
+                } _ => {
                     self.respond(DaemonMessage::Close(
                         "component responsible for mirroring incoming traffic is not running, \
                         which might be due to Kubernetes node kernel version <4.20. \
                         Check agent logs for errors and please report a bug if kernel version >=4.20".into(),
                     )).await?;
-                }
+                }}
             }
             ClientMessage::TcpSteal(message) => {
-                let error = if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
+                let error = match self.tcp_stealer_api.as_mut() { Some(tcp_stealer_api) => {
                     tcp_stealer_api
                         .handle_client_message(message)
                         .await
                         .err()
                         .map(|error| error.to_string())
-                } else {
+                } _ => {
                     Some(
                         "incoming traffic stealing is not available in the targetless mode"
                             .to_string(),
                     )
-                };
+                }};
 
                 if let Some(error) = error {
                     self.respond(DaemonMessage::Close(error)).await?;

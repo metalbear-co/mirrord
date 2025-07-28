@@ -32,20 +32,20 @@ impl ConfigStruct {
 
         let flags = ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
 
-        let fields = if let Data::Struct(DataStruct {
+        let fields = match data
+        { Data::Struct(DataStruct {
             fields: Fields::Named(FieldsNamed { named, .. }),
             ..
-        }) = data
-        {
+        }) => {
             Ok(named
                 .into_iter()
                 .map(ConfigField::try_from)
                 .collect::<Result<_, _>>()?)
-        } else {
+        } _ => {
             Err(source
                 .span()
                 .error("Enums, Unions, and Unnamed Structs are not supported"))
-        }?;
+        }}?;
 
         let ident = flags
             .map_to

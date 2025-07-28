@@ -329,11 +329,11 @@ impl VpnTask {
                     .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
             }
             ClientVpn::Packet(packet) => {
-                if let Some(socket) = self.socket.as_mut() {
+                match self.socket.as_mut() { Some(socket) => {
                     socket.write(&packet).await?;
-                } else {
+                } _ => {
                     tracing::error!(?packet, "unable to send packet");
-                }
+                }}
             }
             ClientVpn::OpenSocket => {
                 self.socket.replace(create_raw_socket().await?);

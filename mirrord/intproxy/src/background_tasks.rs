@@ -166,11 +166,11 @@ where
                     {
                         ControlFlow::Break(err) => return Err(err),
                         ControlFlow::Continue(()) => {
-                            if let Err(err) = task.run(message_bus).await {
+                            match task.run(message_bus).await { Err(err) => {
                                 run_error = Some(err);
-                            } else {
+                            } _ => {
                                 return Ok(());
-                            }
+                            }}
                         }
                     }
                 }
