@@ -1,13 +1,11 @@
+#[cfg(not(windows))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::HashMap,
     env::VarError,
     ffi::{OsStr, OsString},
     ops::Not,
 };
-
-#[cfg(not(windows))]
-use std::os::unix::ffi::OsStrExt;
-
 
 /// Context for generating and verifying a [`MirrordConfig`](super::MirrordConfig).
 ///
@@ -113,7 +111,7 @@ impl ConfigContext {
         let s = std::str::from_utf8(os_value.as_bytes()).map(ToString::to_string);
         #[cfg(windows)]
         let s = os_value.clone().into_string();
-        
+
         s.map_err(|_| VarError::NotUnicode(os_value))
     }
 

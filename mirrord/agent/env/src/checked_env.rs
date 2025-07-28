@@ -1,3 +1,5 @@
+#[cfg(not(windows))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     any,
     convert::Infallible,
@@ -6,9 +8,6 @@ use std::{
     net::{AddrParseError, IpAddr, SocketAddr},
     str::{FromStr, Utf8Error},
 };
-
-#[cfg(not(windows))]
-use std::os::unix::ffi::OsStrExt;
 
 use base64::{engine::general_purpose, Engine};
 #[cfg(feature = "k8s-openapi")]
