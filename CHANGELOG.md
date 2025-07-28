@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.153.0](https://github.com/metalbear-co/mirrord/tree/3.153.0) - 2025-07-28
+
+
+### Added
+
+- Added the `mirrord newsletter` command, which opens the sign-up page in the
+  browser.
+
+
+### Changed
+
+- Passthrough mirroring is now enabled by default, unless mirrord for Teams is
+  used.
+
+
+### Fixed
+
+- Fixed a bug where the SIP patching process was discarding too many open files error
+  during layer injection.
+- Fixed a typo in Istio Ambient warning message.
+
 ## [3.152.1](https://github.com/metalbear-co/mirrord/tree/3.152.1) - 2025-07-22
 
 
