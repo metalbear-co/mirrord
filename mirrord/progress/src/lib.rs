@@ -46,6 +46,12 @@ pub trait Progress: Sized + Send + Sync {
 
     /// Control if drop without calling success is considered failure.
     fn set_fail_on_drop(&mut self, fail: bool);
+
+    /// Hide the progress task temporarily to execute a function without stdout interference. This
+    /// is particularly useful when interactive cluster auth mode is used.
+    ///
+    /// Only for `SpinnerProgress`.
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R;
 }
 
 /// `ProgressTracker` determines the way progress is reported.
@@ -86,6 +92,10 @@ impl Progress for NullProgress {
     fn print(&self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, _: bool) {}
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
+    }
 }
 
 #[derive(Debug)]
@@ -178,6 +188,10 @@ impl Progress for JsonProgress {
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
     }
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
+    }
 }
 
 impl Drop for JsonProgress {
@@ -231,6 +245,10 @@ impl Progress for SimpleProgress {
     }
 
     fn set_fail_on_drop(&mut self, _: bool) {}
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
+    }
 }
 
 fn spinner_template(indent: usize) -> String {
@@ -328,6 +346,10 @@ impl Progress for SpinnerProgress {
 
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
+    }
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        self.progress.suspend(f)
     }
 }
 

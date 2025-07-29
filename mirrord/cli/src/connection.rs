@@ -47,7 +47,7 @@ where
         return Ok(None);
     }
 
-    let api = match OperatorApi::try_new(config, analytics).await? {
+    let api = match OperatorApi::try_new(config, analytics, progress).await? {
         Some(api) => api,
         None if config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
         None => {
@@ -80,7 +80,10 @@ where
     }
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    let api = api.prepare_client_cert(analytics).await.into_certified()?;
+    let api = api
+        .prepare_client_cert(analytics, progress)
+        .await
+        .into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));
 
     let target = ResolvedTarget::new(
@@ -111,15 +114,12 @@ where
 ///
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-pub(crate) async fn create_and_connect<P, R: Reporter>(
+pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut P,
     analytics: &mut R,
     branch_name: Option<String>,
-) -> CliResult<(AgentConnectInfo, AgentConnection)>
-where
-    P: Progress,
-{
+) -> CliResult<(AgentConnectInfo, AgentConnection)> {
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name).await?
     {
@@ -164,9 +164,7 @@ where
         _ => (),
     };
 
-    // NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
-    // authentication with the cluster, for example via the kubelogin tool
-    let k8s_api = KubernetesAPI::create(config)
+    let k8s_api = KubernetesAPI::create(config, progress)
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 

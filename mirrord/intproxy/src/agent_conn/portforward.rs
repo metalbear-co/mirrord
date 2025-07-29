@@ -3,6 +3,7 @@ use mirrord_kube::api::{
     kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
     wrap_raw_connection,
 };
+use mirrord_progress::NullProgress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 
@@ -12,7 +13,7 @@ pub async fn create_connection(
     config: &LayerConfig,
     connect_info: AgentKubernetesConnectInfo,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), AgentConnectionError> {
-    let k8s_api = KubernetesAPI::create(config)
+    let k8s_api = KubernetesAPI::create(config, &NullProgress{})
         .await
         .map_err(AgentConnectionError::Kube)?;
 

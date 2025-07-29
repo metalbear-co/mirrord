@@ -4507,6 +4507,7 @@ dependencies = [
  "mirrord-intproxy-protocol",
  "mirrord-kube",
  "mirrord-operator",
+ "mirrord-progress",
  "mirrord-protocol",
  "mirrord-tls-util",
  "rand 0.9.1",
