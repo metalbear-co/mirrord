@@ -53,4 +53,8 @@ skip-tree = []
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/metalbear-co/rawsocket", "https://github.com/metalbear-co/rust-iptables"]
+allow-git = [
+    "https://github.com/metalbear-co/rawsocket",
+    "https://github.com/metalbear-co/rust-iptables",
+    "https://github.com/metalbear-co/kube"
+]
