@@ -1,0 +1,1 @@
+Fixed a bug in `kube` crate which did not show messages printed out from interactive cluster auth.
