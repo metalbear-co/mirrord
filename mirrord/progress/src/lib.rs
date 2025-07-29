@@ -73,8 +73,6 @@ impl Progress for NullProgress {
         NullProgress
     }
 
-    fn set_fail_on_drop(&mut self, _: bool) {}
-
     fn success(&mut self, _: Option<&str>) {}
 
     fn failure(&mut self, _: Option<&str>) {}
@@ -86,6 +84,8 @@ impl Progress for NullProgress {
     fn ide(&self, _: serde_json::Value) {}
 
     fn print(&self, _: &str) {}
+
+    fn set_fail_on_drop(&mut self, _: bool) {}
 }
 
 #[derive(Debug)]
@@ -138,7 +138,22 @@ impl Progress for JsonProgress {
         task
     }
 
-    fn print(&self, _: &str) {}
+    fn success(&mut self, msg: Option<&str>) {
+        self.done = true;
+        self.print_finished_task(true, msg)
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        self.done = true;
+        self.print_finished_task(false, msg)
+    }
+
+    fn warning(&self, msg: &str) {
+        let message = ProgressMessage::Warning(WarningMessage {
+            message: msg.to_string(),
+        });
+        message.print();
+    }
 
     fn info(&self, msg: &str) {
         let message = ProgressMessage::Info {
@@ -158,22 +173,7 @@ impl Progress for JsonProgress {
         }
     }
 
-    fn warning(&self, msg: &str) {
-        let message = ProgressMessage::Warning(WarningMessage {
-            message: msg.to_string(),
-        });
-        message.print();
-    }
-
-    fn failure(&mut self, msg: Option<&str>) {
-        self.done = true;
-        self.print_finished_task(false, msg)
-    }
-
-    fn success(&mut self, msg: Option<&str>) {
-        self.done = true;
-        self.print_finished_task(true, msg)
-    }
+    fn print(&self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
@@ -208,8 +208,12 @@ impl Progress for SimpleProgress {
         SimpleProgress {}
     }
 
-    fn print(&self, text: &str) {
-        println!("{text}");
+    fn success(&mut self, msg: Option<&str>) {
+        println!("{msg:?}");
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        println!("{msg:?}");
     }
 
     fn warning(&self, msg: &str) {
@@ -222,12 +226,8 @@ impl Progress for SimpleProgress {
 
     fn ide(&self, _: serde_json::Value) {}
 
-    fn failure(&mut self, msg: Option<&str>) {
-        println!("{msg:?}");
-    }
-
-    fn success(&mut self, msg: Option<&str>) {
-        println!("{msg:?}");
+    fn print(&self, text: &str) {
+        println!("{text}");
     }
 
     fn set_fail_on_drop(&mut self, _: bool) {}
@@ -288,8 +288,24 @@ impl Progress for SpinnerProgress {
         }
     }
 
-    fn print(&self, msg: &str) {
-        let _ = self.root_progress.println(msg);
+    fn success(&mut self, msg: Option<&str>) {
+        self.done = true;
+        if let Some(msg) = msg {
+            self.progress.finish_with_message(format!("✓ {msg}"));
+        } else {
+            self.progress
+                .finish_with_message(format!("✓ {}", self.progress.message()));
+        }
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        self.done = true;
+        if let Some(msg) = msg {
+            self.progress.abandon_with_message(format!("x {msg}"));
+        } else {
+            self.progress
+                .abandon_with_message(format!("x {}", self.progress.message()));
+        }
     }
 
     fn warning(&self, msg: &str) {
@@ -306,24 +322,8 @@ impl Progress for SpinnerProgress {
 
     fn ide(&self, _: serde_json::Value) {}
 
-    fn failure(&mut self, msg: Option<&str>) {
-        self.done = true;
-        if let Some(msg) = msg {
-            self.progress.abandon_with_message(format!("x {msg}"));
-        } else {
-            self.progress
-                .abandon_with_message(format!("x {}", self.progress.message()));
-        }
-    }
-
-    fn success(&mut self, msg: Option<&str>) {
-        self.done = true;
-        if let Some(msg) = msg {
-            self.progress.finish_with_message(format!("✓ {msg}"));
-        } else {
-            self.progress
-                .finish_with_message(format!("✓ {}", self.progress.message()));
-        }
+    fn print(&self, msg: &str) {
+        let _ = self.root_progress.println(msg);
     }
 
     fn set_fail_on_drop(&mut self, fail: bool) {
