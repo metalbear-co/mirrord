@@ -3836,7 +3836,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.99.0"
-source = "git+ssh://git@github.com/gememma/kube.git?branch=fix-interactive-mode-msgs#e6cc735729ee23fc2c9d0f03e531b42c1030b2e7"
+source = "git+https://github.com/metalbear-co/kube.git?rev=c095706801fd0fc287e82bcbc314b458097fe9e1#c095706801fd0fc287e82bcbc314b458097fe9e1"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3848,7 +3848,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.99.0"
-source = "git+ssh://git@github.com/gememma/kube.git?branch=fix-interactive-mode-msgs#e6cc735729ee23fc2c9d0f03e531b42c1030b2e7"
+source = "git+https://github.com/metalbear-co/kube.git?rev=c095706801fd0fc287e82bcbc314b458097fe9e1#c095706801fd0fc287e82bcbc314b458097fe9e1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3887,7 +3887,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.99.0"
-source = "git+ssh://git@github.com/gememma/kube.git?branch=fix-interactive-mode-msgs#e6cc735729ee23fc2c9d0f03e531b42c1030b2e7"
+source = "git+https://github.com/metalbear-co/kube.git?rev=c095706801fd0fc287e82bcbc314b458097fe9e1#c095706801fd0fc287e82bcbc314b458097fe9e1"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3904,7 +3904,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.99.0"
-source = "git+ssh://git@github.com/gememma/kube.git?branch=fix-interactive-mode-msgs#e6cc735729ee23fc2c9d0f03e531b42c1030b2e7"
+source = "git+https://github.com/metalbear-co/kube.git?rev=c095706801fd0fc287e82bcbc314b458097fe9e1#c095706801fd0fc287e82bcbc314b458097fe9e1"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3917,7 +3917,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.99.0"
-source = "git+ssh://git@github.com/gememma/kube.git?branch=fix-interactive-mode-msgs#e6cc735729ee23fc2c9d0f03e531b42c1030b2e7"
+source = "git+https://github.com/metalbear-co/kube.git?rev=c095706801fd0fc287e82bcbc314b458097fe9e1#c095706801fd0fc287e82bcbc314b458097fe9e1"
 dependencies = [
  "ahash",
  "async-broadcast",
