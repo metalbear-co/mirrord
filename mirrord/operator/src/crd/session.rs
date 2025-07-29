@@ -2,7 +2,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "mirrord.metalbear.co",
     version = "v1alpha",
@@ -21,7 +21,7 @@ pub struct MirrordClusterSessionSpec {
     pub target: SessionTarget,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionOwner {
     /// Unique ID.
@@ -35,7 +35,7 @@ pub struct MirrordClusterSessionOwner {
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
     /// Target's Resource apiVersion
@@ -57,7 +57,7 @@ pub struct SessionTarget {
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct JiraMetricsResources {
     /// The Jira webhook URL, used to update total session time in the mirrord Jira app
