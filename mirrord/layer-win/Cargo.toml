@@ -1,0 +1,23 @@
+[package]
+name = "layer-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+winapi = { version = "0.3.9", features = ["minwindef", "winnt"] }
+
+[lints]
+workspace = true

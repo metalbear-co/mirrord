@@ -2,6 +2,7 @@
 
 members = [
     "mirrord/intproxy",
+    "mirrord/layer-win"
     #"mirrord/agent/env",
     #"mirrord/agent/iptables",
     #"mirrord/layer/tests/apps/fileops",
