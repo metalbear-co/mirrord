@@ -44,17 +44,17 @@ pub trait Progress: Sized {
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
 
-    /// Control if drop without calling succes is considered failure.
+    /// Control if drop without calling success is considered failure.
     fn set_fail_on_drop(&mut self, fail: bool);
 }
 
-/// `ProgressMode` specifies the way progress is reported by `TaskProgress`.
-// TODO: update outdated comment
+/// `ProgressTracker` determines the way progress is reported.
 #[derive(Debug)]
 #[enum_dispatch(Progress)]
 pub enum ProgressTracker {
     /// Display dynamic progress with spinners.
     SpinnerProgress(SpinnerProgress),
+
     /// Display simple human-readable messages in new lines.
     SimpleProgress(SimpleProgress),
 
@@ -366,7 +366,7 @@ impl ProgressTracker {
 /// Message sent when a new task is created using subtask/new
 #[derive(Serialize, Debug, Clone, Default)]
 struct NewTaskMessage {
-    /// Task name (indentifier)
+    /// Task name (identifier)
     name: String,
     /// Parent task name, if subtask.
     parent: Option<String>,
