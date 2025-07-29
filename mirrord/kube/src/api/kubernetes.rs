@@ -84,7 +84,7 @@ impl KubernetesAPI {
 
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         // filter openshift to make it a lot faster
         if Discovery::new(self.client.clone())
@@ -208,7 +208,7 @@ impl KubernetesAPI {
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let (params, runtime_data) = self
             .create_agent_params(target_config, container_config)

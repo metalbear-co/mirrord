@@ -37,7 +37,7 @@ pub(crate) fn extract_library<P>(
     prefix: bool,
 ) -> CliResult<PathBuf>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let mut progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
@@ -83,7 +83,7 @@ where
 #[cfg(target_os = "macos")]
 pub(crate) fn extract_arm64<P>(progress: &P, prefix: bool) -> CliResult<PathBuf>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let mut progress = progress.subtask("extracting arm64 layer library");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"))

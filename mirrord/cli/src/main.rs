@@ -321,7 +321,7 @@ async fn exec_process<P>(
     user_data: &mut UserData,
 ) -> CliResult<()>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
@@ -444,7 +444,7 @@ fn print_config<P>(
     config_file_path: Option<&str>,
     operator_used: bool,
 ) where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     progress.info(&format!("Running command: {}", command.join(" ")));
 

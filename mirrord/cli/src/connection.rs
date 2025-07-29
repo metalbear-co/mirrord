@@ -118,7 +118,7 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
     branch_name: Option<String>,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name).await?
@@ -225,7 +225,7 @@ fn user_persistent_random_message_select() -> bool {
 
 pub(crate) fn show_multipod_warning<P>(progress: &mut P) -> CliResult<(), CliError>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     // Send to IDEs that we're in multi-pod without operator.
     progress.ide(serde_json::to_value(IdeMessage {
@@ -255,7 +255,7 @@ where
 
 pub(crate) fn show_http_filter_warning<P>(progress: &mut P) -> CliResult<(), CliError>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     // Send to IDEs that at an HTTP filter is set without operator.
     progress.ide(serde_json::to_value(IdeMessage {

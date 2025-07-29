@@ -20,7 +20,7 @@ pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 /// the [`ProgressMessage`] (intellij will fail with `"failed to parse a message from mirrord
 /// binary"`), and we end up displaying an error instead.
 #[enum_dispatch]
-pub trait Progress: Sized {
+pub trait Progress: Sized + Send + Sync {
     /// Create a subtask report from this task.
     fn subtask(&self, text: &str) -> Self;
 
