@@ -79,8 +79,8 @@ dll-syringe.workspace = true
 [target.'cfg(target_os = "macos")'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
 
-[target.'cfg(target_os = "windows")'.build-dependencies]
-layer-win = { artifact = "cdylib", path = "../../mirrord-win-poc/manual-exec/layer-win" }
+#[target.'cfg(target_os = "windows")'.build-dependencies]
+#layer-win = { artifact = "cdylib", path = "../../mirrord-win-poc/manual-exec/layer-win" }
 
 [dev-dependencies]
 rstest.workspace = true

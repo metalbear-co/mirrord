@@ -16,13 +16,14 @@ impl SuspendedProcessExtInject for SuspendedProcess {
             InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)?;
         let syringe = Syringe::for_process(injector_process);
 
-        let payload_path = if !dll_path.ends_with("\0") {
+        let payload_path = if dll_path.ends_with("\0") {
             dll_path
         } else {
-            dll_path + "\0\0" // add wide null termination
+            format!("{dll_path}\0\0") // Ensure double-null termination
         };
 
         syringe.inject(payload_path)?;
         Ok(())
     }
+
 }

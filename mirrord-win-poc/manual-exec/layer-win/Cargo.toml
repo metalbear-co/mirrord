@@ -12,6 +12,7 @@ homepage.workspace = true
 publish.workspace = true
 keywords.workspace = true
 categories.workspace = true
+build = "build.rs"
 
 [dependencies]
 asdf-overlay-hook = "0.7.5"

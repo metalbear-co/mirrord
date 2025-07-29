@@ -463,10 +463,7 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
     match cmd.inject_and_spawn("C:\\Users\\Daniel\\git\\mirrord\\target\\release\\layer_win.dll".to_string()) {
         Ok(_) => Ok(()),
         _ => Err(CliError::BinaryExecuteFailed(binary, binary_args))
-    }?;
-
-    // exit from this process?
-    Ok(())
+    }
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].

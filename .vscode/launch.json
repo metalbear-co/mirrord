@@ -24,7 +24,7 @@
       "name": "debug cli [win]",
       "cargo": {
         "args": [
-          "build", "-p", "mirrord", "--target", "x86_64-pc-windows-msvc"
+          "build", "-p", "mirrord", "--release"
         ],
         "filter": {
           "name": "mirrord"
@@ -34,9 +34,11 @@
         },
       },
       "args": [
-        "exec",
+        "exec", "-c",
+        "--target", "targetless",
         "target/debug/target-dummy.exe", "HIJACK_ME", "VAL"
       ],
+      "env": {"MIRRORD_OPERATOR_ENABLE": "false"},
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
       "sourceLanguages": [
