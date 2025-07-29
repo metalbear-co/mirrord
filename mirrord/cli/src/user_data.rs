@@ -35,15 +35,12 @@ pub(crate) struct UserData {
     /// Helps us keep track of unique users for analytics when telemetry is enabled.
     ///
     /// Must use custom `default =`, since the default is [`Uuid::nil`].
-    #[serde(default = "default_uuid")]
+    ///
+    /// When deserialziing a [`UserData`] file, the `machine_id` might not be present, but
+    /// we don't want `serde` to error and overwrite the other [`UserData`] fields with
+    /// default values.
+    #[serde(default = "Uuid::new_v4")]
     machine_id: Uuid,
-}
-
-/// When deserialziing a [`UserData`] file, the `machine_id` might not be present, but
-/// we don't want `serde` to error and overwrite the other [`UserData`] fields with
-/// default values.
-fn default_uuid() -> Uuid {
-    Uuid::new_v4()
 }
 
 impl Default for UserData {
