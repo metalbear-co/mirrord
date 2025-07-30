@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.154.0](https://github.com/metalbear-co/mirrord/tree/3.154.0) - 2025-07-30
+
+
+### Added
+
+- Add machine_id to UserData so it can be used in analytics.
+- Extended `MirrordKafkaClientConfig` CRD with a kind of a SASL OAUTH token
+  provider to use.
+
+
+### Fixed
+
+- Added "Ready!" message when `mirrord port-forward` command finishes setup.
+- Fixed a bug in `kube` crate which did not show messages printed out from
+  interactive cluster auth.
+- Fixed progress message printed when mirrord automatically adds probe ports to
+  `feature.network.incoming.http_filter.ports`.
+- Reverted changes to SIP log levels that might cause bad instructions under
+  the hood.
+
+
+### Internal
+
+- Add derive for PartialEq and Eq traits to MirrordSessionSpec and nested
+  structs.
+
 ## [3.153.0](https://github.com/metalbear-co/mirrord/tree/3.153.0) - 2025-07-28
 
 
