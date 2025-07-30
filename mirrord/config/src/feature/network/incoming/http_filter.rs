@@ -301,9 +301,9 @@ impl core::fmt::Display for PortList {
         for port in self.iter() {
             if first {
                 write!(f, "{port}")?;
+                first = false;
             } else {
                 write!(f, ", {port}")?;
-                first = false;
             }
         }
         write!(f, "]")?;
