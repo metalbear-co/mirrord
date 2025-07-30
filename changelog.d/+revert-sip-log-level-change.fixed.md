@@ -1,0 +1,1 @@
+Reverted changes to SIP log levels that might cause bad instructions under the hood.
