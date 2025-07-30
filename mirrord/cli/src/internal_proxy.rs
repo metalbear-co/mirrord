@@ -33,6 +33,7 @@ use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    user_data::UserData,
     util::{create_listen_socket, detach_io},
 };
 
@@ -51,6 +52,7 @@ pub(crate) async fn proxy(
     config: LayerConfig,
     listen_port: u16,
     watch: drain::Watch,
+    user_data: &UserData,
 ) -> CliResult<(), InternalProxyError> {
     tracing::info!(
         ?config,
@@ -83,9 +85,19 @@ pub(crate) async fn proxy(
     let container_mode = crate::util::intproxy_container_mode();
 
     let mut analytics = if container_mode {
-        AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
+        AnalyticsReporter::only_error(
+            config.telemetry,
+            execution_kind,
+            watch,
+            user_data.machine_id(),
+        )
     } else {
-        AnalyticsReporter::new(config.telemetry, execution_kind, watch)
+        AnalyticsReporter::new(
+            config.telemetry,
+            execution_kind,
+            watch,
+            user_data.machine_id(),
+        )
     };
     (&config).collect_analytics(analytics.get_mut());
 

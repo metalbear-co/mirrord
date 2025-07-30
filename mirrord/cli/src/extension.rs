@@ -2,7 +2,9 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
-use crate::{config::ExtensionExecArgs, execution::MirrordExecution, CliResult};
+use crate::{
+    config::ExtensionExecArgs, execution::MirrordExecution, user_data::UserData, CliResult,
+};
 
 /// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
@@ -33,7 +35,11 @@ where
 }
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch) -> CliResult<()> {
+pub(crate) async fn extension_exec(
+    args: ExtensionExecArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
@@ -44,7 +50,12 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
+    let mut analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        Default::default(),
+        watch,
+        user_data.machine_id(),
+    );
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {

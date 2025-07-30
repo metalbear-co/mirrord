@@ -2623,8 +2623,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c29c30684418547d476f0b48e84f4821639119c483b1eccd566c8cd0cd05f521"
 dependencies = [
  "rustix 0.38.44",
- "tokio",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "fs4"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
+dependencies = [
+ "rustix 1.0.7",
+ "tokio",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4272,6 +4282,7 @@ dependencies = [
  "const-random",
  "dotenvy",
  "drain",
+ "fs4 0.13.1",
  "futures",
  "home",
  "http-body-util",
@@ -4314,6 +4325,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "which 7.0.3",
 ]
 
@@ -4414,6 +4426,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4422,7 +4435,7 @@ version = "3.153.0"
 dependencies = [
  "bcder",
  "chrono",
- "fs4",
+ "fs4 0.13.1",
  "home",
  "k8s-openapi",
  "kube",
@@ -4689,7 +4702,7 @@ name = "mirrord-sip"
 version = "3.153.0"
 dependencies = [
  "apple-codesign",
- "fs4",
+ "fs4 0.12.0",
  "hex",
  "object",
  "once_cell",
@@ -7994,6 +8007,7 @@ checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
  "getrandom 0.3.3",
  "js-sys",
+ "serde",
  "wasm-bindgen",
 ]
 
