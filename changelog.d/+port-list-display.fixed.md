@@ -1,1 +1,1 @@
-Fixed progress message printed when mirrord automatically adds probe filters to `feature.network.incoming.http_filter.ports`.
+Fixed progress message printed when mirrord automatically adds probe ports to `feature.network.incoming.http_filter.ports`.
