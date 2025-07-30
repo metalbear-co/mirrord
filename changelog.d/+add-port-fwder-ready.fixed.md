@@ -1,0 +1,1 @@
+Added "Ready!" message when `mirrord port-forward` command finishes setup.
