@@ -72,7 +72,7 @@ use std::{
     fs::File,
     io::Read,
     net::SocketAddr,
-    os::unix::process::parent_id,
+    os::{fd::AsRawFd, unix::process::parent_id},
     panic,
     sync::OnceLock,
     time::Duration,
@@ -93,7 +93,10 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
-use nix::{errno::Errno, fcntl::OFlag};
+use nix::{
+    errno::Errno,
+    fcntl::{FcntlArg, FdFlag, OFlag},
+};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
@@ -738,7 +741,16 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
-    let (pipe_read, pipe_write) = match nix::unistd::pipe2(OFlag::O_CLOEXEC) {
+    let pipe_result = if cfg!(target_os = "macos") {
+        nix::unistd::pipe().and_then(|pipe| {
+            nix::fcntl::fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+            Ok(pipe)
+        })
+    } else {
+        nix::unistd::pipe2(OFlag::O_CLOEXEC)
+    };
+
+    let (pipe_read, pipe_write) = match pipe_result {
         Ok(pipe) => pipe,
         Err(error) => {
             // If we cannot create the pipe, fallback to vfork.
