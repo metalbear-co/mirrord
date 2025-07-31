@@ -1,16 +1,21 @@
+#![allow(static_mut_refs)]
 use std::thread;
 
 use minhook_detours_rs::guard::DetourGuard;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
-    um::{consoleapi::AllocConsole, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}},
+    um::{
+        consoleapi::AllocConsole,
+        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
+    },
 };
 
 use crate::hooks::initialize_hooks;
 
-mod macros;
 mod error;
 mod hooks;
+mod macros;
+pub mod process;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
@@ -23,7 +28,8 @@ pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    // Avoid running logic in [`DllMain`] to prevent exceptions, create new thread and wait for it's execution to finish.
+    // Avoid running logic in [`DllMain`] to prevent exceptions, create new thread and wait for it's
+    // execution to finish.
     let _ = thread::spawn(|| {
         mirrord_start().expect("Failed initializing mirrord-layer-win");
     });
@@ -85,9 +91,12 @@ fn release_detour_guard() -> anyhow::Result<()> {
 
 fn mirrord_start() -> anyhow::Result<()> {
     initialize_detour_guard()?;
-    
-    let mut guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
 
+    unsafe {
+        AllocConsole();
+    }
+
+    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;
 
     Ok(())
@@ -100,6 +109,9 @@ entry_point!(|module, reason_for_call, reserved| {
         DLL_THREAD_ATTACH => thread_attach(module, reserved),
         DLL_THREAD_DETACH => thread_detach(module, reserved),
         // Invalid reason for call.
-        _ => FALSE
+        _ => FALSE,
     }
 });
+
+#[cfg(test)]
+mod tests;
