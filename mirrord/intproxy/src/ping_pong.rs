@@ -7,6 +7,7 @@
 
 use std::{
     collections::VecDeque,
+    ops::Not,
     time::{Duration, Instant},
 };
 
@@ -97,7 +98,7 @@ impl BackgroundTask for PingPong {
                         last_agent_message >= Instant::now() - self.ticker.period()
                     }).unwrap_or_default();
 
-                    if self.awaiting_pongs.len() > 0 && !other_messages_in_last_period {
+                    if self.awaiting_pongs.is_empty().not() && other_messages_in_last_period.not() {
                         break Err(PingPongError::PongTimeout);
                     } else {
                         tracing::debug!("Sending ping to the agent");
