@@ -1,22 +1,27 @@
 //! Utilities for handling multiple network protocol stacks within one
 //! [`OutgoingProxy`](super::OutgoingProxy).
 
-use std::{
-    io, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-};
 #[cfg(not(windows))]
+use std::{env, path::PathBuf};
 use std::{
-    env, path::PathBuf,
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-
+#[cfg(not(windows))]
+use ::tokio::fs;
+use ::tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream, UdpSocket},
+};
 use bytes::BytesMut;
 use mirrord_intproxy_protocol::NetProtocol;
+#[cfg(not(windows))]
+use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     outgoing::{
         tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, LayerWrite,
-        SocketAddress, 
-        
+        SocketAddress,
     },
     ClientMessage, ConnectionId,
 };
@@ -24,22 +29,14 @@ use mirrord_protocol::{
 use mirrord_protocol::outgoing::UnixAddr;
 #[cfg(not(windows))]
 use rand::distr::{Alphanumeric, SampleString};
-use ::tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream, UdpSocket},
-};
-#[cfg(not(windows))]
-use ::tokio::fs;
 #[cfg(windows)]
-mod tokio { 
+mod tokio {
     pub mod net {
-        pub struct UnixStream{}
-        pub struct UnixListener{}
+        pub struct UnixStream {}
+        pub struct UnixListener {}
     }
 }
-use tokio::{
-    net::{UnixListener, UnixStream},
-};
+use tokio::net::{UnixListener, UnixStream};
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
@@ -124,9 +121,12 @@ impl NetProtocolExt for NetProtocol {
                 }
             },
             #[cfg(windows)]
-            _ => { 
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported SocketAddress"));
-            },
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "unsupported SocketAddress",
+                ));
+            }
         };
 
         Ok(socket)
@@ -171,7 +171,10 @@ impl PreparedSocket {
             }
             #[cfg(windows)]
             Self::UnixListener(_) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Unsupported UnixListener").into());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Unsupported UnixListener",
+                ));
             }
         };
 
@@ -194,7 +197,10 @@ impl PreparedSocket {
             }
             #[cfg(windows)]
             Self::UnixListener(_) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported UnixListener"));                
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "unsupported UnixListener",
+                ));
             }
         };
 
@@ -241,7 +247,10 @@ impl ConnectedSocket {
             #[cfg(not(windows))]
             InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
             #[cfg(windows)]
-            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported InnerConnectedSocket")),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "unsupported InnerConnectedSocket",
+            )),
         }
     }
 
@@ -274,7 +283,10 @@ impl ConnectedSocket {
                 Ok(bytes)
             }
             #[cfg(windows)]
-            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported InnerConnectedSocket")),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "unsupported InnerConnectedSocket",
+            )),
         }
     }
 
@@ -287,10 +299,13 @@ impl ConnectedSocket {
         match &mut self.inner {
             InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
             #[cfg(not(windows))]
-            InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,           
+            InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
             #[cfg(windows)]
-            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported InnerConnectedSocket")),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "unsupported InnerConnectedSocket",
+            )),
         }
     }
 }

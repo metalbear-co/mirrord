@@ -1,0 +1,1 @@
+Fixed a bug where SIP patching would discard the error when too many files are open and cause problems with layer injection.

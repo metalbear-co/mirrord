@@ -1,3 +1,5 @@
+#[cfg(not(windows))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     any,
     convert::Infallible,

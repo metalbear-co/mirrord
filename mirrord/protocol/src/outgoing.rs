@@ -12,8 +12,9 @@ use bincode::{Decode, Encode};
 use socket2::SockAddr as OsSockAddr;
 
 use crate::{
-    ConnectionId, Payload, 
-    // outgoing::UnixAddr::{Abstract, Pathname, Unnamed}, 
+    ConnectionId,
+    Payload,
+    // outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
     SerializationError,
 };
 
@@ -89,15 +90,16 @@ impl TryFrom<OsSockAddr> for SocketAddress {
         let res = addr.as_socket().map(SocketAddress::Ip);
         #[cfg(not(windows))]
         {
-            res = res.or_else(|| {
-                addr.as_pathname()
-                    .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
-            })
-            .or_else(|| {
-                addr.as_abstract_namespace()
-                    .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
-            })
-            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)));
+            res = res
+                .or_else(|| {
+                    addr.as_pathname()
+                        .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
+                })
+                .or_else(|| {
+                    addr.as_abstract_namespace()
+                        .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
+                })
+                .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)));
         }
         res.ok_or(SerializationError::SocketAddress)
     }
@@ -112,7 +114,9 @@ impl TryFrom<SocketAddress> for OsSockAddr {
             #[cfg(not(windows))]
             SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
             #[cfg(windows)]
-            _ => Err(Self::Error::new(ErrorKind::InvalidInput, SerializationError::SocketAddress).into())
+            _ => Err(
+                Self::Error::new(ErrorKind::InvalidInput, SerializationError::SocketAddress),
+            ),
         }
     }
 }

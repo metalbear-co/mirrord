@@ -5,14 +5,11 @@ use std::fs::DirEntry;
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-use std::{
-    fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock,
-};
-
 #[cfg(not(windows))]
 use std::os::unix::prelude::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
+use std::{fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]
@@ -73,14 +70,13 @@ pub struct MetadataInternal {
     pub access_time: i64,
     /// modification time, st_mtime_ns (unix) or FILETIME (windows)
     pub modification_time: i64,
-    /// creation time, st_ctime_ns (unix) or FILETIME (windows) 
+    /// creation time, st_ctime_ns (unix) or FILETIME (windows)
     pub creation_time: i64,
     /// block size, st_blksize
     pub block_size: u64,
     /// number of blocks, st_blocks
     pub blocks: u64,
 }
-
 
 #[cfg(not(windows))]
 impl From<Metadata> for MetadataInternal {
@@ -103,24 +99,22 @@ impl From<Metadata> for MetadataInternal {
     }
 }
 
-
 #[cfg(windows)]
 impl From<Metadata> for MetadataInternal {
-    
     fn from(metadata: Metadata) -> Self {
-        // let file_id = file_id::get_low_res_file_id(metadata.path()).unwrap();
         Self {
             device_id: metadata.volume_serial_number().unwrap() as u64,
-            inode: metadata.file_index().unwrap(), // On Windows, true inode is not exposed directly from std
-                                          // You could return 0 or use Windows APIs like `GetFileInformationByHandle`
+            // On Windows, true inode is not exposed directly from std
+            // You could return 0 or use Windows APIs like `GetFileInformationByHandle`
+            inode: metadata.file_index().unwrap(),
             mode: metadata.file_attributes(),
             hard_links: metadata.number_of_links().unwrap() as u64,
-            user_id: 0, // requires File
-            group_id: 0, // requires File
-            rdevice_id: 0, 
+            user_id: 0,
+            group_id: 0,
+            rdevice_id: 0,
             size: metadata.file_size(),
             access_time: metadata.last_access_time() as i64,
-            modification_time: metadata.change_time().or(Some(0)).unwrap() as i64, // or last_write_time()?,
+            modification_time: metadata.change_time().unwrap_or(0) as i64,
             creation_time: metadata.creation_time() as i64,
             block_size: 0,
             blocks: 0,
