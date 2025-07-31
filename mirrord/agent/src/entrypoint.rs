@@ -517,7 +517,7 @@ impl ClientConnectionHandler {
             // TODO(alex): If we ever need mirrord->agent latency, then you can just handle this
             // message here (keep in mind that mirrord->operator->agent will give unreliable values,
             // since the operator changes ping-pong behaviour).
-            ClientMessage::OperatorRtt(_) => (),
+            ClientMessage::PingRtt(_) => (),
             ClientMessage::Tcp(message) => {
                 if let Some(mirror_api) = &mut self.tcp_mirror_api {
                     mirror_api.handle_client_message(message).await?

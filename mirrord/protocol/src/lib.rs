@@ -90,6 +90,7 @@ pub static VERSION: LazyLock<Version> = LazyLock::new(|| {
         .expect("Bad version parsing")
 });
 
+/// [`ClientMessage::PingRtt`] version requirement.
 pub static OPERATOR_PING: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.20.0".parse().expect("Bad Identifier"));
 

@@ -145,11 +145,13 @@ pub enum ClientMessage {
     ReadyForLogs,
     Vpn(ClientVpn),
     GetAddrInfoRequestV2(GetAddrInfoRequestV2),
-    OperatorRtt(OperatorRtt),
+    PingRtt(PingRtt),
 }
 
+/// Used by `mirrord` to reply to a [`DaemonMessage::Pong`] so we can calculate RTT between
+/// `mirrord` and the `operator` (the `agent` currently just ignores this).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OperatorRtt {
+pub struct PingRtt {
     pub elapsed: Duration,
 }
 

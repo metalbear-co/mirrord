@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mirrord_protocol::{ClientMessage, OperatorRtt, OPERATOR_PING};
+use mirrord_protocol::{ClientMessage, PingRtt, OPERATOR_PING};
 use semver::Version;
 use thiserror::Error;
 use tokio::time::{self, Interval, MissedTickBehavior};
@@ -33,7 +33,7 @@ pub enum PingPongError {
     PongTimeout,
 }
 
-/// Notification about a [`DeamonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong) received
+/// Notification about a [`DaemonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong) received
 /// from the agent.
 pub enum PingPongMessage {
     AgentSentPong,
@@ -47,7 +47,10 @@ pub enum PingPongMessage {
 pub struct PingPong {
     /// How often the task should send pings.
     ticker: Interval,
-    /// How many pong are expected from the agent.
+    /// How many pong are expected from the agent (`.len()`). We `pop_back` whenever receiving a
+    /// [`DaemonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong).
+    ///
+    /// Also used to handle the mirrord->operator latency metric.
     awaiting_pongs: VecDeque<Instant>,
 
     reconnecting: bool,
@@ -103,6 +106,7 @@ impl BackgroundTask for PingPong {
                     }
                 },
 
+                // We only want to `pop_back` when receiving a `AgentSentPong`.
                 msg = message_bus.recv() => match (msg, self.awaiting_pongs.len()) {
                     (None, _) => {
                         tracing::debug!("Message bus closed, exiting");
@@ -120,7 +124,7 @@ impl BackgroundTask for PingPong {
                         if let Some(protocol_version) = self.protocol_version.as_ref() &&
                            OPERATOR_PING.matches(protocol_version) &&
                            let Some(ping_rtt) = self.awaiting_pongs.pop_front() {
-                            message_bus.send(ClientMessage::OperatorRtt(OperatorRtt { elapsed: ping_rtt.elapsed() })).await;
+                            message_bus.send(ClientMessage::PingRtt(PingRtt { elapsed: ping_rtt.elapsed() })).await;
                         }
                     },
                     (Some(PingPongMessage::AgentSentPong), 0) => {
