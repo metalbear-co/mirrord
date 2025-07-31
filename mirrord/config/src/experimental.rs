@@ -105,6 +105,13 @@ pub struct ExperimentalConfig {
     /// Useful for seeing the state of SIP when `stdout` may be affected by another process.
     #[config(default = None)]
     pub sip_log_destination: Option<PathBuf>,
+
+    /// ### _experimental_ vfork_emulation {#experimental-vfork_emulation}
+    ///
+    /// Enables vfork emulation within the mirrord-layer.
+    /// Might solve rare stack corruption issues.  
+    #[config(default = false)]
+    pub vfork_emulation: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -120,5 +127,6 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.idle_local_http_connection_timeout,
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
+        analytics.add("vfork_emulation", self.vfork_emulation);
     }
 }

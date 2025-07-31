@@ -531,7 +531,9 @@ fn sip_only_layer_start(
         exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries, skip_patch_binaries)
     };
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
-    unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
+    if config.experimental.vfork_emulation {
+        unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
+    }
 
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
@@ -608,7 +610,9 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
-        replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
+        if state.experimental().vfork_emulation {
+            replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
+        }
     };
 
     unsafe {
