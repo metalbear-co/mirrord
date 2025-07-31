@@ -24,11 +24,9 @@ pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Avoid running logic in [`DllMain`] to prevent exceptions, create new thread and wait for it's execution to finish.
-    let t = thread::spawn(|| {
+    let _ = thread::spawn(|| {
         mirrord_start().expect("Failed initializing mirrord-layer-win");
     });
-
-    t.join().expect("Failed starting dll_attach thread");
 
     TRUE
 }
@@ -40,11 +38,9 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Succesful DLL deattach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    let t = thread::spawn(|| {
+    let _ = thread::spawn(|| {
         release_detour_guard().expect("Failed releasing detour guard");
     });
-
-    t.join().expect("Failed starting dll_detach thread");
 
     TRUE
 }
