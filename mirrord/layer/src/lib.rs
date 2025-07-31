@@ -740,6 +740,22 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     res
 }
 
+/// Transparently replaces `vfork` call with a safer `fork`.
+///
+/// `vfork` and `fork` calls are very similar (except performance),
+/// except that with `vfork` the parent process is blocked until the child exits or execs.
+/// This hook uses a dummy pipe to handle this difference:
+/// 1. Parent process creates a pipe with O_CLOEXEC flag.
+/// 2. Parent process forks.
+/// 3. Parent process closes the writing end blocks on reading from the reading end.
+/// 4. The read call returns with EOF when the child process exits or execs.
+///
+/// # Rationale
+///
+/// To properly handle child processes, we need to hook functions from the `exec` family.
+/// These are often used in tandem with `vfork`. However, `vfork` requires the child process
+/// not to write to memory (it's shared with the parent). Doing it in the child process results with
+/// an undefined behavior. Since our hooks always write to memory, `vfork` is not our ally.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
     #[cfg(target_os = "macos")]
