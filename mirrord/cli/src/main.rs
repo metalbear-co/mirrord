@@ -666,19 +666,20 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     result?;
 
     let execution_result = Box::pin(async move {
-        exec_process(
-                config,
-                config_file_path.as_deref(),
-                args,
-                &progress,
-                &mut analytics,
-            )
-            .await
+        let res = exec_process(
+            config,
+            config_file_path.as_deref(),
+            args,
+            &progress,
+            &mut analytics,
+        )
+        .await;
+
+        if res.is_err() && !analytics.has_error() {
+            analytics.set_error(AnalyticsError::Unknown);
+        }
+        res
     }).await;
-    
-    if execution_result.is_err() && !analytics.has_error() {
-        analytics.set_error(AnalyticsError::Unknown);
-    }
 
     execution_result
 }

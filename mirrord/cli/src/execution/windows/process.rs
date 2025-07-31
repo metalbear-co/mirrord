@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::Read;
 use std::os::windows::io::{FromRawHandle, RawHandle};
-use std::process::Stdio;
 use std::time::Duration;
 use windows::Win32::{
     Foundation::{HANDLE, WAIT_OBJECT_0,}, 
