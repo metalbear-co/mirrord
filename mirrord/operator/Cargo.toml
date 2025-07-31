@@ -89,3 +89,4 @@ uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
+serde_yaml.workspace = true
