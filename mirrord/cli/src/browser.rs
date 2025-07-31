@@ -84,15 +84,6 @@ fn is_chrome_installed() -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
-fn is_chrome_installed() -> bool {
-    Command::new("cmd")
-        .args(&["/c", "where", "chrome"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
 #[derive(Serialize)]
 struct ExtensionInitPayload {
     header_filter: String,
