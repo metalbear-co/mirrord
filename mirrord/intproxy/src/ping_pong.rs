@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mirrord_protocol::{tcp::HTTP_FRAMED_VERSION, ClientMessage, OperatorRtt, OPERATOR_PING};
+use mirrord_protocol::{ClientMessage, OperatorRtt, OPERATOR_PING};
 use semver::Version;
 use thiserror::Error;
 use tokio::time::{self, Interval, MissedTickBehavior};
