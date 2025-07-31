@@ -1,9 +1,18 @@
+use std::thread;
+
+use minhook_detours_rs::guard::DetourGuard;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
 };
 
+use crate::hooks::initialize_hooks;
+
 mod macros;
+mod error;
+mod hooks;
+
+pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
 /// Function that gets called upon DLL initialization ([`DLL_PROCESS_ATTACH`]).
 ///
@@ -14,6 +23,13 @@ mod macros;
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    // Avoid running logic in [`DllMain`] to prevent exceptions, create new thread and wait for it's execution to finish.
+    let t = thread::spawn(|| {
+        mirrord_start().expect("Failed initializing mirrord-layer-win");
+    });
+
+    t.join().expect("Failed starting dll_attach thread");
+
     TRUE
 }
 
@@ -24,6 +40,12 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Succesful DLL deattach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    let t = thread::spawn(|| {
+        release_detour_guard().expect("Failed releasing detour guard");
+    });
+
+    t.join().expect("Failed starting dll_detach thread");
+
     TRUE
 }
 
@@ -45,6 +67,36 @@ fn thread_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * Anything else - Failure.
 fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     TRUE
+}
+
+fn initialize_detour_guard() -> anyhow::Result<()> {
+    unsafe {
+        DETOUR_GUARD = Some({
+            let guard = DetourGuard::new().expect("Failed creating DetourGuard");
+            guard
+        });
+    }
+
+    Ok(())
+}
+
+fn release_detour_guard() -> anyhow::Result<()> {
+    unsafe {
+        // This will release the hooking engine, removing all hooks.
+        DETOUR_GUARD.as_mut().unwrap().try_close()?;
+    }
+
+    Ok(())
+}
+
+fn mirrord_start() -> anyhow::Result<()> {
+    initialize_detour_guard()?;
+    
+    let mut guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
+
+    initialize_hooks(guard)?;
+
+    Ok(())
 }
 
 entry_point!(|module, reason_for_call, reserved| {

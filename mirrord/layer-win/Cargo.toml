@@ -19,5 +19,13 @@ crate-type = ["cdylib"]
 [dependencies]
 winapi = { version = "0.3.9", features = ["minwindef", "winnt"] }
 
+# Used for internal error type set-up
+thiserror = "2.0.12" 
+
+# Used for handling all kind of error types in practice
+anyhow = "1.0.98" 
+
+minhook-detours-rs = { path = "../../../minhook-detours-rs" }
+
 [lints]
 workspace = true
