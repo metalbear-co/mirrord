@@ -1831,6 +1831,8 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 [[package]]
 name = "minhook-detours-rs"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd874700cf0120fdfad356a5fb51b32c20fda1e1ff83dc793400e7226fa0ccdf"
 dependencies = [
  "minhook-detours-sys",
  "thiserror 2.0.12",
