@@ -17,7 +17,7 @@ categories.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-winapi = { version = "0.3.9", features = ["minwindef", "winnt"] }
+winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi"] }
 
 # Used for internal error type set-up
 thiserror = "2.0.12" 

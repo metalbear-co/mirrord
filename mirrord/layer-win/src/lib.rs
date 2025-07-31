@@ -3,7 +3,7 @@ use std::thread;
 use minhook_detours_rs::guard::DetourGuard;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
-    um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
+    um::{consoleapi::AllocConsole, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}},
 };
 
 use crate::hooks::initialize_hooks;
@@ -38,9 +38,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Succesful DLL deattach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    let _ = thread::spawn(|| {
-        release_detour_guard().expect("Failed releasing detour guard");
-    });
+    release_detour_guard().expect("Failed releasing detour guard");
 
     TRUE
 }
@@ -87,10 +85,12 @@ fn release_detour_guard() -> anyhow::Result<()> {
 
 fn mirrord_start() -> anyhow::Result<()> {
     initialize_detour_guard()?;
+    println!("hi!");
     
     let mut guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
 
     initialize_hooks(guard)?;
+    println!("initialized hooks");
 
     Ok(())
 }
