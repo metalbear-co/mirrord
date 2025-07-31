@@ -85,12 +85,10 @@ fn release_detour_guard() -> anyhow::Result<()> {
 
 fn mirrord_start() -> anyhow::Result<()> {
     initialize_detour_guard()?;
-    println!("hi!");
     
     let mut guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
 
     initialize_hooks(guard)?;
-    println!("initialized hooks");
 
     Ok(())
 }
