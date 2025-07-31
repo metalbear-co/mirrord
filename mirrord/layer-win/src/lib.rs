@@ -92,6 +92,7 @@ fn release_detour_guard() -> anyhow::Result<()> {
 fn mirrord_start() -> anyhow::Result<()> {
     initialize_detour_guard()?;
 
+    // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
     }
