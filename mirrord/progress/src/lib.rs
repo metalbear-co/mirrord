@@ -27,6 +27,10 @@ pub trait Progress: Sized + Send + Sync {
     /// When task is done successfully
     fn success(&mut self, msg: Option<&str>);
 
+    /// When task is done successfully, and any messages to print - these should be printed by the
+    /// calling function.
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>>;
+
     /// When task is done with failure
     fn failure(&mut self, msg: Option<&str>);
 
@@ -43,6 +47,11 @@ pub trait Progress: Sized + Send + Sync {
 
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
+
+    /// When you want to print a message, cli only, after progress has succeeded.
+    ///
+    /// Only for `SpinnerProgress`.
+    fn add_to_print_buffer(&mut self, msg: &str);
 
     /// Control if drop without calling success is considered failure.
     fn set_fail_on_drop(&mut self, fail: bool);
@@ -81,6 +90,10 @@ impl Progress for NullProgress {
 
     fn success(&mut self, _: Option<&str>) {}
 
+    fn success_and_return_buffer(&mut self, _: Option<&str>) -> Option<Vec<String>> {
+        None
+    }
+
     fn failure(&mut self, _: Option<&str>) {}
 
     fn warning(&self, _: &str) {}
@@ -90,6 +103,8 @@ impl Progress for NullProgress {
     fn ide(&self, _: serde_json::Value) {}
 
     fn print(&self, _: &str) {}
+
+    fn add_to_print_buffer(&mut self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, _: bool) {}
 
@@ -153,6 +168,11 @@ impl Progress for JsonProgress {
         self.print_finished_task(true, msg)
     }
 
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
+        self.success(msg);
+        None
+    }
+
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
         self.print_finished_task(false, msg)
@@ -184,6 +204,8 @@ impl Progress for JsonProgress {
     }
 
     fn print(&self, _: &str) {}
+
+    fn add_to_print_buffer(&mut self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
@@ -226,6 +248,11 @@ impl Progress for SimpleProgress {
         println!("{msg:?}");
     }
 
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
+        self.success(msg);
+        None
+    }
+
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
     }
@@ -243,6 +270,8 @@ impl Progress for SimpleProgress {
     fn print(&self, text: &str) {
         println!("{text}");
     }
+
+    fn add_to_print_buffer(&mut self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, _: bool) {}
 
@@ -270,6 +299,7 @@ pub struct SpinnerProgress {
     root_progress: MultiProgress,
     progress: ProgressBar,
     indent: usize,
+    message_buffer: Vec<String>,
 }
 
 impl SpinnerProgress {
@@ -286,6 +316,7 @@ impl SpinnerProgress {
             indent: 0,
             root_progress,
             progress,
+            message_buffer: vec![],
         }
     }
 }
@@ -303,6 +334,7 @@ impl Progress for SpinnerProgress {
             root_progress: self.root_progress.clone(),
             indent,
             progress,
+            message_buffer: vec![],
         }
     }
 
@@ -314,6 +346,11 @@ impl Progress for SpinnerProgress {
             self.progress
                 .finish_with_message(format!("✓ {}", self.progress.message()));
         }
+    }
+
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
+        self.success(msg);
+        Some(self.message_buffer.clone())
     }
 
     fn failure(&mut self, msg: Option<&str>) {
@@ -342,6 +379,10 @@ impl Progress for SpinnerProgress {
 
     fn print(&self, msg: &str) {
         let _ = self.root_progress.println(msg);
+    }
+
+    fn add_to_print_buffer(&mut self, msg: &str) {
+        self.message_buffer.push(msg.to_string())
     }
 
     fn set_fail_on_drop(&mut self, fail: bool) {

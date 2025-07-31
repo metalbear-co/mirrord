@@ -51,7 +51,8 @@ impl KubernetesAPI {
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
             config.kube_context.clone(),
-        ).await?;
+        )
+        .await?;
 
         let client = progress.suspend(|| client_config.try_into())?;
 

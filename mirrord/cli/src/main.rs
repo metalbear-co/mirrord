@@ -316,7 +316,7 @@ async fn exec_process<P>(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
-    progress: &P,
+    progress: &mut P,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
 ) -> CliResult<()>
@@ -401,7 +401,7 @@ where
     sub_progress_config.success(Some("config summary"));
 
     // print an invitation to the newsletter on certain run count numbers
-    suggest_newsletter_signup(user_data).await;
+    suggest_newsletter_signup(user_data, progress).await;
 
     let args = binary_args
         .clone()
@@ -414,6 +414,12 @@ where
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
+
+    // upon success, print all messages in the progress buffer
+    let buffer = progress.success_and_return_buffer(Some("Ready!"));
+    if let Some(buffer_vec) = buffer {
+        buffer_vec.iter().for_each(|msg| eprintln!("{msg}"))
+    }
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -600,7 +606,7 @@ fn print_config<P>(
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
-    let progress = ProgressTracker::from_env("mirrord exec");
+    let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -642,7 +648,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
         config,
         config_file_path.as_deref(),
         args,
-        &progress,
+        &mut progress,
         &mut analytics,
         user_data,
     )

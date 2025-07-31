@@ -13,7 +13,7 @@ pub async fn create_connection(
     config: &LayerConfig,
     connect_info: AgentKubernetesConnectInfo,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), AgentConnectionError> {
-    let k8s_api = KubernetesAPI::create(config, &NullProgress{})
+    let k8s_api = KubernetesAPI::create(config, &NullProgress {})
         .await
         .map_err(AgentConnectionError::Kube)?;
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mirrord_progress::MIRRORD_PROGRESS_ENV;
+use mirrord_progress::Progress;
 use tokio::process::Command;
 use tracing::trace;
 
@@ -24,7 +24,7 @@ const NEWSLETTER_COUNTER_PROMPT_AFTER_THIRD: u32 = 100;
 
 /// Called during normal execution, suggests newsletter signup if the user has run mirrord a certain
 /// number of times.
-pub async fn suggest_newsletter_signup(user_data: &mut UserData) {
+pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, progress: &mut P) {
     let newsletter_invites = HashMap::from([
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_FIRST,
@@ -53,22 +53,17 @@ pub async fn suggest_newsletter_signup(user_data: &mut UserData) {
         })
         .unwrap_or_default();
 
-    // FIXME: checking this env manually instead of calling a method on progress is a kludge,
-    // unfortunately made necessary by the current state of `Progress`. This should be changed in
-    // the future.
-    match std::env::var(MIRRORD_PROGRESS_ENV).as_deref().ok() {
-        None | Some("std") | Some("standard") => {
-            if let Some(message) = newsletter_invites.get(&current_sessions) {
-                // print the chosen invite to the user if progress mode is on
-                println!(
-                    "\n\n{}\n>> To subscribe to the mirrord newsletter, run:\n\
+    if let Some(message) = newsletter_invites.get(&current_sessions) {
+        // print the chosen invite to the user if progress mode is on
+        progress.add_to_print_buffer(
+            format!(
+                "\n\n{}\n>> To subscribe to the mirrord newsletter, run:\n\
         >> mirrord newsletter\n\
         >> or sign up here: {NEWSLETTER_SIGNUP_URL}{}\n",
-                    message, current_sessions
-                );
-            }
-        }
-        _ => {}
+                message, current_sessions
+            )
+            .as_str(),
+        );
     }
 }
 
