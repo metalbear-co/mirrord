@@ -75,6 +75,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 pub use codec::*;
 pub use error::*;
 pub use payload::{Payload, ToPayload};
+use semver::{Version, VersionReq};
 
 pub type Port = u16;
 pub type ConnectionId = u64;
@@ -83,11 +84,14 @@ pub type ConnectionId = u64;
 pub type RequestId = u16;
 
 /// The version of this crate and the mirrord-protocol.
-pub static VERSION: LazyLock<semver::Version> = LazyLock::new(|| {
+pub static VERSION: LazyLock<Version> = LazyLock::new(|| {
     env!("CARGO_PKG_VERSION")
         .parse()
         .expect("Bad version parsing")
 });
+
+pub static OPERATOR_PING: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.20.0".parse().expect("Bad Identifier"));
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVars(pub String);

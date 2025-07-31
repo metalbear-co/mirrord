@@ -3,6 +3,7 @@ use std::{
     io,
     marker::PhantomData,
     sync::LazyLock,
+    time::Duration,
 };
 
 use actix_codec::{Decoder, Encoder};
@@ -134,6 +135,8 @@ pub enum ClientMessage {
     UdpOutgoing(LayerUdpOutgoing),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
+    /// When the `operator` is being used, these are handled by it, meaning, `Pong` comes
+    /// from the `operator`.
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
     /// Whether to pause or unpause the target container.
@@ -142,6 +145,12 @@ pub enum ClientMessage {
     ReadyForLogs,
     Vpn(ClientVpn),
     GetAddrInfoRequestV2(GetAddrInfoRequestV2),
+    OperatorRtt(OperatorRtt),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OperatorRtt {
+    pub elapsed: Duration,
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.

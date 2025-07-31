@@ -511,6 +511,9 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
+            // Only relevant for the ping pong handling with the operator, here we can just
+            // ignore it.
+            ClientMessage::OperatorRtt(_) => (),
             ClientMessage::Tcp(message) => {
                 if let Some(mirror_api) = &mut self.tcp_mirror_api {
                     mirror_api.handle_client_message(message).await?
