@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::OsStr;
+use std::fs::File;
 use std::process::{Command, Stdio};
 use std::ptr;
 use std::iter::once;
 use std::os::windows::ffi::OsStrExt;
+use std::time::Duration;
 use ::windows::{
     core::{self as windows_core, PCWSTR, PWSTR},
     Win32::{
@@ -107,12 +109,22 @@ impl WindowsCommand {
     }
     
     pub fn inject_and_spawn(self, dll_path: String) -> Result<(), Box<dyn Error>> {
-        let child = self.spawn_suspend()?;
+        let mut child = self.spawn_suspend()?;
         println!("Spawned process in suspended state");
         
         child.inject_dll(dll_path)?;
+        println!("injected dll");
+
         child.resume()?;
-        // join?
+        println!("resumed");
+
+        if child.join(Duration::from_secs(30)) {
+            println!("child is dead ;(");
+        } else {
+            println!("child did not die ;(");
+        }
+        println!("Child Stdout: {}", child.read_stdout());
+        
         Ok(())
     }
 
@@ -154,18 +166,13 @@ impl WindowsCommand {
             ..Default::default()
         };
 
-        let program = self.command.get_program().to_owned();
-        let args: Vec<String> = self.command
+        let program: Vec<u16> = OsStr::new(self.command.get_program()).encode_wide().chain(once(0)).collect();
+        let args: String = self.command
             .get_args()
             .map(|s| s.to_string_lossy().into_owned())
-            .collect();
+            .collect::<Vec<String>>().join(" ");
 
-        let cmdline = format!(
-            "\"{}\" {}",
-            program.to_string_lossy(),
-            args.join(" ")
-        );
-        let mut wide_cmdline: Vec<u16> = OsStr::new(&cmdline)
+        let mut wide_cmdline: Vec<u16> = OsStr::new(&args)
             .encode_wide()
             .chain(once(0))
             .collect();
@@ -185,7 +192,7 @@ impl WindowsCommand {
         let (child_stdin, child_stdout, child_stderr);
         unsafe {
             Win32Threading::CreateProcessW(
-                PCWSTR::null(),                    // ApplicationName
+                PCWSTR(program.as_ptr()),                    // ApplicationName
                 Some(PWSTR(wide_cmdline.as_mut_ptr())),  // CommandLine
                 Some(ptr::null()),                    // ProcessAttributes
                 Some(ptr::null()),                    // ThreadAttributes
@@ -197,15 +204,15 @@ impl WindowsCommand {
                 &mut process_info,
             )?;
 
-            child_stdin = Some(std::process::Stdio::from(HandleWrapper(stdin_pipe_wr)));
+            child_stdin = File::from(HandleWrapper(stdin_pipe_wr));
             // must close read side of the pipe (see: https://stackoverflow.com/q/54416116)
             CloseHandle(stdin_pipe_rd).expect("failed to close write pipe handle");
-        
-            child_stdout = Some(std::process::Stdio::from(HandleWrapper(stdout_pipe_rd)));
+            
+            child_stdout = File::from(HandleWrapper(stdout_pipe_rd));
             // must close write side of the pipe (see: https://stackoverflow.com/q/54416116)
             CloseHandle(stdout_pipe_wr).expect("failed to close write pipe handle");
 
-            child_stderr = Some(std::process::Stdio::from(HandleWrapper(stderr_pipe_rd)));
+            child_stderr = File::from(HandleWrapper(stderr_pipe_rd));
             // must close write side of the pipe (see: https://stackoverflow.com/q/54416116)
             CloseHandle(stderr_pipe_wr).expect("failed to close write pipe handle");
         };

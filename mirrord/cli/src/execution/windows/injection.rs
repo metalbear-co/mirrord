@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::error::Error;
 
 use dll_syringe::{process::OwnedProcess as InjectorOwnedProcess, Syringe};
@@ -15,13 +16,7 @@ impl SuspendedProcessExtInject for SuspendedProcess {
         let injector_process =
             InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)?;
         let syringe = Syringe::for_process(injector_process);
-
-        let payload_path = if dll_path.ends_with("\0") {
-            dll_path
-        } else {
-            format!("{dll_path}\0\0") // Ensure double-null termination
-        };
-
+        let payload_path = OsString::from(dll_path);
         syringe.inject(payload_path)?;
         Ok(())
     }

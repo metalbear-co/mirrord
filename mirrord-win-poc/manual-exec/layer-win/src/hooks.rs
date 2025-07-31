@@ -62,7 +62,7 @@ fn try_hijack_env_key(key_name: String, buffer_ptr: *mut u16, buffer_size: i32) 
     let new_val = OsString::from(HIJACKED_VAL)
         .as_os_str()
         .encode_wide()
-        .chain([0u16]) // null-terminator
+        // .chain([0u16]) // null-terminator
         .collect::<Vec<u16>>();
     if buffer_size < new_val.len() as i32 {
         println!("Could not hijack value, buffer too small, fallback to original impl.");

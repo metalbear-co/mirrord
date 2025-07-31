@@ -1,26 +1,30 @@
 use std::fs::File;
+use std::io::Read;
 use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::process::Stdio;
-use windows::Win32::{Foundation::HANDLE, System::Threading::{self as Win32Threading}};
+use std::time::Duration;
+use windows::Win32::{
+    Foundation::{HANDLE, WAIT_OBJECT_0,}, 
+    System::Threading::{self as Win32Threading, WaitForSingleObject}
+};
 
 pub struct HandleWrapper(pub HANDLE);
 
-impl From<HandleWrapper> for Stdio {
+impl From<HandleWrapper> for File {
     fn from(handle_wrapper: HandleWrapper) -> Self {
         unsafe {
             // SAFETY: Caller guarantees the HANDLE is valid and suitable for use as a stdio stream.
             let raw_handle = handle_wrapper.0;
-            let file = File::from_raw_handle(raw_handle.0 as RawHandle);
-            Stdio::from(file)
+            return File::from_raw_handle(raw_handle.0 as RawHandle);
         }
     }
 }
 /// Wraps a Windows process started in suspended mode
 pub struct SuspendedProcess {
     pub process_info: Win32Threading::PROCESS_INFORMATION,
-    pub stdin: Option<Stdio>,
-    pub stdout: Option<Stdio>,
-    pub stderr: Option<Stdio>,
+    pub stdin: File,
+    pub stdout: File,
+    pub stderr: File,
 }
 
 impl SuspendedProcess {
@@ -32,6 +36,29 @@ impl SuspendedProcess {
             }
         }
         Ok(())
+    }
+
+    pub fn join(&self, duration: Duration) -> bool {
+        let res;
+        unsafe {
+            res = WaitForSingleObject(
+                self.process_info.hProcess,
+                duration
+                    .as_millis()
+                    .try_into()
+                    .expect("duration must fit u32"),
+            );
+        }
+        match res {
+            WAIT_OBJECT_0 => true,
+            _ => false,
+        }
+    }
+
+    pub fn read_stdout(&mut self) -> String{
+        let mut contents = String::new();
+        self.stdout.read_to_string(&mut contents).expect("failed to read stdout to String");
+        contents
     }
 }
 

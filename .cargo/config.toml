@@ -1,2 +1,9 @@
 [unstable]
 bindeps = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-args=/STACK:8388608"]  # 8MB

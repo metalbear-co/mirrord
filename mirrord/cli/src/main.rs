@@ -332,16 +332,17 @@ where
             OsString::from_vec(bytes)
         })
         .collect::<Vec<_>>();
-    let execution_info = MirrordExecution::start_internal(
-        &mut config,
-        #[cfg(target_os = "macos")]
-        Some(&args.binary),
-        #[cfg(target_os = "macos")]
-        Some(binary_args.as_slice()),
-        &mut sub_progress,
-        analytics,
-    )
-    .await?;
+    let execution_info = Box::pin(async {
+        MirrordExecution::start_internal(
+            &mut config,
+            #[cfg(target_os = "macos")]
+            Some(&args.binary),
+            #[cfg(target_os = "macos")]
+            Some(binary_args.as_slice()),
+            &mut sub_progress,
+            analytics,
+        ).await
+    }).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -398,6 +399,7 @@ where
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup().await;
 
+    progress.subtask("running process");
     execve_process(binary, binary_args, env_vars, _did_sip_patch)
 }
 
@@ -460,7 +462,7 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    match cmd.inject_and_spawn("C:\\Users\\Daniel\\git\\mirrord\\target\\release\\layer_win.dll".to_string()) {
+    match cmd.inject_and_spawn("C:\\Users\\Daniel\\git\\mirrord\\target\\x86_64-pc-windows-msvc\\debug\\layer_win.dll".to_string()) {
         Ok(_) => Ok(()),
         _ => Err(CliError::BinaryExecuteFailed(binary, binary_args))
     }
@@ -663,15 +665,17 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     }
     result?;
 
-    let execution_result = exec_process(
-        config,
-        config_file_path.as_deref(),
-        args,
-        &progress,
-        &mut analytics,
-    )
-    .await;
-
+    let execution_result = Box::pin(async move {
+        exec_process(
+                config,
+                config_file_path.as_deref(),
+                args,
+                &progress,
+                &mut analytics,
+            )
+            .await
+    }).await;
+    
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
     }
@@ -822,7 +826,7 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
-    let res: CliResult<(), CliError> = rt.block_on(async move {
+    let res: CliResult<(), CliError> = rt.block_on(Box::pin(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         match cli.commands {
@@ -882,7 +886,7 @@ fn main() -> miette::Result<()> {
         };
 
         Ok(())
-    });
+    }));
 
     rt.block_on(async move {
         tokio::time::timeout(Duration::from_secs(10), signal.drain())

@@ -19,19 +19,39 @@
       ],
     },
     {
+      "type": "cppvsdbg",
+      "request": "launch",
+      "name": "Launch mirrord (MSVC)",
+      "program": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
+      "args": [
+        "exec", "-c",
+        "--target", "targetless",
+        "target/x86_64-pc-windows-msvc/debug/deps/target_dummy.exe", "HIJACK_ME", "VAL"
+      ],
+      "environment": [
+        {"name": "MIRRORD_DISABLE_VERSION_CHECK", "value": "true"},
+        {"name": "MIRRORD_LAYER_FILE", "value": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll"},
+        {"name": "MIRRORD_OPERATOR_ENABLE", "value": "false"},
+      ],
+      "preLaunchTask": "cargo: build mirrord (msvc)",
+      "cwd": "${workspaceFolder}",
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "debug cli [win]",
       "cargo": {
         "args": [
-          "build", "-p", "mirrord", "--release"
+          "build", "-p", "mirrord", "--target", "x86_64-pc-windows-msvc" // "--release"
         ],
         "filter": {
           "name": "mirrord"
         },
         "env": {
           "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/release/layer_win.dll",
+          // "RUSTFLAGS": "-LC:/Users/Daniel/git/mirrord/target/x86_64-pc-windows-msvc/release/build/aws-lc-sys-f222e66db1014569/out/build/artifacts",
         },
+        "problemMatcher": "$rustc",
       },
       "args": [
         "exec", "-c",
