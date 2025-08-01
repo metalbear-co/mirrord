@@ -158,6 +158,10 @@ impl TestIntProxy {
                         .await;
                 }
                 ClientMessage::ReadyForLogs => {}
+                ClientMessage::PingRtt(_) => {
+                    println!("received pingrtt");
+                    continue;
+                }
                 other => break Some(other),
             }
         }
@@ -581,9 +585,10 @@ impl TestIntProxy {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
+    pub async fn expect_file_read_skip_ping(&mut self, expected_fd: u64) -> u64 {
+        let msg = self.recv().await;
         // Verify the app reads the file.
-        Self::expect_message_file_read(self.codec.next().await.unwrap().unwrap(), expected_fd).await
+        Self::expect_message_file_read(msg, expected_fd).await
     }
 
     pub async fn answer_file_open(&mut self) {
@@ -624,13 +629,13 @@ impl TestIntProxy {
             .to_vec();
         self.answer_file_read(contents).await;
         // last call returns 0.
-        let _buffer_size = self.expect_only_file_read(expected_fd).await;
+        let _buffer_size = self.expect_file_read_skip_ping(expected_fd).await;
         self.answer_file_read(vec![]).await;
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
     pub async fn expect_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        let buffer_size = self.expect_file_read_skip_ping(expected_fd).await;
         self.answer_file_read_twice(contents, expected_fd, buffer_size)
             .await
     }
@@ -645,7 +650,7 @@ impl TestIntProxy {
 
     /// For when the application does not keep reading until it gets 0 bytes.
     pub async fn expect_single_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        let buffer_size = self.expect_file_read_skip_ping(expected_fd).await;
         let contents = contents
             .as_bytes()
             .get(0..buffer_size as usize)
