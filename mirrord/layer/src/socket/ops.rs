@@ -1529,7 +1529,7 @@ fn create_dns_resolver_t(
     nameservers: impl IntoIterator<Item = socket2::SockAddr>,
     search: impl IntoIterator<Item = CString>,
     options: CString,
-) -> Box<dns_resolver_t> {
+) -> Box<apple_dnsinfo::dns_resolver_t> {
     let nameserver: Vec<*mut libc::sockaddr> = nameservers
         .into_iter()
         // Remember to free in [`free_dns_resolver_t`]
@@ -1631,15 +1631,12 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
         })
     });
 
-    let resolver = Box::into_raw(Box::new(create_dns_resolver_t(
-        nameservers,
-        search,
-        options,
-    )));
+    let resolver = Box::new(create_dns_resolver_t(nameservers, search, options));
+    let resolver = Box::into_raw(resolver);
 
-    let config = Box::into_raw(Box::new(dns_config_t {
+    let config = Box::into_raw(Box::new(apple_dnsinfo::dns_config_t {
         n_resolver: 1,
-        resolver: resolver as *mut *mut dns_resolver_t,
+        resolver: resolver as *mut *mut apple_dnsinfo::dns_resolver_t,
         n_scoped_resolver: 0,
         scoped_resolver: std::ptr::null_mut(),
         reserved: [0; 5],

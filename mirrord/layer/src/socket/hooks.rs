@@ -1,7 +1,9 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
+#[allow(unused_imports)]
 use std::{
     collections::HashSet,
+    ops::Not,
     os::unix::io::RawFd,
     sync::{LazyLock, Mutex},
 };
@@ -517,11 +519,10 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
 
         let config = Box::from_raw(config);
 
-        let length = config.n_resolver as usize;
-        println!("LENGTH is {length}");
-        Vec::from_raw_parts(config.resolver, length, length)
-            .into_iter()
-            .for_each(|resolver| free_dns_resolver_t(resolver));
+        if config.resolver.is_null().not() && config.n_resolver > 0 {
+            let resolver_ptr = Box::from_raw(config.resolver);
+            free_dns_resolver_t(*resolver);
+        }
     }
 }
 
