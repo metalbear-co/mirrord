@@ -1,4 +1,9 @@
-use std::{collections::HashMap, convert::Infallible, fmt, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
+    fmt,
+    time::Duration,
+};
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
 use mirrord_config::{config::ConfigContext, LayerConfig};
@@ -27,9 +32,10 @@ use crate::{
 
 /// Implements the `mirrord dump` command.
 ///
-/// This command starts a mirrord session using the given config file and target arguments,
-/// subscribes to mirror traffic from the specified ports, and prints any traffic that comes
-/// to the screen with the connection ID.
+/// This command:
+/// 1. Starts a mirrord session using the given config file and target arguments
+/// 2. Subscribes to mirror traffic from the specified ports
+/// 3. Prints all incoming traffic to stdout in a human friendly format
 pub async fn dump_command(
     args: &DumpArgs,
     watch: drain::Watch,
@@ -65,6 +71,7 @@ pub async fn dump_command(
     Ok(())
 }
 
+/// Errors that can occur when dumping incoming traffic with `mirrord dump`.
 #[derive(Debug, Error)]
 pub enum DumpSessionError {
     #[error("agent connection was closed: {}", .0.as_deref().unwrap_or("<no close message>"))]
@@ -83,13 +90,22 @@ impl From<mpsc::error::SendError<ClientMessage>> for DumpSessionError {
     }
 }
 
+/// Implements `mirrord dump` logic on an established [`AgentConnection`].
 struct DumpSession {
     connection: AgentConnection,
     ports: Vec<u16>,
+    /// How many of our port subscriptions were confirmed.
     confirmations: usize,
+    /// Determines when to send the next [`ClientMessage::Ping`].
     ping_interval: Interval,
+    /// We queue incoming traffic until all port subscriptions are confirmed.
+    ///
+    /// This is requried in order not to lose any traffic and still keep progress output nice.
     queued_messages: Vec<DaemonTcp>,
-    conn_id_to_req_id: HashMap<ConnectionId, RequestId>,
+    /// Maps connection id to request ids.
+    ///
+    /// Used when handling [`DaemonTcp::Close`].
+    conn_id_to_req_id: HashMap<ConnectionId, HashSet<RequestId>>,
 }
 
 impl DumpSession {
@@ -107,6 +123,11 @@ impl DumpSession {
         }
     }
 
+    /// Initializes connection with the agent.
+    ///
+    /// 1. Negotiates [`mirrord_protocol`] version.
+    /// 2. Signals readiness for logs.
+    /// 3. Issues port subscriptions.
     async fn init_connection(&mut self) -> Result<(), DumpSessionError> {
         self.connection
             .sender
@@ -172,11 +193,13 @@ impl DumpSession {
 
         match message {
             DaemonTcp::Close(close) => match self.conn_id_to_req_id.remove(&close.connection_id) {
-                Some(request_id) => {
-                    println!(
-                        "## Request ID [{}:{}] finished",
-                        close.connection_id, request_id
-                    );
+                Some(request_ids) => {
+                    for request_id in request_ids {
+                        println!(
+                            "## Request ID [{}:{}] finished",
+                            close.connection_id, request_id
+                        );
+                    }
                 }
                 None => {
                     println!("## Connection ID {} closed", close.connection_id);
@@ -197,7 +220,9 @@ impl DumpSession {
             }
             DaemonTcp::HttpRequest(req) => {
                 self.conn_id_to_req_id
-                    .insert(req.connection_id, req.request_id);
+                    .entry(req.connection_id)
+                    .or_default()
+                    .insert(req.request_id);
                 println!(
                     "## New HTTP request received: Request ID [{}:{}] to port {}",
                     req.connection_id, req.request_id, req.port,
@@ -218,7 +243,9 @@ impl DumpSession {
             }
             DaemonTcp::HttpRequestFramed(req) => {
                 self.conn_id_to_req_id
-                    .insert(req.connection_id, req.request_id);
+                    .entry(req.connection_id)
+                    .or_default()
+                    .insert(req.request_id);
                 println!(
                     "## New HTTP request received: Request ID [{}:{}] to port {}",
                     req.connection_id, req.request_id, req.port,
@@ -238,7 +265,9 @@ impl DumpSession {
             DaemonTcp::HttpRequestChunked(chunked) => match chunked {
                 ChunkedRequest::StartV1(req) => {
                     self.conn_id_to_req_id
-                        .insert(req.connection_id, req.request_id);
+                        .entry(req.connection_id)
+                        .or_default()
+                        .insert(req.request_id);
                     println!(
                         "## New HTTP request received: Request ID [{}:{}] to port {}",
                         req.connection_id, req.request_id, req.port,
@@ -257,7 +286,9 @@ impl DumpSession {
                 }
                 ChunkedRequest::StartV2(req) => {
                     self.conn_id_to_req_id
-                        .insert(req.connection_id, req.request_id);
+                        .entry(req.connection_id)
+                        .or_default()
+                        .insert(req.request_id);
                     let HttpRequestMetadata::V1 {
                         source,
                         destination,
@@ -418,6 +449,7 @@ impl DumpSession {
     }
 }
 
+/// Provides a nice display of a request head (method, uri, version, headers).
 struct RequestHead<'a, B>(&'a InternalHttpRequest<B>);
 
 impl<B> fmt::Display for RequestHead<'_, B> {
@@ -431,6 +463,7 @@ impl<B> fmt::Display for RequestHead<'_, B> {
     }
 }
 
+/// Provides a nice display of a request frame.
 struct RequestFrame {
     connection_id: ConnectionId,
     request_id: RequestId,
