@@ -34,7 +34,7 @@ impl<'c, V> Targeted<'c, V> {
 impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVariant<'c>> {
     async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let Targeted {
             client,
@@ -66,7 +66,7 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
 impl<'c> ContainerApi<EphemeralTargetedVariant<'c>> for Targeted<'c, EphemeralTargetedVariant<'c>> {
     async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let Targeted {
             client,

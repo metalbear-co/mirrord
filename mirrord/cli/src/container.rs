@@ -96,7 +96,7 @@ async fn create_config_and_analytics<P: Progress>(
 /// 1. Prepared command to run the user container.
 /// 2. Handle to the external proxy.
 /// 3. Handle to temporary files containing intproxy-extproxy TLS configs.
-async fn prepare_proxies<P: Progress + Send + Sync>(
+async fn prepare_proxies<P: Progress>(
     analytics: &mut AnalyticsReporter,
     progress: &P,
     config: &mut LayerConfig,

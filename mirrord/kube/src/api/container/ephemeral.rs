@@ -51,7 +51,7 @@ pub async fn create_ephemeral_agent<P, V>(
     progress: &P,
 ) -> Result<AgentKubernetesConnectInfo>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
     V: ContainerVariant<Update = KubeEphemeralContainer>,
 {
     let params = variant.params();

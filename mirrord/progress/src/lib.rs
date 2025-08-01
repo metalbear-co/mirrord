@@ -20,12 +20,16 @@ pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 /// the [`ProgressMessage`] (intellij will fail with `"failed to parse a message from mirrord
 /// binary"`), and we end up displaying an error instead.
 #[enum_dispatch]
-pub trait Progress: Sized {
+pub trait Progress: Sized + Send + Sync {
     /// Create a subtask report from this task.
     fn subtask(&self, text: &str) -> Self;
 
     /// When task is done successfully
     fn success(&mut self, msg: Option<&str>);
+
+    /// When task is done successfully, and any messages to print - these should be printed by the
+    /// calling function.
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>>;
 
     /// When task is done with failure
     fn failure(&mut self, msg: Option<&str>);
@@ -44,17 +48,28 @@ pub trait Progress: Sized {
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
 
-    /// Control if drop without calling succes is considered failure.
+    /// When you want to print a message, cli only, after progress has succeeded.
+    ///
+    /// Only for `SpinnerProgress`.
+    fn add_to_print_buffer(&mut self, msg: &str);
+
+    /// Control if drop without calling success is considered failure.
     fn set_fail_on_drop(&mut self, fail: bool);
+
+    /// Hide the progress task temporarily to execute a function without stdout interference. This
+    /// is particularly useful when interactive cluster auth mode is used.
+    ///
+    /// Only for `SpinnerProgress`.
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R;
 }
 
-/// `ProgressMode` specifies the way progress is reported by `TaskProgress`.
-// TODO: update outdated comment
+/// `ProgressTracker` determines the way progress is reported.
 #[derive(Debug)]
 #[enum_dispatch(Progress)]
 pub enum ProgressTracker {
     /// Display dynamic progress with spinners.
     SpinnerProgress(SpinnerProgress),
+
     /// Display simple human-readable messages in new lines.
     SimpleProgress(SimpleProgress),
 
@@ -73,9 +88,11 @@ impl Progress for NullProgress {
         NullProgress
     }
 
-    fn set_fail_on_drop(&mut self, _: bool) {}
-
     fn success(&mut self, _: Option<&str>) {}
+
+    fn success_and_return_buffer(&mut self, _: Option<&str>) -> Option<Vec<String>> {
+        None
+    }
 
     fn failure(&mut self, _: Option<&str>) {}
 
@@ -86,6 +103,14 @@ impl Progress for NullProgress {
     fn ide(&self, _: serde_json::Value) {}
 
     fn print(&self, _: &str) {}
+
+    fn add_to_print_buffer(&mut self, _: &str) {}
+
+    fn set_fail_on_drop(&mut self, _: bool) {}
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
+    }
 }
 
 #[derive(Debug)]
@@ -138,7 +163,27 @@ impl Progress for JsonProgress {
         task
     }
 
-    fn print(&self, _: &str) {}
+    fn success(&mut self, msg: Option<&str>) {
+        self.done = true;
+        self.print_finished_task(true, msg)
+    }
+
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
+        self.success(msg);
+        None
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        self.done = true;
+        self.print_finished_task(false, msg)
+    }
+
+    fn warning(&self, msg: &str) {
+        let message = ProgressMessage::Warning(WarningMessage {
+            message: msg.to_string(),
+        });
+        message.print();
+    }
 
     fn info(&self, msg: &str) {
         let message = ProgressMessage::Info {
@@ -158,25 +203,16 @@ impl Progress for JsonProgress {
         }
     }
 
-    fn warning(&self, msg: &str) {
-        let message = ProgressMessage::Warning(WarningMessage {
-            message: msg.to_string(),
-        });
-        message.print();
-    }
+    fn print(&self, _: &str) {}
 
-    fn failure(&mut self, msg: Option<&str>) {
-        self.done = true;
-        self.print_finished_task(false, msg)
-    }
-
-    fn success(&mut self, msg: Option<&str>) {
-        self.done = true;
-        self.print_finished_task(true, msg)
-    }
+    fn add_to_print_buffer(&mut self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
+    }
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
     }
 }
 
@@ -208,8 +244,17 @@ impl Progress for SimpleProgress {
         SimpleProgress {}
     }
 
-    fn print(&self, text: &str) {
-        println!("{text}");
+    fn success(&mut self, msg: Option<&str>) {
+        println!("{msg:?}");
+    }
+
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
+        self.success(msg);
+        None
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        println!("{msg:?}");
     }
 
     fn warning(&self, msg: &str) {
@@ -222,15 +267,17 @@ impl Progress for SimpleProgress {
 
     fn ide(&self, _: serde_json::Value) {}
 
-    fn failure(&mut self, msg: Option<&str>) {
-        println!("{msg:?}");
+    fn print(&self, text: &str) {
+        println!("{text}");
     }
 
-    fn success(&mut self, msg: Option<&str>) {
-        println!("{msg:?}");
-    }
+    fn add_to_print_buffer(&mut self, _: &str) {}
 
     fn set_fail_on_drop(&mut self, _: bool) {}
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
+    }
 }
 
 fn spinner_template(indent: usize) -> String {
@@ -252,6 +299,7 @@ pub struct SpinnerProgress {
     root_progress: MultiProgress,
     progress: ProgressBar,
     indent: usize,
+    message_buffer: Vec<String>,
 }
 
 impl SpinnerProgress {
@@ -268,6 +316,7 @@ impl SpinnerProgress {
             indent: 0,
             root_progress,
             progress,
+            message_buffer: vec![],
         }
     }
 }
@@ -285,11 +334,33 @@ impl Progress for SpinnerProgress {
             root_progress: self.root_progress.clone(),
             indent,
             progress,
+            message_buffer: vec![],
         }
     }
 
-    fn print(&self, msg: &str) {
-        let _ = self.root_progress.println(msg);
+    fn success(&mut self, msg: Option<&str>) {
+        self.done = true;
+        if let Some(msg) = msg {
+            self.progress.finish_with_message(format!("✓ {msg}"));
+        } else {
+            self.progress
+                .finish_with_message(format!("✓ {}", self.progress.message()));
+        }
+    }
+
+    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
+        self.success(msg);
+        Some(self.message_buffer.clone())
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        self.done = true;
+        if let Some(msg) = msg {
+            self.progress.abandon_with_message(format!("x {msg}"));
+        } else {
+            self.progress
+                .abandon_with_message(format!("x {}", self.progress.message()));
+        }
     }
 
     fn warning(&self, msg: &str) {
@@ -306,28 +377,20 @@ impl Progress for SpinnerProgress {
 
     fn ide(&self, _: serde_json::Value) {}
 
-    fn failure(&mut self, msg: Option<&str>) {
-        self.done = true;
-        if let Some(msg) = msg {
-            self.progress.abandon_with_message(format!("x {msg}"));
-        } else {
-            self.progress
-                .abandon_with_message(format!("x {}", self.progress.message()));
-        }
+    fn print(&self, msg: &str) {
+        let _ = self.root_progress.println(msg);
     }
 
-    fn success(&mut self, msg: Option<&str>) {
-        self.done = true;
-        if let Some(msg) = msg {
-            self.progress.finish_with_message(format!("✓ {msg}"));
-        } else {
-            self.progress
-                .finish_with_message(format!("✓ {}", self.progress.message()));
-        }
+    fn add_to_print_buffer(&mut self, msg: &str) {
+        self.message_buffer.push(msg.to_string())
     }
 
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
+    }
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        self.progress.suspend(f)
     }
 }
 
@@ -366,7 +429,7 @@ impl ProgressTracker {
 /// Message sent when a new task is created using subtask/new
 #[derive(Serialize, Debug, Clone, Default)]
 struct NewTaskMessage {
-    /// Task name (indentifier)
+    /// Task name (identifier)
     name: String,
     /// Parent task name, if subtask.
     parent: Option<String>,

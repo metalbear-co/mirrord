@@ -1,0 +1,1 @@
+Ensure SpinnerProgress allows interactive cluster auth, and allow messages to be printed out at the end of progress from a buffer.

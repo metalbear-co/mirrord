@@ -46,14 +46,15 @@ impl KubernetesAPI {
     ///
     /// If [`LayerConfig::target`] specifies a targetless run,
     /// replaces [`AgentConfig::namespace`] with the target namespace.
-    pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_config(
+    pub async fn create<P: Progress>(config: &LayerConfig, progress: &P) -> Result<Self> {
+        let client_config = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-        .await?
-        .try_into()?;
+        .await?;
+
+        let client = progress.suspend(|| client_config.try_into())?;
 
         let mut agent = config.agent.clone();
         if config
@@ -84,7 +85,7 @@ impl KubernetesAPI {
 
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         // filter openshift to make it a lot faster
         if Discovery::new(self.client.clone())
@@ -208,7 +209,7 @@ impl KubernetesAPI {
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let (params, runtime_data) = self
             .create_agent_params(target_config, container_config)

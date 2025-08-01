@@ -39,7 +39,7 @@ impl StatusCommandHandler {
         }
 
         let mut status_progress = progress.subtask("fetching status");
-        let api = OperatorApi::try_new(&layer_config, &mut NullReporter::default())
+        let api = OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
             .await
             .inspect_err(|_| {
                 status_progress.failure(Some("failed to get status"));

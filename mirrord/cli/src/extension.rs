@@ -14,7 +14,7 @@ async fn mirrord_exec<P>(
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let execution_info = MirrordExecution::start_internal(
         &mut config,
