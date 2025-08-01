@@ -517,9 +517,13 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
 
         let config = Box::from_raw(config);
 
-        Vec::from_raw_parts(config.resolver, config.n_resolver as usize, 0)
-            .into_iter()
-            .for_each(|resolver| free_dns_resolver_t(resolver));
+        Vec::from_raw_parts(
+            config.resolver,
+            config.n_resolver as usize,
+            config.n_resolver as usize,
+        )
+        .into_iter()
+        .for_each(|resolver| free_dns_resolver_t(resolver));
     }
 }
 
