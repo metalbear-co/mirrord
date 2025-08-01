@@ -323,8 +323,7 @@ impl TestRequest {
             None => {
                 assert_eq!(parts.method, Method::POST);
                 let body = body.collect().await.unwrap().to_bytes();
-                let expected = std::iter::repeat(Self::FRAME)
-                    .take(3)
+                let expected = std::iter::repeat_n(Self::FRAME, 3)
                     .flatten()
                     .copied()
                     .collect::<Vec<_>>();
@@ -383,8 +382,7 @@ impl TestRequest {
             None => {
                 assert_eq!(response.status(), StatusCode::OK);
                 let body = response.into_body().collect().await.unwrap().to_bytes();
-                let expected = std::iter::repeat(Self::FRAME)
-                    .take(3)
+                let expected = std::iter::repeat_n(Self::FRAME, 3)
                     .flatten()
                     .copied()
                     .collect::<Vec<_>>();
@@ -764,8 +762,7 @@ impl StealingClient {
         expect_connection_id: ConnectionId,
         protocol: TestTcpProtocol,
     ) {
-        let expected = std::iter::repeat(TestTcpProtocol::MESSAGE)
-            .take(3)
+        let expected = std::iter::repeat_n(TestTcpProtocol::MESSAGE, 3)
             .flatten()
             .copied()
             .collect::<Vec<_>>();
