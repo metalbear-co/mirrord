@@ -1491,7 +1491,11 @@ mod tests {
     async fn reading_from_unbuffered_file(#[case] readonly: bool, #[case] buffering_enabled: bool) {
         let (proxy, mut tasks) = setup_proxy(
             mirrord_protocol::VERSION.clone(),
-            buffering_enabled.then_some(4096).unwrap_or_default(),
+            if buffering_enabled {
+                4096
+            } else {
+                Default::default()
+            },
         )
         .await;
 
