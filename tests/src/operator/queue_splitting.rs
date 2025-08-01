@@ -13,6 +13,7 @@ use crate::utils::{
     application::Application,
     kube_client,
     process::TestProcess,
+    services::TestWorkloadType,
     sqs_resources::{
         sqs_test_resources, wait_for_stable_state, write_sqs_messages, QueueInfo, TestMessage,
     },
@@ -233,6 +234,12 @@ pub async fn two_users(
     #[case] with_asterisk_queue_id: bool,
     #[case] with_env_from: bool,
     #[case] with_value_from: bool,
+    #[values(
+        TestWorkloadType::Deployment,
+        TestWorkloadType::ArgoRolloutWithWorkloadRef,
+        TestWorkloadType::ArgoRolloutWithTemplate
+    )]
+    test_workload_type: TestWorkloadType,
 ) {
     let kube_client = kube_client.await;
     let sqs_test_resources = sqs_test_resources(
@@ -241,6 +248,7 @@ pub async fn two_users(
         with_fallback_json,
         with_env_from,
         with_value_from,
+        test_workload_type,
     )
     .await;
     let application = Application::RustSqs;
@@ -259,7 +267,7 @@ pub async fn two_users(
     println!("Starting first mirrord client");
     let mut client_a = application
         .run(
-            &sqs_test_resources.deployment_target(),
+            &sqs_test_resources.target(),
             Some(sqs_test_resources.namespace()),
             None,
             Some(vec![(
@@ -283,7 +291,7 @@ pub async fn two_users(
     println!("Starting second mirrord client");
     let mut client_b = application
         .run(
-            &sqs_test_resources.deployment_target(),
+            &sqs_test_resources.target(),
             Some(sqs_test_resources.namespace()),
             None,
             Some(vec![(

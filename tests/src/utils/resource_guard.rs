@@ -11,7 +11,7 @@ use serde::{de::DeserializeOwned, Serialize};
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
 /// This guard can be configured not to delete the resource if dropped during a panic.
-pub(crate) struct ResourceGuard {
+pub struct ResourceGuard {
     /// Whether the resource should be deleted if the test has panicked.
     pub(crate) delete_on_fail: bool,
     /// This future will delete the resource once awaited.
