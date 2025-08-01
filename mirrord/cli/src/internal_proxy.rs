@@ -13,9 +13,12 @@
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    time::Duration,
+};
+#[cfg(not(windows))]
+use std::{
     ops::Not,
     os::unix::ffi::OsStrExt,
-    time::Duration,
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
@@ -25,16 +28,21 @@ use mirrord_intproxy::{
     IntProxy,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
+#[cfg(not(windows))]
 use nix::sys::resource::{setrlimit, Resource};
 use tokio::net::TcpListener;
-use tracing::{warn, Level};
+use tracing::Level;
+#[cfg(not(windows))]
+use tracing::warn;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
-    util::{create_listen_socket, detach_io},
+    util::{create_listen_socket},
 };
+#[cfg(not(windows))]
+use create::util::detach_io;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -61,6 +69,7 @@ pub(crate) async fn proxy(
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
+    #[cfg(not(windows))]
     if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
         warn!(%error, "Failed to set the file descriptor limit");
     }
@@ -68,6 +77,8 @@ pub(crate) async fn proxy(
     let agent_connect_info = env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
         .ok_or(InternalProxyError::MissingConnectInfo)
         .and_then(|var| {
+            #[cfg(windows)]
+            let var = var.to_string_lossy();
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 InternalProxyError::DeseralizeConnectInfo(
                     String::from_utf8_lossy(var.as_bytes()).into_owned(),
@@ -102,6 +113,7 @@ pub(crate) async fn proxy(
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
+    #[cfg(not(windows))]
     if container_mode.not() {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }

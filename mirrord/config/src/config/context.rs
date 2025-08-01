@@ -98,7 +98,7 @@ impl ConfigContext {
         #[cfg(not(windows))]
         let name = OsStr::from_bytes(name.as_bytes());
 
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         let name = OsStr::new(name);
 
         let os_value = match self.env_override.get(name) {
@@ -107,9 +107,9 @@ impl ConfigContext {
             None => std::env::var_os(name).ok_or(VarError::NotPresent),
         }?;
 
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         let s = std::str::from_utf8(os_value.as_bytes()).map(ToString::to_string);
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         let s = os_value.clone().into_string();
 
         s.map_err(|_| VarError::NotUnicode(os_value))

@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]

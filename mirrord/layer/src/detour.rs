@@ -10,8 +10,10 @@ use core::{
     ops::{FromResidual, Residual, Try},
 };
 use std::{
-    cell::RefCell, ffi::CString, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock,
+    cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock,
 };
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::prelude::*;
 
 #[cfg(target_os = "macos")]
 use libc::c_char;

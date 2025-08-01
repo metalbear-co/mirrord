@@ -8,11 +8,16 @@ use core::ffi::{c_size_t, c_ssize_t};
 use std::{
     borrow::Borrow,
     ffi::CString,
-    os::unix::{ffi::OsStrExt, io::RawFd},
     ptr, slice,
     time::Duration,
 };
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
+// test file not compatible for windows
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 
+#[cfg(not(target_os = "windows"))]
 use libc::{
     self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
     AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
@@ -26,6 +31,7 @@ use mirrord_protocol::file::{
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
+#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 use num_traits::Bounded;
 use tracing::trace;
@@ -1136,7 +1142,10 @@ pub(crate) unsafe extern "C" fn readlink_detour(
 ) -> ssize_t {
     read_link(raw_path.checked_into())
         .map(|ReadLinkFileResponse { path }| {
+            #[cfg(not(target_os = "windows"))]
             let path_bytes = path.as_os_str().as_bytes();
+            #[cfg(target_os = "windows")]
+            let path_bytes = OsStr::new(path).encode_wide();
 
             let path_ptr = path_bytes.as_ptr();
             let out_buffer = out_buffer.cast();

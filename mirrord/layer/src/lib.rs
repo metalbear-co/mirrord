@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 #![feature(c_variadic)]
 #![feature(naked_functions)]
 #![feature(io_error_uncategorized)]
@@ -70,11 +71,13 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
 };
+
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::parent_id;
 
 use ctor::ctor;
 use error::{LayerError, Result};

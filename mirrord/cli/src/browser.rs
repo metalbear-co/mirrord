@@ -1,3 +1,6 @@
+#![cfg(not(windows))]
+// Currently browser only supported on not(windows)
+
 use std::{process::Command, sync::LazyLock};
 
 use base64::engine::{general_purpose::STANDARD, Engine};

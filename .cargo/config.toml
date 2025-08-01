@@ -1,2 +1,12 @@
 [unstable]
 bindeps = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[target.'cfg(windows)']
+rustflags = [
+    "--cfg", "feature=\"windows_build\"",         # enable windows_build
+    "-C", "link-args=/STACK:8388608"  # STACKSIZE=8MB
+]
