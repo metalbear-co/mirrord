@@ -4,7 +4,8 @@ use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, Level};
+use uuid::Uuid;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -16,6 +17,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
+    Uuid(Uuid),
     Nested(Analytics),
 }
 
@@ -161,6 +163,12 @@ impl From<usize> for AnalyticValue {
     }
 }
 
+impl From<Uuid> for AnalyticValue {
+    fn from(id: Uuid) -> Self {
+        AnalyticValue::Uuid(id)
+    }
+}
+
 impl From<Analytics> for AnalyticValue {
     fn from(analytics: Analytics) -> Self {
         AnalyticValue::Nested(analytics)
@@ -198,9 +206,15 @@ pub struct AnalyticsReporter {
 }
 
 impl AnalyticsReporter {
-    pub fn new(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
+    pub fn new(
+        enabled: bool,
+        execution_kind: ExecutionKind,
+        watch: drain::Watch,
+        machine_id: Uuid,
+    ) -> Self {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
+        analytics.add("machine_id", machine_id);
 
         AnalyticsReporter {
             analytics,
@@ -213,8 +227,13 @@ impl AnalyticsReporter {
         }
     }
 
-    pub fn only_error(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
-        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch);
+    pub fn only_error(
+        enabled: bool,
+        execution_kind: ExecutionKind,
+        watch: drain::Watch,
+        machine_id: Uuid,
+    ) -> Self {
+        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch, machine_id);
         reporter.error_only_send = true;
         reporter
     }
@@ -316,15 +335,13 @@ struct AnalyticsReport {
     error: Option<AnalyticsError>,
 }
 
+const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.co/api/v1/event";
+
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = Level::TRACE)]
 async fn send_analytics(report: AnalyticsReport) {
     let client = reqwest::Client::new();
-    let res = client
-        .post("https://analytics.metalbear.co/api/v1/event")
-        .json(&report)
-        .send()
-        .await;
+    let res = client.post(ANALYTICS_ENDPOINT).json(&report).send().await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }

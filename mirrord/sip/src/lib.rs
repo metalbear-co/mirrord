@@ -64,7 +64,7 @@ mod main {
         Architecture, Endianness, FileKind,
     };
     use once_cell::sync::Lazy;
-    use tracing::{debug, error, trace, warn};
+    use tracing::{trace, warn};
     use which::which;
 
     use super::*;
@@ -721,6 +721,20 @@ mod main {
             try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
         };
 
+        //    ______________________________
+        //  / \                             \
+        // |   |  ATTENTION! DANGER AHEAD!  |
+        //  \_ |                            |
+        //     |  ATTENTION! DANGER AHEAD!  |
+        //     |                            |
+        //     |  ATTENTION! DANGER AHEAD!  |
+        //     |   _________________________|___
+        //     |  /                            /
+        //     \_/____________________________/
+        //
+        // DO NOT INTRODUCE NEW TRACING LOGS OR CHANGE THE LEVEL OF EXISTING LOGS - tracing logs are
+        // NOT fork safe, and have been known to cause issues, including forcing the user's
+        // machine to restart.
         let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
@@ -745,24 +759,22 @@ mod main {
                 // The full error is: `{ code: 24, kind: Uncategorized, message: "Too many open
                 // files" }`. This error was encountered in the past when using mirrord with Air
                 // (hot reloader).
-                error!(
-                    "Too many files open when trying to patch {binary_path}. Try increasing the \
-                    file limit using `ulimit`."
-                );
-                Err(SipError::IO(err))
+                Err(SipError::TooManyFilesOpen(binary_path.to_string()))
             }
             Err(SipError::IO(err)) if err.kind() == ErrorKind::NotFound => {
+                // In the future, if we know there are other kind of error we can ignore, add them
+                // to this match arm
                 trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
-                    This is not necessarily an error."
+                    This type of `error` happens during normal execution flow."
                 );
                 // E.g. `env` tries to execute a bunch of non-existing files and fails, and
                 // that's just its valid flow.
                 Ok(None)
             }
             Err(err) => {
-                debug!(
+                trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
                     This is not necessarily an error."
