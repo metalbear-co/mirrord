@@ -354,6 +354,7 @@ pub async fn service_for_mirrord_ls(
         randomize_name,
         kube_client,
     )
+    .await
 }
 
 /// Service that should only be reachable from inside the cluster, as a communication partner
