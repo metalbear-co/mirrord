@@ -481,7 +481,7 @@ impl fmt::Display for RequestFrame {
         match &self.frame {
             InternalHttpBodyFrame::Data(data) => {
                 writeln!(f, "data ({} bytes)", data.len())?;
-                match std::str::from_utf8(&data) {
+                match std::str::from_utf8(data) {
                     Ok(s) => writeln!(f, "{s}")?,
                     Err(..) => writeln!(f, "{}\n(hex)", hex::encode(data.as_ref()))?,
                 }
