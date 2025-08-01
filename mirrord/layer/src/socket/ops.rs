@@ -1573,21 +1573,24 @@ fn create_dns_resolver_t(
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
-    let resolver = Box::from_raw(resolver);
+    unsafe {
+        let resolver = Box::from_raw(resolver);
 
-    let nameservers = Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
+        let nameservers =
+            Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
 
-    for nameserver in nameservers {
-        let _ = Box::from_raw(nameserver);
+        for nameserver in nameservers {
+            let _ = Box::from_raw(nameserver);
+        }
+
+        let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
+
+        for search in searchs {
+            let _ = CString::from_raw(search);
+        }
+
+        let _ = CString::from_raw(resolver.options);
     }
-
-    let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
-
-    for search in searchs {
-        let _ = CString::from_raw(search);
-    }
-
-    let _ = CString::from_raw(resolver.options);
 }
 
 /// reconstruct a macos specific [`dns_config_t`] api from parsing the `/etc/resolv.conf` file from

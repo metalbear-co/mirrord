@@ -543,7 +543,7 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
 #[hook_guard_fn]
 unsafe extern "C-unwind" fn CFNetworkCopySystemProxySettings_detour()
 -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFDictionary>> {
-    unsafe { None }
+    None
 }
 
 pub(crate) unsafe fn enable_socket_hooks(
