@@ -28,13 +28,52 @@ const TCP_SERVER_IMAGES: &[&str] = &[
     "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
 ];
 
+pub(super) fn get_pod_template_json_value(
+    name: &str,
+    image: &str,
+    env: Value,
+    env_from: Option<Vec<EnvFromSource>>,
+) -> Value {
+    let use_probe = TCP_SERVER_IMAGES.contains(&image);
+    json!({
+        "metadata": {
+            "labels": {
+                "app": name,
+                "test-label-for-pods": format!("pod-{name}"),
+                format!("test-label-for-pods-{name}"): name
+            }
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": &CONTAINER_NAME,
+                    "image": image,
+                    "ports": [
+                        {
+                            "containerPort": 80
+                        }
+                    ],
+                    "env": env,
+                    "envFrom": serde_json::to_value(env_from).unwrap(),
+                    "startupProbe": use_probe.then_some(Probe {
+                        tcp_socket: Some(TCPSocketAction {
+                            host: None,
+                            port: IntOrString::Int(80),
+                        }),
+                        ..Default::default()
+                    }),
+                }
+            ]
+        }
+    })
+}
+
 pub(super) fn deployment_from_json(
     name: &str,
     image: &str,
     env: Value,
     env_from: Option<Vec<EnvFromSource>>,
 ) -> Deployment {
-    let use_probe = TCP_SERVER_IMAGES.contains(&image);
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -53,37 +92,7 @@ pub(super) fn deployment_from_json(
                     "app": &name
                 }
             },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": env,
-                            "envFrom": serde_json::to_value(env_from).unwrap(),
-                            "startupProbe": use_probe.then_some(Probe {
-                                tcp_socket: Some(TCPSocketAction {
-                                    host: None,
-                                    port: IntOrString::Int(80),
-                                }),
-                                ..Default::default()
-                            }),
-                        }
-                    ]
-                }
-            }
+            "template": get_pod_template_json_value(name, image, env, env_from)
         }
     }))
     .expect("Failed creating `deployment` from json spec!")
@@ -124,11 +133,37 @@ pub(super) fn service_from_json(name: &str, service_type: &str) -> Service {
     .expect("Failed creating `service` from json spec!")
 }
 
+pub(super) enum SpecSource<'a> {
+    WorkloadRef(&'a Deployment),
+    PodTemplate(Value),
+}
+
+impl SpecSource<'_> {
+    fn get_workload_ref(&self) -> Value {
+        match self {
+            SpecSource::WorkloadRef(dep) => json!({
+                "apiVersion": Deployment::API_VERSION,
+                "kind": Deployment::KIND,
+                "name": dep.name().unwrap(),
+                "scaleDown": "progressively"
+            }),
+            SpecSource::PodTemplate(_) => Value::Null,
+        }
+    }
+
+    fn get_pod_template(self) -> Value {
+        match self {
+            SpecSource::WorkloadRef(_) => Value::Null,
+            SpecSource::PodTemplate(value) => value,
+        }
+    }
+}
+
 /// Creates an Argo Rollout resource with the given name, image, and env vars
 ///
 /// Creates a [`Rollout`] resource following the Argo Rollouts
 /// [specification](https://argoproj.github.io/argo-rollouts/features/specification/)
-pub(super) fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
+pub(super) fn argo_rollout_from_json(name: &str, spec_source: SpecSource) -> Rollout {
     serde_json::from_value(json!({
         "apiVersion": Rollout::API_VERSION,
         "kind": Rollout::KIND,
@@ -147,48 +182,12 @@ pub(super) fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rol
                     "app": name
                 }
             },
-            "workloadRef": {
-                "apiVersion": Deployment::API_VERSION,
-                "kind": Deployment::KIND,
-                "name": deployment.name().unwrap(),
-                "scaleDown": "progressively"
-            },
+            "workloadRef": spec_source.get_workload_ref(),
+            "template": spec_source.get_pod_template(),
             "strategy": {
                 "canary": {}
             }
         }
     }))
     .expect("Failed creating `rollout` from json spec!")
-}
-
-/// Creates an Argo Rollout resource with the given name, using a template (not workloadRef)
-///
-/// The template is copied from the given deployment's pod template.
-pub(super) fn argo_rollout_with_template_from_json(name: &str, deployment: &Deployment) -> Rollout {
-    let pod_template = &deployment.spec.as_ref().unwrap().template;
-    serde_json::from_value(json!({
-        "apiVersion": Rollout::API_VERSION,
-        "kind": Rollout::KIND,
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-rollouts": format!("rollout-{name}")
-            }
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": name
-                }
-            },
-            "template": pod_template,
-            "strategy": {
-                "canary": {}
-            }
-        }
-    }))
-    .expect("Failed creating `rollout` with template from json spec!")
 }
