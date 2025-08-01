@@ -161,6 +161,13 @@ impl DumpSession {
         Ok(())
     }
 
+    /// Handles a [`DaemonTcp`] message from the agent.
+    ///
+    /// Messages containing incoming traffic are stored in [`Self::queued_messages`] until we get
+    /// [`DaemonTcp::SubscribeResult`] for all previously issued port subscriptions.
+    ///
+    /// When all subscriptions have been confirmed, incoming traffic is printed to stdout in a human
+    /// friendly format.
     fn handle_tcp_message(
         &mut self,
         message: DaemonTcp,
