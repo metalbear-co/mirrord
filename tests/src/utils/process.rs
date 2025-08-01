@@ -240,11 +240,14 @@ impl TestProcess {
     }
 
     pub async fn write_to_stdin(&mut self, data: &[u8]) {
-        match self.child.stdin { Some(ref mut stdin) => {
-            stdin.write(data).await.unwrap();
-        } _ => {
-            panic!("Can't write to test app's stdin!");
-        }}
+        match self.child.stdin {
+            Some(ref mut stdin) => {
+                stdin.write(data).await.unwrap();
+            }
+            _ => {
+                panic!("Can't write to test app's stdin!");
+            }
+        }
     }
 
     /// Waits for process to end and stdout/err to be read. - returns final exit status

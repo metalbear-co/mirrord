@@ -4,7 +4,7 @@ use futures::StreamExt;
 use mirrord_config::LayerConfig;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 use crate::{
     config::Commands,

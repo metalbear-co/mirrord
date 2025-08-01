@@ -83,8 +83,8 @@ use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -479,14 +479,18 @@ fn fetch_env_vars() -> HashMap<String, String> {
         (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
     };
 
-    let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() { {
+    let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+        {
             make_proxy_request_with_response(GetEnvVarsRequest {
                 env_vars_filter: env_vars_exclude,
                 env_vars_select: env_vars_include,
             })
             .expect("failed to make request to proxy")
             .expect("failed to fetch remote env")
-        } } else { Default::default() };
+        }
+    } else {
+        Default::default()
+    };
 
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
@@ -653,16 +657,21 @@ fn enable_hooks(state: &LayerSetup) {
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) { Some(socket) => {
-        // Closed file is a socket, so if it's already bound to a port - notify agent to stop
-        // mirroring/stealing that port.
-        socket.close();
-    } _ => if setup().fs_config().is_active() {
-        OPEN_FILES
-            .lock()
-            .expect("OPEN_FILES lock failed")
-            .remove(&fd);
-    }}
+    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+        Some(socket) => {
+            // Closed file is a socket, so if it's already bound to a port - notify agent to stop
+            // mirroring/stealing that port.
+            socket.close();
+        }
+        _ => {
+            if setup().fs_config().is_active() {
+                OPEN_FILES
+                    .lock()
+                    .expect("OPEN_FILES lock failed")
+                    .remove(&fd);
+            }
+        }
+    }
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
@@ -676,60 +685,63 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 ///
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {unsafe {
-
-    let res = FN_CLOSE(fd);
-    close_layer_fd(fd);
-    res
-}}
+pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    unsafe {
+        let res = FN_CLOSE(fd);
+        close_layer_fd(fd);
+        res
+    }
+}
 
 /// Hook for `libc::fork`.
 ///
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {unsafe {
+pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    unsafe {
+        tracing::debug!("Process {} forking!.", std::process::id());
 
-    tracing::debug!("Process {} forking!.", std::process::id());
+        let res = FN_FORK();
 
-    let res = FN_FORK();
+        match res.cmp(&0) {
+            Ordering::Equal => {
+                tracing::debug!("Child process initializing layer.");
+                #[allow(static_mut_refs)]
+                let parent_connection = match PROXY_CONNECTION.take() {
+                    Some(conn) => conn,
+                    None => {
+                        tracing::debug!("Skipping new inptroxy connection (trace only)");
+                        return res;
+                    }
+                };
 
-    match res.cmp(&0) {
-        Ordering::Equal => {
-            tracing::debug!("Child process initializing layer.");
-            #[allow(static_mut_refs)]
-            let parent_connection = match  PROXY_CONNECTION.take()  {
-                Some(conn) => conn,
-                None => {
-                    tracing::debug!("Skipping new inptroxy connection (trace only)");
-                    return res;
-                }
-            };
-
-            let new_connection = ProxyConnection::new(
-                parent_connection.proxy_addr(),
-                NewSessionRequest::Forked(parent_connection.layer_id()),
-                PROXY_CONNECTION_TIMEOUT
-                    .get()
-                    .copied()
-                    .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
-            )
-            .expect("failed to establish proxy connection for child");
-            #[allow(static_mut_refs)]
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("Failed setting PROXY_CONNECTION in child fork");
-            // in macOS (and tbh sounds logical) we can't just drop the old connection in the child,
-            // as it needs to access a mutex with invalid state, so we need to forget it.
-            // better implementation would be to somehow close the underlying connections
-            // but side effect should be trivial
-            std::mem::forget(parent_connection);
+                let new_connection = ProxyConnection::new(
+                    parent_connection.proxy_addr(),
+                    NewSessionRequest::Forked(parent_connection.layer_id()),
+                    PROXY_CONNECTION_TIMEOUT
+                        .get()
+                        .copied()
+                        .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
+                )
+                .expect("failed to establish proxy connection for child");
+                #[allow(static_mut_refs)]
+                PROXY_CONNECTION
+                    .set(new_connection)
+                    .expect("Failed setting PROXY_CONNECTION in child fork");
+                // in macOS (and tbh sounds logical) we can't just drop the old connection in the
+                // child, as it needs to access a mutex with invalid state, so we
+                // need to forget it. better implementation would be to somehow
+                // close the underlying connections but side effect should be
+                // trivial
+                std::mem::forget(parent_connection);
+            }
+            Ordering::Greater => tracing::debug!("Child process id is {res}."),
+            Ordering::Less => tracing::debug!("fork failed"),
         }
-        Ordering::Greater => tracing::debug!("Child process id is {res}."),
-        Ordering::Less => tracing::debug!("fork failed"),
-    }
 
-    res
-}}
+        res
+    }
+}
 
 /// No need to guard because we call another detour which will do the guard for us.
 ///
@@ -737,19 +749,19 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {unsafe {
 ///
 /// One of the many [`libc::close`]-ish functions.
 #[hook_fn]
-pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int { unsafe {
-    close_detour(fd)
-}}
+pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
+    unsafe { close_detour(fd) }
+}
 
 #[hook_fn]
-pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int { unsafe {
-    close_detour(fd)
-}}
+pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int {
+    unsafe { close_detour(fd) }
+}
 
 #[hook_fn]
-pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int { unsafe {
-    close_detour(fd)
-}}
+pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
+    unsafe { close_detour(fd) }
+}
 
 /// ## Hook
 ///
@@ -758,15 +770,15 @@ pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int { unsafe {
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close_detour(
-
     a: usize,
     b: usize,
     fd: c_int,
     c: usize,
-) -> c_int {unsafe {
-
-    // In this case we call `close_layer_fd` before the original close function, because execution
-    // does not return to here after calling `FN_UV_FS_CLOSE`.
-    close_layer_fd(fd);
-    FN_UV_FS_CLOSE(a, b, fd, c)
-}}
+) -> c_int {
+    unsafe {
+        // In this case we call `close_layer_fd` before the original close function, because
+        // execution does not return to here after calling `FN_UV_FS_CLOSE`.
+        close_layer_fd(fd);
+        FN_UV_FS_CLOSE(a, b, fd, c)
+    }
+}

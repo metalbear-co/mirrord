@@ -1,16 +1,15 @@
-use std::{fmt, time::Instant};
-use std::ops::Not;
+use std::{fmt, ops::Not, time::Instant};
 
-use futures::{stream, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use k8s_openapi::{
+    ClusterResourceScope, Metadata, NamespaceResourceScope,
     api::{
         apps::v1::{Deployment, ReplicaSet, StatefulSet},
         batch::v1::{CronJob, Job},
         core::v1::{Pod, Service},
     },
-    ClusterResourceScope, Metadata, NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api, Resource};
+use kube::{Api, Resource, api::ListParams};
 use mirrord_config::target::TargetType;
 use serde::de::{self, DeserializeOwned};
 

@@ -6,12 +6,13 @@ use std::{
 };
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{error::DecodeError, Decode, Encode};
+use bincode::{Decode, Encode, error::DecodeError};
 use bytes::{Buf, BufMut, BytesMut};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
+    ResponseError,
     dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::{
@@ -20,7 +21,6 @@ use crate::{
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
-    ResponseError,
 };
 
 /// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].
@@ -255,7 +255,7 @@ mod tests {
     use bytes::BytesMut;
 
     use super::*;
-    use crate::{tcp::TcpData, Payload};
+    use crate::{Payload, tcp::TcpData};
 
     #[test]
     fn sanity_client_encode_decode() {

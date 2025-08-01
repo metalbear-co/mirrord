@@ -9,7 +9,7 @@ use mirrord_kube::{
     api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
     error::KubeApiError,
 };
-use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
+use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,8 +19,8 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
     Retry,
+    strategy::{ExponentialBackoff, jitter},
 };
 use tracing::Level;
 

@@ -7,8 +7,8 @@ use std::{
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    file::*, ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse,
-    RemoteIOError, ResponseError,
+    ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
+    ResponseError, file::*,
 };
 use semver::Version;
 use thiserror::Error;
@@ -16,7 +16,7 @@ use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    error::{agent_lost_io_error, UnexpectedAgentMessage},
+    error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{LayerClosed, LayerForked, ProxyMessage, ToLayer},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
@@ -588,7 +588,11 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::Open(open) => {
-                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() { AdditionalRequestData::OpenBuffered } else { Default::default() };
+                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() {
+                    AdditionalRequestData::OpenBuffered
+                } else {
+                    Default::default()
+                };
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
@@ -598,7 +602,11 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::OpenRelative(open) => {
-                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() { AdditionalRequestData::OpenBuffered } else { Default::default() };
+                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() {
+                    AdditionalRequestData::OpenBuffered
+                } else {
+                    Default::default()
+                };
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
@@ -1171,13 +1179,13 @@ mod tests {
 
     use mirrord_intproxy_protocol::{LayerId, ProxyToLayerMessage};
     use mirrord_protocol::{
+        ClientMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
         file::{
             FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse,
             OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest,
             ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
             SeekFileRequest, SeekFileResponse, SeekFromInternal,
         },
-        ClientMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
     };
     use rstest::rstest;
     use semver::Version;

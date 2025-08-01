@@ -10,8 +10,8 @@ use bincode::{Decode, Encode};
 use socket2::SockAddr as OsSockAddr;
 
 use crate::{
-    outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
     ConnectionId, Payload, SerializationError,
+    outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
 };
 
 pub mod tcp;
@@ -54,11 +54,11 @@ impl TryFrom<UnixAddr> for OsSockAddr {
         match addr {
             Pathname(path) => OsSockAddr::unix(path),
             // We could use a `socket2::SockAddr::from_abstract_name` but it does not have it yet.
-            Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
-                io::Error::other(
-                    "Unprintable abstract addresses not supported.",
-                )
-            })?),
+            Abstract(bytes) => {
+                OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
+                    io::Error::other("Unprintable abstract addresses not supported.")
+                })?)
+            }
             UnixAddr::Unnamed => OsSockAddr::unix(""),
         }
     }

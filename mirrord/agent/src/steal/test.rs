@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, Filter, HttpFilter, IncomingTrafficTransportType, StealType},
     DaemonMessage, LogLevel,
+    tcp::{DaemonTcp, Filter, HttpFilter, IncomingTrafficTransportType, StealType},
 };
 use mirrord_tls_util::MaybeTls;
 use rstest::rstest;
@@ -21,9 +21,9 @@ use utils::{StealingClient, TestHttpKind, TestRequest, TestTcpProtocol};
 use super::{StealerCommand, TcpStealerTask};
 use crate::{
     incoming::{
+        RedirectorTask,
         test::{DummyConnectionTx, DummyRedirector},
         tls::test::SimpleStore,
-        RedirectorTask,
     },
     util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
 };
@@ -191,16 +191,17 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
         .await;
     tokio::join!(
         async {
-            let conn = match &setup.tls { Some(tls_setup) => {
-                let connector = tls_setup.connector(None);
-                let conn = connector
-                    .connect(ServerName::try_from("server").unwrap(), conn)
-                    .await
-                    .unwrap();
-                MaybeTls::Tls(Box::new(TlsStream::Client(conn)))
-            } _ => {
-                MaybeTls::NoTls(conn)
-            }};
+            let conn = match &setup.tls {
+                Some(tls_setup) => {
+                    let connector = tls_setup.connector(None);
+                    let conn = connector
+                        .connect(ServerName::try_from("server").unwrap(), conn)
+                        .await
+                        .unwrap();
+                    MaybeTls::Tls(Box::new(TlsStream::Client(conn)))
+                }
+                _ => MaybeTls::NoTls(conn),
+            };
             TestTcpProtocol::Echo.run(conn, false).await;
         },
         async {
@@ -223,13 +224,14 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
                     .await;
             } else {
                 let (conn, _) = setup.original_server.accept().await.unwrap();
-                let conn = match &setup.tls { Some(tls_setup) => {
-                    let acceptor = tls_setup.acceptor();
-                    let conn = acceptor.accept(conn).await.unwrap();
-                    MaybeTls::Tls(Box::new(TlsStream::Server(conn)))
-                } _ => {
-                    MaybeTls::NoTls(conn)
-                }};
+                let conn = match &setup.tls {
+                    Some(tls_setup) => {
+                        let acceptor = tls_setup.acceptor();
+                        let conn = acceptor.accept(conn).await.unwrap();
+                        MaybeTls::Tls(Box::new(TlsStream::Server(conn)))
+                    }
+                    _ => MaybeTls::NoTls(conn),
+                };
                 TestTcpProtocol::Echo.run(conn, true).await;
             }
         },

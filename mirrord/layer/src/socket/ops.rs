@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
+use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -26,7 +26,7 @@ use mirrord_protocol::{
 };
 use nix::{
     errno::Errno,
-    sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage},
+    sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
 };
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
@@ -385,7 +385,9 @@ fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
             // `getsockname` returned an error, or a non-IP address. Not stopping execution on
             // that, as it does not mean anything else went wrong in this run. Just emitting a
             // warning without the port number.
-            tracing::debug!("Could not determine the bound port of a socket, for the purpose of displaying it in a warning.");
+            tracing::debug!(
+                "Could not determine the bound port of a socket, for the purpose of displaying it in a warning."
+            );
             "A port".to_string()
         };
         warn!(
@@ -659,11 +661,12 @@ pub(super) fn connect(
 
         let ip = ip_address.ip();
         if (ip.is_loopback() || ip.is_unspecified())
-            && let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
-                // `result` here is always a success, as error and bypass are returned on the `?`
-                // above.
-                return Detour::Success(result);
-            }
+            && let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)?
+        {
+            // `result` here is always a success, as error and bypass are returned on the `?`
+            // above.
+            return Detour::Success(result);
+        }
 
         if is_ignored_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));

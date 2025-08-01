@@ -4,7 +4,6 @@
 #![feature(try_with_capacity)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-
 // TODO(alex): It's coming from our `fancy_regex::Error` conversion.
 #![allow(clippy::result_large_err)]
 // TODO(alex): Get a big `Box` for the big variants.

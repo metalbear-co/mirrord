@@ -71,12 +71,15 @@ impl DetourGuard {
                 && *bypass
             {
                 None
-            } else { match enabled.try_borrow_mut() { Ok(mut bypass) => {
-                *bypass = true;
-                Some(Self)
-            } _ => {
-                None
-            }}}
+            } else {
+                match enabled.try_borrow_mut() {
+                    Ok(mut bypass) => {
+                        *bypass = true;
+                        Some(Self)
+                    }
+                    _ => None,
+                }
+            }
         })
     }
 }

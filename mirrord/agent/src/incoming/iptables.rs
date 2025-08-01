@@ -5,11 +5,10 @@ use std::{
 };
 
 use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{error::IPTablesError, IPTablesWrapper, SafeIpTables};
+use mirrord_agent_iptables::{IPTablesWrapper, SafeIpTables, error::IPTablesError};
 use nix::sys::socket::{
-    self,
+    self, SockaddrIn, SockaddrIn6,
     sockopt::{Ip6tOriginalDst, OriginalDst},
-    SockaddrIn, SockaddrIn6,
 };
 use tokio::net::TcpListener;
 use tracing::Level;
@@ -95,12 +94,13 @@ impl IpTablesRedirector {
         .await?;
 
         if let Some((exclusion, port)) = iptables.exclusion().zip(self.with_mesh_exclusion)
-            && let Err(error) = exclusion.add_exclusion(port) {
-                tracing::error!(
-                    %error,
-                    "Failed to add exclusion to redirector",
-                )
-            };
+            && let Err(error) = exclusion.add_exclusion(port)
+        {
+            tracing::error!(
+                %error,
+                "Failed to add exclusion to redirector",
+            )
+        };
 
         self.iptables = Some(iptables);
 
@@ -148,12 +148,13 @@ impl PortRedirector for IpTablesRedirector {
     async fn cleanup(&mut self) -> Result<(), Self::Error> {
         if let Some(iptables) = self.iptables.take() {
             if let Some((exclusion, port)) = iptables.exclusion().zip(self.with_mesh_exclusion)
-                && let Err(error) = exclusion.remove_exclusion(port) {
-                    tracing::error!(
-                        %error,
-                        "Failed to add exclusion to redirector",
-                    )
-                };
+                && let Err(error) = exclusion.remove_exclusion(port)
+            {
+                tracing::error!(
+                    %error,
+                    "Failed to add exclusion to redirector",
+                )
+            };
 
             iptables.cleanup().await?;
         }
@@ -181,7 +182,7 @@ impl PortRedirector for IpTablesRedirector {
                         stream,
                         source,
                         destination,
-                    })
+                    });
                 }
                 Err(error) => {
                     // Resolving the original destination can fail,

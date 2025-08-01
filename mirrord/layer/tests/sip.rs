@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 mod common;
 
 pub use common::*;
-use mirrord_sip::{sip_patch, SipPatchOptions};
+use mirrord_sip::{SipPatchOptions, sip_patch};
 
 /// Verify that mirrord ignores the temp dir with the SIP-patched binaries.
 /// If it does not, it would try to read the script from the remote pod.
@@ -57,10 +57,12 @@ async fn tmp_dir_read_locally(dylib_path: &Path) {
 
     assert_eq!(intproxy.try_recv().await, None);
     test_process.wait().await;
-    assert!(!test_process
-        .get_stdout()
-        .await
-        .contains("No such file or directory"));
+    assert!(
+        !test_process
+            .get_stdout()
+            .await
+            .contains("No such file or directory")
+    );
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
 }

@@ -103,33 +103,45 @@ pub struct LocalTlsDelivery {
 impl LocalTlsDelivery {
     pub fn verify(&self, _: &mut ConfigContext) -> Result<(), ConfigError> {
         match self {
-            Self { protocol: TlsDeliveryProtocol::Tcp, .. } => {
+            Self {
+                protocol: TlsDeliveryProtocol::Tcp,
+                ..
+            } => {
                 // other settings are ignored
-            },
-            Self { trust_roots: Some(..), server_cert: Some(..), .. } => {
+            }
+            Self {
+                trust_roots: Some(..),
+                server_cert: Some(..),
+                ..
+            } => {
                 return Err(ConfigError::Conflict(
                     ".feature.network.incoming.tls_delivery.trust_roots and \
-                    .feature.network.incoming.tls_delivery.server_cert cannot be specified together".into()
-                ))
+                    .feature.network.incoming.tls_delivery.server_cert cannot be specified together"
+                        .into(),
+                ));
             }
-            Self { trust_roots: Some(roots), .. } if roots.is_empty() => {
+            Self {
+                trust_roots: Some(roots),
+                ..
+            } if roots.is_empty() => {
                 return Err(ConfigError::InvalidValue {
                     name: ".feature.network.incoming.tls_delivery.trust_roots",
                     provided: "[]".into(),
                     error: "cannot be an empty list".into(),
-                })
+                });
             }
             _ => {}
         }
 
         if let Some(server_name) = self.server_name.as_deref()
-            && ServerName::try_from(server_name).is_err() {
-                return Err(ConfigError::InvalidValue {
-                    name: ".feature.network.incoming.tls_delivery.server_name",
-                    provided: server_name.into(),
-                    error: "must be a valid DNS name or an IP address".into(),
-                });
-            }
+            && ServerName::try_from(server_name).is_err()
+        {
+            return Err(ConfigError::InvalidValue {
+                name: ".feature.network.incoming.tls_delivery.server_name",
+                provided: server_name.into(),
+                error: "must be a valid DNS name or an IP address".into(),
+            });
+        }
 
         Ok(())
     }

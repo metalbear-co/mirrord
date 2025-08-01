@@ -56,12 +56,12 @@ mod main {
     use apple_codesign::{CodeSignatureFlags, MachFile};
     use fs4::fs_std::FileExt;
     use object::{
-        macho::{self, MachHeader64, LC_RPATH},
+        Architecture, Endianness, FileKind,
+        macho::{self, LC_RPATH, MachHeader64},
         read::{
             self,
             macho::{FatArch, LoadCommandVariant::Rpath, MachHeader},
         },
-        Architecture, Endianness, FileKind,
     };
     use once_cell::sync::Lazy;
     use tracing::{trace, warn};
@@ -70,9 +70,9 @@ mod main {
     use super::*;
     pub use crate::error::SipError;
     use crate::{
+        SipError::{FileNotFound, UnlikelyError},
         error::Result,
         main::SipStatus::{NoSip, SipBinary, SipScript},
-        SipError::{FileNotFound, UnlikelyError},
     };
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
@@ -330,8 +330,7 @@ mod main {
         if output.exists() {
             trace!(
                 "Using existing SIP-patched version of {:?}: {:?}",
-                path,
-                output
+                path, output
             );
             return Ok(output);
         }
@@ -342,8 +341,7 @@ mod main {
 
         trace!(
             "{:?} is a SIP protected binary, making non protected version at: {:?}",
-            path,
-            output
+            path, output
         );
         let data = std::fs::read(path)?;
 
@@ -393,9 +391,7 @@ mod main {
 
         trace!(
             "Shebang points to: {:?}. Patching the interpreter and making a version of {:?} with an altered shebang at: {:?}",
-            shebang.interpreter_path,
-            original_path,
-            patched_path,
+            shebang.interpreter_path, original_path, patched_path,
         );
 
         let data = std::fs::read(original_path)?;
@@ -1103,17 +1099,21 @@ mod main {
             let is_frameworks_path = |path: &str| path == frameworks_path;
 
             // Verify that the path was not there before.
-            assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .map(|value| value.split(':').any(is_frameworks_path))
-                .unwrap_or_default());
+            assert!(
+                !env::var(FRAMEWORKS_ENV_VAR_NAME)
+                    .map(|value| value.split(':').any(is_frameworks_path))
+                    .unwrap_or_default()
+            );
 
             set_fallback_frameworks_path_if_mac_app(Path::new(example_path));
 
             // Verify that the path is there after.
-            assert!(env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .unwrap()
-                .split(':')
-                .any(is_frameworks_path));
+            assert!(
+                env::var(FRAMEWORKS_ENV_VAR_NAME)
+                    .unwrap()
+                    .split(':')
+                    .any(is_frameworks_path)
+            );
         }
 
         #[test]

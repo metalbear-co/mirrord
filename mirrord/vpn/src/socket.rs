@@ -1,4 +1,4 @@
-use futures::{future, Sink, SinkExt, Stream};
+use futures::{Sink, SinkExt, Stream, future};
 use mirrord_protocol::vpn::NetworkConfiguration;
 use tokio::io;
 

@@ -1,9 +1,9 @@
 use std::{
     self,
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap, VecDeque},
-    fs::{read_link, File, OpenOptions, ReadDir},
-    io::{self, prelude::*, SeekFrom},
+    collections::{HashMap, VecDeque, hash_map::Entry},
+    fs::{File, OpenOptions, ReadDir, read_link},
+    io::{self, SeekFrom, prelude::*},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
@@ -15,9 +15,9 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
-use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use mirrord_protocol::{FileRequest, FileResponse, RemoteResult, ResponseError, file::*};
 use nix::unistd::UnlinkatFlags;
-use tracing::{error, trace, Level};
+use tracing::{Level, error, trace};
 
 use crate::{
     error::AgentResult, metrics::OPEN_FD_COUNT, util::path_resolver::InTargetPathResolver,
@@ -439,9 +439,7 @@ impl FileManager {
     pub(crate) fn mkdirat(&mut self, dirfd: u64, path: &Path, mode: u32) -> RemoteResult<()> {
         trace!(
             "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
-            dirfd,
-            path,
-            mode
+            dirfd, path, mode
         );
 
         let relative_dir = self
@@ -507,7 +505,7 @@ impl FileManager {
             _ => {
                 return Err(ResponseError::from(std::io::Error::from_raw_os_error(
                     libc::EINVAL,
-                )))
+                )));
             }
         };
 
@@ -520,8 +518,7 @@ impl FileManager {
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
         trace!(
             "FileManager::seek -> fd {:#?} | seek_from {:#?}",
-            fd,
-            seek_from
+            fd, seek_from
         );
 
         self.open_files
@@ -609,8 +606,7 @@ impl FileManager {
         let pathname = self.resolve_path(&pathname)?;
         trace!(
             "FileManager::access -> pathname {:#?} | mode {:#?}",
-            pathname,
-            mode,
+            pathname, mode,
         );
 
         // Mirror bit representation of flags to support how the flags are represented in the
@@ -640,11 +636,12 @@ impl FileManager {
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
-                { RemoteFile::Directory(parent_path) => {
-                    parent_path.join(path)
-                } _ => {
-                    return Err(ResponseError::NotDirectory(fd));
-                }}
+                {
+                    RemoteFile::Directory(parent_path) => parent_path.join(path),
+                    _ => {
+                        return Err(ResponseError::NotDirectory(fd));
+                    }
+                }
             }
             // fstat
             (None, Some(fd)) => {
@@ -656,12 +653,12 @@ impl FileManager {
                     RemoteFile::File(file) => {
                         return Ok(XstatResponse {
                             metadata: file.metadata()?.into(),
-                        })
+                        });
                     }
                     RemoteFile::Directory(path) => {
                         return Ok(XstatResponse {
                             metadata: path.metadata()?.into(),
-                        })
+                        });
                     }
                 }
             }
@@ -809,13 +806,12 @@ impl FileManager {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
-        let result = match dir_stream.next() { Some(offset_entry_pair) => {
-            ReadDirResponse {
+        let result = match dir_stream.next() {
+            Some(offset_entry_pair) => ReadDirResponse {
                 direntry: Some(offset_entry_pair.try_into()?),
-            }
-        } _ => {
-            ReadDirResponse { direntry: None }
-        }};
+            },
+            _ => ReadDirResponse { direntry: None },
+        };
 
         Ok(result)
     }

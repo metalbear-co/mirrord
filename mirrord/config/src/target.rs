@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
-use schemars::{r#gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
+use schemars::{JsonSchema, r#gen::SchemaGenerator, schema::SchemaObject};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumString};
 
@@ -13,9 +13,9 @@ use self::{
 };
 use crate::{
     config::{
+        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
         from_env::{FromEnv, FromEnvWithError},
         source::MirrordConfigSource,
-        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
     feature::FeatureConfig,
     util::string_or_struct_option,
@@ -340,9 +340,13 @@ impl FromStr for Target {
             Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
-            Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
+            Some("statefulset") => {
+                stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet)
+            }
             Some("service") => service::ServiceTarget::from_split(&mut split).map(Target::Service),
-            Some("replicaset") => replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet),
+            Some("replicaset") => {
+                replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet)
+            }
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),

@@ -112,11 +112,10 @@ async fn create_raw_socket() -> io::Result<AsyncRawSocket> {
         Type::DGRAM,
         Some(Protocol::from(libc::ETH_P_IP.to_be())),
     )?;
-    let sock_addr = interface_index_to_sock_addr(i32::try_from(index).map_err(|_| {
-        io::Error::other(
-            format!("invalid interface index {index}"),
-        )
-    })?)?;
+    let sock_addr = interface_index_to_sock_addr(
+        i32::try_from(index)
+            .map_err(|_| io::Error::other(format!("invalid interface index {index}")))?,
+    )?;
     socket.bind(&sock_addr)?;
     socket.set_nonblocking(true)?;
     AsyncRawSocket::new(socket, sock_addr)
@@ -149,22 +148,14 @@ async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
         .address
         .as_ref()
         .and_then(SockaddrStorage::as_sockaddr_in)
-        .ok_or_else(|| {
-            io::Error::other(
-                "usable_interface.address.as_sockaddr_in",
-            )
-        })?
+        .ok_or_else(|| io::Error::other("usable_interface.address.as_sockaddr_in"))?
         .ip()
         .into();
     let net_mask = usable_interface
         .netmask
         .as_ref()
         .and_then(SockaddrStorage::as_sockaddr_in)
-        .ok_or_else(|| {
-            io::Error::other(
-                "usable_interface.netmask.as_sockaddr_in",
-            )
-        })?
+        .ok_or_else(|| io::Error::other("usable_interface.netmask.as_sockaddr_in"))?
         .ip()
         .into();
     // extracting gateway is more difficult, ugly patch for now.
@@ -172,11 +163,7 @@ async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
         .address
         .as_ref()
         .and_then(SockaddrStorage::as_sockaddr_in)
-        .ok_or_else(|| {
-            io::Error::other(
-                "usable_interface.address.as_sockaddr_in",
-            )
-        })?
+        .ok_or_else(|| io::Error::other("usable_interface.address.as_sockaddr_in"))?
         .ip()
         .octets();
 
@@ -324,13 +311,14 @@ impl VpnTask {
                     .await
                     .map_err(io::Error::other)?;
             }
-            ClientVpn::Packet(packet) => {
-                match self.socket.as_mut() { Some(socket) => {
+            ClientVpn::Packet(packet) => match self.socket.as_mut() {
+                Some(socket) => {
                     socket.write(&packet).await?;
-                } _ => {
+                }
+                _ => {
                     tracing::error!(?packet, "unable to send packet");
-                }}
-            }
+                }
+            },
             ClientVpn::OpenSocket => {
                 self.socket.replace(create_raw_socket().await?);
             }

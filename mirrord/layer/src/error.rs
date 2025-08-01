@@ -1,7 +1,7 @@
 use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use ignore_codes::*;
-use libc::{c_char, hostent, DIR, FILE};
+use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]

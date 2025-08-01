@@ -385,10 +385,10 @@ mod tests {
         use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
 
         let read_write = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_write.*\.a".to_string()
+            r"/pain/read_write.*\.a".to_string(),
         ]));
         let read_only = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_only.*\.a".to_string()
+            r"/pain/read_only.*\.a".to_string(),
         ]));
         let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
         let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_string()));

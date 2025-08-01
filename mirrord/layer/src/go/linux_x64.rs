@@ -23,7 +23,7 @@ use crate::{
 /// We cannot provide any stack guarantees when our detour executes(whether it will exceed the
 /// go's stack limit), so we need to switch to system stack.
 #[unsafe(naked)]
-unsafe extern "C" fn go_rawsyscall_detour() { 
+unsafe extern "C" fn go_rawsyscall_detour() {
     naked_asm!(
         // push the arguments of Rawsyscall from the stack to preserved registers
         "mov rbx, QWORD PTR [rsp+0x10]",
@@ -109,7 +109,7 @@ unsafe extern "C" fn go_rawsyscall_detour() {
 
 /// [Naked function] hook for Syscall6
 #[unsafe(naked)]
-unsafe extern "C" fn go_syscall6_detour() { 
+unsafe extern "C" fn go_syscall6_detour() {
     naked_asm!(
         "mov rax, QWORD PTR [rsp+0x8]",
         "mov rbx, QWORD PTR [rsp+0x10]",
@@ -194,7 +194,7 @@ unsafe extern "C" fn go_syscall6_detour() {
 
 /// [Naked function] hook for Syscall
 #[unsafe(naked)]
-unsafe extern "C" fn go_syscall_detour() { 
+unsafe extern "C" fn go_syscall_detour() {
     naked_asm!(
         "mov rax, QWORD PTR [rsp+0x8]",
         "mov rbx, QWORD PTR [rsp+0x10]",
@@ -274,7 +274,7 @@ unsafe extern "C" fn go_syscall_detour() {
 /// [Naked function] maps to gasave_systemstack_switch, called by asmcgocall.abi0
 #[unsafe(no_mangle)]
 #[unsafe(naked)]
-unsafe extern "C" fn gosave_systemstack_switch() { 
+unsafe extern "C" fn gosave_systemstack_switch() {
     naked_asm!(
         "lea    r9, [rip+0xdd9]",
         "mov    QWORD PTR [r14+0x40],r9",
@@ -294,7 +294,7 @@ unsafe extern "C" fn gosave_systemstack_switch() {
 /// [Naked function] maps to runtime.abort.abi0, called by `gosave_systemstack_switch`
 #[unsafe(no_mangle)]
 #[unsafe(naked)]
-unsafe extern "C" fn go_runtime_abort() { 
+unsafe extern "C" fn go_runtime_abort() {
     naked_asm!("int 0x3", "jmp go_runtime_abort");
 }
 
@@ -307,50 +307,67 @@ unsafe extern "C" fn c_abi_syscall_handler(
     param1: i64,
     param2: i64,
     param3: i64,
-) -> i64 { unsafe {
-    trace!(
-        "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
-        syscall,
-        param1,
-        param2,
-        param3
-    );
-    let syscall_result = match syscall {
-        libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
-        libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_close => close_detour(param1 as _) as i64,
+) -> i64 {
+    unsafe {
+        trace!(
+            "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
+            syscall, param1, param2, param3
+        );
+        let syscall_result = match syscall {
+            libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_close => close_detour(param1 as _) as i64,
 
-        _ if crate::setup().fs_config().is_active() => match syscall {
-            libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
-            // Note(syscall_linux.go)
-            // if flags == 0 {
-            // 	return faccessat(dirfd, path, mode)
-            // }
-            // The Linux kernel faccessat system call does not take any flags.
-            // The glibc faccessat implements the flags itself; see
-            // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
-            // Because people naturally expect syscall.Faccessat to act
-            // like C faccessat, we do the same.
-            libc::SYS_faccessat => {
-                faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
-            }
-            libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_statfs => statfs64_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_fstatfs => fstatfs64_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_getdents64 => getdents64_detour(param1 as _, param2 as _, param3 as _) as i64,
-            #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-            libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_mkdirat => mkdirat_detour(param1 as _, param2 as _, param3 as _) as i64,
-            #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-            libc::SYS_rmdir => rmdir_detour(param1 as _) as i64,
-            #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-            libc::SYS_unlink => unlink_detour(param1 as _) as i64,
-            libc::SYS_unlinkat => unlinkat_detour(param1 as _, param2 as _, param3 as _) as i64,
+            _ if crate::setup().fs_config().is_active() => match syscall {
+                libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
+                // Note(syscall_linux.go)
+                // if flags == 0 {
+                // 	return faccessat(dirfd, path, mode)
+                // }
+                // The Linux kernel faccessat system call does not take any flags.
+                // The glibc faccessat implements the flags itself; see
+                // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
+                // Because people naturally expect syscall.Faccessat to act
+                // like C faccessat, we do the same.
+                libc::SYS_faccessat => {
+                    faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
+                }
+                libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_statfs => statfs64_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_fstatfs => fstatfs64_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_getdents64 => {
+                    getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
+                }
+                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+                libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_mkdirat => mkdirat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+                libc::SYS_rmdir => rmdir_detour(param1 as _) as i64,
+                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+                libc::SYS_unlink => unlink_detour(param1 as _) as i64,
+                libc::SYS_unlinkat => unlinkat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                _ => {
+                    let (Ok(result) | Err(result)) = syscalls::syscall!(
+                        syscalls::Sysno::from(syscall as i32),
+                        param1,
+                        param2,
+                        param3
+                    )
+                    .map(|success| success as i64)
+                    .map_err(|fail| {
+                        let raw_errno = fail.into_raw();
+                        Errno::set_raw(raw_errno);
+
+                        -(raw_errno as i64)
+                    });
+                    result
+                }
+            },
             _ => {
                 let (Ok(result) | Err(result)) = syscalls::syscall!(
                     syscalls::Sysno::from(syscall as i32),
@@ -367,38 +384,22 @@ unsafe extern "C" fn c_abi_syscall_handler(
                 });
                 result
             }
-        },
-        _ => {
-            let (Ok(result) | Err(result)) = syscalls::syscall!(
-                syscalls::Sysno::from(syscall as i32),
-                param1,
-                param2,
-                param3
-            )
-            .map(|success| success as i64)
-            .map_err(|fail| {
-                let raw_errno = fail.into_raw();
-                Errno::set_raw(raw_errno);
+        };
 
-                -(raw_errno as i64)
-            });
-            result
+        if syscall_result.is_negative() {
+            // Might not be an exact mapping, but it should be good enough.
+            -(Errno::last_raw() as i64)
+        } else {
+            syscall_result
         }
-    };
-
-    if syscall_result.is_negative() {
-        // Might not be an exact mapping, but it should be good enough.
-        -(Errno::last_raw() as i64)
-    } else {
-        syscall_result
     }
-}}
+}
 
 /// Detour for Go >= 1.19
 /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
 /// so syscall6 handler need to handle syscall3 detours as well.
 #[unsafe(naked)]
-unsafe extern "C" fn go_syscall_new_detour() { 
+unsafe extern "C" fn go_syscall_new_detour() {
     naked_asm!(
         "cmp rax, 60", // SYS_EXIT
         "je 4f",

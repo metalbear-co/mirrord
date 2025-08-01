@@ -5,15 +5,15 @@ use std::{
 
 use enum_dispatch::enum_dispatch;
 use mirrord_agent_env::mesh::MeshVendor;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::{
     error::{IPTablesError, IPTablesResult},
     flush_connections::FlushConnections,
     mesh::{
+        MeshRedirect, MeshVendorExt,
         exclusion::{MeshExclusion, WithMeshExclusion},
         istio::AmbientRedirect,
-        MeshRedirect, MeshVendorExt,
     },
     prerouting::PreroutingRedirect,
     redirect::Redirect,
@@ -177,24 +177,25 @@ where
     ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
-        let mut redirect = match MeshVendor::detect(ipt.as_ref())? { Some(vendor) => {
-            match &vendor {
+        let mut redirect = match MeshVendor::detect(ipt.as_ref())? {
+            Some(vendor) => match &vendor {
                 MeshVendor::IstioAmbient => {
                     Redirects::Ambient(AmbientRedirect::create(ipt.clone(), pod_ips)?)
                 }
                 _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
-            }
-        } _ => {
-            tracing::trace!(ipv6 = ipv6, "creating standard redirect");
-            match StandardRedirect::create(ipt.clone(), pod_ips) {
-                Err(err) => {
-                    warn!("Unable to create StandardRedirect chain: {err}");
+            },
+            _ => {
+                tracing::trace!(ipv6 = ipv6, "creating standard redirect");
+                match StandardRedirect::create(ipt.clone(), pod_ips) {
+                    Err(err) => {
+                        warn!("Unable to create StandardRedirect chain: {err}");
 
-                    Redirects::PrerouteFallback(PreroutingRedirect::create(ipt.clone())?)
+                        Redirects::PrerouteFallback(PreroutingRedirect::create(ipt.clone())?)
+                    }
+                    Ok(standard) => Redirects::Standard(standard),
                 }
-                Ok(standard) => Redirects::Standard(standard),
             }
-        }};
+        };
 
         if flush_connections {
             redirect = Redirects::FlushConnections(FlushConnections::create(Box::new(redirect))?)
@@ -238,21 +239,20 @@ where
     ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
-        let mut redirect = match MeshVendor::detect(ipt.as_ref())? { Some(vendor) => {
-            match &vendor {
+        let mut redirect = match MeshVendor::detect(ipt.as_ref())? {
+            Some(vendor) => match &vendor {
                 MeshVendor::IstioAmbient => Redirects::Ambient(AmbientRedirect::load(ipt.clone())?),
                 _ => Redirects::Mesh(MeshRedirect::load(ipt.clone(), vendor)?),
-            }
-        } _ => {
-            match StandardRedirect::load(ipt.clone()) {
+            },
+            _ => match StandardRedirect::load(ipt.clone()) {
                 Err(err) => {
                     warn!("Unable to load StandardRedirect chain: {err}");
 
                     Redirects::PrerouteFallback(PreroutingRedirect::load(ipt.clone())?)
                 }
                 Ok(standard) => Redirects::Standard(standard),
-            }
-        }};
+            },
+        };
 
         if flush_connections {
             redirect = Redirects::FlushConnections(FlushConnections::load(Box::new(redirect))?)
@@ -413,8 +413,8 @@ mod tests {
     use mockall::predicate::{eq, str};
 
     use crate::{
-        MockIPTables, SafeIpTables, IPTABLE_EXCLUDE_FROM_MESH, IPTABLE_MESH, IPTABLE_PREROUTING,
-        IPTABLE_STANDARD,
+        IPTABLE_EXCLUDE_FROM_MESH, IPTABLE_MESH, IPTABLE_PREROUTING, IPTABLE_STANDARD,
+        MockIPTables, SafeIpTables,
     };
 
     #[tokio::test]
@@ -799,7 +799,8 @@ mod tests {
 
         let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
         assert_eq!(
-            leftover_rules_res.unwrap().len(), 0,
+            leftover_rules_res.unwrap().len(),
+            0,
             "Fresh IP table should successfully list table rules and list no existing mirrord rules"
         );
     }
@@ -823,7 +824,8 @@ mod tests {
 
         let leftover_rules_res = SafeIpTables::list_mirrord_rules(&mock).await;
         assert_eq!(
-            leftover_rules_res.unwrap().len(), 1,
+            leftover_rules_res.unwrap().len(),
+            1,
             "Fresh IP table should successfully list table rules and list one existing mirrord rule"
         );
     }

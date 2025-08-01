@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{FsModeConfig, FsUserConfig};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
+    config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -62,8 +62,8 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 ///   2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
 ///      are read remotely by default when the mode is `localwithoverrides`.
 ///   3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
-///      under the running user's home directory will not be found by the application when the
-///      mode is not `local`.
+///      under the running user's home directory will not be found by the application when the mode
+///      is not `local`.
 ///
 ///   In order to override that default setting for a path, or a pattern, include it the
 ///   appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even

@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::{api::ListParams, Api, Client, Resource};
+use kube::{Api, Client, Resource, api::ListParams};
 use mirrord_config::target::rollout::RolloutTarget;
 
 use super::RuntimeDataFromLabels;

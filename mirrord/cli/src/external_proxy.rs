@@ -25,8 +25,8 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -34,7 +34,7 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, LayerConfig};
+use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
 use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};

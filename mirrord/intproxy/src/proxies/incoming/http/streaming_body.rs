@@ -9,8 +9,8 @@ use std::{
 use bytes::Bytes;
 use hyper::body::{Body, Frame};
 use mirrord_protocol::{
-    tcp::{InternalHttpBody, InternalHttpBodyFrame},
     Payload,
+    tcp::{InternalHttpBody, InternalHttpBodyFrame},
 };
 use tokio::sync::mpsc::{self, Receiver};
 

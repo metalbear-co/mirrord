@@ -1,15 +1,15 @@
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
-    tcp::{LayerTcp, NewTcpConnectionV1, TcpData},
     ClientMessage, DaemonMessage,
+    tcp::{LayerTcp, NewTcpConnectionV1, TcpData},
 };
 use tracing::{debug, info};
 
 use super::config::DumpArgs;
 use crate::{
-    connection::{create_and_connect, AgentConnection},
+    connection::{AgentConnection, create_and_connect},
     error::{CliError, CliResult},
     user_data::UserData,
 };

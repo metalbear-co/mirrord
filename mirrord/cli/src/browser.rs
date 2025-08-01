@@ -1,6 +1,6 @@
 use std::{process::Command, sync::LazyLock};
 
-use base64::engine::{general_purpose::STANDARD, Engine};
+use base64::engine::{Engine, general_purpose::STANDARD};
 use mirrord_config::feature::network::NetworkConfig;
 use mirrord_progress::Progress;
 use serde::Serialize;

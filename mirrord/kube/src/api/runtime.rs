@@ -10,11 +10,11 @@ use std::{
 };
 
 use k8s_openapi::{
+    NamespaceResourceScope,
     api::core::v1::{Container, ContainerPort, Node, Pod, Probe},
     apimachinery::pkg::util::intstr::IntOrString,
-    NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api, Client, Resource};
+use kube::{Api, Client, Resource, api::ListParams};
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::target::Target;
 use serde::de::DeserializeOwned;
@@ -213,7 +213,9 @@ impl RuntimeData {
                 return Err(KubeApiError::invalid_value(
                     pod,
                     ".status.containerStatuses.[].containerID",
-                    format_args!("failed to extract container runtime for `{container_name}`: `{container_id_full}`"),
+                    format_args!(
+                        "failed to extract container runtime for `{container_name}`: `{container_id_full}`"
+                    ),
                 ));
             }
         };

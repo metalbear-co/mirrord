@@ -1,23 +1,23 @@
 use core::slice::Iter;
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, hash_map::Entry},
     ops::Not,
     path::PathBuf,
     time::Duration,
 };
 
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate},
     types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use prettytable::{row, Row, Table};
+use prettytable::{Row, Table, row};
 use tracing::Level;
 
-use crate::{error::CliError, util::remove_proxy_env, CliResult};
+use crate::{CliResult, error::CliError, util::remove_proxy_env};
 
 /// Handles the `mirrord operator status` command.
 pub(super) struct StatusCommandHandler {

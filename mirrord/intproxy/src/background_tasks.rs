@@ -13,7 +13,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
-use tokio_stream::{wrappers::ReceiverStream, StreamExt, StreamMap, StreamNotifyClose};
+use tokio_stream::{StreamExt, StreamMap, StreamNotifyClose, wrappers::ReceiverStream};
 
 pub type MessageBus<T> =
     MessageBusInner<<T as BackgroundTask>::MessageIn, <T as BackgroundTask>::MessageOut>;
@@ -165,13 +165,14 @@ where
                         .await
                     {
                         ControlFlow::Break(err) => return Err(err),
-                        ControlFlow::Continue(()) => {
-                            match task.run(message_bus).await { Err(err) => {
+                        ControlFlow::Continue(()) => match task.run(message_bus).await {
+                            Err(err) => {
                                 run_error = Some(err);
-                            } _ => {
+                            }
+                            _ => {
                                 return Ok(());
-                            }}
-                        }
+                            }
+                        },
                     }
                 }
             }

@@ -45,8 +45,8 @@ use crate::{
     container::ContainerConfig,
     external_proxy::ExternalProxyConfig,
     feature::{
-        fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
         FeatureConfig,
+        fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
     },
     internal_proxy::InternalProxyConfig,
     target::TargetConfig,
@@ -788,13 +788,13 @@ mod tests {
     use crate::{
         agent::AgentFileConfig,
         feature::{
+            FeatureFileConfig,
             fs::{FsModeConfig, FsUserConfig},
             network::{
+                NetworkFileConfig,
                 incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
                 outgoing::OutgoingFileConfig,
-                NetworkFileConfig,
             },
-            FeatureFileConfig,
         },
         target::{Target, TargetFileConfig},
         util::ToggleableConfig,

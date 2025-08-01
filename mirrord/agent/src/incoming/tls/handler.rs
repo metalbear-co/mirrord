@@ -2,7 +2,7 @@ use std::{fmt, io, net::IpAddr, sync::Arc};
 
 use http::Uri;
 use mirrord_tls_util::UriExt;
-use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
+use rustls::{ClientConfig, ServerConfig, ServerConnection, pki_types::ServerName};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 

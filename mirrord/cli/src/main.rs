@@ -260,6 +260,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
+    LayerConfig,
     config::ConfigContext,
     feature::{
         fs::FsModeConfig,
@@ -268,10 +269,9 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    LayerConfig,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
+use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -617,7 +617,9 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
 
     if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
-        warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
+        warn!(
+            "TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't"
+        )
     }
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
