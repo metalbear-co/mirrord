@@ -1,0 +1,1 @@
+Fixed an issue where `mirrord dump` command was not receiving HTTP traffic from an agent configured to use passthrough mirroring.

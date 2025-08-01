@@ -17,6 +17,7 @@ use thiserror::Error;
 
 use crate::{
     container::{CommandDisplay, IntproxySidecarError},
+    dump::DumpSessionError,
     port_forward::PortForwardError,
     profile::ProfileError,
 };
@@ -427,8 +428,8 @@ pub(crate) enum CliError {
     ))]
     ExecveE2Big,
 
-    #[error("Failed starting a mirrord dump session: {0}")]
-    DumpError(String),
+    #[error("mirrord dump session failed: {0}")]
+    DumpError(#[from] DumpSessionError),
 
     #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
     OperatorCopyTargetFailed { message: Option<String> },

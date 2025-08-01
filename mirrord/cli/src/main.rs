@@ -767,6 +767,7 @@ async fn port_forward(
         receiver: agent_conn.agent_rx,
     };
 
+    progress.success(Some("Ready!"));
     let _ = tokio::try_join!(
         async {
             if !args.port_mapping.is_empty() {

@@ -297,8 +297,14 @@ impl From<HashSet<u16>> for PortList {
 impl core::fmt::Display for PortList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
+        let mut first = true;
         for port in self.iter() {
-            write!(f, "{port} ")?;
+            if first {
+                write!(f, "{port}")?;
+                first = false;
+            } else {
+                write!(f, ", {port}")?;
+            }
         }
         write!(f, "]")?;
         Ok(())

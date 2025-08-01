@@ -1,10 +1,10 @@
-use std::{path::PathBuf, sync::LazyLock};
+use std::{ops::Not, path::PathBuf, sync::LazyLock};
 
 use fs4::tokio::AsyncFileExt;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
-    io::{self, AsyncReadExt, AsyncWriteExt},
+    io::{self, AsyncWriteExt},
 };
 use tracing::trace;
 use uuid::Uuid;
@@ -56,22 +56,8 @@ impl UserData {
     /// Create `UserData` from the default file path (`DATA_STORE_PATH`)
     pub(crate) async fn from_default_path() -> io::Result<Self> {
         let read_from_file = async || {
-            if !DATA_STORE_DIR.exists() {
-                fs::create_dir_all(&*DATA_STORE_DIR).await?;
-            }
-
-            let mut store_file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(DATA_STORE_PATH.as_path())
-                .await?;
-
-            let mut contents = vec![];
-            store_file.read_to_end(&mut contents).await?;
+            let contents = fs::read(DATA_STORE_PATH.as_path()).await?;
             let user_data: UserData = serde_json::from_slice(contents.as_slice())?;
-
             Ok::<_, io::Error>(user_data)
         };
 
@@ -88,17 +74,21 @@ impl UserData {
 
                 Ok(user_data)
             }
-            Err(fail) => {
+            Err(error) => {
                 trace!(
-                    %fail,
+                    %error,
                     "Could not load `UserData` from file! Attempting to create it..."
                 );
 
                 let user_data = Self::default();
-                user_data.overwrite_to_file().await.inspect_err(|fail| {
-                    trace!(%fail, "Creating a default `UserData` file failed!\
-                        There are no guarantees that the `UserData` will be stored anywhere.")
+                user_data.overwrite_to_file().await.inspect_err(|error| {
+                    trace!(
+                        %error,
+                        "Creating a default `UserData` file failed! \
+                        There are no guarantees that the `UserData` will be stored anywhere.",
+                    );
                 })?;
+
                 Ok(user_data)
             }
         }
@@ -106,7 +96,10 @@ impl UserData {
 
     /// Overwrite the JSON contents at the default file path (`DATA_STORE_PATH`) with `UserData`
     pub(crate) async fn overwrite_to_file(&self) -> Result<(), io::Error> {
-        // DATA_STORE_DIR and DATA_STORE_PATH are already known to exist
+        if DATA_STORE_DIR.exists().not() {
+            fs::create_dir_all(&*DATA_STORE_DIR).await?;
+        }
+
         let mut store_file = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -116,10 +109,9 @@ impl UserData {
             .await?;
 
         if store_file.try_lock_exclusive()? {
-            let contents = serde_json::to_vec(&self)?;
+            let contents = serde_json::to_vec(self)?;
             store_file.write_all(contents.as_slice()).await?;
-
-            store_file.unlock_async().await?;
+            store_file.unlock()?;
         }
         Ok(())
     }
