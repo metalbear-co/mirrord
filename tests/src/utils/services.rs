@@ -138,7 +138,7 @@ async fn create_rollout(
     namespace: &str,
     kube_client: &Client,
 ) {
-    let (rollout_guard, rollout) = ResourceGuard::create(rollout_api, &rollout, delete_after_fail)
+    let (rollout_guard, rollout) = ResourceGuard::create(rollout_api, rollout, delete_after_fail)
         .await
         .unwrap_or_else(|err| {
             panic!(
@@ -213,7 +213,7 @@ pub(crate) async fn internal_service(
     );
 
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
-    if let Some((guard, _namespace_resource)) = ResourceGuard::create::<Namespace>(
+    if let Ok((guard, _namespace_resource)) = ResourceGuard::create::<Namespace>(
         namespace_api.clone(),
         &serde_json::from_value(json!({
             "apiVersion": "v1",
@@ -229,7 +229,6 @@ pub(crate) async fn internal_service(
         delete_after_fail,
     )
     .await
-    .ok()
     {
         guards.push(guard);
     }
