@@ -4272,6 +4272,7 @@ dependencies = [
  "drain",
  "fs4 0.13.1",
  "futures",
+ "hex",
  "home",
  "http-body-util",
  "humantime",
