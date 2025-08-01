@@ -1,3 +1,5 @@
+#![cfg(not(target_os = "windows"))]
+
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
@@ -5,15 +7,18 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     ops::Not,
-    os::{
-        fd::{BorrowedFd, FromRawFd, IntoRawFd},
-        unix::io::RawFd,
-    },
+    
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
     sync::{Arc, Mutex, OnceLock},
 };
 
+#[cfg(not(target_os = "windows"))]
+use std::os::{
+    fd::{BorrowedFd, FromRawFd, IntoRawFd},
+    unix::io::RawFd,
+};
+#[cfg(not(target_os = "windows"))]
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
@@ -24,6 +29,7 @@ use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
+#[cfg(not(target_os = "windows"))]
 use nix::{
     errno::Errno,
     sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage},
@@ -363,39 +369,42 @@ fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
     // It's plausible that the user did not know the port has to be in either port list to be
     // stolen when an HTTP filter is set, so show a warning.
     if http_filter_used && incoming_config.ports.is_none() {
-        let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-            .inspect_err(|err| {
-                tracing::debug!(
-                    "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
-                )
-            })
-            .ok()
-            .and_then(|addr_storage| {
-                addr_storage
-                    .as_sockaddr_in()
-                    .map(SockaddrIn::port)
-                    .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
-            }) {
-            if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
-                format!("Remote port {mapped_port} (mapped from local port {port})",)
+        #[cfg(not(target_os = "windows"))]
+        {
+            let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
+                .inspect_err(|err| {
+                    tracing::debug!(
+                        "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
+                    )
+                })
+                .ok()
+                .and_then(|addr_storage| {
+                    addr_storage
+                        .as_sockaddr_in()
+                        .map(SockaddrIn::port)
+                        .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
+                }) {
+                if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
+                    format!("Remote port {mapped_port} (mapped from local port {port})",)
+                } else {
+                    format!("Port {port}")
+                }
             } else {
-                format!("Port {port}")
-            }
-        } else {
-            // `getsockname` returned an error, or a non-IP address. Not stopping execution on
-            // that, as it does not mean anything else went wrong in this run. Just emitting a
-            // warning without the port number.
-            tracing::debug!("Could not determine the bound port of a socket, for the purpose of displaying it in a warning.");
-            "A port".to_string()
-        };
-        warn!(
-            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
-            ports, and will therefore be bound locally. If this is intentional, ignore this \
-            warning. If you want the http filter to apply to this port, add it to \
-            `feature.network.incoming.http_filter.ports`. \
-            If you want to steal all the traffic of this port, add it to \
-            `feature.network.incoming.ports`."
-        );
+                // `getsockname` returned an error, or a non-IP address. Not stopping execution on
+                // that, as it does not mean anything else went wrong in this run. Just emitting a
+                // warning without the port number.
+                tracing::debug!("Could not determine the bound port of a socket, for the purpose of displaying it in a warning.");
+                "A port".to_string()
+            };
+            warn!(
+                "{port_text} was not included in the filtered ports, and also not in the non-filtered \
+                ports, and will therefore be bound locally. If this is intentional, ignore this \
+                warning. If you want the http filter to apply to this port, add it to \
+                `feature.network.incoming.http_filter.ports`. \
+                If you want to steal all the traffic of this port, add it to \
+                `feature.network.incoming.ports`."
+            );
+        }
     }
 }
 

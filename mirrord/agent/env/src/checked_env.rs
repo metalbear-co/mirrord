@@ -1,5 +1,3 @@
-#[cfg(not(windows))]
-use std::os::unix::ffi::OsStrExt;
 use std::{
     any,
     convert::Infallible,
@@ -11,10 +9,6 @@ use std::{
 
 #[cfg(not(windows))]
 use std::os::unix::ffi::OsStrExt;
-
-#[cfg(windows)]
-#[allow(unused_imports)]
-use std::os::windows::ffi::OsStrExt;
 
 use base64::{engine::general_purpose, Engine};
 #[cfg(feature = "k8s-openapi")]
@@ -97,9 +91,9 @@ impl<V: EnvValue> CheckedEnv<V> {
     pub fn try_from_env(self) -> Result<Option<V>, V::FromReprError> {
         match std::env::var_os(self.name) {
             Some(repr) => {
-                #[cfg(not(windows))]
+                #[cfg(not(target_os = "windows"))]
                 let value = V::from_repr(repr.as_bytes())?;
-                #[cfg(windows)]
+                #[cfg(target_os = "windows")]
                 let value = V::from_repr(repr.as_encoded_bytes())?;
                 Ok(Some(value))
             }

@@ -269,9 +269,9 @@ impl ExecParams {
             );
         }
         if let Some(fs_mode) = self.fs_mode {
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             let file_mode = OsString::from_vec(fs_mode.to_string().into_bytes());
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             let file_mode = OsString::from(fs_mode.to_string());
             envs.insert(
                 "MIRRORD_FILE_MODE".as_ref(),
@@ -474,9 +474,9 @@ impl AgentParams {
             );
         }
         if let Some(agent_ttl) = &self.agent_ttl {
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             let agent_ttl = OsString::from_vec(agent_ttl.to_string().into_bytes());
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             let agent_ttl = OsString::from(agent_ttl.to_string());
             envs.insert(
                 "MIRRORD_AGENT_TTL".as_ref(),
@@ -484,9 +484,9 @@ impl AgentParams {
             );
         }
         if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             let agent_startup_timeout = OsString::from_vec(agent_startup_timeout.to_string().into_bytes());
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             let agent_startup_timeout = OsString::from(agent_startup_timeout.to_string());
             envs.insert(
                 "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),

@@ -7,14 +7,18 @@ use std::assert_matches::assert_matches;
 use std::{env, fs};
 use std::{
     env::temp_dir,
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 
+#[cfg(not(target_os = "windows"))]
+use std::path::PathBuf;
+#[cfg(not(target_os = "windows"))]
 use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{sip_patch, SipPatchOptions, MIRRORD_TEMP_BIN_DIR_PATH_BUF};
+#[cfg(not(target_os = "windows"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -606,6 +610,38 @@ async fn go_dir_bypass(
     test_process.assert_no_error_in_stderr().await;
 }
 
+#[cfg(target_os = "windows")]
+use tokio::process::Child;
+#[cfg(target_os = "windows")]
+use windows::Win32::{
+    Foundation::CloseHandle,
+    System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE},
+};
+
+#[cfg(target_os = "windows")]
+fn terminate_tokio_child(child: &Child) -> std::io::Result<()> {
+    let pid = child.id().ok_or_else(|| std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "Failed to get child process ID",
+    ))?;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, false.into(), pid)?;
+        if handle.is_invalid() {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let result = TerminateProcess(handle, 1);
+        let _ = CloseHandle(handle).unwrap();
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(_) => Err(std::io::Error::last_os_error()),
+        }
+    }
+}
+
+
 /// Test go file read and close.
 /// This test also verifies the close hook, since go's `os.ReadFile` calls `Close`.
 /// We don't call close in other tests because Go does not wait for the operation to complete before
@@ -644,6 +680,9 @@ async fn read_go(
     // Notify Go test app that the close detour completed and it can exit.
     // (The go app waits for this, since Go does not wait for the close detour to complete before
     // returning from `Close`).
+    #[cfg(target_os = "windows")]
+    terminate_tokio_child(&test_process.child).unwrap();
+    #[cfg(not(target_os = "windows"))]
     signal::kill(
         Pid::from_raw(test_process.child.id().unwrap() as pid_t),
         Signal::SIGTERM,
@@ -734,6 +773,7 @@ async fn faccessat_go(
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
+    #[cfg(not(target_os = "windows"))]
     intproxy
         .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)
         .await;

@@ -3,14 +3,15 @@
 use std::{
     collections::{HashMap, HashSet},
     net::{SocketAddr, ToSocketAddrs},
-    os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock, Mutex},
 };
-
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
 use base64::prelude::*;
 use bincode::{Decode, Encode};
 use hooks::FN_FCNTL;
+#[cfg(not(target_os = "windows"))]
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -27,8 +28,9 @@ use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult},
-    socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
 };
+#[cfg(not(target_os = "windows"))]
+use crate::socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING};
 
 #[cfg(target_os = "macos")]
 mod apple_dnsinfo;

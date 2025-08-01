@@ -43,7 +43,7 @@ use crate::{
 #[cfg(not(windows))]
 use crate::extract::extract_library;
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 pub mod windows;
 
 /// Environment variable for saving the execution kind for analytics.

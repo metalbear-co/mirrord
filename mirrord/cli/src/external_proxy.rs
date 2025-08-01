@@ -74,7 +74,7 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     let agent_connect_info: AgentConnectInfo = std::env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
         .ok_or(ExternalProxyError::MissingConnectInfo)
         .and_then(|var| {
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             let var = var.to_string_lossy();
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 let as_string = String::from_utf8_lossy(var.as_bytes()).into_owned();

@@ -237,6 +237,8 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{
     collections::HashMap, env::vars, net::SocketAddr,
@@ -308,7 +310,7 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 use crate::{newsletter::suggest_newsletter_signup, util::get_user_git_branch};
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use crate::execution::windows::command::WindowsCommand;
 
 async fn exec_process<P>(
@@ -403,7 +405,7 @@ where
     execve_process(binary, binary_args, env_vars, _did_sip_patch)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 fn process_which(binary: String) -> Result<>{
     match which(&binary) {
         Ok(pathbuf) => pathbuf,
@@ -411,7 +413,7 @@ fn process_which(binary: String) -> Result<>{
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
 
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
@@ -452,7 +454,7 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
 
     let cmd = WindowsCommand::new(&binary)

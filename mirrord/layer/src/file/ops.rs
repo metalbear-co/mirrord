@@ -9,12 +9,15 @@ use std::{
     env,
     ffi::CString,
     io::SeekFrom,
-    os::unix::io::RawFd,
     path::{Path, PathBuf},
 };
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
+
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
+#[cfg(not(target_os = "windows"))]
 use libc::{c_int, iovec, AT_FDCWD};
 use mirrord_protocol::{
     file::{
@@ -25,6 +28,7 @@ use mirrord_protocol::{
     },
     Payload, ResponseError,
 };
+#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]

@@ -2,17 +2,20 @@ use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
 use std::{
     collections::HashSet,
-    os::unix::io::RawFd,
     sync::{LazyLock, Mutex},
 };
-
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
+#[cfg(not(target_os = "windows"))]
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
 use mirrord_config::experimental::ExperimentalConfig;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
+#[cfg(not(target_os = "windows"))]
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
@@ -174,6 +177,7 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
 
 /// Hook for `_accept$NOCANCEL` (for macos, see
 /// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
+#[cfg(not(target_os = "windows"))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     sockfd: c_int,
@@ -190,6 +194,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
 }
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
+#[cfg(not(target_os = "windows"))]
 #[hook_fn]
 pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     let arg = arg.arg::<usize>();
@@ -209,6 +214,7 @@ pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     let dup_result = FN_DUP(fd);
@@ -223,6 +229,7 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     if oldfd == newfd {

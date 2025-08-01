@@ -176,20 +176,44 @@ macro_rules! hook_symbol {
 ///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
 /// }
 /// ```
+#[cfg(not(target_os = "windows"))]
 #[macro_export]
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
         graceful_exit!()
     }};
-    () => {{
+    () => {
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGKILL,
         )
         .expect("unable to graceful exit")
-    }};
+    };
 }
+
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+
+#[cfg(target_os = "windows")]
+#[macro_export]
+macro_rules! graceful_exit {
+    ($($arg:tt)+) => {{
+        eprintln!($($arg)+);
+        graceful_exit!()
+    }};
+    () => {
+        unsafe {
+            let success = TerminateProcess(GetCurrentProcess(), 1).as_bool();
+            if success {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        }
+    };
+}
+
 
 #[cfg(all(
     target_os = "linux",

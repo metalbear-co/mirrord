@@ -5,9 +5,9 @@ use std::fs::DirEntry;
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::prelude::MetadataExt;
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use std::os::windows::fs::MetadataExt;
 use std::{fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock};
 
@@ -78,7 +78,7 @@ pub struct MetadataInternal {
     pub blocks: u64,
 }
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 impl From<Metadata> for MetadataInternal {
     fn from(metadata: Metadata) -> Self {
         Self {
@@ -99,7 +99,7 @@ impl From<Metadata> for MetadataInternal {
     }
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 impl From<Metadata> for MetadataInternal {
     fn from(metadata: Metadata) -> Self {
         Self {

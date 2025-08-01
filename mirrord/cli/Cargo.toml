@@ -90,3 +90,5 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 
+[features]
+windows_build = []
