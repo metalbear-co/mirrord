@@ -278,12 +278,12 @@ mod main {
         let mut load_commands = mach_header.load_commands(Endianness::default(), binary, 0)?;
         let mut rpath_entries = Vec::new();
         while let Some(load_command) = load_commands.next()? {
-            if load_command.cmd() == LC_RPATH {
-                if let Ok(Rpath(rpath_command)) = load_command.variant() {
-                    rpath_entries.push(from_utf8(
-                        load_command.string(Endianness::default(), rpath_command.path)?,
-                    )?)
-                }
+            if load_command.cmd() == LC_RPATH
+                && let Ok(Rpath(rpath_command)) = load_command.variant()
+            {
+                rpath_entries.push(from_utf8(
+                    load_command.string(Endianness::default(), rpath_command.path)?,
+                )?)
             }
         }
         Ok(rpath_entries)
@@ -374,11 +374,12 @@ mod main {
         std::fs::set_permissions(&signed_temp_file, std::fs::metadata(path)?.permissions())?;
 
         // Move the temp binary into its final location if no other process/thread already did.
-        if let Err(err) = signed_temp_file.persist_noclobber(&output) {
-            if err.error.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(SipError::BinaryMoveFailed(err.error));
-            }
+        if let Err(err) = signed_temp_file.persist_noclobber(&output)
+            && err.error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(SipError::BinaryMoveFailed(err.error));
         }
+
         Ok(output)
     }
 
