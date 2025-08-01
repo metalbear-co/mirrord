@@ -1,4 +1,5 @@
 #![feature(error_reporter)]
+#![feature(let_chains)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
@@ -495,7 +496,14 @@ impl IntProxy {
 
                 self.task_txs
                     .incoming
-                    .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
+                    .send(IncomingProxyMessage::AgentProtocolVersion(
+                        protocol_version.clone(),
+                    ))
+                    .await;
+
+                self.task_txs
+                    .ping_pong
+                    .send(PingPongMessage::ProtocolVersion(protocol_version))
                     .await;
             }
             DaemonMessage::LogMessage(log) => match log.level {

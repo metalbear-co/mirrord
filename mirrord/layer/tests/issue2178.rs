@@ -22,7 +22,7 @@ async fn test_issue2178(
     intproxy
         .expect_file_open_with_read_flag("/app/test.txt", 3)
         .await;
-    assert_eq!(intproxy.expect_only_file_read(3).await, 12);
+    assert_eq!(intproxy.expect_file_read_skip_ping(3).await, 12);
     let file_data = "abcdefgh".as_bytes().to_vec();
     intproxy.answer_file_read(file_data).await;
     intproxy.expect_file_close(3).await;

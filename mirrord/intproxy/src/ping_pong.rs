@@ -5,9 +5,14 @@
 //! Realized using the [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong) and
 //! [`ClientMessage::Ping`] messages.
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::VecDeque,
+    ops::Not,
+    time::{Duration, Instant},
+};
 
-use mirrord_protocol::ClientMessage;
+use mirrord_protocol::{ClientMessage, PingRtt, OPERATOR_PING};
+use semver::Version;
 use thiserror::Error;
 use tokio::time::{self, Interval, MissedTickBehavior};
 use tracing::Level;
@@ -29,12 +34,13 @@ pub enum PingPongError {
     PongTimeout,
 }
 
-/// Notification about a [`DeamonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong) received
+/// Notification about a [`DaemonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong) received
 /// from the agent.
 pub enum PingPongMessage {
     AgentSentPong,
     AgentSentMessage,
     ConnectionRefresh(ConnectionRefresh),
+    ProtocolVersion(semver::Version),
 }
 
 /// Encapsulates logic of the ping pong mechanism on the proxy side.
@@ -42,11 +48,15 @@ pub enum PingPongMessage {
 pub struct PingPong {
     /// How often the task should send pings.
     ticker: Interval,
-    /// How many pong are expected from the agent.
-    awaiting_pongs: usize,
+    /// How many pong are expected from the agent (`.len()`). We `pop_back` whenever receiving a
+    /// [`DaemonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong).
+    ///
+    /// Also used to handle the mirrord->operator latency metric.
+    awaiting_pongs: VecDeque<Instant>,
 
     reconnecting: bool,
 
+    protocol_version: Option<Version>,
     last_agent_message: Option<Instant>,
 }
 
@@ -62,8 +72,9 @@ impl PingPong {
 
         Self {
             ticker,
-            awaiting_pongs: 0,
+            awaiting_pongs: Default::default(),
             reconnecting: false,
+            protocol_version: Default::default(),
             last_agent_message: None,
         }
     }
@@ -87,16 +98,17 @@ impl BackgroundTask for PingPong {
                         last_agent_message >= Instant::now() - self.ticker.period()
                     }).unwrap_or_default();
 
-                    if self.awaiting_pongs > 0 && !other_messages_in_last_period {
+                    if self.awaiting_pongs.is_empty().not() && other_messages_in_last_period.not() {
                         break Err(PingPongError::PongTimeout);
                     } else {
                         tracing::debug!("Sending ping to the agent");
                         let _ = message_bus.send(ProxyMessage::ToAgent(ClientMessage::Ping)).await;
-                        self.awaiting_pongs += 1;
+                        self.awaiting_pongs.push_back(Instant::now());
                     }
                 },
 
-                msg = message_bus.recv() => match (msg, self.awaiting_pongs) {
+                // We only want to `pop_back` when receiving a `AgentSentPong`.
+                msg = message_bus.recv() => match (msg, self.awaiting_pongs.len()) {
                     (None, _) => {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(())
@@ -107,7 +119,14 @@ impl BackgroundTask for PingPong {
                     }
                     (Some(PingPongMessage::AgentSentPong), 1..) => {
                         tracing::debug!("Agent responded to ping");
-                        self.awaiting_pongs = self.awaiting_pongs.saturating_sub(1);
+
+                        // Send the rtt to the operator so we can measure mirrord->operator
+                        // latency.
+                        if let Some(protocol_version) = self.protocol_version.as_ref() &&
+                           OPERATOR_PING.matches(protocol_version) &&
+                           let Some(ping_rtt) = self.awaiting_pongs.pop_front() {
+                            message_bus.send(ClientMessage::PingRtt(PingRtt { elapsed: ping_rtt.elapsed() })).await;
+                        }
                     },
                     (Some(PingPongMessage::AgentSentPong), 0) => {
                         break Err(PingPongError::UnmatchedPong)
@@ -123,8 +142,10 @@ impl BackgroundTask for PingPong {
                                 self.ticker.reset();
                             }
                         }
-                    }
-
+                    },
+                    (Some(PingPongMessage::ProtocolVersion(protocol_version)), _) => {
+                        self.protocol_version.replace(protocol_version);
+                    },
                 },
             }
         }

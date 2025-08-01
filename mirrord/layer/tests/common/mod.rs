@@ -158,6 +158,10 @@ impl TestIntProxy {
                         .await;
                 }
                 ClientMessage::ReadyForLogs => {}
+                ClientMessage::PingRtt(_) => {
+                    println!("received pingrtt");
+                    continue;
+                }
                 other => break Some(other),
             }
         }
@@ -371,9 +375,10 @@ impl TestIntProxy {
     /// Verify layer hooks an `open` of file `file_name` with read flag set, and any other flags.
     /// Send back answer with given `fd`.
     pub async fn expect_file_open_with_read_flag(&mut self, file_name: &str, fd: u64) {
+        let msg = self.recv().await;
         // Verify the app tries to open the expected file.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path,
@@ -417,9 +422,10 @@ impl TestIntProxy {
         fd: u64,
         open_options: OpenOptionsInternal,
     ) {
+        let msg = self.recv().await;
         // Verify the app tries to open the expected file.
         assert_eq!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
@@ -439,9 +445,10 @@ impl TestIntProxy {
 
     /// Like the other expect_file_open_... but where we don't compare to predefined open options.
     pub async fn expect_file_open_with_whatever_options(&mut self, file_name: &str, fd: u64) {
+        let msg = self.recv().await;
         // Verify the app tries to open the expected file.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path,
@@ -461,9 +468,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::ReadLink`], and answers it.
     pub async fn expect_read_link(&mut self, file_name: &str) {
+        let msg = self.recv().await;
         // Expecting `readlink` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::ReadLink(
                 mirrord_protocol::file::ReadLinkFileRequest { path }
             )) if path.to_str().unwrap() == file_name
@@ -485,9 +493,11 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::MakeDir`] and answers it.
     pub async fn expect_make_dir(&mut self, expected_dir_name: &str, expected_mode: u32) {
+        let msg = self.recv().await;
+
         // Expecting `mkdir` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::MakeDir(
                 mirrord_protocol::file::MakeDirRequest { pathname, mode }
             )) if pathname.to_str().unwrap() == expected_dir_name && mode == expected_mode
@@ -504,9 +514,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::Statefs`] and answers it.
     pub async fn expect_statfs(&mut self, expected_path: &str) {
+        let msg = self.recv().await;
         // Expecting `statfs` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::StatFsV2(
                 mirrord_protocol::file::StatFsRequestV2 { path }
             )) if path.to_str().unwrap() == expected_path
@@ -525,9 +536,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::Xstatefs`] and answers it.
     pub async fn expect_fstatfs(&mut self, expected_fd: u64) {
+        let msg = self.recv().await;
         // Expecting `fstatfs` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::XstatFsV2(
                 mirrord_protocol::file::XstatFsRequestV2 { fd }
             )) if expected_fd == fd
@@ -546,9 +558,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::RemoveDir`] and answers it.
     pub async fn expect_remove_dir(&mut self, expected_dir_name: &str) {
+        let msg = self.recv().await;
         // Expecting `rmdir` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::RemoveDir(
                 mirrord_protocol::file::RemoveDirRequest { pathname }
             )) if pathname.to_str().unwrap() == expected_dir_name
@@ -581,9 +594,10 @@ impl TestIntProxy {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
+    pub async fn expect_file_read_skip_ping(&mut self, expected_fd: u64) -> u64 {
+        let msg = self.recv().await;
         // Verify the app reads the file.
-        Self::expect_message_file_read(self.codec.next().await.unwrap().unwrap(), expected_fd).await
+        Self::expect_message_file_read(msg, expected_fd).await
     }
 
     pub async fn answer_file_open(&mut self) {
@@ -624,13 +638,13 @@ impl TestIntProxy {
             .to_vec();
         self.answer_file_read(contents).await;
         // last call returns 0.
-        let _buffer_size = self.expect_only_file_read(expected_fd).await;
+        let _buffer_size = self.expect_file_read_skip_ping(expected_fd).await;
         self.answer_file_read(vec![]).await;
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
     pub async fn expect_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        let buffer_size = self.expect_file_read_skip_ping(expected_fd).await;
         self.answer_file_read_twice(contents, expected_fd, buffer_size)
             .await
     }
@@ -645,7 +659,7 @@ impl TestIntProxy {
 
     /// For when the application does not keep reading until it gets 0 bytes.
     pub async fn expect_single_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        let buffer_size = self.expect_file_read_skip_ping(expected_fd).await;
         let contents = contents
             .as_bytes()
             .get(0..buffer_size as usize)
@@ -702,8 +716,9 @@ impl TestIntProxy {
 
     /// Read next layer message and verify it's a close request.
     pub async fn expect_file_close(&mut self, fd: u64) {
+        let msg = self.recv().await;
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            msg,
             ClientMessage::FileRequest(FileRequest::Close(
                 mirrord_protocol::file::CloseFileRequest { fd }
             ))

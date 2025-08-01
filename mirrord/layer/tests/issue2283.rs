@@ -39,7 +39,7 @@ async fn test_issue2283(
         intproxy
             .expect_file_open_for_reading("/etc/resolv.conf", 2136)
             .await;
-        intproxy.expect_only_file_read(2136).await;
+        intproxy.expect_file_read_skip_ping(2136).await;
         intproxy
             .answer_file_read("search home\nnameserver 10.0.0.138\n".as_bytes().to_vec())
             .await;
