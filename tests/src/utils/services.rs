@@ -270,7 +270,7 @@ pub(crate) async fn internal_service(
                 delete_after_fail,
                 &mut guards,
                 &name,
-                &namespace,
+                namespace,
                 &kube_client,
             )
             .await;
@@ -297,7 +297,7 @@ pub(crate) async fn internal_service(
                 delete_after_fail,
                 &mut guards,
                 &name,
-                &namespace,
+                namespace,
                 &kube_client,
             )
             .await;
