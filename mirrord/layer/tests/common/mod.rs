@@ -716,8 +716,9 @@ impl TestIntProxy {
 
     /// Read next layer message and verify it's a close request.
     pub async fn expect_file_close(&mut self, fd: u64) {
+        let msg = self.recv().await;
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            msg,
             ClientMessage::FileRequest(FileRequest::Close(
                 mirrord_protocol::file::CloseFileRequest { fd }
             ))
