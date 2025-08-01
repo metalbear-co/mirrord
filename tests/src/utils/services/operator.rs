@@ -10,7 +10,7 @@ use resource_guard::ResourceGuard;
 use rstest::*;
 use serde_json::json;
 
-use super::{cluster_resource, kube_service, resource_guard};
+use super::{cluster_resource, kube_service, resource_guard, TestWorkloadType};
 use crate::utils::{
     default_env, format_time, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME,
     TEST_RESOURCE_LABEL,
@@ -77,7 +77,7 @@ pub async fn service_for_mirrord_ls(
     }))
     .unwrap();
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
-    let namespace_guard = ResourceGuard::create(
+    let namespace_res = ResourceGuard::create(
         namespace_api.clone(),
         &namespace_resource,
         delete_after_fail,
@@ -87,7 +87,7 @@ pub async fn service_for_mirrord_ls(
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, default_env(), None);
-    let (deployment_guard, deployment) =
+    let (deployment_guard, _deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
             .unwrap();
@@ -133,20 +133,22 @@ pub async fn service_for_mirrord_ls(
         chrono::Utc::now()
     );
 
+    let mut guards = vec![
+        deployment_guard,
+        service_guard,
+        stateful_set_guard,
+        cron_job_guard,
+        job_guard,
+    ];
+    if let Some((namespace_guard, _namespace_resource)) = namespace_res {
+        guards.push(namespace_guard);
+    }
+
     KubeService {
         name,
         namespace: namespace.to_string(),
-        service,
-        deployment,
-        rollout: None,
         pod_name,
-        guards: vec![
-            deployment_guard,
-            service_guard,
-            stateful_set_guard,
-            cron_job_guard,
-            job_guard,
-        ],
-        namespace_guard: namespace_guard.map(|(guard, _)| guard),
+        guards,
+        workload_type: TestWorkloadType::default(),
     }
 }

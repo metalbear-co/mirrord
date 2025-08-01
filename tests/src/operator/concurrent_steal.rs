@@ -98,11 +98,9 @@ pub async fn two_clients_steal_same_target_pod_deployment(
         .await;
     println!("Client A subscribed the port");
 
-    let deployment_name = service.deployment.metadata.name.as_deref().unwrap();
-
     let mut client_b = application
         .run(
-            &format!("deployment/{deployment_name}"),
+            &service.deployment_target(),
             Some(&service.namespace),
             Some(flags.clone()),
             None,
