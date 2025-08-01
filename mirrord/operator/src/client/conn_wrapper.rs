@@ -96,16 +96,16 @@ where
                 client_message = self.client_rx.recv() => {
                     match client_message {
                         Some(ClientMessage::SwitchProtocolVersion(version)) => {
-                            if let Some(operator_protocol_version) = self.protocol_version.as_ref() {
+                            match self.protocol_version.as_ref() { Some(operator_protocol_version) => {
                                 self.handle_client_message(ClientMessage::SwitchProtocolVersion(operator_protocol_version.min(&version).clone())).await?;
-                            } else {
+                            } _ => {
                                 self.daemon_tx
                                     .send(DaemonMessage::SwitchProtocolVersionResponse(
                                         "1.2.1".parse().expect("Bad static version"),
                                     ))
                                     .await
                                     .map_err(|_| ConnectionWrapperError::ChannelClosed)?;
-                            }
+                            }}
                         }
                         Some(client_message) => self.handle_client_message(client_message).await?,
                         None => break,

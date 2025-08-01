@@ -1,6 +1,6 @@
 use std::{fmt, fs::File};
 
-use nix::sched::{setns, CloneFlags};
+use nix::sched::{CloneFlags, setns};
 use thiserror::Error;
 use tracing::Level;
 

@@ -8,9 +8,9 @@ use tokio::fs;
 
 use self::session::SessionCommandHandler;
 use crate::{
+    CliResult, OperatorSetupParams,
     config::{OperatorArgs, OperatorCommand},
     error::{CliError, OperatorSetupError},
-    CliResult, OperatorSetupParams,
 };
 
 mod session;
@@ -50,7 +50,9 @@ async fn operator_setup(
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     if !accept_tos {
-        eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
+        eprintln!(
+            "Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS"
+        );
 
         return Ok(());
     }

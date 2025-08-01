@@ -14,12 +14,12 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc,
 };
-use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
+use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 
 use super::{
-    error::{ConnError, HttpDetectError},
-    tls::{self, handler::PassThroughTlsConnector, StealTlsHandlerStore},
     Redirected,
+    error::{ConnError, HttpDetectError},
+    tls::{self, StealTlsHandlerStore, handler::PassThroughTlsConnector},
 };
 use crate::{
     http::HttpVersion,

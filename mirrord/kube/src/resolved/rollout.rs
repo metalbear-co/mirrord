@@ -13,7 +13,7 @@ use crate::{
 impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
     type Resource = Rollout;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         self.resource
             .metadata
             .name

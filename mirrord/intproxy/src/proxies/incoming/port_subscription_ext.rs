@@ -2,8 +2,8 @@
 
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
-    tcp::{LayerTcp, LayerTcpSteal, StealType},
     ClientMessage, Port,
+    tcp::{LayerTcp, LayerTcpSteal, StealType},
 };
 
 /// Retrieves subscribed port from the given [`StealType`].

@@ -5,18 +5,18 @@
 use error::CliResult;
 use futures::TryFutureExt;
 use mirrord_config::{
+    LayerConfig,
     config::ConfigContext,
     target::{
-        cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
-        replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
-        stateful_set::StatefulSetTarget, Target, TargetConfig, TargetType,
+        Target, TargetConfig, TargetType, cron_job::CronJobTarget, deployment::DeploymentTarget,
+        job::JobTarget, pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget,
+        service::ServiceTarget, stateful_set::StatefulSetTarget,
     },
-    LayerConfig,
 };
 use mirrord_progress::NullProgress;
 use serde::Serialize;
 
-use crate::{config::VerifyConfigArgs, error, CliError};
+use crate::{CliError, config::VerifyConfigArgs, error};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]

@@ -1,7 +1,8 @@
-#![feature(let_chains)]
 #![feature(try_trait_v2)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::large_enum_variant)]
 
 //! # Features
 //!

@@ -3,7 +3,7 @@ use std::{fmt, io, net::SocketAddr, ops::Not, path::PathBuf, process::Stdio, tim
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
 use mirrord_config::{
-    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig,
+    LayerConfig, config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
@@ -13,18 +13,18 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     process::{ChildStderr, ChildStdout, Command},
 };
-use tokio_stream::{wrappers::LinesStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::LinesStream};
 use tracing::Level;
 
 use super::command_display::CommandDisplay;
 use crate::{
+    CliError, ContainerRuntime,
     config::ContainerRuntimeCommand,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::{command_builder::RuntimeCommandBuilder, command_display::CommandExt},
     error::ContainerError,
     execution::MIRRORD_EXECUTION_KIND_ENV,
     util::MIRRORD_CONSOLE_ADDR_ENV,
-    CliError, ContainerRuntime,
 };
 
 /// Errors that can occure when creating or starting the internal proxy sidecar container.
@@ -301,7 +301,7 @@ async fn exec_and_get_first_line(mut command: Command) -> Result<String, Intprox
             return Err(IntproxySidecarError::CommandExecuteError {
                 command: command.display(),
                 error,
-            })
+            });
         }
         Ok(Ok(output)) => output,
     };

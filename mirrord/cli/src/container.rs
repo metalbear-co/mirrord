@@ -7,8 +7,8 @@ pub use command_display::CommandDisplay;
 use command_display::CommandExt;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
 use mirrord_config::{
-    config::ConfigContext, external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME, LayerConfig,
-    MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
+    external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
@@ -20,7 +20,7 @@ use crate::{
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
     error::{CliResult, ContainerError},
-    execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
+    execution::{LINUX_INJECTION_ENV_VAR, MirrordExecution},
     logging::pipe_intproxy_sidecar_logs,
     user_data::UserData,
     util::MIRRORD_CONSOLE_ADDR_ENV,
@@ -53,7 +53,9 @@ fn get_mirrord_console_addr() -> Option<String> {
     if is_non_loopback {
         Some(console_addr)
     } else {
-        panic!("{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers: {console_addr}")
+        panic!(
+            "{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers: {console_addr}"
+        )
     }
 }
 

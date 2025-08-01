@@ -1,6 +1,6 @@
 use std::{ptr::null_mut, sync::LazyLock};
 
-use frida_gum::{interceptor::Interceptor, Gum, Module, NativePointer};
+use frida_gum::{Gum, Module, NativePointer, interceptor::Interceptor};
 use tracing::trace;
 
 use crate::{LayerError, Result};

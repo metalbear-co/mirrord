@@ -1,8 +1,9 @@
-use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
+use mirrord_intproxy_protocol::{LayerToProxyMessage, codec::CodecError};
 use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, ResponseError};
 use thiserror::Error;
 
 use crate::{
+    MainTaskId,
     agent_conn::{AgentChannelError, AgentConnectionError},
     layer_initializer::LayerInitializerError,
     ping_pong::PingPongError,
@@ -10,7 +11,6 @@ use crate::{
         files::FilesProxyError, incoming::IncomingProxyError, outgoing::OutgoingProxyError,
         simple::SimpleProxyError,
     },
-    MainTaskId,
 };
 
 #[derive(Error, Debug)]

@@ -6,8 +6,8 @@ use std::{
 
 use futures::StreamExt;
 use mirrord_config::feature::network::incoming::{
-    http_filter::{HttpFilterConfig, InnerFilter},
     IncomingConfig,
+    http_filter::{HttpFilterConfig, InnerFilter},
 };
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
@@ -19,20 +19,20 @@ use mirrord_intproxy_protocol::{
     ProxyToLayerMessage,
 };
 use mirrord_protocol::{
+    CLIENT_READY_FOR_LOGS, ClientMessage, ConnectionId, DaemonMessage, LogLevel, Payload, Port,
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
     outgoing::{
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     tcp::{Filter, HttpFilter, StealType},
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Payload, Port, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
     net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
     select,
     sync::{
@@ -40,11 +40,11 @@ use tokio::{
         oneshot,
     },
 };
-use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
+use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{connection::AgentConnection, AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
+use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort, connection::AgentConnection};
 
 /// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -212,10 +212,15 @@ impl PortForwarder {
                                     .await?;
                                 self.task_txs.remove(&socket_pair);
                                 self.sockets.remove(&connection_id);
-                                tracing::warn!("failed to send connection ID {connection_id} to task on oneshot channel");
+                                tracing::warn!(
+                                    "failed to send connection ID {connection_id} to task on oneshot channel"
+                                );
                             }
                         };
-                        tracing::trace!("successful connection to remote address {remote_socket}, connection ID is {}", connection_id);
+                        tracing::trace!(
+                            "successful connection to remote address {remote_socket}, connection ID is {}",
+                            connection_id
+                        );
                     }
                     Err(error) => {
                         tracing::error!("failed to connect to a remote address: {error}");
@@ -258,7 +263,7 @@ impl PortForwarder {
                     Err(error) => {
                         return Err(PortForwardError::AgentError(format!(
                             "problem receiving DaemonTcpOutgoing::Read {error}"
-                        )))
+                        )));
                     }
                 },
                 DaemonTcpOutgoing::Close(connection_id) => {
@@ -296,7 +301,9 @@ impl PortForwarder {
                         Ok(_) => (),
                         Err(_) => {
                             self.task_txs.remove(&socket_pair);
-                            tracing::warn!("failed to send resolved ip {resolved_ip} to task on oneshot channel");
+                            tracing::warn!(
+                                "failed to send resolved ip {resolved_ip} to task on oneshot channel"
+                            );
                         }
                     };
                 }
@@ -744,8 +751,8 @@ impl LocalConnectionTask {
                     Ok(_) => (),
                     Err(error) => {
                         tracing::warn!(
-                    "failed to send hostname lookup request to PortForwarder on internal channel: {error}"
-                );
+                            "failed to send hostname lookup request to PortForwarder on internal channel: {error}"
+                        );
                     }
                 }
                 // wait on oneshot for reply
@@ -1047,18 +1054,18 @@ mod test {
 
     use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
     use mirrord_protocol::{
+        ClientMessage, DaemonMessage, ToPayload,
         outgoing::{
-            tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
             DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+            tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         },
         tcp::{
             DaemonTcp, Filter, HttpRequest, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
             InternalHttpRequest, InternalHttpResponse, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
             StealType, TcpClose, TcpData,
         },
-        ClientMessage, DaemonMessage, ToPayload,
     };
-    use reqwest::{header::HeaderMap, Method, StatusCode, Version};
+    use reqwest::{Method, StatusCode, Version, header::HeaderMap};
     use rstest::rstest;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -1067,9 +1074,9 @@ mod test {
     };
 
     use crate::{
+        RemoteAddr,
         connection::AgentConnection,
         port_forward::{PortForwarder, ReversePortForwarder},
-        RemoteAddr,
     };
 
     /// Connects [`ReversePortForwarder`] with test code with [`ClientMessage`] and

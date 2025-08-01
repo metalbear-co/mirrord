@@ -5,7 +5,7 @@ use std::{collections::HashSet, time::Duration};
 use enum_dispatch::enum_dispatch;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
-use serde_json::{to_string, Value};
+use serde_json::{Value, to_string};
 
 pub mod messages;
 

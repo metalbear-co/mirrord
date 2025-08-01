@@ -9,8 +9,8 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
     Retry,
+    strategy::{ExponentialBackoff, jitter},
 };
 
 use crate::{

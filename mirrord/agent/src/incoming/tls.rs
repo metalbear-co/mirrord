@@ -13,12 +13,12 @@ use mirrord_agent_env::steal_tls::{
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::{
-    best_effort_root_store, DangerousNoVerifierClient, DangerousNoVerifierServer,
+    DangerousNoVerifierClient, DangerousNoVerifierServer, best_effort_root_store,
 };
 use rustls::{
-    pki_types::CertificateDer,
-    server::{danger::ClientCertVerifier, NoClientAuth, WebPkiClientVerifier},
     ClientConfig, RootCertStore, ServerConfig,
+    pki_types::CertificateDer,
+    server::{NoClientAuth, WebPkiClientVerifier, danger::ClientCertVerifier},
 };
 use tracing::Level;
 

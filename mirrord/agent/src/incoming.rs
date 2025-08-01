@@ -18,9 +18,9 @@ use std::{
 
 use composed::ComposedRedirector;
 pub use connection::{
+    IncomingStream, IncomingStreamItem,
     http::{ResponseBodyProvider, ResponseProvider, StolenHttp},
     tcp::StolenTcp,
-    IncomingStream, IncomingStreamItem,
 };
 pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;

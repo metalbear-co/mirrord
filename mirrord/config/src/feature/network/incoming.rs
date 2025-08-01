@@ -3,14 +3,14 @@ use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 use bimap::BiMap;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
-use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de, ser, ser::SerializeSeq as _};
 use thiserror::Error;
 use tls_delivery::LocalTlsDelivery;
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigContext,
-        ConfigError, FromMirrordConfig, MirrordConfig, Result,
+        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result, from_env::FromEnv,
+        source::MirrordConfigSource, unstable::Unstable,
     },
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
@@ -524,10 +524,11 @@ impl IncomingConfig {
             }
         } else if self.ignore_ports.contains(&port) {
             false
-        } else if let Some(ports) = &self.ports {
-            ports.contains(&port)
         } else {
-            true
+            match &self.ports {
+                Some(ports) => ports.contains(&port),
+                _ => true,
+            }
         }
     }
 
@@ -553,10 +554,9 @@ impl IncomingConfig {
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
                     // Avoid conflicts with `incoming.ports`.
-                    if let Some(ports) = &self.ports {
-                        ports.contains(port).not()
-                    } else {
-                        true
+                    match &self.ports {
+                        Some(ports) => ports.contains(port).not(),
+                        _ => true,
                     }
                 })
                 .copied()
@@ -733,7 +733,7 @@ mod test {
     use rstest::rstest;
 
     use super::IncomingConfig;
-    use crate::feature::network::incoming::{http_filter::HttpFilterConfig, IncomingMode};
+    use crate::feature::network::incoming::{IncomingMode, http_filter::HttpFilterConfig};
 
     #[rstest]
     #[case(

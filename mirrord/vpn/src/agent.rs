@@ -1,13 +1,13 @@
 use std::{
     pin::Pin,
     sync::LazyLock,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use futures::{Stream, StreamExt};
 use mirrord_protocol::{
-    vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
     ClientMessage, DaemonMessage, LogLevel,
+    vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
 };
 use semver::VersionReq;
 use tokio::sync::{mpsc, oneshot};

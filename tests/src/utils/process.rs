@@ -240,10 +240,13 @@ impl TestProcess {
     }
 
     pub async fn write_to_stdin(&mut self, data: &[u8]) {
-        if let Some(ref mut stdin) = self.child.stdin {
-            stdin.write(data).await.unwrap();
-        } else {
-            panic!("Can't write to test app's stdin!");
+        match self.child.stdin {
+            Some(ref mut stdin) => {
+                stdin.write(data).await.unwrap();
+            }
+            _ => {
+                panic!("Can't write to test app's stdin!");
+            }
         }
     }
 

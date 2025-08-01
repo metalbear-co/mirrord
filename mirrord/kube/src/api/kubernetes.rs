@@ -2,29 +2,29 @@ use std::ops::{Deref, Not};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
+    config::{KubeConfigOptions, Kubeconfig},
 };
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::{
+    LayerConfig,
     agent::AgentConfig,
     feature::network::NetworkConfig,
     target::{Target, TargetConfig},
-    LayerConfig,
 };
 use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, Level};
+use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
     api::{
         container::{
+            ContainerApi, ContainerParams,
             ephemeral::EphemeralTargetedVariant,
             job::{JobTargetedVariant, JobVariant},
             targeted::Targeted,
             targetless::Targetless,
-            ContainerApi, ContainerParams,
         },
         runtime::{RuntimeData, RuntimeDataProvider},
     },
@@ -337,18 +337,23 @@ where
         ..Default::default()
     };
 
-    let mut config = if let Some(kubeconfig) = kubeconfig {
-        let kubeconfig = shellexpand::full(&kubeconfig)
-            .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-        let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
-        Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
-    } else if kube_config_opts.context.is_some() {
-        // if context is set, it's not in cluster so it has to be a kubeconfig.
-        Config::from_kubeconfig(&kube_config_opts).await?
-    } else {
-        // if context isn't set and user doesn't specify a kubeconfig, we infer which tries local
-        // kube or incluster configuration.
-        Config::infer().await?
+    let mut config = match kubeconfig {
+        Some(kubeconfig) => {
+            let kubeconfig = shellexpand::full(&kubeconfig)
+                .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+            let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
+            Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
+        }
+        _ => {
+            if kube_config_opts.context.is_some() {
+                // if context is set, it's not in cluster so it has to be a kubeconfig.
+                Config::from_kubeconfig(&kube_config_opts).await?
+            } else {
+                // if context isn't set and user doesn't specify a kubeconfig, we infer which tries
+                // local kube or incluster configuration.
+                Config::infer().await?
+            }
+        }
     };
 
     if let Some(accept_invalid_certificates) = accept_invalid_certificates {

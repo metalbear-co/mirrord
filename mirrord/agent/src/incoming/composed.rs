@@ -1,6 +1,6 @@
 use std::{fmt, ops::Not};
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 
 use super::{PortRedirector, Redirected};
 

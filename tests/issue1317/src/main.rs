@@ -32,5 +32,5 @@ async fn index(incoming: String) -> String {
 
 use std::time::Duration;
 
-use actix_web::{get, middleware::Logger, App, HttpServer};
+use actix_web::{App, HttpServer, get, middleware::Logger};
 use tracing::info;

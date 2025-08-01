@@ -8,12 +8,12 @@ use std::{
 };
 
 use mirrord_protocol::{
+    ClientMessage, DaemonMessage,
     outgoing::{
+        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
     },
-    ClientMessage, DaemonMessage,
 };
 use rstest::rstest;
 

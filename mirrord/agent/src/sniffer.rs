@@ -1,11 +1,11 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt,
     net::Ipv4Addr,
     ops::Not,
 };
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use mirrord_protocol::Port;
 use pnet::packet::tcp::TcpFlags;
 use tcp_capture::TcpCapture;
@@ -13,7 +13,7 @@ use tokio::{
     select,
     sync::{
         broadcast,
-        mpsc::{error::TrySendError, Receiver, Sender},
+        mpsc::{Receiver, Sender, error::TrySendError},
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -396,16 +396,16 @@ where
 mod test {
     use std::{
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
         time::{Duration, Instant},
     };
 
     use api::TcpSnifferApi;
     use mirrord_protocol::{
-        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
         ConnectionId, LogLevel, ToPayload,
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     };
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;

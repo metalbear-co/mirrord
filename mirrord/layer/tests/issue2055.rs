@@ -2,10 +2,10 @@
 use std::{net::IpAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     ClientMessage, DaemonMessage, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,
     ResponseError,
+    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
 };
 use rstest::rstest;
 

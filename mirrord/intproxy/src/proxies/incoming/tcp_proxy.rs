@@ -3,7 +3,7 @@ use std::{io::ErrorKind, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{tcp::IncomingTrafficTransportType, ConnectionId};
+use mirrord_protocol::{ConnectionId, tcp::IncomingTrafficTransportType};
 use mirrord_tls_util::MaybeTls;
 use rustls::pki_types::ServerName;
 use tokio::{

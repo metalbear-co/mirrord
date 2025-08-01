@@ -4,7 +4,7 @@ use futures::StreamExt;
 use mirrord_config::LayerConfig;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 use crate::{
     config::Commands,
@@ -155,7 +155,7 @@ pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), Extern
 pub async fn pipe_intproxy_sidecar_logs<'s, S>(
     config: &LayerConfig,
     stream: S,
-) -> Result<impl Future<Output = ()> + 's, InternalProxyError>
+) -> Result<impl Future<Output = ()> + 's + use<'s, S>, InternalProxyError>
 where
     S: Stream<Item = std::io::Result<String>> + 's,
 {

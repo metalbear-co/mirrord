@@ -2,7 +2,7 @@ use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
-use kube::{api::LogParams, Api};
+use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use regex::Regex;

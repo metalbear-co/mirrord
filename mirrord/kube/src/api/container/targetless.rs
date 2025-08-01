@@ -5,8 +5,8 @@ use mirrord_progress::Progress;
 use crate::{
     api::{
         container::{
-            job::{create_job_agent, JobVariant},
             ContainerApi, ContainerVariant,
+            job::{JobVariant, create_job_agent},
         },
         kubernetes::AgentKubernetesConnectInfo,
     },

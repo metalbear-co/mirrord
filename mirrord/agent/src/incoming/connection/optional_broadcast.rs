@@ -3,7 +3,7 @@ use hyper::body::Frame;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::sync::broadcast;
 
-use crate::incoming::{connection::copy_bidirectional::CowBytes, IncomingStreamItem};
+use crate::incoming::{IncomingStreamItem, connection::copy_bidirectional::CowBytes};
 
 /// Utility wrapper over an optional [`broadcast::Sender`].
 ///

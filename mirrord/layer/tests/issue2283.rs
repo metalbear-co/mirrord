@@ -3,12 +3,12 @@
 use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
+    ClientMessage, DaemonMessage,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     outgoing::{
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
-    ClientMessage, DaemonMessage,
 };
 use rstest::rstest;
 

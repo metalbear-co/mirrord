@@ -12,11 +12,11 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use super::{ConnectionInfo, IncomingIO, IncomingStream};
 use crate::incoming::{
+    ConnError, IncomingStreamItem,
     connection::{
         copy_bidirectional::{self, PassthroughConnection, StealingClient},
         optional_broadcast::OptionalBroadcast,
     },
-    ConnError, IncomingStreamItem,
 };
 
 /// A redirected TCP connection.

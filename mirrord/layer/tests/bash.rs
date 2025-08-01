@@ -5,11 +5,11 @@ use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
-    file::{MetadataInternal, XstatRequest, XstatResponse},
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    file::{MetadataInternal, XstatRequest, XstatResponse},
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::{sip_patch, SipPatchOptions};
+use mirrord_sip::{SipPatchOptions, sip_patch};
 use rstest::rstest;
 use tokio::net::TcpListener;
 

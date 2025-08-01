@@ -6,8 +6,8 @@ use std::{collections::HashSet, path::Path, time::Duration};
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::file::XstatResponse;
 use mirrord_protocol::{
-    file::{OpenFileRequest, OpenFileResponse, ReadFileRequest},
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    file::{OpenFileRequest, OpenFileResponse, ReadFileRequest},
 };
 use rstest::rstest;
 

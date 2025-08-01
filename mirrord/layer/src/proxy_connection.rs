@@ -4,16 +4,16 @@ use std::{
     io,
     net::{SocketAddr, TcpStream},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
 
 use mirrord_intproxy_protocol::{
-    codec::{self, CodecError, SyncDecoder, SyncEncoder},
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
+    codec::{self, CodecError, SyncDecoder, SyncEncoder},
 };
 use thiserror::Error;
 
@@ -105,10 +105,9 @@ impl ProxyConnection {
 
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
         let response = self.responses.lock()?.receive(response_id)?;
-        if let ProxyToLayerMessage::ProxyFailed(error_msg) = response {
-            Err(ProxyError::ProxyFailure(error_msg))
-        } else {
-            Ok(response)
+        match response {
+            ProxyToLayerMessage::ProxyFailed(error_msg) => Err(ProxyError::ProxyFailure(error_msg)),
+            _ => Ok(response),
         }
     }
 

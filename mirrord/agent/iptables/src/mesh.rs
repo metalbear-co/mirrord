@@ -5,8 +5,8 @@ use fancy_regex::Regex;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 
 use crate::{
-    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect,
-    redirect::Redirect, IPTables, IPTABLE_MESH,
+    IPTABLE_MESH, IPTables, error::IPTablesResult, output::OutputRedirect,
+    prerouting::PreroutingRedirect, redirect::Redirect,
 };
 
 pub mod exclusion;
@@ -202,7 +202,7 @@ mod tests {
     use nix::unistd::getgid;
 
     use crate::{
-        mesh::MeshRedirect, redirect::Redirect, MockIPTables, IPTABLE_MESH, IPTABLE_PREROUTING,
+        IPTABLE_MESH, IPTABLE_PREROUTING, MockIPTables, mesh::MeshRedirect, redirect::Redirect,
     };
 
     fn create_mesh_list_values(mock: &mut MockIPTables) {

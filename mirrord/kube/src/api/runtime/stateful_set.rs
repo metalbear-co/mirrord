@@ -9,7 +9,7 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for StatefulSetTarget {
     type Resource = StatefulSet;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         Cow::from(&self.stateful_set)
     }
 

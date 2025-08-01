@@ -2,7 +2,7 @@
 
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn, Type};
+use syn::{Block, Ident, ItemFn, Type, parse::Parser, punctuated::Punctuated, token::Comma};
 
 /// `#[hook_fn]` annotates the C ffi functions (mirrord's `_detour`s), and is used to generate the
 /// following boilerplate (using `close_detour` as an example):

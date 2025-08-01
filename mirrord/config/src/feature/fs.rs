@@ -13,7 +13,7 @@ use serde::Deserialize;
 pub use self::{advanced::*, mode::*};
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError, MirrordConfig,
+        ConfigContext, ConfigError, MirrordConfig, from_env::FromEnv, source::MirrordConfigSource,
     },
     util::MirrordToggleableConfig,
 };

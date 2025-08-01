@@ -18,7 +18,7 @@ use mirrord_config::feature::network::{
 };
 use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::{
-    outgoing::SocketAddress, DnsLookupError, ResolveErrorKindInternal, ResponseError,
+    DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
 use socket2::SockAddr;
 use tracing::warn;
@@ -27,7 +27,7 @@ use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult},
-    socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
+    socket::ops::{REMOTE_DNS_REVERSE_MAPPING, remote_getaddrinfo},
 };
 
 #[cfg(target_os = "macos")]

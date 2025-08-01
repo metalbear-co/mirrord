@@ -1,15 +1,15 @@
-use std::{fmt, time::Instant};
+use std::{fmt, ops::Not, time::Instant};
 
-use futures::{stream, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use k8s_openapi::{
+    ClusterResourceScope, Metadata, NamespaceResourceScope,
     api::{
         apps::v1::{Deployment, ReplicaSet, StatefulSet},
         batch::v1::{CronJob, Job},
         core::v1::{Pod, Service},
     },
-    ClusterResourceScope, Metadata, NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api, Resource};
+use kube::{Api, Resource, api::ListParams};
 use mirrord_config::target::TargetType;
 use serde::de::{self, DeserializeOwned};
 
@@ -150,7 +150,7 @@ impl KubeResourceSeeker<'_> {
                 .as_ref()?
                 .containers
                 .iter()
-                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
+                .filter(|&container| SKIP_NAMES.contains(container.name.as_str()).not())
                 .map(|container| container.name.clone())
                 .collect();
 
@@ -252,7 +252,7 @@ impl KubeResourceSeeker<'_> {
     pub fn list_all_namespaced<R>(
         &self,
         field_selector: Option<&str>,
-    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send
+    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send + use<R>
     where
         R: 'static
             + Resource<DynamicType = (), Scope = NamespaceResourceScope>
@@ -301,7 +301,7 @@ impl KubeResourceSeeker<'_> {
     pub fn list_all_clusterwide<R>(
         &self,
         field_selector: Option<&str>,
-    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send
+    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send + use<R>
     where
         R: 'static
             + Resource<DynamicType = (), Scope = ClusterResourceScope>

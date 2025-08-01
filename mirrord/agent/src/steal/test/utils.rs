@@ -7,23 +7,23 @@ use std::{
 
 use bytes::Bytes;
 use futures::StreamExt;
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, StreamBody};
+use http_body_util::{BodyExt, Empty, StreamBody, combinators::BoxBody};
 use hyper::{
+    Request, Response,
     body::{Frame, Incoming},
     header,
-    http::{request, HeaderName, Method, StatusCode},
-    Request, Response,
+    http::{HeaderName, Method, StatusCode, request},
 };
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::{
+    ConnectionId, DaemonMessage, LogLevel,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, ChunkedResponse, DaemonTcp,
-        HttpRequestMetadata, HttpResponse, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, InternalHttpResponse, LayerTcpSteal, NewTcpConnectionV2, StealType,
-        TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_RESPONSE_VERSION,
-        MODE_AGNOSTIC_HTTP_REQUESTS,
+        HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_RESPONSE_VERSION, HttpRequestMetadata,
+        HttpResponse, IncomingTrafficTransportType, InternalHttpBodyNew, InternalHttpRequest,
+        InternalHttpResponse, LayerTcpSteal, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV2,
+        StealType, TcpClose, TcpData,
     },
-    ConnectionId, DaemonMessage, LogLevel,
 };
 use mirrord_tls_util::MaybeTls;
 use rustls::pki_types::ServerName;
@@ -37,10 +37,10 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     http::{
-        body::RolledBackBody, extract_requests::ExtractedRequests, sender::HttpSender, HttpVersion,
+        HttpVersion, body::RolledBackBody, extract_requests::ExtractedRequests, sender::HttpSender,
     },
     steal::{StealerCommand, TcpStealerApi},
-    util::{protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus, ClientId},
+    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
 };
 
 /// TCP protocols used in steal tests.
@@ -323,8 +323,7 @@ impl TestRequest {
             None => {
                 assert_eq!(parts.method, Method::POST);
                 let body = body.collect().await.unwrap().to_bytes();
-                let expected = std::iter::repeat(Self::FRAME)
-                    .take(3)
+                let expected = std::iter::repeat_n(Self::FRAME, 3)
                     .flatten()
                     .copied()
                     .collect::<Vec<_>>();
@@ -383,8 +382,7 @@ impl TestRequest {
             None => {
                 assert_eq!(response.status(), StatusCode::OK);
                 let body = response.into_body().collect().await.unwrap().to_bytes();
-                let expected = std::iter::repeat(Self::FRAME)
-                    .take(3)
+                let expected = std::iter::repeat_n(Self::FRAME, 3)
                     .flatten()
                     .copied()
                     .collect::<Vec<_>>();
@@ -579,10 +577,11 @@ impl StealingClient {
     pub async fn expect_connection(&mut self) -> NewTcpConnectionV2 {
         match self.api.recv().await.unwrap() {
             DaemonMessage::TcpSteal(DaemonTcp::NewConnectionV1(conn)) => {
-                assert!(self
-                    .protocol_version
-                    .matches(&MODE_AGNOSTIC_HTTP_REQUESTS)
-                    .not());
+                assert!(
+                    self.protocol_version
+                        .matches(&MODE_AGNOSTIC_HTTP_REQUESTS)
+                        .not()
+                );
                 NewTcpConnectionV2 {
                     connection: conn,
                     transport: IncomingTrafficTransportType::Tcp,
@@ -609,10 +608,11 @@ impl StealingClient {
                     line!(),
                 );
 
-                assert!(self
-                    .protocol_version
-                    .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION)
-                    .not());
+                assert!(
+                    self.protocol_version
+                        .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION)
+                        .not()
+                );
                 assert_eq!(request.port, self.steal_type.get_port(),);
                 ChunkedRequestStartV2 {
                     connection_id: request.connection_id,
@@ -642,9 +642,10 @@ impl StealingClient {
                     file!(),
                     line!(),
                 );
-                assert!(self
-                    .protocol_version
-                    .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION));
+                assert!(
+                    self.protocol_version
+                        .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION)
+                );
                 let HttpRequestMetadata::V1 { destination, .. } = &request.metadata;
                 assert_eq!(destination.port(), self.steal_type.get_port(),);
                 request
@@ -761,8 +762,7 @@ impl StealingClient {
         expect_connection_id: ConnectionId,
         protocol: TestTcpProtocol,
     ) {
-        let expected = std::iter::repeat(TestTcpProtocol::MESSAGE)
-            .take(3)
+        let expected = std::iter::repeat_n(TestTcpProtocol::MESSAGE, 3)
             .flatten()
             .copied()
             .collect::<Vec<_>>();

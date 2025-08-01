@@ -8,10 +8,10 @@ use mirrord_tls_util::generate_cert;
 use pem::{EncodeConfig, LineEnding, Pem};
 use rcgen::CertifiedKey;
 use rustls::{
+    ClientConfig, RootCertStore, ServerConfig,
     crypto::CryptoProvider,
     pki_types::{CertificateDer, PrivateKeyDer, ServerName},
     server::WebPkiClientVerifier,
-    ClientConfig, RootCertStore, ServerConfig,
 };
 use tempfile::TempDir;
 use tokio::{

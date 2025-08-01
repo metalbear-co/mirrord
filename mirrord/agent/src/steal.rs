@@ -4,7 +4,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     http::filter::HttpFilter,
     incoming::{StolenHttp, StolenTcp},
-    util::{protocol_version::ClientProtocolVersion, ClientId},
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod api;

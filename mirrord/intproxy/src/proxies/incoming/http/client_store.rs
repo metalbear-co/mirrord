@@ -290,8 +290,8 @@ mod test {
     use bytes::Bytes;
     use http_body_util::Empty;
     use hyper::{
-        body::Incoming, server::conn::http1, service::service_fn, Method, Request, Response,
-        Version,
+        Method, Request, Response, Version, body::Incoming, server::conn::http1,
+        service::service_fn,
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};

@@ -115,8 +115,7 @@ mod test {
 
     use super::*;
 
-    const EXPECTED: &str =
-    "# Root\n\nRoot - 1l\n\nRoot - 2l\n\n## Root - b_field\n\nRoot_B_Node - 1l\n\nRoot_B_Node - 2l\n\n### Root_B_Node - c_field\n\nRoot_B_C_Node - 1l\n\nRoot_B_C_Node - 2l\n\n### Root_B_C_Node - d_field\n\nRoot_B_C_D_Edge - 1l\n\nRoot_B_C_D_Edge - 2l\n\n#### Root_B_C_D_Edge - c_field\n\nRoot_B_C_D_Edge - edge - c_field\n\n#### Root_B_C_D_Edge - d_field\n\nRoot_B_C_D_Edge - edge - d_field\n\n### Root_B_C_Node - root_b_c_node_field\n\nRoot_B_C_Node - edge - root_b_c_node_field\n\n### Root_B_Node - root_b_node_field\n\nRoot_B_Node - edge - root_b_node_field\n\n## Root - e_field\n\nRoot_E_Edge - 1l\n\nRoot_E_Edge - 2l\n\n## Root_E_Edge - e_field\n\nRoot_E_Edge - edge - e_field\n\n## Root_E_Edge - f_field\n\nRoot_E_Edge - edge - f_field\n\n## Root - root_field\n\nRoot - edge - root_field\n\n";
+    const EXPECTED: &str = "# Root\n\nRoot - 1l\n\nRoot - 2l\n\n## Root - b_field\n\nRoot_B_Node - 1l\n\nRoot_B_Node - 2l\n\n### Root_B_Node - c_field\n\nRoot_B_C_Node - 1l\n\nRoot_B_C_Node - 2l\n\n### Root_B_C_Node - d_field\n\nRoot_B_C_D_Edge - 1l\n\nRoot_B_C_D_Edge - 2l\n\n#### Root_B_C_D_Edge - c_field\n\nRoot_B_C_D_Edge - edge - c_field\n\n#### Root_B_C_D_Edge - d_field\n\nRoot_B_C_D_Edge - edge - d_field\n\n### Root_B_C_Node - root_b_c_node_field\n\nRoot_B_C_Node - edge - root_b_c_node_field\n\n### Root_B_Node - root_b_node_field\n\nRoot_B_Node - edge - root_b_node_field\n\n## Root - e_field\n\nRoot_E_Edge - 1l\n\nRoot_E_Edge - 2l\n\n## Root_E_Edge - e_field\n\nRoot_E_Edge - edge - e_field\n\n## Root_E_Edge - f_field\n\nRoot_E_Edge - edge - f_field\n\n## Root - root_field\n\nRoot - edge - root_field\n\n";
 
     const FILES: [&str; 5] = [
         r#"

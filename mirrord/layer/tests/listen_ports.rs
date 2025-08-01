@@ -11,8 +11,8 @@ use std::{
 };
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcpSteal, StealType},
     ClientMessage, DaemonMessage,
+    tcp::{DaemonTcp, LayerTcpSteal, StealType},
 };
 use rstest::rstest;
 use tokio::{io::AsyncWriteExt, net::TcpListener};
@@ -93,7 +93,9 @@ async fn listen_ports(
             TcpStream::connect(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), local_port))
                 .await
                 .unwrap();
-        println!("connected to the application on port {local_port} (application code used {subscription_port})");
+        println!(
+            "connected to the application on port {local_port} (application code used {subscription_port})"
+        );
         stream.write_all(b"HELLO").await.unwrap();
         stream.shutdown().await.unwrap();
         assert_matches!(

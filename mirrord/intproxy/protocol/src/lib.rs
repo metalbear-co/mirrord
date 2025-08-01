@@ -10,11 +10,11 @@ use std::{
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
+    FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
     dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::SocketAddress,
     tcp::StealType,
-    FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
 };
 
 #[cfg(feature = "codec")]

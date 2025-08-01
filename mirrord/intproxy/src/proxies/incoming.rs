@@ -18,13 +18,13 @@ use mirrord_intproxy_protocol::{
     MessageId, PortSubscription, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
+    ClientMessage, ConnectionId, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
         ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
         InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
         NewTcpConnectionV2, TcpData,
     },
-    ClientMessage, ConnectionId, RequestId, ResponseError,
 };
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
@@ -35,11 +35,11 @@ use tracing::Level;
 
 use self::subscriptions::SubscriptionsManager;
 use crate::{
+    ProxyMessage,
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{LayerClosed, LayerForked, ToLayer},
-    ProxyMessage,
 };
 
 mod bound_socket;
@@ -70,11 +70,7 @@ impl<T> ConnectionMap<T> {
     }
 
     fn get(&self, is_steal: bool) -> &HashMap<ConnectionId, T> {
-        if is_steal {
-            &self.steal
-        } else {
-            &self.mirror
-        }
+        if is_steal { &self.steal } else { &self.mirror }
     }
 }
 

@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_char, CString},
+    ffi::{CString, c_char},
     ptr,
 };
 

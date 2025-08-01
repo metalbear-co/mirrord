@@ -1,4 +1,4 @@
-use k8s_cri::v1::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
+use k8s_cri::v1::{ContainerStatusRequest, runtime_service_client::RuntimeServiceClient};
 use serde::Deserialize;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
@@ -6,7 +6,7 @@ use tower::service_fn;
 use tracing::error;
 
 use super::ContainerRuntimeError;
-use crate::runtime::{error::ContainerRuntimeResult, ContainerInfo, ContainerRuntime};
+use crate::runtime::{ContainerInfo, ContainerRuntime, error::ContainerRuntimeResult};
 
 static CRIO_DEFAULT_SOCK_PATH: &str = "/host/run/crio/crio.sock";
 

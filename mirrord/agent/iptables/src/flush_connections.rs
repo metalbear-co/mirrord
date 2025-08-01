@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use tokio::process::Command;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::{error::IPTablesResult, redirect::Redirect};
 

@@ -7,12 +7,12 @@ use mirrord_protocol::FileRequest;
 use tokio::time;
 
 use crate::{
+    IntProxy,
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{ProxyRuntimeError, ProxyStartupError},
     layer_conn::LayerConnection,
     layer_initializer::LayerInitializer,
     main_tasks::{FromLayer, MainTaskId, ProxyMessage},
-    IntProxy,
 };
 
 /// This struct is a strategy that handle failover logic for [`IntProxy`].
@@ -164,18 +164,21 @@ impl FailoverStrategy {
     }
 
     async fn send_error_to_layer(&self, layer_id: LayerId, message_id: MessageId) {
-        if let Some(layer) = self.layers.get(&layer_id) {
-            layer
-                .send(LocalMessage {
-                    message_id,
-                    inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
-                })
-                .await;
-        } else {
-            tracing::warn!(
-                "Layer {:?} not found, but it was waiting for proxy to respond!",
-                layer_id
-            );
+        match self.layers.get(&layer_id) {
+            Some(layer) => {
+                layer
+                    .send(LocalMessage {
+                        message_id,
+                        inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
+                    })
+                    .await;
+            }
+            _ => {
+                tracing::warn!(
+                    "Layer {:?} not found, but it was waiting for proxy to respond!",
+                    layer_id
+                );
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::{borrow::Cow, ops::Deref, sync::Arc};
 
-use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 use x509_certificate::{InMemorySigningKeyPair, KeyAlgorithm, X509CertificateError};
 
 /// Wrapper over [`InMemorySigningKeyPair`].

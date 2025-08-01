@@ -477,8 +477,10 @@ impl ResolvedTarget<false> {
                     if !exists_in_a_pod {
                         return Err(KubeApiError::invalid_state(
                             &resource,
-                            format_args!("none of the pods that match the labels contain the target container `{container}`"
-                        )));
+                            format_args!(
+                                "none of the pods that match the labels contain the target container `{container}`"
+                            ),
+                        ));
                     }
                 }
 

@@ -1,12 +1,12 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     error::{Error, Report},
     fmt,
     ops::Not,
     sync::Arc,
 };
 
-use futures::{future::Shared, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use tokio::sync::{
     mpsc::{self, error::TrySendError},
@@ -16,15 +16,15 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
-    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo, MaybeHttp},
+    PortRedirector, Redirected,
+    connection::{ConnectionInfo, MaybeHttp, http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
     steal_handle::{StealHandle, StolenTraffic},
     tls::StealTlsHandlerStore,
-    PortRedirector, Redirected,
 };
 use crate::{
     http::extract_requests::{ExtractedRequest, ExtractedRequests},
-    incoming::{mirror_handle::MirrorHandle, MirroredTraffic},
+    incoming::{MirroredTraffic, mirror_handle::MirrorHandle},
 };
 
 /// A task responsible for redirecting incoming connections.
@@ -547,7 +547,7 @@ mod test {
 
     use rstest::rstest;
 
-    use crate::incoming::{test::DummyRedirector, RedirectorTask};
+    use crate::incoming::{RedirectorTask, test::DummyRedirector};
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]

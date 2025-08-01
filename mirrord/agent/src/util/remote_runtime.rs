@@ -21,8 +21,8 @@ use std::{
 };
 
 use futures::{
-    future::{BoxFuture, Shared},
     FutureExt,
+    future::{BoxFuture, Shared},
 };
 use tokio::sync::{mpsc, oneshot};
 

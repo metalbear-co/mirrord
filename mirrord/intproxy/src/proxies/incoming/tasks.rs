@@ -1,9 +1,9 @@
 use std::{convert::Infallible, fmt, io};
 
-use hyper::{upgrade::OnUpgrade, Version};
+use hyper::{Version, upgrade::OnUpgrade};
 use mirrord_protocol::{
-    tcp::{ChunkedResponse, HttpResponse, InternalHttpBody},
     ConnectionId, Payload, Port, RequestId,
+    tcp::{ChunkedResponse, HttpResponse, InternalHttpBody},
 };
 use thiserror::Error;
 

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use nix::unistd::getgid;
 use tracing::warn;
 
-use crate::{chain::IPTableChain, error::IPTablesResult, IPTables, Redirect};
+use crate::{IPTables, Redirect, chain::IPTableChain, error::IPTablesResult};
 
 pub struct OutputRedirect<const USE_INSERT: bool, IPT: IPTables> {
     managed: IPTableChain<IPT>,

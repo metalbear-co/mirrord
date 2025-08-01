@@ -8,9 +8,9 @@ use std::{
 };
 
 use mirrord_protocol::{
+    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{OpenFileResponse, ReadFileResponse},
     tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
 };
 use rstest::rstest;
 

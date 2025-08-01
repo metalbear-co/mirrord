@@ -1,8 +1,8 @@
 use hyper::{
+    Request, Response,
     body::{Body, Incoming},
     client::conn::{http1, http2},
     rt::{Read, Write},
-    Request, Response,
 };
 use hyper_util::rt::TokioExecutor;
 

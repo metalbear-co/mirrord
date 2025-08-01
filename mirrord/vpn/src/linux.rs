@@ -5,7 +5,7 @@ use std::{
 };
 
 use mirrord_protocol::{
-    file::*, vpn::NetworkConfiguration, ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse, file::*, vpn::NetworkConfiguration,
 };
 use tokio::process::Command;
 

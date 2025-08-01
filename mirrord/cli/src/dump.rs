@@ -6,15 +6,15 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
+    ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, DaemonTcp, HttpRequestMetadata, IncomingTrafficTransportType,
         InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, NewTcpConnectionV1,
         NewTcpConnectionV2, TcpData,
     },
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
 };
 use thiserror::Error;
 use tokio::{
@@ -25,7 +25,7 @@ use tracing::{debug, info};
 
 use super::config::DumpArgs;
 use crate::{
-    connection::{create_and_connect, AgentConnection},
+    connection::{AgentConnection, create_and_connect},
     error::CliResult,
     user_data::UserData,
 };
@@ -304,10 +304,13 @@ impl DumpSession {
                         "## New {} request received: Request ID [{}:{}] from {source} to {destination}",
                         match &req.transport {
                             IncomingTrafficTransportType::Tcp => "HTTP".to_string(),
-                            IncomingTrafficTransportType::Tls { alpn_protocol, server_name } => format!(
+                            IncomingTrafficTransportType::Tls {
+                                alpn_protocol,
+                                server_name,
+                            } => format!(
                                 "HTTPS (ALPN={:?}, SNI={server_name:?})",
                                 alpn_protocol.as_deref().map(String::from_utf8_lossy),
-                            )
+                            ),
                         },
                         req.connection_id,
                         req.request_id,
@@ -436,7 +439,7 @@ impl DumpSession {
                 | DaemonMessage::UdpOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)) => {
-                    return Err(DumpSessionError::UnexpectedAgentMessage(message))
+                    return Err(DumpSessionError::UnexpectedAgentMessage(message));
                 }
             }
         }

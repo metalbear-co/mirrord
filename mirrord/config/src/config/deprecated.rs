@@ -1,4 +1,4 @@
-use crate::config::{source::MirrordConfigSource, ConfigContext, Result};
+use crate::config::{ConfigContext, Result, source::MirrordConfigSource};
 
 #[derive(Clone)]
 pub struct Deprecated<T>(String, T);

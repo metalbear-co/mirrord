@@ -21,13 +21,13 @@ use std::{
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
-    agent_conn::{AgentConnectInfo, AgentConnection},
     IntProxy,
+    agent_conn::{AgentConnectInfo, AgentConnection},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
-use nix::sys::resource::{setrlimit, Resource};
+use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,

@@ -2,10 +2,10 @@ use std::fmt;
 
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
+use tokio_stream::{StreamMap, StreamNotifyClose, wrappers::ReceiverStream};
 
 use super::{
-    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo},
+    connection::{ConnectionInfo, http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
     task::{RedirectRequest, TaskError},
 };

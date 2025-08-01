@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     net::SocketAddr,
 };
 
@@ -9,7 +9,7 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{BlockedAction, ClientMessage, Port, RemoteResult, ResponseError};
 use tracing::Level;
 
-use super::{port_subscription_ext::PortSubscriptionExt, IncomingProxyError};
+use super::{IncomingProxyError, port_subscription_ext::PortSubscriptionExt};
 use crate::{
     main_tasks::{ProxyMessage, ToLayer},
     remote_resources::RemoteResources,

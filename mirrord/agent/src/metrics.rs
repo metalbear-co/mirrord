@@ -1,14 +1,14 @@
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
-use axum::{extract::State, routing::get, Router};
+use axum::{Router, extract::State, routing::get};
 use http::StatusCode;
-use prometheus::{proto::MetricFamily, IntGauge, Registry};
+use prometheus::{IntGauge, Registry, proto::MetricFamily};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;

@@ -10,7 +10,7 @@ use std::{
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
 use tracing::Level;
 
-use super::{DirStreamFd, LocalFd, RemoteFd, OPEN_FILES};
+use super::{DirStreamFd, LocalFd, OPEN_FILES, RemoteFd};
 use crate::{
     common,
     detour::{Bypass, Detour},

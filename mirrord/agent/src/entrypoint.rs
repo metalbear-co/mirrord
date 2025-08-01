@@ -5,17 +5,17 @@ use std::{
     ops::Not,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
 };
 
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::TryFutureExt;
-use metrics::{start_metrics, CLIENT_COUNT};
+use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{error::IPTablesError, SafeIpTables};
+use mirrord_agent_iptables::{SafeIpTables, error::IPTablesError};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -24,10 +24,10 @@ use tokio::{
     signal::unix::SignalKind,
     sync::mpsc::Sender,
     task::JoinSet,
-    time::{timeout, Duration},
+    time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn, Level};
+use tracing::{Level, debug, error, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -47,9 +47,9 @@ use crate::{
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerApi},
     util::{
+        ClientId,
         protocol_version::ClientProtocolVersion,
         remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
-        ClientId,
     },
 };
 
@@ -321,26 +321,27 @@ impl ClientConnectionHandler {
         task: BackgroundTask<SnifferCommand>,
         connection: &mut ClientConnection,
     ) -> Option<TcpSnifferApi> {
-        if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
-            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
-                Ok(api) => Some(api),
-                Err(e) => {
-                    let message = format!(
-                        "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
-                    );
+        match task {
+            BackgroundTask::Running(sniffer_status, sniffer_sender) => {
+                match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
+                    Ok(api) => Some(api),
+                    Err(e) => {
+                        let message = format!(
+                            "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
+                        );
 
-                    warn!(message);
+                        warn!(message);
 
-                    // Ignore message send error.
-                    let _ = connection
-                        .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
-                        .await;
+                        // Ignore message send error.
+                        let _ = connection
+                            .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
+                            .await;
 
-                    None
+                        None
+                    }
                 }
             }
-        } else {
-            None
+            _ => None,
         }
     }
 
@@ -350,21 +351,23 @@ impl ClientConnectionHandler {
         task: BackgroundTask<StealerCommand>,
         connection: &mut ClientConnection,
     ) -> AgentResult<Option<TcpStealerApi>> {
-        if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
-            match TcpStealerApi::new(id, protocol_version, stealer_sender, stealer_status).await {
-                Ok(api) => Ok(Some(api)),
-                Err(e) => {
-                    let _ = connection
-                        .send(DaemonMessage::Close(format!(
-                            "Failed to create TcpStealerApi: {e}."
-                        )))
-                        .await; // Ignore message send error.
+        match task {
+            BackgroundTask::Running(stealer_status, stealer_sender) => {
+                match TcpStealerApi::new(id, protocol_version, stealer_sender, stealer_status).await
+                {
+                    Ok(api) => Ok(Some(api)),
+                    Err(e) => {
+                        let _ = connection
+                            .send(DaemonMessage::Close(format!(
+                                "Failed to create TcpStealerApi: {e}."
+                            )))
+                            .await; // Ignore message send error.
 
-                    Err(e)?
+                        Err(e)?
+                    }
                 }
             }
-        } else {
-            Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -403,11 +406,11 @@ impl ClientConnectionHandler {
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
                 message = async {
-                    if let Some(ref mut mirror_api) = self.tcp_mirror_api {
+                    match self.tcp_mirror_api { Some(ref mut mirror_api) => {
                         mirror_api.recv().await
-                    } else {
+                    } _ => {
                         unreachable!()
-                    }
+                    }}
                 }, if self.tcp_mirror_api.is_some() => match message {
                     Ok(message) => {
                         self.respond(message).await?;
@@ -415,11 +418,11 @@ impl ClientConnectionHandler {
                     Err(e) => break e,
                 },
                 message = async {
-                    if let Some(ref mut stealer_api) = self.tcp_stealer_api {
+                    match self.tcp_stealer_api { Some(ref mut stealer_api) => {
                         stealer_api.recv().await
-                    } else {
+                    } _ => {
                         unreachable!()
-                    }
+                    }}
                 }, if self.tcp_stealer_api.is_some() => match message {
                     Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
@@ -511,29 +514,27 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
-            ClientMessage::Tcp(message) => {
-                if let Some(mirror_api) = &mut self.tcp_mirror_api {
-                    mirror_api.handle_client_message(message).await?
-                } else {
+            ClientMessage::Tcp(message) => match &mut self.tcp_mirror_api {
+                Some(mirror_api) => mirror_api.handle_client_message(message).await?,
+                _ => {
                     self.respond(DaemonMessage::Close(
                         "component responsible for mirroring incoming traffic is not running, \
                         which might be due to Kubernetes node kernel version <4.20. \
                         Check agent logs for errors and please report a bug if kernel version >=4.20".into(),
                     )).await?;
                 }
-            }
+            },
             ClientMessage::TcpSteal(message) => {
-                let error = if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api
+                let error = match self.tcp_stealer_api.as_mut() {
+                    Some(tcp_stealer_api) => tcp_stealer_api
                         .handle_client_message(message)
                         .await
                         .err()
-                        .map(|error| error.to_string())
-                } else {
-                    Some(
+                        .map(|error| error.to_string()),
+                    _ => Some(
                         "incoming traffic stealing is not available in the targetless mode"
                             .to_string(),
-                    )
+                    ),
                 };
 
                 if let Some(error) = error {

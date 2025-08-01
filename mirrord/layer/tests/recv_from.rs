@@ -4,11 +4,11 @@
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
-    outgoing::{
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
-    },
     ClientMessage, DaemonMessage,
+    outgoing::{
+        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    },
 };
 use rstest::rstest;
 

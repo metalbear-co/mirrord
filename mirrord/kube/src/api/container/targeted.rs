@@ -5,9 +5,9 @@ use tracing::debug;
 use crate::{
     api::{
         container::{
-            ephemeral::{create_ephemeral_agent, EphemeralTargetedVariant},
-            job::{create_job_agent, JobTargetedVariant},
             ContainerApi, ContainerVariant,
+            ephemeral::{EphemeralTargetedVariant, create_ephemeral_agent},
+            job::{JobTargetedVariant, create_job_agent},
         },
         kubernetes::AgentKubernetesConnectInfo,
         runtime::{NodeCheck, RuntimeData},

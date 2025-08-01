@@ -1,7 +1,7 @@
 use std::{io, time::Duration};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use mirrord_protocol::{vpn::ServerVpn, DaemonMessage};
+use mirrord_protocol::{DaemonMessage, vpn::ServerVpn};
 
 use crate::{agent::VpnAgent, error::VpnError};
 

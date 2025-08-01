@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 
 use k8s_openapi::{
+    ListableResource, Metadata, NamespaceResourceScope, Resource,
     api::core::v1::PodTemplateSpec,
     apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta},
-    ListableResource, Metadata, NamespaceResourceScope, Resource,
 };
 use kube::Client;
 use serde::{Deserialize, Serialize};

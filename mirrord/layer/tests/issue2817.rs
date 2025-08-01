@@ -4,8 +4,8 @@
 use std::{path::Path, time::Duration};
 
 use mirrord_protocol::{
-    tcp::{Filter, HttpFilter, LayerTcpSteal, StealType},
     ClientMessage,
+    tcp::{Filter, HttpFilter, LayerTcpSteal, StealType},
 };
 use rstest::rstest;
 

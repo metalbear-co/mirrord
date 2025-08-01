@@ -3,11 +3,11 @@ use std::fmt::Debug;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
-use x509_certificate::{asn1time::Time, rfc5280};
 #[cfg(feature = "client")]
 use x509_certificate::{
-    rfc2986, InMemorySigningKeyPair, X509CertificateBuilder, X509CertificateError,
+    InMemorySigningKeyPair, X509CertificateBuilder, X509CertificateError, rfc2986,
 };
+use x509_certificate::{asn1time::Time, rfc5280};
 
 use crate::{certificate::Certificate, key_pair::KeyPair};
 
@@ -194,7 +194,7 @@ impl DateValidityExt for rfc5280::Validity {
 /// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
-    use kube::{api::PostParams, Api, Client, Resource};
+    use kube::{Api, Client, Resource, api::PostParams};
 
     use super::*;
     use crate::error::CredentialStoreError;
@@ -275,8 +275,8 @@ pub mod client {
 #[cfg(test)]
 mod test {
     use bcder::{
-        decode::{BytesSource, Constructed},
         Mode,
+        decode::{BytesSource, Constructed},
     };
     use x509_certificate::rfc2986::CertificationRequest;
 

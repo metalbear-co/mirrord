@@ -14,11 +14,13 @@ pub(crate) unsafe extern "C" fn sec_trust_evaluate_with_error_detour(
 }
 
 pub(crate) unsafe fn enable_tls_hooks(hook_manager: &mut HookManager) {
-    replace!(
-        hook_manager,
-        "SecTrustEvaluateWithError",
-        sec_trust_evaluate_with_error_detour,
-        FnSec_trust_evaluate_with_error,
-        FN_SEC_TRUST_EVALUATE_WITH_ERROR
-    );
+    unsafe {
+        replace!(
+            hook_manager,
+            "SecTrustEvaluateWithError",
+            sec_trust_evaluate_with_error_detour,
+            FnSec_trust_evaluate_with_error,
+            FN_SEC_TRUST_EVALUATE_WITH_ERROR
+        );
+    }
 }

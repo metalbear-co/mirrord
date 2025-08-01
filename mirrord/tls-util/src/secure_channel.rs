@@ -2,7 +2,7 @@ use std::{io::Write, path::Path, sync::Arc};
 
 use pem::{EncodeConfig, LineEnding, Pem};
 use rcgen::CertifiedKey;
-use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
+use rustls::{ClientConfig, RootCertStore, server::WebPkiClientVerifier};
 use tempfile::NamedTempFile;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 

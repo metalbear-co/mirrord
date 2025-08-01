@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    self, from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError,
-    FromMirrordConfig, MirrordConfig,
+    self, ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
+    source::MirrordConfigSource,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]

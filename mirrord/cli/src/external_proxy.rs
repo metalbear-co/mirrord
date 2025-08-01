@@ -25,8 +25,8 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -34,7 +34,7 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, LayerConfig};
+use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
 use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};
@@ -134,7 +134,7 @@ pub async fn proxy(
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                if let Ok((stream, peer_addr)) = conn {
+                match conn { Ok((stream, peer_addr)) => {
                     tracing::debug!(?peer_addr, "new connection");
 
                     let tls_acceptor = tls_acceptor.clone();
@@ -172,9 +172,9 @@ pub async fn proxy(
                             tracing::debug!(?peer_addr, "final connection, closing listener");
                         }
                     });
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
 
             message = own_agent_conn.agent_rx.recv() => {
@@ -272,15 +272,15 @@ async fn handle_connection(
                 }
             }
             daemon_message = agent_conn.agent_rx.recv() => {
-                if let Some(daemon_message) = daemon_message {
+                match daemon_message { Some(daemon_message) => {
                     if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(?peer_addr, %error, "unable to send message to intproxy");
 
                         break;
                     }
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
             _ = cancellation_token.cancelled() => {
                 tracing::debug!(?peer_addr, "closing connection due to cancellation_token");

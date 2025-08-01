@@ -100,8 +100,10 @@ pub async fn newsletter_command() {
         Ok(output) if output.status.success() => {}
         other => {
             tracing::trace!(?other, "failed to open browser");
-            println!("To sign up for the mirrord newsletter and get notified of new features as they come out, visit:\n\n\
-             {url}");
+            println!(
+                "To sign up for the mirrord newsletter and get notified of new features as they come out, visit:\n\n\
+             {url}"
+            );
         }
     }
 }

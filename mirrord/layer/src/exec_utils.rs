@@ -1,18 +1,19 @@
 use std::{
     env,
-    ffi::{c_void, CStr, CString},
+    ffi::{CStr, CString, c_void},
     path::PathBuf,
     sync::OnceLock,
 };
 
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_sip::{sip_patch, SipError, SipPatchOptions, MIRRORD_PATCH_DIR};
+use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
 use null_terminated::Nul;
 use tracing::{trace, warn};
 
 use crate::{
-    common::{strip_mirrord_path, CheckedInto},
+    EXECUTABLE_ARGS,
+    common::{CheckedInto, strip_mirrord_path},
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
@@ -23,7 +24,7 @@ use crate::{
     error::HookError,
     exec_hooks::{hooks, *},
     hooks::HookManager,
-    replace, EXECUTABLE_ARGS,
+    replace,
 };
 
 /// Maximal number of items to expect in argv.
@@ -40,27 +41,29 @@ pub(crate) unsafe fn enable_macos_hooks(
     patch_binaries: Vec<String>,
     skip_binaries: Vec<String>,
 ) {
-    PATCH_BINARIES
-        .set(patch_binaries)
-        .expect("couldn't set patch_binaries");
-    SKIP_PATCH_BINARIES
-        .set(skip_binaries)
-        .expect("couldn't set skip_binaries");
-    replace!(
-        hook_manager,
-        "posix_spawn",
-        posix_spawn_detour,
-        FnPosix_spawn,
-        FN_POSIX_SPAWN
-    );
-    replace!(
-        hook_manager,
-        "_NSGetExecutablePath",
-        _nsget_executable_path_detour,
-        Fn_nsget_executable_path,
-        FN__NSGET_EXECUTABLE_PATH
-    );
-    replace!(hook_manager, "dlopen", dlopen_detour, FnDlopen, FN_DLOPEN);
+    unsafe {
+        PATCH_BINARIES
+            .set(patch_binaries)
+            .expect("couldn't set patch_binaries");
+        SKIP_PATCH_BINARIES
+            .set(skip_binaries)
+            .expect("couldn't set skip_binaries");
+        replace!(
+            hook_manager,
+            "posix_spawn",
+            posix_spawn_detour,
+            FnPosix_spawn,
+            FN_POSIX_SPAWN
+        );
+        replace!(
+            hook_manager,
+            "_NSGetExecutablePath",
+            _nsget_executable_path_detour,
+            Fn_nsget_executable_path,
+            FN__NSGET_EXECUTABLE_PATH
+        );
+        replace!(hook_manager, "dlopen", dlopen_detour, FnDlopen, FN_DLOPEN);
+    }
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
@@ -99,8 +102,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 "The application wants to execute {}, SIP check got FileNotFound for {}. \
                 If the file actually exists and should have been found, make sure it is excluded \
                 from FS ops.",
-                path,
-                non_existing_bin
+                path, non_existing_bin
             );
             Bypass(ExecOnNonExistingFile(non_existing_bin))
         }
@@ -146,8 +148,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             .inspect(|original_path| {
                 trace!(
                     "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
-                    arg_str,
-                    original_path
+                    arg_str, original_path
                 );
             })
             .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
@@ -198,28 +199,31 @@ pub(crate) unsafe fn patch_sip_for_new_process(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> Detour<(CString, Argv, Argv)> {
-    let calling_exe = env::current_exe()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_default();
-    trace!("Executable {} called execve/posix_spawn", calling_exe);
+    unsafe {
+        let calling_exe = env::current_exe()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default();
+        trace!("Executable {} called execve/posix_spawn", calling_exe);
 
-    let path_str = path.checked_into()?;
-    // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
-    // path. The file might not even exist in our tmp dir, and the application is expecting it there
-    // only because it somehow found out about its own patched location in our tmp dir.
-    // If original path is SIP, and actually exists in our dir that patched executable will be used.
-    let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_c_string = patch_if_sip(path_str)
-        .and_then(|new_path| Success(CString::new(new_path)?))
-        // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-        .unwrap_or(CString::new(path_str.to_string())?);
+        let path_str = path.checked_into()?;
+        // If an application is trying to run an executable from our tmp dir, strip our tmp dir from
+        // the path. The file might not even exist in our tmp dir, and the application is
+        // expecting it there only because it somehow found out about its own patched
+        // location in our tmp dir. If original path is SIP, and actually exists in our dir
+        // that patched executable will be used.
+        let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
+        let path_c_string = patch_if_sip(path_str)
+            .and_then(|new_path| Success(CString::new(new_path)?))
+            // Continue also on error, use original path, don't bypass yet, try cleaning argv.
+            .unwrap_or(CString::new(path_str.to_string())?);
 
-    let argv_arr = Nul::new_unchecked(argv);
-    let envp_arr = Nul::new_unchecked(envp);
+        let argv_arr = Nul::new_unchecked(argv);
+        let envp_arr = Nul::new_unchecked(envp);
 
-    let argv_vec = intercept_tmp_dir(argv_arr)?;
-    let envp_vec = intercept_environment(envp_arr)?;
-    Success((path_c_string, argv_vec, envp_vec))
+        let argv_vec = intercept_tmp_dir(argv_arr)?;
+        let envp_vec = intercept_environment(envp_arr)?;
+        Success((path_c_string, argv_vec, envp_vec))
+    }
 }
 
 /// Hook for `libc::posix_spawn`.
@@ -234,28 +238,30 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    match patch_sip_for_new_process(path, argv, envp) {
-        Detour::Success((path, argv, envp)) => {
-            match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
-                Detour::Success(envp) => FN_POSIX_SPAWN(
-                    pid,
-                    path.into_raw().cast_const(),
-                    file_actions,
-                    attrp,
-                    argv.leak(),
-                    envp.leak(),
-                ),
-                _ => FN_POSIX_SPAWN(
-                    pid,
-                    path.into_raw().cast_const(),
-                    file_actions,
-                    attrp,
-                    argv.leak(),
-                    envp.leak(),
-                ),
+    unsafe {
+        match patch_sip_for_new_process(path, argv, envp) {
+            Detour::Success((path, argv, envp)) => {
+                match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
+                    Detour::Success(envp) => FN_POSIX_SPAWN(
+                        pid,
+                        path.into_raw().cast_const(),
+                        file_actions,
+                        attrp,
+                        argv.leak(),
+                        envp.leak(),
+                    ),
+                    _ => FN_POSIX_SPAWN(
+                        pid,
+                        path.into_raw().cast_const(),
+                        file_actions,
+                        attrp,
+                        argv.leak(),
+                        envp.leak(),
+                    ),
+                }
             }
+            _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
         }
-        _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
 }
 
@@ -264,37 +270,39 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     path: *mut c_char,
     buflen: *mut u32,
 ) -> c_int {
-    let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
-    if res == 0 {
-        let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
-        if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
-            // SAFETY: If we're here, the original function was passed this pointer and was
-            //         successful, so this pointer must be valid.
-            let old_len = *buflen;
+    unsafe {
+        let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
+        if res == 0 {
+            let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
+            if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
+                // SAFETY: If we're here, the original function was passed this pointer and was
+                //         successful, so this pointer must be valid.
+                let old_len = *buflen;
 
-            // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
-            let prefix_len = later_ptr.offset_from(path);
+                // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
+                let prefix_len = later_ptr.offset_from(path);
 
-            let stripped_len = old_len - prefix_len as u32;
+                let stripped_len = old_len - prefix_len as u32;
 
-            // SAFETY:
-            // - can read `stripped_len` bytes from `path_cstring` because it's its length.
-            // - can write `stripped_len` bytes to `path`, because the length of the path after
-            //   stripping a prefix will always be shorter than before.
-            // - cannot use `copy_from_nonoverlapping`.
-            path.copy_from(later_ptr, stripped_len as _);
+                // SAFETY:
+                // - can read `stripped_len` bytes from `path_cstring` because it's its length.
+                // - can write `stripped_len` bytes to `path`, because the length of the path after
+                //   stripping a prefix will always be shorter than before.
+                // - cannot use `copy_from_nonoverlapping`.
+                path.copy_from(later_ptr, stripped_len as _);
 
-            // SAFETY:
-            // - We call the original function before this, so if it's not a valid pointer we should
-            //   not get back 0, and then this code is not executed.
-            *buflen = stripped_len;
+                // SAFETY:
+                // - We call the original function before this, so if it's not a valid pointer we
+                //   should not get back 0, and then this code is not executed.
+                *buflen = stripped_len;
 
-            // If the buffer is long enough for the path, it is long enough for the stripped
-            // path.
-            return 0;
+                // If the buffer is long enough for the path, it is long enough for the stripped
+                // path.
+                return 0;
+            }
         }
+        res
     }
-    res
 }
 
 /// Just strip the sip patch dir out of the path if there.
@@ -307,17 +315,19 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     raw_path: *const c_char,
     mode: c_int,
 ) -> *const c_void {
-    // we hold the guard manually for tracing/internal code
-    let guard = crate::detour::DetourGuard::new();
-    let detour: Detour<PathBuf> = raw_path.checked_into();
-    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
-        trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
-        ptr
-    } else {
-        trace!("dlopen called on path {detour:?}.");
-        raw_path
-    };
-    drop(guard);
-    // call dlopen guardless
-    FN_DLOPEN(raw_path, mode)
+    unsafe {
+        // we hold the guard manually for tracing/internal code
+        let guard = crate::detour::DetourGuard::new();
+        let detour: Detour<PathBuf> = raw_path.checked_into();
+        let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
+            trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
+            ptr
+        } else {
+            trace!("dlopen called on path {detour:?}.");
+            raw_path
+        };
+        drop(guard);
+        // call dlopen guardless
+        FN_DLOPEN(raw_path, mode)
+    }
 }

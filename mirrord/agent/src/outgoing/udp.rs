@@ -10,15 +10,15 @@ use futures::{
     stream::{SplitSink, SplitStream},
 };
 use mirrord_protocol::{
-    outgoing::{udp::*, *},
     ConnectionId, Payload, ResponseError,
+    outgoing::{udp::*, *},
 };
 use streammap_ext::StreamMap;
 use tokio::{
     io,
     net::UdpSocket,
     select,
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, error::SendError},
 };
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::Level;

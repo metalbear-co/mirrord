@@ -42,7 +42,7 @@
 /// ```
 #[macro_export]
 macro_rules! replace {
-    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
+    ($hook_manager:expr_2021, $func:expr_2021, $detour_function:expr_2021, $detour_type:ty, $hook_fn:expr_2021) => {{
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
@@ -100,7 +100,7 @@ macro_rules! replace {
 /// ```
 #[macro_export]
 macro_rules! replace_with_fallback {
-    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr, $fallback_fn:expr) => {{
+    ($hook_manager:expr_2021, $func:expr_2021, $detour_function:expr_2021, $detour_type:ty, $hook_fn:expr_2021, $fallback_fn:expr_2021) => {{
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
@@ -149,7 +149,7 @@ macro_rules! replace_with_fallback {
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 macro_rules! hook_symbol {
-    ($hook_manager:expr, $func:expr, $detour_name:expr) => {
+    ($hook_manager:expr_2021, $func:expr_2021, $detour_name:expr_2021) => {
         match $hook_manager.hook_symbol_main_module($func, $detour_name as *mut libc::c_void) {
             Ok(_) => {
                 trace!("hooked {:?} in main module", $func);

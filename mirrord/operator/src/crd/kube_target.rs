@@ -107,7 +107,7 @@ mod tests {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    use crate::crd::{kube_target::KubeTarget, TargetSpec};
+    use crate::crd::{TargetSpec, kube_target::KubeTarget};
 
     #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
     #[kube(

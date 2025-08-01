@@ -2,13 +2,13 @@ use std::{io, net::SocketAddr};
 
 use nix::sys::socket::SockaddrStorage;
 use pnet::packet::{
+    Packet,
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
     ipv4::Ipv4Packet,
     tcp::TcpPacket,
-    Packet,
 };
-use rawsocket::{filter::SocketFilterProgram, RawCapture};
+use rawsocket::{RawCapture, filter::SocketFilterProgram};
 use tokio::net::UdpSocket;
 use tracing::Level;
 
@@ -155,8 +155,8 @@ impl TcpCapture for RawSocketTcpCapture {
 #[cfg(test)]
 pub mod test {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     use tokio::sync::mpsc::Receiver;

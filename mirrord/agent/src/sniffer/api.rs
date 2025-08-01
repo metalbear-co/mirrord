@@ -1,26 +1,26 @@
 use std::ops::RangeInclusive;
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     ConnectionId, LogMessage, Port,
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
 };
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
 };
 use tokio_stream::{
-    wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
     StreamMap, StreamNotifyClose,
+    wrappers::{BroadcastStream, errors::BroadcastStreamRecvError},
 };
 
 use super::{
-    messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
     AgentResult,
+    messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
 };
 use crate::{
     error::AgentError,
-    util::{remote_runtime::BgTaskStatus, ClientId},
+    util::{ClientId, remote_runtime::BgTaskStatus},
 };
 
 /// Interface used by clients to interact with the

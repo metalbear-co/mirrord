@@ -13,11 +13,11 @@ use http::{HeaderValue, Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
 use kube::{
+    Client, Error, Result,
     client::{Body, UpgradeConnectionError},
     core::ErrorResponse,
-    Client, Error, Result,
 };
-use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
 
 const WS_PROTOCOL: &str = "v4.channel.k8s.io";
 

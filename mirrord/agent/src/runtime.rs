@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
+use bollard::{API_DEFAULT_VERSION, Docker, container::InspectContainerOptions};
 use containerd_client::{
     services::v1::{
-        containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
-        GetRequest,
+        GetContainerRequest, GetRequest, containers_client::ContainersClient,
+        tasks_client::TasksClient,
     },
-    tonic::{transport::Channel, Request},
+    tonic::{Request, transport::Channel},
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;

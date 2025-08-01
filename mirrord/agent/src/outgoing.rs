@@ -2,15 +2,15 @@ use std::{collections::HashMap, fmt, time::Duration};
 
 use bytes::Bytes;
 use mirrord_protocol::{
-    outgoing::{tcp::*, *},
     ConnectionId, RemoteError, ResponseError,
+    outgoing::{tcp::*, *},
 };
 use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
 use tokio::{
     io::{self, AsyncWriteExt, ReadHalf, WriteHalf},
     select,
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, error::SendError},
     time,
 };
 use tokio_stream::StreamExt;

@@ -1,5 +1,5 @@
 use super::ConfigContext;
-use crate::config::{source::MirrordConfigSource, Result};
+use crate::config::{Result, source::MirrordConfigSource};
 
 #[derive(Clone)]
 pub struct Unstable<T>(&'static str, &'static str, T);

@@ -1,17 +1,17 @@
 use std::{io, net::SocketAddr};
 
 use mirrord_intproxy_protocol::{
-    codec::{AsyncDecoder, AsyncEncoder, CodecError},
     LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProxyToLayerMessage,
+    codec::{AsyncDecoder, AsyncEncoder, CodecError},
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
 use crate::{
+    ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus},
     main_tasks::NewLayer,
-    ProxyMessage,
 };
 
 #[derive(Error, Debug)]

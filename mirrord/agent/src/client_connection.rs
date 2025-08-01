@@ -11,9 +11,9 @@ use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_rustls::{
-    client::TlsStream,
-    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
     TlsConnector,
+    client::TlsStream,
+    rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
 };
 use tracing::Level;
 use x509_parser::{error::PEMError, nom, pem};
@@ -160,8 +160,8 @@ mod test {
     use mirrord_protocol::ClientCodec;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::{
-        rustls::{pki_types::PrivateKeyDer, ServerConfig},
         TlsAcceptor,
+        rustls::{ServerConfig, pki_types::PrivateKeyDer},
     };
 
     use super::*;

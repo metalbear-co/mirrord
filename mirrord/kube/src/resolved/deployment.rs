@@ -8,7 +8,7 @@ use crate::{api::runtime::RuntimeDataFromLabels, error::KubeApiError};
 impl RuntimeDataFromLabels for ResolvedResource<Deployment> {
     type Resource = Deployment;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         self.resource
             .metadata
             .name

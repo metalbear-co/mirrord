@@ -2,7 +2,7 @@ use std::fmt;
 
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
+use tokio_stream::{StreamMap, StreamNotifyClose, wrappers::ReceiverStream};
 
 use super::{
     error::RedirectorTaskError,
