@@ -41,27 +41,29 @@ pub(crate) unsafe fn enable_macos_hooks(
     patch_binaries: Vec<String>,
     skip_binaries: Vec<String>,
 ) {
-    PATCH_BINARIES
-        .set(patch_binaries)
-        .expect("couldn't set patch_binaries");
-    SKIP_PATCH_BINARIES
-        .set(skip_binaries)
-        .expect("couldn't set skip_binaries");
-    replace!(
-        hook_manager,
-        "posix_spawn",
-        posix_spawn_detour,
-        FnPosix_spawn,
-        FN_POSIX_SPAWN
-    );
-    replace!(
-        hook_manager,
-        "_NSGetExecutablePath",
-        _nsget_executable_path_detour,
-        Fn_nsget_executable_path,
-        FN__NSGET_EXECUTABLE_PATH
-    );
-    replace!(hook_manager, "dlopen", dlopen_detour, FnDlopen, FN_DLOPEN);
+    unsafe {
+        PATCH_BINARIES
+            .set(patch_binaries)
+            .expect("couldn't set patch_binaries");
+        SKIP_PATCH_BINARIES
+            .set(skip_binaries)
+            .expect("couldn't set skip_binaries");
+        replace!(
+            hook_manager,
+            "posix_spawn",
+            posix_spawn_detour,
+            FnPosix_spawn,
+            FN_POSIX_SPAWN
+        );
+        replace!(
+            hook_manager,
+            "_NSGetExecutablePath",
+            _nsget_executable_path_detour,
+            Fn_nsget_executable_path,
+            FN__NSGET_EXECUTABLE_PATH
+        );
+        replace!(hook_manager, "dlopen", dlopen_detour, FnDlopen, FN_DLOPEN);
+    }
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
@@ -197,28 +199,31 @@ pub(crate) unsafe fn patch_sip_for_new_process(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> Detour<(CString, Argv, Argv)> {
-    let calling_exe = env::current_exe()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_default();
-    trace!("Executable {} called execve/posix_spawn", calling_exe);
+    unsafe {
+        let calling_exe = env::current_exe()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default();
+        trace!("Executable {} called execve/posix_spawn", calling_exe);
 
-    let path_str = path.checked_into()?;
-    // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
-    // path. The file might not even exist in our tmp dir, and the application is expecting it there
-    // only because it somehow found out about its own patched location in our tmp dir.
-    // If original path is SIP, and actually exists in our dir that patched executable will be used.
-    let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_c_string = patch_if_sip(path_str)
-        .and_then(|new_path| Success(CString::new(new_path)?))
-        // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-        .unwrap_or(CString::new(path_str.to_string())?);
+        let path_str = path.checked_into()?;
+        // If an application is trying to run an executable from our tmp dir, strip our tmp dir from
+        // the path. The file might not even exist in our tmp dir, and the application is
+        // expecting it there only because it somehow found out about its own patched
+        // location in our tmp dir. If original path is SIP, and actually exists in our dir
+        // that patched executable will be used.
+        let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
+        let path_c_string = patch_if_sip(path_str)
+            .and_then(|new_path| Success(CString::new(new_path)?))
+            // Continue also on error, use original path, don't bypass yet, try cleaning argv.
+            .unwrap_or(CString::new(path_str.to_string())?);
 
-    let argv_arr = Nul::new_unchecked(argv);
-    let envp_arr = Nul::new_unchecked(envp);
+        let argv_arr = Nul::new_unchecked(argv);
+        let envp_arr = Nul::new_unchecked(envp);
 
-    let argv_vec = intercept_tmp_dir(argv_arr)?;
-    let envp_vec = intercept_environment(envp_arr)?;
-    Success((path_c_string, argv_vec, envp_vec))
+        let argv_vec = intercept_tmp_dir(argv_arr)?;
+        let envp_vec = intercept_environment(envp_arr)?;
+        Success((path_c_string, argv_vec, envp_vec))
+    }
 }
 
 /// Hook for `libc::posix_spawn`.
