@@ -1,6 +1,6 @@
 use proc_macro2::{Span, TokenStream};
 use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{Data, DataStruct, DeriveInput, Fields, FieldsNamed, Ident, Visibility};
 
 mod field;
@@ -32,20 +32,18 @@ impl ConfigStruct {
 
         let flags = ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
 
-        let fields = match data
-        { Data::Struct(DataStruct {
-            fields: Fields::Named(FieldsNamed { named, .. }),
-            ..
-        }) => {
-            Ok(named
+        let fields = match data {
+            Data::Struct(DataStruct {
+                fields: Fields::Named(FieldsNamed { named, .. }),
+                ..
+            }) => Ok(named
                 .into_iter()
                 .map(ConfigField::try_from)
-                .collect::<Result<_, _>>()?)
-        } _ => {
-            Err(source
+                .collect::<Result<_, _>>()?),
+            _ => Err(source
                 .span()
-                .error("Enums, Unions, and Unnamed Structs are not supported"))
-        }}?;
+                .error("Enums, Unions, and Unnamed Structs are not supported")),
+        }?;
 
         let ident = flags
             .map_to
@@ -79,7 +77,7 @@ impl ToTokens for ConfigStruct {
         } = &self;
 
         let field_definitions = fields.iter().map(|field| field.definition());
-        let field_impl = fields.iter().map(|field| field.implmentation(source));
+        let field_impl = fields.iter().map(|field| field.implementation(source));
 
         let generator = generator.as_ref().unwrap_or(ident);
 

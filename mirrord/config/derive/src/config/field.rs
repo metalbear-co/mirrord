@@ -1,5 +1,5 @@
 use proc_macro2_diagnostics::Diagnostic;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
 use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
@@ -25,11 +25,10 @@ pub struct ConfigField {
 impl ConfigField {
     /// Check if field is `Option<T>` and if so return type of `T`
     fn is_option(field: &Field) -> Option<Type> {
-        let seg = match &field.ty { Type::Path(ty) => {
-            ty.path.segments.first()
-        } _ => {
-            None
-        }}?;
+        let seg = match &field.ty {
+            Type::Path(ty) => ty.path.segments.first(),
+            _ => None,
+        }?;
 
         (seg.ident == "Option").then(|| match &seg.arguments {
             PathArguments::AngleBracketed(generics) => match generics.args.first() {
@@ -124,7 +123,7 @@ impl ConfigField {
     ///           .source_value().transpose()?
     ///           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
     /// ```
-    pub fn implmentation(&self, parent: &Ident) -> impl ToTokens + use<> {
+    pub fn implementation(&self, parent: &Ident) -> impl ToTokens + use<> {
         let ConfigField {
             ident,
             option,
