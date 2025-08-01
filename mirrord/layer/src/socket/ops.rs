@@ -1576,8 +1576,11 @@ pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
     unsafe {
         let resolver = Box::from_raw(resolver);
 
-        let nameservers =
-            Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
+        let nameservers = Vec::from_raw_parts(
+            resolver.nameserver,
+            resolver.n_nameserver as usize,
+            resolver.n_nameserver as usize,
+        );
 
         for nameserver in nameservers {
             let _ = Box::from_raw(nameserver);
