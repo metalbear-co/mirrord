@@ -238,6 +238,8 @@
 #![deny(unused_crate_dependencies)]
 // TODO(alex): Get a big `Box` for the big variants.
 #![allow(clippy::large_enum_variant)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::result_large_err)]
 
 use std::{
     collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
