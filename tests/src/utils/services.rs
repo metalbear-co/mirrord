@@ -489,7 +489,7 @@ pub async fn rollout_service(
         service_name,
         randomize_name,
         kube_client.await,
-        Value::Null,
+        default_env(),
         None,
         None,
         false,
