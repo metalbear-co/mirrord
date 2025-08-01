@@ -375,9 +375,10 @@ impl TestIntProxy {
     /// Verify layer hooks an `open` of file `file_name` with read flag set, and any other flags.
     /// Send back answer with given `fd`.
     pub async fn expect_file_open_with_read_flag(&mut self, file_name: &str, fd: u64) {
+        let msg = self.recv().await;
         // Verify the app tries to open the expected file.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path,
@@ -421,9 +422,10 @@ impl TestIntProxy {
         fd: u64,
         open_options: OpenOptionsInternal,
     ) {
+        let msg = self.recv().await;
         // Verify the app tries to open the expected file.
         assert_eq!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
@@ -443,9 +445,10 @@ impl TestIntProxy {
 
     /// Like the other expect_file_open_... but where we don't compare to predefined open options.
     pub async fn expect_file_open_with_whatever_options(&mut self, file_name: &str, fd: u64) {
+        let msg = self.recv().await;
         // Verify the app tries to open the expected file.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path,
@@ -465,9 +468,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::ReadLink`], and answers it.
     pub async fn expect_read_link(&mut self, file_name: &str) {
+        let msg = self.recv().await;
         // Expecting `readlink` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::ReadLink(
                 mirrord_protocol::file::ReadLinkFileRequest { path }
             )) if path.to_str().unwrap() == file_name
@@ -489,9 +493,11 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::MakeDir`] and answers it.
     pub async fn expect_make_dir(&mut self, expected_dir_name: &str, expected_mode: u32) {
+        let msg = self.recv().await;
+
         // Expecting `mkdir` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::MakeDir(
                 mirrord_protocol::file::MakeDirRequest { pathname, mode }
             )) if pathname.to_str().unwrap() == expected_dir_name && mode == expected_mode
@@ -508,9 +514,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::Statefs`] and answers it.
     pub async fn expect_statfs(&mut self, expected_path: &str) {
+        let msg = self.recv().await;
         // Expecting `statfs` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::StatFsV2(
                 mirrord_protocol::file::StatFsRequestV2 { path }
             )) if path.to_str().unwrap() == expected_path
@@ -529,9 +536,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::Xstatefs`] and answers it.
     pub async fn expect_fstatfs(&mut self, expected_fd: u64) {
+        let msg = self.recv().await;
         // Expecting `fstatfs` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::XstatFsV2(
                 mirrord_protocol::file::XstatFsRequestV2 { fd }
             )) if expected_fd == fd
@@ -550,9 +558,10 @@ impl TestIntProxy {
 
     /// Makes a [`FileRequest::RemoveDir`] and answers it.
     pub async fn expect_remove_dir(&mut self, expected_dir_name: &str) {
+        let msg = self.recv().await;
         // Expecting `rmdir` call with path.
         assert_matches!(
-            self.recv().await,
+            msg,
             ClientMessage::FileRequest(FileRequest::RemoveDir(
                 mirrord_protocol::file::RemoveDirRequest { pathname }
             )) if pathname.to_str().unwrap() == expected_dir_name
