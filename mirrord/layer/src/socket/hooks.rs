@@ -495,17 +495,15 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
-    unsafe {
-        remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
-            Box::into_raw(Box::new(dns_config_t {
-                n_resolver: 0,
-                resolver: std::ptr::null_mut(),
-                n_scoped_resolver: 0,
-                scoped_resolver: std::ptr::null_mut(),
-                reserved: [0; 5],
-            }))
-        })
-    }
+    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
+        Box::into_raw(Box::new(dns_config_t {
+            n_resolver: 0,
+            resolver: std::ptr::null_mut(),
+            n_scoped_resolver: 0,
+            scoped_resolver: std::ptr::null_mut(),
+            reserved: [0; 5],
+        }))
+    })
 }
 
 /// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
