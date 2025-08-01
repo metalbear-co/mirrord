@@ -521,7 +521,7 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
 
         if config.resolver.is_null().not() && config.n_resolver > 0 {
             let resolver_ptr = Box::from_raw(config.resolver);
-            free_dns_resolver_t(*resolver);
+            free_dns_resolver_t(*resolver_ptr);
         }
     }
 }
