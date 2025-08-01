@@ -415,24 +415,11 @@ impl DumpSession {
                     return Err(DumpSessionError::AgentConnClosed(Some(message)));
                 }
                 DaemonMessage::Pong => continue,
-                DaemonMessage::LogMessage(LogMessage {
-                    level: LogLevel::Error,
-                    message,
-                }) => {
-                    tracing::error!("Received log: {message}");
-                }
-                DaemonMessage::LogMessage(LogMessage {
-                    level: LogLevel::Warn,
-                    message,
-                }) => {
-                    tracing::warn!("Received log: {message}");
-                }
-                DaemonMessage::LogMessage(LogMessage {
-                    level: LogLevel::Info,
-                    message,
-                }) => {
-                    tracing::info!("Received log: {message}");
-                }
+                DaemonMessage::LogMessage(LogMessage { level, message }) => match level {
+                    LogLevel::Error => tracing::error!("Received log: {message}"),
+                    LogLevel::Warn => tracing::warn!("Received log: {message}"),
+                    LogLevel::Info => tracing::warn!("Received log: {message}"),
+                },
                 message @ (DaemonMessage::File(..)
                 | DaemonMessage::GetAddrInfoResponse(..)
                 | DaemonMessage::GetEnvVarsResponse(..)
