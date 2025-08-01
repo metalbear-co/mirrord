@@ -410,6 +410,7 @@ struct SqsConsumerServiceConfig {
     with_fallback_json: bool,
     with_env_from: bool,
     with_value_from: bool,
+    workload_type: TestWorkloadType,
 }
 
 /// Create a microservice for the sqs test application.
@@ -426,8 +427,8 @@ async fn sqs_consumer_service(
         with_fallback_json,
         with_env_from,
         with_value_from,
+        workload_type,
     }: SqsConsumerServiceConfig,
-    workload_type: TestWorkloadType,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
 
@@ -749,8 +750,8 @@ pub async fn sqs_test_resources(
             with_fallback_json,
             with_env_from,
             with_value_from,
+            workload_type,
         },
-        workload_type,
     )
     .await;
 
