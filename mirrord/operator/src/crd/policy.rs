@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use kube::CustomResource;
 use schemars::{
-    schema::{InstanceType, ObjectValidation, Schema, SchemaObject},
     JsonSchema,
+    schema::{ArrayValidation, InstanceType, ObjectValidation, Schema, SchemaObject, SingleOrVec},
 };
 use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{IntoDeserializer, MapAccess, Visitor},
     ser::SerializeMap,
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 
 use super::label_selector::LabelSelector;
@@ -415,12 +415,32 @@ impl JsonSchema for QueueFilterRuleExp {
         "QueueFilterRuleExp".to_string()
     }
 
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> Schema {
+    fn json_schema(r#gen: &mut schemars::r#gen::SchemaGenerator) -> Schema {
+        let array_of_objects_schema = Some(Box::new(ArrayValidation {
+            items: Some(SingleOrVec::Single(Box::new(Schema::Object(
+                SchemaObject {
+                    // K8s does not allow definition $ref and require non-empty item value by
+                    // default. We need this extension to bypass the check.
+                    extensions: [(
+                        "x-kubernetes-preserve-unknown-fields".to_string(),
+                        serde_json::Value::Bool(true),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..Default::default()
+                },
+            )))),
+            ..Default::default()
+        }));
         let all_of_schema = {
             let mut obj = ObjectValidation::default();
             obj.properties.insert(
                 "allOf".to_string(),
-                gen.subschema_for::<Vec<QueueFilterRuleExp>>(),
+                Schema::Object(SchemaObject {
+                    instance_type: Some(InstanceType::Array.into()),
+                    array: array_of_objects_schema.clone(),
+                    ..Default::default()
+                }),
             );
             obj.required.insert("allOf".to_string());
             Schema::Object(SchemaObject {
@@ -430,11 +450,16 @@ impl JsonSchema for QueueFilterRuleExp {
             })
         };
 
+        // anyOf variant: { "anyOf": [{}, {}, ...] }
         let any_of_schema = {
             let mut obj = ObjectValidation::default();
             obj.properties.insert(
                 "anyOf".to_string(),
-                gen.subschema_for::<Vec<QueueFilterRuleExp>>(),
+                Schema::Object(SchemaObject {
+                    instance_type: Some(InstanceType::Array.into()),
+                    array: array_of_objects_schema,
+                    ..Default::default()
+                }),
             );
             obj.required.insert("anyOf".to_string());
             Schema::Object(SchemaObject {
@@ -444,9 +469,8 @@ impl JsonSchema for QueueFilterRuleExp {
             })
         };
 
-        let single_schema = gen.subschema_for::<QueueFilterRule>();
+        let single_schema = r#gen.subschema_for::<QueueFilterRule>();
 
-        // Use a oneOf to represent the three mutually exclusive shapes
         Schema::Object(SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![all_of_schema, any_of_schema, single_schema]),
