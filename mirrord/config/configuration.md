@@ -598,6 +598,11 @@ Enables trusting any certificate on macOS, useful for <https://github.com/golang
 
 Uses /dev/null for creating local fake files (should be better than using /tmp)
 
+### _experimental_ vfork_emulation {#experimental-vfork_emulation}
+
+Enables vfork emulation within the mirrord-layer.
+Might solve rare stack corruption issues.  
+
 ## external_proxy {#root-external_proxy}
 
 Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
