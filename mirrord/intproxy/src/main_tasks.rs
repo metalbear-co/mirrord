@@ -145,4 +145,5 @@ pub struct LayerClosed {
 pub enum ConnectionRefresh {
     Start,
     End,
+    Request,
 }
