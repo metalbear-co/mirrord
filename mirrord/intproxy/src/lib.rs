@@ -414,7 +414,11 @@ impl IntProxy {
     }
 
     /// Routes most messages from the agent to the correct background task.
+    ///
     /// Some messages are handled here.
+    ///
+    /// - When adding a new message, remember to add it here, otherwise it'll fall under `other` and
+    ///   error out.
     async fn handle_agent_message(
         &mut self,
         message: DaemonMessage,
@@ -434,6 +438,12 @@ impl IntProxy {
                 self.task_txs
                     .ping_pong
                     .send(PingPongMessage::AgentSentPong)
+                    .await
+            }
+            DaemonMessage::OperatorPing(id) => {
+                self.task_txs
+                    .agent
+                    .send(ClientMessage::OperatorPong(id))
                     .await
             }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
