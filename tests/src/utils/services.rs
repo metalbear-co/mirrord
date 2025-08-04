@@ -4,10 +4,7 @@ use k8s_openapi::api::{
     apps::v1::Deployment,
     core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
-use kube::{
-    api::{DeleteParams, Patch, PatchParams},
-    Api, Client, Resource, ResourceExt,
-};
+use kube::{api::DeleteParams, Api, Client, Resource, ResourceExt};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use resource_guard::ResourceGuard;
