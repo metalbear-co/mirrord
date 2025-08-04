@@ -5,7 +5,10 @@
 //! Realized using the [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong) and
 //! [`ClientMessage::Ping`] messages.
 
-use std::time::{Duration, Instant};
+use std::{
+    ops::ControlFlow,
+    time::{Duration, Instant},
+};
 
 use mirrord_protocol::ClientMessage;
 use thiserror::Error;
@@ -14,7 +17,7 @@ use tracing::Level;
 
 use crate::{
     ProxyMessage,
-    background_tasks::{BackgroundTask, MessageBus},
+    background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
     main_tasks::ConnectionRefresh,
 };
 
@@ -46,6 +49,8 @@ pub struct PingPong {
     awaiting_pongs: usize,
 
     reconnecting: bool,
+    reconnects: usize,
+    max_reconnects: usize,
 
     last_agent_message: Option<Instant>,
 }
@@ -56,7 +61,7 @@ impl PingPong {
     /// # Arguments
     ///
     /// * frequency - how often the task should send pings
-    pub fn new(frequency: Duration) -> Self {
+    pub fn new(frequency: Duration, max_reconnects: usize) -> Self {
         let mut ticker = time::interval(frequency);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -64,6 +69,8 @@ impl PingPong {
             ticker,
             awaiting_pongs: 0,
             reconnecting: false,
+            reconnects: 0,
+            max_reconnects,
             last_agent_message: None,
         }
     }
@@ -107,6 +114,12 @@ impl BackgroundTask for PingPong {
                     }
                     (Some(PingPongMessage::AgentSentPong), 1..) => {
                         tracing::debug!("Agent responded to ping");
+
+                        // We recived a Pong from agent so reconnect counter should be reset
+                        if self.reconnects != 0 {
+                            self.reconnects = 0;
+                        }
+
                         self.awaiting_pongs = self.awaiting_pongs.saturating_sub(1);
                     },
                     (Some(PingPongMessage::AgentSentPong), 0) => {
@@ -116,17 +129,41 @@ impl BackgroundTask for PingPong {
                         tracing::debug!(info = ?refresh, "Received info about connection refresh");
                         match refresh {
                             ConnectionRefresh::Start => {
+                                self.awaiting_pongs = 0;
                                 self.reconnecting = true;
                             }
                             ConnectionRefresh::End => {
                                 self.reconnecting = false;
                                 self.ticker.reset();
                             }
+                            ConnectionRefresh::Request => {}
                         }
                     }
 
                 },
             }
+        }
+    }
+}
+
+impl RestartableBackgroundTask for PingPong {
+    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
+    async fn restart(
+        &mut self,
+        error: Self::Error,
+        message_bus: &mut MessageBus<Self>,
+    ) -> ControlFlow<Self::Error> {
+        match error {
+            PingPongError::PongTimeout if self.reconnects < self.max_reconnects => {
+                message_bus
+                    .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::Request))
+                    .await;
+
+                self.reconnects += 1;
+
+                ControlFlow::Continue(())
+            }
+            _ => ControlFlow::Break(error),
         }
     }
 }
