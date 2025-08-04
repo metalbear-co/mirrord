@@ -603,6 +603,9 @@ Uses /dev/null for creating local fake files (should be better than using /tmp)
 Enables vfork emulation within the mirrord-layer.
 Might solve rare stack corruption issues.  
 
+Note that for Go applications on ARM64, this feature is not yet supported,
+and this settings is ignored.
+
 ## external_proxy {#root-external_proxy}
 
 Configuration for the external proxy mirrord spawns when using the `mirrord container` command.

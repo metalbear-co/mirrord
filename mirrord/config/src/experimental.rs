@@ -110,6 +110,9 @@ pub struct ExperimentalConfig {
     ///
     /// Enables vfork emulation within the mirrord-layer.
     /// Might solve rare stack corruption issues.  
+    ///
+    /// Note that for Go applications on ARM64, this feature is not yet supported,
+    /// and this settings is ignored.
     #[config(default = false)]
     pub vfork_emulation: bool,
 }
