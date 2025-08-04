@@ -649,7 +649,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager);
+        go_hooks::enable_hooks(&mut hook_manager, state.experimental());
     }
 }
 

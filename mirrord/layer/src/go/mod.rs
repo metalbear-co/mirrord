@@ -169,3 +169,46 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         syscall_result
     }
 }
+
+/// Handler for `rawVforkSyscall` calls.
+///
+/// Removes the [`libc::CLONE_VM`] flag from the clone flags.
+/// This way the child process will **not** share parent's memory,
+/// and we will be able to safely use hooks in the child.
+///
+/// The [`libc::CLONE_VFORK`] flag is left intact on purpose,
+/// as it only suspends the parent process until the child exits or execs
+/// (which is a behavior we want to preserve - the user application might depend on it).
+///
+/// See [Linux manual](https://man7.org/linux/man-pages/man2/clone.2.html) for reference.
+#[no_mangle]
+unsafe extern "C" fn raw_vfork_handler(
+    mut param_1: i64,
+    param_2: i64,
+    param_3: i64,
+    syscall_num: i64,
+) -> i64 {
+    if syscall_num == libc::SYS_clone {
+        param_1 &= !(libc::CLONE_VM as i64);
+    } else if syscall_num == libc::SYS_clone3 {
+        let args = param_1 as *mut libc::clone_args;
+        if let Some(args) = args.as_mut() {
+            args.flags &= !(libc::CLONE_VM as u64);
+        }
+    };
+
+    syscalls::syscall!(
+        syscalls::Sysno::from(syscall_num as i32),
+        param_1,
+        param_2,
+        param_3,
+        0,
+        0,
+        0
+    )
+    .map(|success| success as i64)
+    .unwrap_or_else(|error| {
+        let raw_errno = error.into_raw();
+        -(raw_errno as i64)
+    })
+}

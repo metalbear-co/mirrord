@@ -1,5 +1,6 @@
 use std::arch::naked_asm;
 
+use mirrord_config::experimental::ExperimentalConfig;
 use nix::errno::Errno;
 use tracing::trace;
 
@@ -511,6 +512,30 @@ unsafe extern "C" fn go_syscall_new_detour() {
     )
 }
 
+/// Detour for `syscall.rawVforkSyscall.abi0` function.
+#[naked]
+unsafe extern "C" fn raw_vfork_detour() {
+    naked_asm!(
+        "mov rdi, qword ptr [rsp+0x10]",
+        "mov rsi, qword ptr [rsp+0x18]",
+        "mov rdx, qword ptr [rsp+0x20]",
+        "mov rcx, qword ptr [rsp+0x8]",
+        "pop r12",
+        "call raw_vfork_handler",
+        "push r12",
+        "cmp rax, 0xfffffffffffff001",
+        "jbe 2f",
+        "mov qword ptr [rsp+0x28], -1",
+        "neg rax",
+        "mov qword ptr [rsp+0x30], rax",
+        "ret",
+        "2:",
+        "mov qword ptr [rsp+0x28], rax",
+        "mov qword ptr [rsp+0x30], 0",
+        "ret",
+    )
+}
+
 /// Hooks for when hooking a pre go 1.19 binary
 fn pre_go1_19(hook_manager: &mut HookManager) {
     hook_symbol!(
@@ -545,7 +570,7 @@ fn post_go1_23(hook_manager: &mut HookManager) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &ExperimentalConfig) {
     if let Some(version_symbol) =
         hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")
     {
@@ -566,6 +591,14 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
         } else {
             trace!("found version < 1.19");
             pre_go1_19(hook_manager);
+        }
+
+        if experimental.vfork_emulation {
+            hook_symbol!(
+                hook_manager,
+                "syscall.rawVforkSyscall.abi0",
+                raw_vfork_detour
+            );
         }
     }
 }
