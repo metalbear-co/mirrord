@@ -4,17 +4,17 @@ use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, target::TargetType, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
-use serde::{ser::SerializeSeq, Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeSeq};
 use tracing::Level;
 
-use crate::{util, CliError, CliResult, Format, ListTargetArgs};
+use crate::{CliError, CliResult, Format, ListTargetArgs, util};
 
 /// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
 /// Primarily used by the plugins when the user picks a target to fetch fewer targets at once.

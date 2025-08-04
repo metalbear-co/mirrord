@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use kube::{core::ErrorResponse, Api};
+use kube::{Api, core::ErrorResponse};
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{
-        error::{OperatorApiError, OperatorOperation},
         MaybeClientCert, OperatorApi,
+        error::{OperatorApiError, OperatorOperation},
     },
     crd::{NewOperatorFeature, SessionCrd},
 };

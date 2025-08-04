@@ -2,7 +2,7 @@ use core::fmt;
 use std::{marker::PhantomData, str::FromStr};
 
 use super::context::ConfigContext;
-use crate::config::{source::MirrordConfigSource, ConfigError, Result};
+use crate::config::{ConfigError, Result, source::MirrordConfigSource};
 
 #[derive(Clone)]
 pub struct FromEnv<T>(&'static str, PhantomData<T>);

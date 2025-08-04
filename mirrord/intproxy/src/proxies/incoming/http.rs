@@ -1,14 +1,14 @@
 use std::{fmt, io, net::SocketAddr, ops::Not};
 
 use hyper::{
+    Request, Response, StatusCode, Version,
     body::Incoming,
     client::conn::{http1, http2},
-    Request, Response, StatusCode, Version,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
-    tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
     ConnectionId, Payload, Port, RequestId,
+    tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
 };
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};

@@ -2,7 +2,7 @@ use std::arch::naked_asm;
 
 use tracing::trace;
 
-use crate::{go::c_abi_syscall6_handler, macros::hook_symbol, HookManager};
+use crate::{HookManager, go::c_abi_syscall6_handler, macros::hook_symbol};
 
 type VoidFn = unsafe extern "C" fn() -> ();
 static mut FN_ASMCGOCALL: Option<VoidFn> = None;
@@ -22,22 +22,24 @@ struct SyscallArgs {
 
 /// asmcgocall can pass a pointer, so this is a conversion call to `c_abi_syscall6_handler`
 unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs) -> i64 {
-    c_abi_syscall6_handler(
-        (*syscall_struct).syscall,
-        (*syscall_struct).arg1,
-        (*syscall_struct).arg2,
-        (*syscall_struct).arg3,
-        (*syscall_struct).arg4,
-        (*syscall_struct).arg5,
-        (*syscall_struct).arg6,
-    )
+    unsafe {
+        c_abi_syscall6_handler(
+            (*syscall_struct).syscall,
+            (*syscall_struct).arg1,
+            (*syscall_struct).arg2,
+            (*syscall_struct).arg3,
+            (*syscall_struct).arg4,
+            (*syscall_struct).arg5,
+            (*syscall_struct).arg6,
+        )
+    }
 }
 
 /// Detour for Go >= 1.19
 /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
 /// so syscall6 handler need to handle syscall3 detours as well.
 // We're using asmcogcall to avoid re-implementing it and doing it badly.
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn go_syscall_new_detour() {
     naked_asm!(
         // save fp and lr to stack and reserve that memory.

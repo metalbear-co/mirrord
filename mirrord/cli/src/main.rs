@@ -233,10 +233,13 @@
 //!
 //! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
 //! prints a nice little message to stdout.
-#![feature(let_chains)]
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::large_enum_variant)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::result_large_err)]
 
 use std::{
     collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
@@ -259,6 +262,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
+    LayerConfig,
     config::ConfigContext,
     feature::{
         fs::FsModeConfig,
@@ -267,10 +271,9 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    LayerConfig,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
+use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -616,7 +619,9 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
 
     if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
-        warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
+        warn!(
+            "TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't"
+        )
     }
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
@@ -894,12 +899,11 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
 
-    if check_version {
-        if let Ok(client) = reqwest::Client::builder()
+    if check_version
+        && let Ok(client) = reqwest::Client::builder()
             .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
             .build()
-        {
-            if let Ok(result) = client
+            && let Ok(result) = client
                 .get(format!(
                     "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
                     CURRENT_VERSION,
@@ -907,8 +911,7 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await
-            {
-                if let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
+                && let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                         let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
                         let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
@@ -919,9 +922,6 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                         progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
                     }
                 }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

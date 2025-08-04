@@ -59,7 +59,7 @@ impl RuntimeCommandBuilder {
                 self.push_arg("-v");
                 self.push_arg(format!(
                     "{host_path}:{container_path}{}",
-                    readonly.then_some(":ro").unwrap_or_default()
+                    if readonly { ":ro" } else { Default::default() }
                 ));
             }
         }

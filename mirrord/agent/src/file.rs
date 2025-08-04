@@ -1,9 +1,9 @@
 use std::{
     self,
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap, VecDeque},
-    fs::{read_link, File, OpenOptions, ReadDir},
-    io::{self, prelude::*, BufReader, SeekFrom},
+    collections::{HashMap, VecDeque, hash_map::Entry},
+    fs::{File, OpenOptions, ReadDir, read_link},
+    io::{self, SeekFrom, prelude::*},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
@@ -15,9 +15,9 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
-use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use mirrord_protocol::{FileRequest, FileResponse, RemoteResult, ResponseError, file::*};
 use nix::unistd::UnlinkatFlags;
-use tracing::{error, trace, Level};
+use tracing::{Level, error, trace};
 
 use crate::{
     error::AgentResult, metrics::OPEN_FD_COUNT, util::path_resolver::InTargetPathResolver,
@@ -34,7 +34,7 @@ fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryIntern
 }
 
 #[derive(Debug)]
-struct GetDEnts64Stream {
+pub(crate) struct GetDEnts64Stream {
     inner: std::fs::ReadDir,
     current_and_parent: VecDeque<io::Result<DirEntryInternal>>,
     current_index: usize,
@@ -342,50 +342,6 @@ impl FileManager {
             })
     }
 
-    /// Remote implementation of `fgets`.
-    ///
-    /// Uses `BufReader::read_line` to read a line (including `"\n"`) from a file with `fd`. The
-    /// file cursor position has to be moved manually due to this.
-    ///
-    /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
-    /// on it (even though we return the full `Vec` of bytes).
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn read_line(
-        &mut self,
-        fd: u64,
-        buffer_size: u64,
-    ) -> RemoteResult<ReadFileResponse> {
-        self.open_files
-            .get_mut(&fd)
-            .ok_or(ResponseError::NotFound(fd))
-            .and_then(|remote_file| {
-                if let RemoteFile::File(file) = remote_file {
-                    let original_position = file.stream_position()?;
-                    // limit bytes read using take
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
-                    let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
-                    Ok(reader
-                        .read_until(b'\n', &mut buffer)
-                        .and_then(|read_amount| {
-                            // Revert file to original position + bytes read (in case the
-                            // bufreader advanced too much)
-                            file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
-
-                            // We handle the extra bytes in the `fgets` hook, so here we can
-                            // just return the full buffer.
-                            let response = ReadFileResponse {
-                                bytes: buffer.into(),
-                                read_amount: read_amount as u64,
-                            };
-
-                            Ok(response)
-                        })?)
-                } else {
-                    Err(ResponseError::NotFile(fd))
-                }
-            })
-    }
-
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_limited(
         &mut self,
@@ -483,9 +439,7 @@ impl FileManager {
     pub(crate) fn mkdirat(&mut self, dirfd: u64, path: &Path, mode: u32) -> RemoteResult<()> {
         trace!(
             "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
-            dirfd,
-            path,
-            mode
+            dirfd, path, mode
         );
 
         let relative_dir = self
@@ -551,7 +505,7 @@ impl FileManager {
             _ => {
                 return Err(ResponseError::from(std::io::Error::from_raw_os_error(
                     libc::EINVAL,
-                )))
+                )));
             }
         };
 
@@ -564,8 +518,7 @@ impl FileManager {
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
         trace!(
             "FileManager::seek -> fd {:#?} | seek_from {:#?}",
-            fd,
-            seek_from
+            fd, seek_from
         );
 
         self.open_files
@@ -653,8 +606,7 @@ impl FileManager {
         let pathname = self.resolve_path(&pathname)?;
         trace!(
             "FileManager::access -> pathname {:#?} | mode {:#?}",
-            pathname,
-            mode,
+            pathname, mode,
         );
 
         // Mirror bit representation of flags to support how the flags are represented in the
@@ -680,14 +632,15 @@ impl FileManager {
             (Some(path), None) => path,
             // fstatat
             (Some(path), Some(fd)) => {
-                if let RemoteFile::Directory(parent_path) = self
+                match self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    parent_path.join(path)
-                } else {
-                    return Err(ResponseError::NotDirectory(fd));
+                    RemoteFile::Directory(parent_path) => parent_path.join(path),
+                    _ => {
+                        return Err(ResponseError::NotDirectory(fd));
+                    }
                 }
             }
             // fstat
@@ -700,12 +653,12 @@ impl FileManager {
                     RemoteFile::File(file) => {
                         return Ok(XstatResponse {
                             metadata: file.metadata()?.into(),
-                        })
+                        });
                     }
                     RemoteFile::Directory(path) => {
                         return Ok(XstatResponse {
                             metadata: path.metadata()?.into(),
-                        })
+                        });
                     }
                 }
             }
@@ -853,12 +806,11 @@ impl FileManager {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
-        let result = if let Some(offset_entry_pair) = dir_stream.next() {
-            ReadDirResponse {
+        let result = match dir_stream.next() {
+            Some(offset_entry_pair) => ReadDirResponse {
                 direntry: Some(offset_entry_pair.try_into()?),
-            }
-        } else {
-            ReadDirResponse { direntry: None }
+            },
+            _ => ReadDirResponse { direntry: None },
         };
 
         Ok(result)
