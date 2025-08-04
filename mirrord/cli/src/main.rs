@@ -415,11 +415,7 @@ where
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
-    // upon success, print all messages in the progress buffer
-    let buffer = progress.success_and_return_buffer(Some("Ready!"));
-    if let Some(buffer_vec) = buffer {
-        buffer_vec.iter().for_each(|msg| eprintln!("{msg}"))
-    }
+    progress.success(Some("Ready!"));
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())

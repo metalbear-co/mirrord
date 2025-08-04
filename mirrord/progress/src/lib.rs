@@ -25,42 +25,40 @@ pub trait Progress: Sized + Send + Sync {
     fn subtask(&self, text: &str) -> Self;
 
     /// When task is done successfully
-    fn success(&mut self, msg: Option<&str>);
-
-    /// When task is done successfully, and any messages to print - these should be printed by the
-    /// calling function.
-    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>>;
+    fn success(&mut self, _: Option<&str>) {}
 
     /// When task is done with failure
-    fn failure(&mut self, msg: Option<&str>);
+    fn failure(&mut self, _: Option<&str>) {}
 
     /// When you want to issue a warning on current task
-    fn warning(&self, msg: &str);
+    fn warning(&self, _: &str) {}
 
     /// When you want to print a message, IDE support.
-    fn info(&self, msg: &str);
+    fn info(&self, _: &str) {}
 
     /// When you want to send a message to the IDE that doesn't need to be shown to the user.
     ///
     /// You may use this to pass additional context to the IDE through the `value` object.
-    fn ide(&self, value: serde_json::Value);
+    fn ide(&self, _: serde_json::Value) {}
 
     /// When you want to print a message, cli only.
-    fn print(&self, msg: &str);
+    fn print(&self, _: &str) {}
 
     /// When you want to print a message, cli only, after progress has succeeded.
     ///
     /// Only for `SpinnerProgress`.
-    fn add_to_print_buffer(&mut self, msg: &str);
+    fn add_to_print_buffer(&mut self, _: &str) {}
 
     /// Control if drop without calling success is considered failure.
-    fn set_fail_on_drop(&mut self, fail: bool);
+    fn set_fail_on_drop(&mut self, _: bool) {}
 
     /// Hide the progress task temporarily to execute a function without stdout interference. This
     /// is particularly useful when interactive cluster auth mode is used.
     ///
     /// Only for `SpinnerProgress`.
-    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R;
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        f()
+    }
 }
 
 /// `ProgressTracker` determines the way progress is reported.
@@ -86,30 +84,6 @@ pub struct NullProgress;
 impl Progress for NullProgress {
     fn subtask(&self, _: &str) -> NullProgress {
         NullProgress
-    }
-
-    fn success(&mut self, _: Option<&str>) {}
-
-    fn success_and_return_buffer(&mut self, _: Option<&str>) -> Option<Vec<String>> {
-        None
-    }
-
-    fn failure(&mut self, _: Option<&str>) {}
-
-    fn warning(&self, _: &str) {}
-
-    fn info(&self, _: &str) {}
-
-    fn ide(&self, _: serde_json::Value) {}
-
-    fn print(&self, _: &str) {}
-
-    fn add_to_print_buffer(&mut self, _: &str) {}
-
-    fn set_fail_on_drop(&mut self, _: bool) {}
-
-    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
-        f()
     }
 }
 
@@ -168,11 +142,6 @@ impl Progress for JsonProgress {
         self.print_finished_task(true, msg)
     }
 
-    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
-        self.success(msg);
-        None
-    }
-
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
         self.print_finished_task(false, msg)
@@ -203,16 +172,8 @@ impl Progress for JsonProgress {
         }
     }
 
-    fn print(&self, _: &str) {}
-
-    fn add_to_print_buffer(&mut self, _: &str) {}
-
     fn set_fail_on_drop(&mut self, fail: bool) {
         self.fail_on_drop = fail;
-    }
-
-    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
-        f()
     }
 }
 
@@ -248,11 +209,6 @@ impl Progress for SimpleProgress {
         println!("{msg:?}");
     }
 
-    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
-        self.success(msg);
-        None
-    }
-
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
     }
@@ -265,18 +221,8 @@ impl Progress for SimpleProgress {
         println!("{msg}");
     }
 
-    fn ide(&self, _: serde_json::Value) {}
-
     fn print(&self, text: &str) {
         println!("{text}");
-    }
-
-    fn add_to_print_buffer(&mut self, _: &str) {}
-
-    fn set_fail_on_drop(&mut self, _: bool) {}
-
-    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
-        f()
     }
 }
 
@@ -346,11 +292,7 @@ impl Progress for SpinnerProgress {
             self.progress
                 .finish_with_message(format!("✓ {}", self.progress.message()));
         }
-    }
-
-    fn success_and_return_buffer(&mut self, msg: Option<&str>) -> Option<Vec<String>> {
-        self.success(msg);
-        Some(self.message_buffer.clone())
+        self.message_buffer.iter().for_each(|msg| println!("{msg}"));
     }
 
     fn failure(&mut self, msg: Option<&str>) {
@@ -374,8 +316,6 @@ impl Progress for SpinnerProgress {
         self.print(&formatted_message);
         self.progress.set_message(formatted_message);
     }
-
-    fn ide(&self, _: serde_json::Value) {}
 
     fn print(&self, msg: &str) {
         let _ = self.root_progress.println(msg);
