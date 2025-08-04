@@ -142,6 +142,7 @@ pub enum ClientMessage {
     ReadyForLogs,
     Vpn(ClientVpn),
     GetAddrInfoRequestV2(GetAddrInfoRequestV2),
+    OperatorPong(u128),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -191,6 +192,7 @@ pub enum DaemonMessage {
     PauseTarget(crate::pause::DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
     Vpn(ServerVpn),
+    OperatorPing(u128),
 }
 
 pub struct ProtocolCodec<I, O> {

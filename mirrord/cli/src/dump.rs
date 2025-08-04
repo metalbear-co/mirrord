@@ -418,6 +418,12 @@ impl DumpSession {
             };
 
             match message {
+                DaemonMessage::OperatorPing(id) => {
+                    self.connection
+                        .sender
+                        .send(ClientMessage::OperatorPong(id))
+                        .await?;
+                }
                 DaemonMessage::Tcp(message) => {
                     self.handle_tcp_message(message, progress)?;
                 }
