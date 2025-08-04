@@ -248,7 +248,7 @@ pub(crate) async fn internal_service(
 
     match workload_type {
         TestWorkloadType::Deployment => {
-            let deployment = deployment_from_json(&name, image, env, env_from);
+            let deployment = deployment_from_json(&name, image, env, env_from, 1);
             let (deployment_guard, _deployment) =
                 ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
                     .await
@@ -256,7 +256,7 @@ pub(crate) async fn internal_service(
             guards.push(deployment_guard);
         }
         TestWorkloadType::ArgoRolloutWithWorkloadRef => {
-            let deployment = deployment_from_json(&name, image, env, env_from);
+            let deployment = deployment_from_json(&name, image, env, env_from, 0);
             let (deployment_guard, deployment) =
                 ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
                     .await
@@ -273,17 +273,6 @@ pub(crate) async fn internal_service(
                 &kube_client,
             )
             .await;
-
-            // Scale deployment to zero replicas so only the rollout manages pods
-            let patch = serde_json::json!({ "spec": { "replicas": 0 } });
-            deployment_api
-                .patch(
-                    &name,
-                    &PatchParams::apply("mirrord-test"),
-                    &Patch::Merge(&patch),
-                )
-                .await
-                .expect("Failed to scale deployment to zero replicas");
         }
         TestWorkloadType::ArgoRolloutWithTemplate => {
             let rollout = argo_rollout_from_json(

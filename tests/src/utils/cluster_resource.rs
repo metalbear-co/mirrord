@@ -73,6 +73,7 @@ pub(super) fn deployment_from_json(
     image: &str,
     env: Value,
     env_from: Option<Vec<EnvFromSource>>,
+    replicas: u8,
 ) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
@@ -86,7 +87,7 @@ pub(super) fn deployment_from_json(
             }
         },
         "spec": {
-            "replicas": 1,
+            "replicas": replicas,
             "selector": {
                 "matchLabels": {
                     "app": &name
