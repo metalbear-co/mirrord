@@ -16,9 +16,9 @@ use tokio::time::{self, Interval, MissedTickBehavior};
 use tracing::Level;
 
 use crate::{
+    ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
     main_tasks::ConnectionRefresh,
-    ProxyMessage,
 };
 
 /// Errors that can occur when handling ping pong.

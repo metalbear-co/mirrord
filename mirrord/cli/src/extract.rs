@@ -8,7 +8,7 @@ use const_random::const_random;
 use mirrord_progress::Progress;
 use tracing::debug;
 
-use crate::{error::CliError, CliResult};
+use crate::{CliResult, error::CliError};
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]

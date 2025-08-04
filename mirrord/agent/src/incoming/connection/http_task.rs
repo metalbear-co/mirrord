@@ -2,15 +2,15 @@ use std::{error::Report, future::Future};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use http_body_util::{combinators::BoxBody, BodyExt, StreamBody};
+use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
 use hyper::{
+    Request, Response,
     body::{Body, Frame, Incoming},
     http::{StatusCode, Version},
     upgrade::{OnUpgrade, Upgraded},
-    Request, Response,
 };
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{tcp::InternalHttpBodyFrame, Payload};
+use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -22,17 +22,17 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     http::{
-        body::RolledBackBody, error::MirrordErrorResponse, extract_requests::ExtractedRequest,
-        sender::HttpSender, HttpVersion,
+        HttpVersion, body::RolledBackBody, error::MirrordErrorResponse,
+        extract_requests::ExtractedRequest, sender::HttpSender,
     },
     incoming::{
+        IncomingStreamItem,
         connection::{
+            ConnectionInfo,
             copy_bidirectional::{self, CowBytes, OutgoingDestination},
             optional_broadcast::OptionalBroadcast,
-            ConnectionInfo,
         },
         error::ConnError,
-        IncomingStreamItem,
     },
 };
 

@@ -1,6 +1,8 @@
 #![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::large_enum_variant)]
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -17,7 +19,7 @@ use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
 };
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, LogLevel, CLIENT_READY_FOR_LOGS,
+    CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
 };
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
@@ -659,15 +661,15 @@ mod test {
     use mirrord_intproxy_protocol::{
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
-    use mirrord_protocol::{file::StatFsRequestV2, ClientMessage, DaemonMessage, FileRequest};
+    use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
     };
 
     use crate::{
-        agent_conn::{AgentConnection, ReconnectFlow},
         IntProxy,
+        agent_conn::{AgentConnection, ReconnectFlow},
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests

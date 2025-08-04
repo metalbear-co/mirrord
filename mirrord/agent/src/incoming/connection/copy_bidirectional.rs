@@ -7,7 +7,7 @@ use tokio::{
 };
 
 use crate::incoming::{
-    connection::optional_broadcast::OptionalBroadcast, ConnError, IncomingStreamItem,
+    ConnError, IncomingStreamItem, connection::optional_broadcast::OptionalBroadcast,
 };
 
 /// Copies data bidirectionally between an incoming stream and an outgoing destination.

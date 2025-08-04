@@ -15,7 +15,9 @@ fn main() {
         && std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|t| t.eq("aarch64") || t.eq("x86_64"))
         && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|t| t.eq("macos"))
     {
-        println!("cargo::warning=No environment variable 'MIRRORD_LAYER_FILE_MACOS_ARM64' found - it should contain the path to the mirrord layer compiled for the `aarch64-apple-darwin` target");
+        println!(
+            "cargo::warning=No environment variable 'MIRRORD_LAYER_FILE_MACOS_ARM64' found - it should contain the path to the mirrord layer compiled for the `aarch64-apple-darwin` target"
+        );
         exit(1);
     };
 }

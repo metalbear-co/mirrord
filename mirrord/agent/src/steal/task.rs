@@ -1,29 +1,29 @@
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt,
     ops::Not,
 };
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use http::header::UPGRADE;
 use mirrord_protocol::{
+    LogMessage,
     tcp::{
         HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_FILTERED_UPGRADE_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
     },
-    LogMessage,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
-    subscriptions::{PortSubscription, PortSubscriptions},
     Command, StealerCommand, StealerMessage,
+    subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
     incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
-    util::{protocol_version::ClientProtocolVersion, ChannelClosedFuture, ClientId},
+    util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
 /// Background task responsible for handling steal port subscriptions

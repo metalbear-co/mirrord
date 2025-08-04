@@ -1,11 +1,11 @@
 use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref, str::FromStr};
 
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::{
-    config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result},
     LayerConfig,
+    config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result},
 };
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
