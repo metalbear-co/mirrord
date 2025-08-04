@@ -154,19 +154,20 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         )?;
         NT_CREATE_PROCESS_ORIGINAL = Some(original);
 
+        let nt_create_process_ex = get_export("ntdll", "NtCreateProcessEx");
+        let original = guard.create_hook::<NtCreateProcessExType>(
+            nt_create_process_ex as _,
+            nt_create_process_ex_hook as _,
+        )?;
+
+        NT_CREATE_PROCESS_EX_ORIGINAL = Some(original);
+
         let nt_create_user_process = get_export("ntdll", "NtCreateUserProcess");
         let original = guard.create_hook::<NtCreateUserProcessType>(
             nt_create_user_process as _,
             nt_create_user_process_hook as _,
         )?;
         NT_CREATE_USER_PROCESS_ORIGINAL = Some(original);
-
-        let nt_create_process_ex = get_export("ntdll", "NtCreateProcessEx");
-        let original = guard.create_hook::<NtCreateProcessExType>(
-            nt_create_process_ex as _,
-            nt_create_process_ex_hook as _,
-        )?;
-        NT_CREATE_PROCESS_EX_ORIGINAL = Some(original);
     }
 
     Ok(())

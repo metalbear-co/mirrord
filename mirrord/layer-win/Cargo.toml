@@ -27,7 +27,7 @@ anyhow = "1.0.98"
 
 str-win = { path = "../str-win" }
 
-minhook-detours-rs = "0.1.0"
+minhook-detours-rs = "0.2.0"
 
 [lints]
 workspace = true

@@ -28,8 +28,7 @@ pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    // Avoid running logic in [`DllMain`] to prevent exceptions, create new thread and wait for it's
-    // execution to finish.
+    // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
         mirrord_start().expect("Failed initializing mirrord-layer-win");
     });
