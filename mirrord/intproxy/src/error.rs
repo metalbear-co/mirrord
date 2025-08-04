@@ -3,7 +3,7 @@ use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, Response
 use thiserror::Error;
 
 use crate::{
-    agent_conn::{AgentChannelError, AgentConnectionError},
+    agent_conn::{AgentConnectionError, AgentConnectionTaskError},
     layer_initializer::LayerInitializerError,
     ping_pong::PingPongError,
     proxies::{
@@ -47,7 +47,7 @@ pub(crate) enum ProxyRuntimeError {
     TaskPanic(MainTaskId),
 
     #[error("{0}")]
-    AgentChannel(#[from] AgentChannelError),
+    AgentChannel(#[from] AgentConnectionTaskError),
     #[error("layer initializer failed: {0}")]
     LayerInitializer(#[from] LayerInitializerError),
     #[error("ping pong failed: {0}")]
