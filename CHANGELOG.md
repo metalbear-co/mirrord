@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04
+
+
+### Fixed
+
+- Fixed an issue where `mirrord dump` command was not receiving HTTP traffic
+  from an agent configured to use passthrough mirroring.
+- Fixed an issue with how mirrord-intproxy handles operator connection errors.
+  [#3432](https://github.com/metalbear-co/mirrord/issues/3432)
+
+
+### Internal
+
+- Fixed an issue where `~/.mirrord/data.json` content was reset with each
+  mirrord session.
+- Fixed mangled output from some of the Python E2E apps.
+
 ## [3.154.0](https://github.com/metalbear-co/mirrord/tree/3.154.0) - 2025-07-30
 
 
