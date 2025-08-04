@@ -9,7 +9,7 @@ RUN ./platform.sh
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # cargo-chef 0.1.69 breaks the build
-RUN cargo install cargo-chef@0.1.68
+RUN cargo install cargo-chef@0.1.72
 
 FROM chef AS planner
 
