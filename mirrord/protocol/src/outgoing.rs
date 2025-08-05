@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     fmt::{Display, Formatter},
     io,
-    io::ErrorKind,
     net::SocketAddr as StdIpSocketAddr,
 };
 
@@ -12,9 +11,7 @@ use bincode::{Decode, Encode};
 use socket2::SockAddr as OsSockAddr;
 
 use crate::{
-    ConnectionId,
-    Payload,
-    SerializationError,
+    ConnectionId, Payload, SerializationError,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -61,12 +58,11 @@ impl TryFrom<UnixAddr> for OsSockAddr {
         match addr {
             Pathname(path) => OsSockAddr::unix(path),
             // We could use a `socket2::SockAddr::from_abstract_name` but it does not have it yet.
-            Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
-                io::Error::new(
-                    ErrorKind::Other,
-                    "Unprintable abstract addresses not supported.",
-                )
-            })?),
+            Abstract(bytes) => {
+                OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
+                    io::Error::other("Unprintable abstract addresses not supported.")
+                })?)
+            }
             UnixAddr::Unnamed => OsSockAddr::unix(""),
         }
     }
@@ -80,7 +76,7 @@ impl TryFrom<SocketAddress> for StdIpSocketAddr {
         if let SocketAddress::Ip(socket_addr) = addr {
             Ok(socket_addr)
         } else {
-            Err(io::Error::new(ErrorKind::Other, "Not an IP address"))
+            Err(io::Error::other("Not an IP address"))
         }
     }
 }

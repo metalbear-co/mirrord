@@ -1,6 +1,5 @@
 #![feature(slice_concat_trait)]
 #![feature(iterator_try_collect)]
-#![feature(let_chains)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
@@ -46,8 +45,8 @@ use crate::{
     container::ContainerConfig,
     external_proxy::ExternalProxyConfig,
     feature::{
-        fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
         FeatureConfig,
+        fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
     },
     internal_proxy::InternalProxyConfig,
     target::TargetConfig,
@@ -789,13 +788,13 @@ mod tests {
     use crate::{
         agent::AgentFileConfig,
         feature::{
+            FeatureFileConfig,
             fs::{FsModeConfig, FsUserConfig},
             network::{
+                NetworkFileConfig,
                 incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
                 outgoing::OutgoingFileConfig,
-                NetworkFileConfig,
             },
-            FeatureFileConfig,
         },
         target::{Target, TargetFileConfig},
         util::ToggleableConfig,

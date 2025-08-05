@@ -19,7 +19,7 @@ use std::os::{
     unix::io::RawFd,
 };
 #[cfg(not(target_os = "windows"))]
-use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
+use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -32,7 +32,7 @@ use mirrord_protocol::{
 #[cfg(not(target_os = "windows"))]
 use nix::{
     errno::Errno,
-    sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage},
+    sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
 };
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
@@ -393,7 +393,9 @@ fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
                 // `getsockname` returned an error, or a non-IP address. Not stopping execution on
                 // that, as it does not mean anything else went wrong in this run. Just emitting a
                 // warning without the port number.
-                tracing::debug!("Could not determine the bound port of a socket, for the purpose of displaying it in a warning.");
+                tracing::debug!(
+                    "Could not determine the bound port of a socket, for the purpose of displaying it in a warning."
+                );
                 "A port".to_string()
             };
             warn!(
@@ -667,12 +669,12 @@ pub(super) fn connect(
         }
 
         let ip = ip_address.ip();
-        if ip.is_loopback() || ip.is_unspecified() {
-            if let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
-                // `result` here is always a success, as error and bypass are returned on the `?`
-                // above.
-                return Detour::Success(result);
-            }
+        if (ip.is_loopback() || ip.is_unspecified())
+            && let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)?
+        {
+            // `result` here is always a success, as error and bypass are returned on the `?`
+            // above.
+            return Detour::Success(result);
         }
 
         if is_ignored_port(&ip_address) {
@@ -1580,21 +1582,31 @@ fn create_dns_resolver_t(
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
-    let resolver = Box::from_raw(resolver);
+    unsafe {
+        let resolver = Box::from_raw(resolver);
 
-    let nameservers = Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
+        let nameservers = Vec::from_raw_parts(
+            resolver.nameserver,
+            resolver.n_nameserver as usize,
+            resolver.n_nameserver as usize,
+        );
 
-    for nameserver in nameservers {
-        let _ = Box::from_raw(nameserver);
+        for nameserver in nameservers {
+            let _ = Box::from_raw(nameserver);
+        }
+
+        let searchs = Vec::from_raw_parts(
+            resolver.search,
+            resolver.n_search as usize,
+            resolver.n_search as usize,
+        );
+
+        for search in searchs {
+            let _ = CString::from_raw(search);
+        }
+
+        let _ = CString::from_raw(resolver.options);
     }
-
-    let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
-
-    for search in searchs {
-        let _ = CString::from_raw(search);
-    }
-
-    let _ = CString::from_raw(resolver.options);
 }
 
 /// reconstruct a macos specific [`dns_config_t`] api from parsing the `/etc/resolv.conf` file from

@@ -2,22 +2,22 @@ use std::{collections::VecDeque, error::Report, ops::RangeInclusive};
 
 use futures::StreamExt;
 use mirrord_protocol::{
+    ConnectionId, DaemonMessage, LogMessage, RequestId,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
-        MODE_AGNOSTIC_HTTP_REQUESTS,
+        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
+        NewTcpConnectionV2, TcpClose, TcpData,
     },
-    ConnectionId, DaemonMessage, LogMessage, RequestId,
 };
 use tokio_stream::StreamMap;
 
 use crate::{
+    AgentError,
     error::AgentResult,
     incoming::{IncomingStream, IncomingStreamItem, MirrorHandle, MirroredTraffic},
     sniffer::api::TcpSnifferApi,
     util::protocol_version::ClientProtocolVersion,
-    AgentError,
 };
 
 /// Agent client's API for using the TCP mirror feature.

@@ -2,7 +2,7 @@ use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use ignore_codes::*;
 #[cfg(not(target_os = "windows"))]
-use libc::{c_char, hostent, DIR, FILE};
+use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
@@ -227,7 +227,7 @@ impl From<HookError> for i64 {
             }
             HookError::ProxyError(ref err) => {
                 let reason = match err {
-                    ProxyError::ProxyFailure(ref err) => {
+                    ProxyError::ProxyFailure(err) => {
                         format!("Proxy encountered an error: {err}")
                     }
                     err => format!("Proxy error, connectivity issue or a bug: {err}"),

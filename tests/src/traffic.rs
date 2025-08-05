@@ -751,10 +751,11 @@ mod traffic_tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mirrord_args = outgoing_enabled
-            .not()
-            .then(|| vec!["--no-outgoing"])
-            .unwrap_or_default();
+        let mirrord_args = if outgoing_enabled.not() {
+            vec!["--no-outgoing"]
+        } else {
+            Default::default()
+        };
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),

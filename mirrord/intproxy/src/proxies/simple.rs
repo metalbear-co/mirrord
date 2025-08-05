@@ -5,19 +5,19 @@ use std::collections::HashMap;
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, ADDRINFO_V2_VERSION},
     ClientMessage, DaemonMessage, GetEnvVarsRequest, RemoteResult,
+    dns::{ADDRINFO_V2_VERSION, AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
 
 use crate::{
+    ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus},
-    error::{agent_lost_io_error, UnexpectedAgentMessage},
+    error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::ToLayer,
     request_queue::RequestQueue,
-    ProxyMessage,
 };
 
 #[derive(Debug)]

@@ -64,6 +64,9 @@ tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
 mid = "3.0.0"
 home.workspace = true
+uuid.workspace = true
+fs4.workspace = true
+hex.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource"] }

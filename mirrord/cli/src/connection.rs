@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::Reporter;
-use mirrord_config::{target::Target, LayerConfig};
+use mirrord_config::{LayerConfig, target::Target};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
@@ -10,8 +10,8 @@ use mirrord_kube::{
 };
 use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
 use mirrord_progress::{
-    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     IdeAction, IdeMessage, NotificationLevel, Progress,
+    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -164,6 +164,8 @@ where
         _ => (),
     };
 
+    // NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
+    // authentication with the cluster, for example via the kubelogin tool
     let k8s_api = KubernetesAPI::create(config)
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;

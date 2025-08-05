@@ -7,6 +7,11 @@ pub enum SipError {
     #[error("IO failed with `{0}`")]
     IO(#[from] std::io::Error),
 
+    #[error(
+        "Too many files open when trying to patch {0}. Try increasing the file limit using `ulimit`."
+    )]
+    TooManyFilesOpen(String),
+
     #[error("Adding Rpaths failed with statuscode: `{0}`, output: `{1}`")]
     AddingRpathsFailed(i32, String),
 

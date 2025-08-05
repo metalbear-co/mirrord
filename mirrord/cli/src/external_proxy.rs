@@ -24,8 +24,8 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -35,7 +35,7 @@ use std::os::unix::ffi::OsStrExt;
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, LayerConfig};
+use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
 use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};
@@ -48,7 +48,8 @@ use crate::{
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
-    util::{create_listen_socket},
+    user_data::UserData,
+    util::create_listen_socket,
 };
 
 #[cfg(not(windows))]
@@ -63,7 +64,12 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
-pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -> CliResult<()> {
+pub async fn proxy(
+    config: LayerConfig,
+    listen_port: u16,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     tracing::info!(
         ?config,
         listen_port,
@@ -87,7 +93,12 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
         .and_then(|execution_kind| execution_kind.parse().ok())
         .unwrap_or_default();
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry, execution_kind, watch);
+    let mut analytics = AnalyticsReporter::new(
+        config.telemetry,
+        execution_kind,
+        watch,
+        user_data.machine_id(),
+    );
     (&config).collect_analytics(analytics.get_mut());
 
     // This connection is just to keep the agent alive as long as the client side is running.
@@ -130,7 +141,7 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                if let Ok((stream, peer_addr)) = conn {
+                match conn { Ok((stream, peer_addr)) => {
                     tracing::debug!(?peer_addr, "new connection");
 
                     let tls_acceptor = tls_acceptor.clone();
@@ -168,9 +179,9 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
                             tracing::debug!(?peer_addr, "final connection, closing listener");
                         }
                     });
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
 
             message = own_agent_conn.agent_rx.recv() => {
@@ -268,15 +279,15 @@ async fn handle_connection(
                 }
             }
             daemon_message = agent_conn.agent_rx.recv() => {
-                if let Some(daemon_message) = daemon_message {
+                match daemon_message { Some(daemon_message) => {
                     if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(?peer_addr, %error, "unable to send message to intproxy");
 
                         break;
                     }
-                } else {
+                } _ => {
                     break;
-                }
+                }}
             }
             _ = cancellation_token.cancelled() => {
                 tracing::debug!(?peer_addr, "closing connection due to cancellation_token");

@@ -6,8 +6,8 @@ use super::BackgroundTask;
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
-    incoming::{self, tls::StealTlsHandlerStore, MirrorHandle, RedirectorTask, StealHandle},
-    sniffer::{messages::SnifferCommand, TcpConnectionSniffer},
+    incoming::{self, MirrorHandle, RedirectorTask, StealHandle, tls::StealTlsHandlerStore},
+    sniffer::{TcpConnectionSniffer, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerTask},
     util::{
         path_resolver::InTargetPathResolver,

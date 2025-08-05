@@ -1,13 +1,13 @@
 use std::{
     clone::Clone,
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     future::Future,
     hash::Hash,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use tokio::sync::mpsc;
 
 pub mod error;
@@ -202,7 +202,7 @@ mod subscription_tests {
 mod channel_closed_tests {
     use std::time::Duration;
 
-    use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+    use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
     use rstest::rstest;
 
     use super::*;

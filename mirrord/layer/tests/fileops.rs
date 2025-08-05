@@ -14,11 +14,10 @@ use std::{
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
 #[cfg(not(target_os = "windows"))]
-use libc::{pid_t, O_RDWR};
+use libc::{O_RDWR, pid_t};
 use mirrord_protocol::{file::*, *};
 #[cfg(target_os = "macos")]
-use mirrord_sip::{sip_patch, SipPatchOptions, MIRRORD_TEMP_BIN_DIR_PATH_BUF};
-#[cfg(not(target_os = "windows"))]
+use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_PATH_BUF, SipPatchOptions, sip_patch};
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,

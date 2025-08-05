@@ -5,13 +5,13 @@ use std::{
 };
 
 use nom::{
+    IResult,
     branch::alt,
     bytes::complete::{tag, take_until},
     character::complete::{alphanumeric1, digit1},
     combinator::opt,
     multi::many1,
     sequence::{delimited, preceded, terminated},
-    IResult,
 };
 use thiserror::Error;
 

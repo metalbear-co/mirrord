@@ -5,7 +5,7 @@ use std::{
 
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::io::RawFd;
-use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
+use libc::{O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, c_int};
 use mirrord_protocol::file::{
     AccessFileRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,

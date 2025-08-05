@@ -8,9 +8,9 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     ClientMessage, DaemonMessage, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,
+    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
 };
 
 #[rstest]

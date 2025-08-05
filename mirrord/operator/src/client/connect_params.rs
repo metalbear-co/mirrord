@@ -3,7 +3,7 @@ use std::{
     fmt,
 };
 
-use mirrord_config::{feature::network::incoming::ConcurrentSteal, LayerConfig};
+use mirrord_config::{LayerConfig, feature::network::incoming::ConcurrentSteal};
 use serde::Serialize;
 
 /// Query params for the operator connect request.

@@ -8,18 +8,18 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
-    config::ConfigError, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM,
-    feature::env::mapper::EnvVarsRemapper, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigError,
+    external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{
-    tcp::HTTP_COMPOSITE_FILTER_VERSION, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
-    LogLevel,
+    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
+    tcp::HTTP_COMPOSITE_FILTER_VERSION,
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::{sip_patch, SipPatchOptions};
+use mirrord_sip::{SipPatchOptions, sip_patch};
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
@@ -30,15 +30,15 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
 use crate::{
-    connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
+    CliResult,
+    connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     util::{get_user_git_branch, remove_proxy_env},
-    CliResult,
 };
 #[cfg(not(windows))]
 use crate::extract::extract_library;
@@ -106,7 +106,7 @@ where
 
 /// Creates a task that reads stderr and returns a vector of warnings at the end.
 /// Caller should cancel the token and wait on join handle.
-async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<P>
+async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<'_, P>
 where
     P: Progress + Send + Sync,
 {
@@ -346,7 +346,7 @@ impl MirrordExecution {
                     log_info,
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
-                             // closure.
+                // closure.
             })
             .transpose()?;
 

@@ -15,12 +15,12 @@ use std::os::unix::ffi::OsStringExt;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_config::{
+    LayerConfig,
     feature::env::{
         MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
         MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
     },
     target::TargetType,
-    LayerConfig,
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
@@ -625,7 +625,9 @@ impl FromStr for AddrPortMapping {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PortMappingParseErr {
-    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4-or-hostname:remote-port`")]
+    #[error(
+        "Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4-or-hostname:remote-port`"
+    )]
     InvalidFormat(String),
 
     #[error("Failed to parse port `{0}` in argument `{1}`")]

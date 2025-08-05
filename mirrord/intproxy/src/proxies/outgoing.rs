@@ -7,22 +7,22 @@ use mirrord_intproxy_protocol::{
     ProxyToLayerMessage,
 };
 use mirrord_protocol::{
-    outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
+    outgoing::{DaemonConnect, DaemonRead, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing},
 };
 use thiserror::Error;
 use tracing::Level;
 
 use self::interceptor::Interceptor;
 use crate::{
+    ProxyMessage,
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
-    error::{agent_lost_io_error, UnexpectedAgentMessage},
+    error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::ToLayer,
     proxies::outgoing::net_protocol_ext::NetProtocolExt,
     request_queue::RequestQueue,
-    ProxyMessage,
 };
 
 mod interceptor;
