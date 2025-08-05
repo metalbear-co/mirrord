@@ -63,6 +63,22 @@ pub(crate) async fn extension_exec(
     }
     result?;
 
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+
+        use crate::is_static;
+
+        let is_static = args
+            .executable
+            .as_deref()
+            .map(Path::new)
+            .is_some_and(is_static::is_binary_static);
+        if is_static {
+            progress.warning("Target binary is not dynamically linked. mirrord might not work!");
+        }
+    }
+
     #[cfg(target_os = "macos")]
     let execution_result =
         mirrord_exec(args.executable.as_deref(), config, progress, &mut analytics).await;

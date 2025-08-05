@@ -295,6 +295,8 @@ mod extension;
 mod external_proxy;
 mod extract;
 mod internal_proxy;
+#[cfg(target_os = "linux")]
+mod is_static;
 mod list;
 mod logging;
 mod newsletter;
@@ -327,6 +329,21 @@ where
     P: Progress,
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+
+        let mut sub_progress =
+            sub_progress.subtask("checking if target binary is dynamically linked");
+        if is_static::is_binary_static(Path::new(&args.binary)) {
+            sub_progress.failure(Some(
+                "target binary is not dynamically linked, mirrord might not work!",
+            ));
+        } else {
+            sub_progress.success(Some("target binary is dynamically linked"));
+        }
+    }
 
     #[cfg(target_os = "macos")]
     let binary_args = args
