@@ -183,7 +183,7 @@ pub fn check_mesh_vendor(pod: &Pod) -> Option<MeshVendor> {
 ///
 /// 1. If `container_name` is passed, will only try to find that container. Will return [`None`] if
 ///    the container does not exist.
-/// 2. Otherwise, if `default_container` is passed, will try to find that container.
+/// 2. If `default_container` is passed, will try to find that container.
 /// 3. Otherwise, will take the first container that is not on the [`SKIP_NAMES`] list.
 ///
 /// The second value in the returned tuple indicates whether the container was picked from multiple
