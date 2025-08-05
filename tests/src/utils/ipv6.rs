@@ -9,7 +9,11 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client};
 use rstest::fixture;
 
-use crate::utils::{kube_client, kube_service::KubeService, services::internal_service};
+use crate::utils::{
+    kube_client,
+    kube_service::KubeService,
+    services::{internal_service, TestWorkloadType},
+};
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
@@ -42,6 +46,7 @@ pub async fn ipv6_service(
         None,
         None,
         true,
+        TestWorkloadType::Deployment,
     )
     .await
 }
