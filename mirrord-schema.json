@@ -968,7 +968,7 @@
         },
         "vfork_emulation": {
           "title": "_experimental_ vfork_emulation {#experimental-vfork_emulation}",
-          "description": "Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.\n\nNote that for Go applications on ARM64, this feature is not yet supported, and this settings is ignored.",
+          "description": "Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.\n\nNote that for Go applications on ARM64, this feature is not yet supported, and this setting is ignored.",
           "type": [
             "boolean",
             "null"
