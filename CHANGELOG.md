@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.155.0](https://github.com/metalbear-co/mirrord/tree/3.155.0) - 2025-08-05
+
+
+### Added
+
+- When picking a target container automatically, mirrord now takes the
+  `kubectl.kubernetes.io/default-container` annotation into consideration.
+
+
+### Changed
+
+- mirrord policy CRDs now allow for blocking scale down when using the copy target feature.
+
+
+### Fixed
+
+- Fixed a bug where mirrord-layer was encountering issues due to `vfork` in the
+  user application. The fix is hidden behind the `experimental.vfork_emulation`
+  mirrord config flag.
+- Fixed issues with default mirrord CLI progress mode and interactive cluster auth plugins.
+
+
+### Internal
+
+- E2E test SQS with argo rollouts.
+- Updated Rust toolchain to nightly-2025-08-01.
+- Use return-dispatch action to trigger operator e2e from mirrord.
+
 ## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04
 
 
