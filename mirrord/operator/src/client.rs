@@ -1,14 +1,14 @@
 use std::{fmt, ops::Not, time::Duration};
 
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use http::{request::Request, HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, request::Request};
 use kube::{
-    api::{ListParams, PostParams},
     Api, Client, Config, Resource,
+    api::{ListParams, PostParams},
 };
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
@@ -16,7 +16,7 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{target::Target, LayerConfig};
+use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -31,8 +31,8 @@ use tracing::Level;
 
 use crate::{
     crd::{
+        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
-        MirrordOperatorCrd, NewOperatorFeature, TargetCrd, OPERATOR_STATUS_NAME,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
@@ -203,15 +203,18 @@ impl OperatorApi<NoClientCert> {
     /// NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
     /// authentication with the cluster, for example via the kubelogin tool
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    pub async fn try_new<R>(
+    pub async fn try_new<P, R>(
         config: &LayerConfig,
         reporter: &mut R,
+        progress: &P,
     ) -> OperatorApiResult<Option<Self>>
     where
         R: Reporter,
+        P: Progress,
     {
         let base_config = Self::base_client_config(config).await?;
-        let client = Client::try_from(base_config.clone())
+        let client = progress
+            .suspend(|| Client::try_from(base_config.clone()))
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
@@ -257,10 +260,15 @@ impl OperatorApi<NoClientCert> {
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
     /// In case of failure, state of this API instance does not change.
-    #[tracing::instrument(level = Level::TRACE, skip(reporter))]
-    pub async fn prepare_client_cert<R>(self, reporter: &mut R) -> OperatorApi<MaybeClientCert>
+    #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
+    pub async fn prepare_client_cert<P, R>(
+        self,
+        reporter: &mut R,
+        progress: &P,
+    ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
+        P: Progress,
     {
         let previous_client = self.client.clone();
 
@@ -284,7 +292,8 @@ impl OperatorApi<NoClientCert> {
             config
                 .headers
                 .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-            let client = Client::try_from(config)
+            let client = progress
+                .suspend(|| Client::try_from(config))
                 .map_err(KubeApiError::from)
                 .map_err(OperatorApiError::CreateKubeClient)?;
 
@@ -381,8 +390,7 @@ where
         if self.operator.spec.operator_version > mirrord_version {
             let message = format!(
                 "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
-                mirrord_version,
-                self.operator.spec.operator_version
+                mirrord_version, self.operator.spec.operator_version
             );
             progress.warning(&message);
             false

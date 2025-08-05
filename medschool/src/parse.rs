@@ -5,8 +5,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use syn::{Attribute, Expr, Ident, Type, TypePath};
 
 use crate::{
-    types::{PartialField, PartialType},
     DocsError,
+    types::{PartialField, PartialType},
 };
 
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.

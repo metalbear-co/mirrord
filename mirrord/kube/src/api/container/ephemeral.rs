@@ -3,9 +3,9 @@ use k8s_openapi::api::core::v1::{
     Capabilities, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
 };
 use kube::{
-    api::PostParams,
-    runtime::{watcher, WatchStreamExt},
     Api, Client,
+    api::PostParams,
+    runtime::{WatchStreamExt, watcher},
 };
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 use mirrord_config::agent::AgentConfig;
@@ -17,8 +17,8 @@ use super::util::agent_env;
 use crate::{
     api::{
         container::{
-            util::{base_command_line, get_capabilities, wait_for_agent_startup},
             ContainerParams, ContainerVariant,
+            util::{base_command_line, get_capabilities, wait_for_agent_startup},
         },
         kubernetes::AgentKubernetesConnectInfo,
         runtime::RuntimeData,
@@ -51,7 +51,7 @@ pub async fn create_ephemeral_agent<P, V>(
     progress: &P,
 ) -> Result<AgentKubernetesConnectInfo>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
     V: ContainerVariant<Update = KubeEphemeralContainer>,
 {
     let params = variant.params();

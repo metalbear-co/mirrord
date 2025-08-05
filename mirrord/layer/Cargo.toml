@@ -34,7 +34,7 @@ dotenvy.workspace = true
 frida-gum = { version = "0.15", features = ["auto-download"] }
 http.workspace = true
 libc.workspace = true
-nix = { workspace = true, features = ["net", "process", "signal"] }
+nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 null-terminated = { version = "0.3", default-features = false }
 num-traits = "0.2"
 rand.workspace = true

@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use kube::{core::ErrorResponse, Api};
+use kube::{Api, core::ErrorResponse};
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{
-        error::{OperatorApiError, OperatorOperation},
         MaybeClientCert, OperatorApi,
+        error::{OperatorApiError, OperatorOperation},
     },
     crd::{NewOperatorFeature, SessionCrd},
 };
@@ -47,14 +47,17 @@ impl SessionCommandHandler {
         })?;
 
         let mut subtask = progress.subtask("checking operator");
-        let operator_api = match OperatorApi::try_new(&config, &mut NullReporter::default()).await?
-        {
-            Some(api) => api.prepare_client_cert(&mut NullReporter::default()).await,
-            None => {
-                subtask.failure(Some("operator not found"));
-                return Err(CliError::OperatorNotInstalled);
-            }
-        };
+        let operator_api =
+            match OperatorApi::try_new(&config, &mut NullReporter::default(), &progress).await? {
+                Some(api) => {
+                    api.prepare_client_cert(&mut NullReporter::default(), &progress)
+                        .await
+                }
+                None => {
+                    subtask.failure(Some("operator not found"));
+                    return Err(CliError::OperatorNotInstalled);
+                }
+            };
 
         operator_api.inspect_cert_error(|error| {
             progress.warning(&format!("Failed to prepare user certificate: {error}"));

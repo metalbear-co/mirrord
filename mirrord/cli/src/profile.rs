@@ -6,9 +6,9 @@ use std::{fmt::Display, str::FromStr};
 use kube::{Api, Client};
 use miette::Diagnostic;
 use mirrord_config::{
-    feature::{network::incoming::IncomingMode, FeatureConfig},
-    util::VecOrSingle,
     LayerConfig,
+    feature::{FeatureConfig, network::incoming::IncomingMode},
+    util::VecOrSingle,
 };
 use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{

@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt,
     ops::Not,
     sync::atomic::Ordering,
@@ -258,7 +258,7 @@ impl PortSubscription {
 mod test {
     use crate::{
         http::filter::HttpFilter,
-        incoming::{test::DummyRedirector, RedirectorTask},
+        incoming::{RedirectorTask, test::DummyRedirector},
         steal::subscriptions::{PortSubscription, PortSubscriptions},
         util::ClientId,
     };

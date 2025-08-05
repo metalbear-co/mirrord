@@ -8,12 +8,12 @@ use null_terminated::Nul;
 use tracing::warn;
 
 use crate::{
+    PROXY_CONNECTION,
     detour::{Bypass, Detour},
     error::{HookError, HookResult},
     exec_hooks::Argv,
     file::OpenOptionsInternalExt,
     socket::SHARED_SOCKETS_ENV_VAR,
-    PROXY_CONNECTION,
 };
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].

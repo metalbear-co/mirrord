@@ -1,32 +1,32 @@
 use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
         fs::FsConfig,
         network::{
             incoming::{
-                http_filter::{HttpFilterConfig, InnerFilter},
                 IncomingConfig,
+                http_filter::{HttpFilterConfig, InnerFilter},
             },
             outgoing::OutgoingConfig,
         },
     },
     target::Target,
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
 };
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
-    tcp::{Filter, HttpFilter, StealType},
     Port,
+    tcp::{Filter, HttpFilter, StealType},
 };
 use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
     file::{filter::FileFilter, mapper::FileRemapper},
-    socket::{dns_selector::DnsSelector, OutgoingSelector},
+    socket::{OutgoingSelector, dns_selector::DnsSelector},
 };
 
 /// Complete layer setup.

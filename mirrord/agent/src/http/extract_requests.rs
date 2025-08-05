@@ -8,21 +8,21 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{future::Either, FutureExt, Stream};
+use futures::{FutureExt, Stream, future::Either};
 use http_body_util::combinators::BoxBody;
 use hyper::{
+    Error, Request, Response,
     body::{Body, Frame, Incoming, SizeHint},
     http::request::Parts,
     server::conn::{http1, http2},
     service::Service,
     upgrade::OnUpgrade,
-    Error, Request, Response,
 };
 use hyper_util::rt::TokioExecutor;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
-use super::{error::MirrordErrorResponse, BoxResponse, HttpVersion};
+use super::{BoxResponse, HttpVersion, error::MirrordErrorResponse};
 use crate::metrics::{MetricGuard, REDIRECTED_REQUESTS};
 
 /// An HTTP request extracted from an HTTP connection
@@ -246,7 +246,7 @@ mod test {
     use bytes::Bytes;
     use futures::StreamExt;
     use http_body_util::{BodyExt, Empty};
-    use hyper::{http::StatusCode, Request, Response};
+    use hyper::{Request, Response, http::StatusCode};
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
     use tokio::{
@@ -254,7 +254,7 @@ mod test {
         sync::Notify,
     };
 
-    use crate::http::{extract_requests::ExtractedRequests, sender::HttpSender, HttpVersion};
+    use crate::http::{HttpVersion, extract_requests::ExtractedRequests, sender::HttpSender};
 
     /// Verifies that [`ExtractedRequests`] works correctly
     /// and can be gracefully shut down.

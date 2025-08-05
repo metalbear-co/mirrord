@@ -6,9 +6,9 @@ use k8s_openapi::api::{
     core::v1::{Pod, PodTemplateSpec},
 };
 use kube::{
-    api::{ObjectMeta, PostParams},
-    runtime::{watcher, WatchStreamExt},
     Api, Client, ResourceExt,
+    api::{ObjectMeta, PostParams},
+    runtime::{WatchStreamExt, watcher},
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
@@ -18,11 +18,11 @@ use tracing::debug;
 use crate::{
     api::{
         container::{
+            ContainerParams, ContainerVariant,
             pod::{PodTargetedVariant, PodVariant},
             util::wait_for_agent_startup,
-            ContainerParams, ContainerVariant,
         },
-        kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
+        kubernetes::{AgentKubernetesConnectInfo, get_k8s_resource_api},
         runtime::RuntimeData,
     },
     error::{KubeApiError, Result},
@@ -34,7 +34,7 @@ pub async fn create_job_agent<P, V>(
     progress: &P,
 ) -> Result<AgentKubernetesConnectInfo>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
     V: ContainerVariant<Update = Job>,
 {
     let params = variant.params();
@@ -99,9 +99,9 @@ where
     match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
-                    "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
-                    env!("CARGO_PKG_VERSION"),
-                );
+                "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
+                env!("CARGO_PKG_VERSION"),
+            );
             pod_progress.warning(&message);
         }
         _ => {}
@@ -242,7 +242,7 @@ mod test {
 
     use super::*;
     use crate::api::{
-        container::util::{get_capabilities, DEFAULT_TOLERATIONS},
+        container::util::{DEFAULT_TOLERATIONS, get_capabilities},
         runtime::ContainerRuntime,
     };
 

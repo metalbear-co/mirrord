@@ -8,7 +8,7 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for ResolvedResource<ReplicaSet> {
     type Resource = ReplicaSet;
 
-    fn name(&self) -> Cow<str> {
+    fn name(&self) -> Cow<'_, str> {
         self.resource
             .metadata
             .name

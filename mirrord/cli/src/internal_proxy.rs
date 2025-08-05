@@ -21,18 +21,19 @@ use std::{
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
-    agent_conn::{AgentConnectInfo, AgentConnection},
     IntProxy,
+    agent_conn::{AgentConnectInfo, AgentConnection},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
-use nix::sys::resource::{setrlimit, Resource};
+use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    user_data::UserData,
     util::{create_listen_socket, detach_io},
 };
 
@@ -51,6 +52,7 @@ pub(crate) async fn proxy(
     config: LayerConfig,
     listen_port: u16,
     watch: drain::Watch,
+    user_data: &UserData,
 ) -> CliResult<(), InternalProxyError> {
     tracing::info!(
         ?config,
@@ -83,9 +85,19 @@ pub(crate) async fn proxy(
     let container_mode = crate::util::intproxy_container_mode();
 
     let mut analytics = if container_mode {
-        AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
+        AnalyticsReporter::only_error(
+            config.telemetry,
+            execution_kind,
+            watch,
+            user_data.machine_id(),
+        )
     } else {
-        AnalyticsReporter::new(config.telemetry, execution_kind, watch)
+        AnalyticsReporter::new(
+            config.telemetry,
+            execution_kind,
+            watch,
+            user_data.machine_id(),
+        )
     };
     (&config).collect_analytics(analytics.get_mut());
 
