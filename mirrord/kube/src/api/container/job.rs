@@ -34,7 +34,7 @@ pub async fn create_job_agent<P, V>(
     progress: &P,
 ) -> Result<AgentKubernetesConnectInfo>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
     V: ContainerVariant<Update = Job>,
 {
     let params = variant.params();
