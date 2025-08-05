@@ -1,1 +1,0 @@
-When picking a target container automatically, mirrord now takes `kubectl.kubernetes.io/default-container` annotation into consideration.

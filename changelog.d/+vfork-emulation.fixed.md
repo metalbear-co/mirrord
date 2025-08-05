@@ -1,1 +1,0 @@
-Fixed a bug where mirrord-layer was encountering issues due to `vfork` in the user application.
