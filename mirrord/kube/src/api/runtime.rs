@@ -167,16 +167,21 @@ impl RuntimeData {
             .as_ref()
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
+        let default_container_name = pod
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| {
+                // See https://kubernetes.io/docs/reference/labels-annotations-taints/#kubectl-kubernetes-io-default-container.
+                annotations.get("kubectl.kubernetes.io/default-container")
+            })
+            .map(String::as_str);
 
-        if container_name.is_none() && container_statuses.len() > 1 {
-            tracing::trace!(
-                "Target has multiple containers and no container name was specified.\
-                Now filtering out mesh containers etc."
-            );
-        }
-
-        let (chosen_container, guessed_container) =
-            choose_container(container_name, container_statuses.as_ref());
+        let (chosen_container, guessed_container) = choose_container(
+            container_name,
+            default_container_name,
+            container_statuses.as_ref(),
+        );
 
         if guessed_container {
             tracing::warn!("mirrord picked first eligible container out of many");
