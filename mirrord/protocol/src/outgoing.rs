@@ -2,6 +2,7 @@ use core::fmt;
 use std::{
     fmt::{Display, Formatter},
     io,
+    io::ErrorKind,
     net::SocketAddr as StdIpSocketAddr,
 };
 

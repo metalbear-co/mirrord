@@ -141,11 +141,11 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     #[ignore]
+    #[cfg_attr(target_os = "windows", ignore)]
     pub async fn connect_to_kubernetes_api_service_over_ipv6() {
         let app = Application::CurlToKubeApi;
         let mut process = app

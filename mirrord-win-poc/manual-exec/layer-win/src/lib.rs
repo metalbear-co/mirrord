@@ -6,7 +6,7 @@ use windows::Win32::{Foundation::HINSTANCE, System::SystemServices::DLL_PROCESS_
 
 use crate::hooks::install_hooks;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(non_snake_case, unused_variables)]
 /// # Safety
 /// Can be called by loader only. Must not be called manually.

@@ -19,8 +19,10 @@ fn main() {
 }
 
 fn set_env_var(key: &str, val: &str) {
-    env::set_var(key, val);
-    // println!("setting env:{key}={val:#?}");
+    unsafe {
+        env::set_var(key, val);
+        // println!("setting env:{key}={val:#?}");
+    }
 }
 
 fn get_env_var(key: &str) -> String {

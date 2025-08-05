@@ -28,11 +28,11 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
 use tracing::Level;
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use tracing::warn;
 
 use crate::{
@@ -42,6 +42,7 @@ use crate::{
     user_data::UserData,
     util::create_listen_socket,
 };
+#[cfg(not(target_os = "windows"))]
 use create::util::detach_io;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it

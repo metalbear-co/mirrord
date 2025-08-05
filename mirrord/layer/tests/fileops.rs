@@ -18,6 +18,7 @@ use libc::{O_RDWR, pid_t};
 use mirrord_protocol::{file::*, *};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_PATH_BUF, SipPatchOptions, sip_patch};
+#[cfg(not(target_os = "windows"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,

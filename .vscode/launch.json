@@ -29,13 +29,13 @@
         ],
         "env": {
           "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
-          "MIRRORD_TESTS_USE_BINARY": "target/x86_64-pc-windows-msvc/debug/deps/mirrord-c49e95cc042b1e8b.exe",
+          "MIRRORD_TESTS_USE_BINARY": "target/x86_64-pc-windows-msvc/debug/deps/mirrord-445c7e5eeffee072.exe",
         },
         "filter": {
           "name": "tests"
         },
       },
-      "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-7e3afcc1cc264af6.exe",
+      "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-08b24540faf8040c.exe",
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
       "sourceLanguages": [
