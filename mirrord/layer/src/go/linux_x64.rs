@@ -514,7 +514,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
 }
 
 /// Detour for `syscall.rawVforkSyscall.abi0` function.
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn raw_vfork_detour() {
     naked_asm!(
         "mov rdi, qword ptr [rsp+0x10]",

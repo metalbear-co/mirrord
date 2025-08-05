@@ -802,11 +802,11 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
                     "This is most probably a bug, please report it."
                 }
             );
-            return FN_VFORK();
+            return unsafe { FN_VFORK() };
         }
     };
 
-    let fork_result = fork_detour();
+    let fork_result = unsafe { fork_detour() };
     match fork_result.cmp(&0) {
         // We're the child.
         // Write end of the pipe will be dropped when we exit or exec,
@@ -853,7 +853,7 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
                 "Failed to fork the current process for vfork emulation. \
                 Letting the vfork happen. This might cause unforeseen issues.",
             );
-            return FN_VFORK();
+            return unsafe { FN_VFORK() };
         }
     }
 
