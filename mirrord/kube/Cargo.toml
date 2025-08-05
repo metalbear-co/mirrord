@@ -24,10 +24,15 @@ incluster = []
 portforward = [
     "dep:tokio-retry"
 ]
+# re-export kube. Useful for consumers of this library, as we use
+# types from kube in our public API, therefore the versions must
+# match. So callers can use `mirrord_kube::kube` instead of kube
+# directly, to make sure they use the same kube version.
+re-export-kube = []
 
 [dependencies]
 mirrord-agent-env = { path = "../agent/env", features = ["k8s-openapi"] }
-mirrord-config = { path = "../config"}
+mirrord-config = { path = "../config" }
 mirrord-progress = { path = "../progress" }
 mirrord-protocol = { path = "../protocol" }
 
