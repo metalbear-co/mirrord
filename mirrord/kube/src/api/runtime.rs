@@ -97,6 +97,11 @@ pub struct RuntimeData {
 }
 
 impl RuntimeData {
+    /// Standard annotation containing the name of the [`Pod`]'s default container.
+    ///
+    /// See [Kubernetes docs](https://kubernetes.io/docs/reference/labels-annotations-taints/#kubectl-kubernetes-io-default-container).
+    pub const DEFAULT_CONTAINER_ANNOTATION: &str = "kubectl.kubernetes.io/default-container";
+
     /// Extracts data needed to create the mirrord-agent targeting the given [`Pod`].
     /// Verifies that the [`Pod`] is ready to be a target:
     /// 1. pod is in "Running" phase,
@@ -171,10 +176,7 @@ impl RuntimeData {
             .metadata
             .annotations
             .as_ref()
-            .and_then(|annotations| {
-                // See https://kubernetes.io/docs/reference/labels-annotations-taints/#kubectl-kubernetes-io-default-container.
-                annotations.get("kubectl.kubernetes.io/default-container")
-            })
+            .and_then(|annotations| annotations.get(Self::DEFAULT_CONTAINER_ANNOTATION))
             .map(String::as_str);
 
         let (chosen_container, guessed_container) = choose_container(
