@@ -112,7 +112,7 @@ pub struct ExperimentalConfig {
     /// Might solve rare stack corruption issues.  
     ///
     /// Note that for Go applications on ARM64, this feature is not yet supported,
-    /// and this settings is ignored.
+    /// and this setting is ignored.
     #[config(default = false)]
     pub vfork_emulation: bool,
 }
