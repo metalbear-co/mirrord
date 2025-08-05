@@ -30,8 +30,8 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.152.1"
-edition = "2021"
+edition = "2024"
+version = "3.154.1"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -82,7 +82,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { version = "0.99", default-features = false, features = [
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "c095706801fd0fc287e82bcbc314b458097fe9e1", default-features = false, features = [
     "runtime",
     "derive",
     "client",
@@ -185,6 +185,15 @@ pem = "3"
 
 # Used by `cli`, `auth`
 home = "0.5"
+
+# Used by `cli`, `analytics`
+uuid = { version = "1.17", features = ["v4", "serde"] }
+
+# Used by `cli`, `auth`
+fs4 = { version = "0.13", features = ["tokio"], default-features = false }
+
+# Used by `cli`, `sip`.
+hex = "0.4"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

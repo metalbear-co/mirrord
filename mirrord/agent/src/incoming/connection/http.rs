@@ -2,11 +2,11 @@ use std::fmt;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use http_body_util::{combinators::BoxBody, StreamBody};
+use http_body_util::{StreamBody, combinators::BoxBody};
 use hyper::{
-    body::Frame,
-    http::{request, response, HeaderMap, Method, StatusCode, Uri, Version},
     Response,
+    body::Frame,
+    http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
@@ -17,10 +17,10 @@ use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use super::{ConnectionInfo, IncomingStream};
 use crate::{
-    http::{body::RolledBackBody, extract_requests::ExtractedRequest, BoxResponse},
+    http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
     incoming::{
-        connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
         IncomingStreamItem,
+        connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
     },
 };
 

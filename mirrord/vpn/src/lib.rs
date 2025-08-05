@@ -1,4 +1,3 @@
-#![feature(concat_idents)]
 #![feature(try_blocks)]
 #![deny(unused_crate_dependencies)]
 

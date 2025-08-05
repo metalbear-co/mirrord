@@ -13,8 +13,8 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::{
-    body::{Body, Frame},
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
+    body::{Body, Frame},
 };
 use mirrord_macros::protocol_break;
 use semver::VersionReq;

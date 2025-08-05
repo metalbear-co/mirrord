@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect,
-    redirect::Redirect, IPTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_MESH,
+    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_MESH, IPTables, error::IPTablesResult,
+    output::OutputRedirect, prerouting::PreroutingRedirect, redirect::Redirect,
 };
 
 pub struct AmbientRedirect<IPT: IPTables> {

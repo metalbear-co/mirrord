@@ -13,8 +13,8 @@ use std::{
 };
 
 use bincode::{
-    error::{DecodeError, EncodeError},
     Decode, Encode,
+    error::{DecodeError, EncodeError},
 };
 use thiserror::Error;
 

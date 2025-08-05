@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use tracing::Level;
 
 use crate::{
-    chain::IPTableChain, error::IPTablesResult, redirect::Redirect, IPTables,
-    IPTABLE_EXCLUDE_FROM_MESH,
+    IPTABLE_EXCLUDE_FROM_MESH, IPTables, chain::IPTableChain, error::IPTablesResult,
+    redirect::Redirect,
 };
 
 /// Type used for excluding certain ports from the service mesh proxy.

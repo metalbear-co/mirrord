@@ -9,7 +9,7 @@ use std::{
     str::{FromStr, Utf8Error},
 };
 
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 #[cfg(feature = "k8s-openapi")]
 use k8s_openapi::api::core::v1::EnvVar;
 use thiserror::Error;

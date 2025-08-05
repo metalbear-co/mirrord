@@ -1,6 +1,8 @@
 #![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::large_enum_variant)]
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -17,7 +19,7 @@ use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
 };
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, LogLevel, CLIENT_READY_FOR_LOGS,
+    CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
 };
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
@@ -34,7 +36,7 @@ use tokio::{
 };
 
 use crate::{
-    agent_conn::AgentConnection,
+    agent_conn::{AgentConnection, AgentConnectionMessage},
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
     error::{InternalProxyError, ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
@@ -74,7 +76,7 @@ struct TaskTxs {
     _layer_initializer: TaskSender<LayerInitializer>,
     agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
-    ping_pong: TaskSender<PingPong>,
+    ping_pong: TaskSender<RestartableBackgroundTaskWrapper<PingPong>>,
     outgoing: TaskSender<OutgoingProxy>,
     incoming: TaskSender<IncomingProxy>,
     files: TaskSender<FilesProxy>,
@@ -111,6 +113,8 @@ impl IntProxy {
     const CHANNEL_SIZE: usize = 512;
     /// How long can the agent connection remain silent.
     const PING_INTERVAL: Duration = Duration::from_secs(30);
+    /// How many sequential reconnects should PingPong task attepmt to perform before giving up.
+    const PING_PONG_MAX_RECONNECTS: usize = 5;
 
     /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
     /// The returned instance will accept connections from the layers using the given
@@ -141,8 +145,8 @@ impl IntProxy {
         // If we don't do this, we risk responding with `NotImplemented`
         // to requests that have a requirement on the mirrord-protocol version.
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
-        let ping_pong = background_tasks.register(
-            PingPong::new(Self::PING_INTERVAL),
+        let ping_pong = background_tasks.register_restartable(
+            PingPong::new(Self::PING_INTERVAL, Self::PING_PONG_MAX_RECONNECTS),
             MainTaskId::PingPong,
             Self::CHANNEL_SIZE,
         );
@@ -638,6 +642,12 @@ impl IntProxy {
                 })
                 .await?;
             }
+            ConnectionRefresh::Request => {
+                self.task_txs
+                    .agent
+                    .send(AgentConnectionMessage::RequestReconnect)
+                    .await;
+            }
         }
 
         Ok(())
@@ -651,15 +661,15 @@ mod test {
     use mirrord_intproxy_protocol::{
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
-    use mirrord_protocol::{file::StatFsRequestV2, ClientMessage, DaemonMessage, FileRequest};
+    use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
     };
 
     use crate::{
-        agent_conn::{AgentConnection, ReconnectFlow},
         IntProxy,
+        agent_conn::{AgentConnection, ReconnectFlow},
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests

@@ -11,9 +11,9 @@ use semver::VersionReq;
 use thiserror::Error;
 
 use crate::{
+    Port,
     outgoing::SocketAddress,
     tcp::{Filter, HttpFilter, StealType},
-    Port,
 };
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]

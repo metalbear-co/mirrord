@@ -2,22 +2,22 @@ use std::{
     collections::HashMap, future, io, path::PathBuf, sync::atomic::Ordering, time::Duration,
 };
 
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{StreamExt, stream::FuturesOrdered};
 use hickory_resolver::{
+    Hosts, TokioAsyncResolver,
     config::{LookupIpStrategy, ServerOrderingStrategy},
     error::{ResolveError, ResolveErrorKind},
     lookup_ip::LookupIp,
     proto::error::ProtoErrorKind,
     system_conf::parse_resolv_conf,
-    Hosts, TokioAsyncResolver,
 };
 use mirrord_agent_env::envs;
 use mirrord_protocol::{
+    DnsLookupError, ResolveErrorKindInternal, ResponseError,
     dns::{
         AddressFamily, DnsLookup, GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse,
         LookupRecord,
     },
-    DnsLookupError, ResolveErrorKindInternal, ResponseError,
 };
 use thiserror::Error;
 use tokio::{
@@ -29,7 +29,7 @@ use tokio::{
     task::{Id, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{warn, Level};
+use tracing::{Level, warn};
 
 use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, util::remote_runtime::BgTaskStatus};
 

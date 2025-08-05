@@ -1,4 +1,4 @@
-use kube::{api::GroupVersionKind, discovery, Client, Resource};
+use kube::{Client, Resource, api::GroupVersionKind, discovery};
 
 use crate::crd::MirrordOperatorCrd;
 
