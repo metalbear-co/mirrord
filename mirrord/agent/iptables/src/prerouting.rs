@@ -2,7 +2,7 @@ use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 
-use crate::{chain::IPTableChain, error::IPTablesResult, IPTables, Redirect, IPTABLE_PREROUTING};
+use crate::{IPTABLE_PREROUTING, IPTables, Redirect, chain::IPTableChain, error::IPTablesResult};
 
 pub struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
@@ -87,7 +87,7 @@ mod tests {
     use mockall::predicate::eq;
 
     use crate::{
-        prerouting::PreroutingRedirect, redirect::Redirect, MockIPTables, IPTABLE_PREROUTING,
+        IPTABLE_PREROUTING, MockIPTables, prerouting::PreroutingRedirect, redirect::Redirect,
     };
 
     #[tokio::test]

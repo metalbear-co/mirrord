@@ -1,9 +1,9 @@
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
-    config::ExtensionExecArgs, execution::MirrordExecution, user_data::UserData, CliResult,
+    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, user_data::UserData,
 };
 
 /// Actually facilitate execution after all preparations were complete

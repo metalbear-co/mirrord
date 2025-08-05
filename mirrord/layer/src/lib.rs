@@ -1,7 +1,5 @@
 #![feature(c_variadic)]
-#![feature(naked_functions)]
 #![feature(io_error_uncategorized)]
-#![feature(let_chains)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
@@ -10,6 +8,8 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::result_large_err)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -87,8 +87,8 @@ use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -356,7 +356,7 @@ fn init_tracing() {
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
 ///
 /// 5. Fetches remote environment from the agent (if enabled with
-///     [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
+///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
         // Use localwithoverrides on targetless regardless of user config, unless fs-mode is already
@@ -439,17 +439,20 @@ fn layer_start(mut config: LayerConfig) {
     if fetch_env {
         let env = fetch_env_vars();
         for (key, value) in env {
-            std::env::set_var(key, value);
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(key, value) };
         }
 
-        std::env::set_var(REMOTE_ENV_FETCHED, "true");
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(REMOTE_ENV_FETCHED, "true") };
     }
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
         std::env::vars().for_each(|(key, _)| {
             if unset.contains(&key.to_lowercase()) {
-                std::env::remove_var(&key);
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                unsafe { std::env::remove_var(&key) };
             }
         });
     }
@@ -481,16 +484,18 @@ fn fetch_env_vars() -> HashMap<String, String> {
         (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
     };
 
-    let mut env_vars = (!env_vars_exclude.is_empty() || !env_vars_include.is_empty())
-        .then(|| {
+    let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+        {
             make_proxy_request_with_response(GetEnvVarsRequest {
                 env_vars_filter: env_vars_exclude,
                 env_vars_select: env_vars_include,
             })
             .expect("failed to make request to proxy")
             .expect("failed to fetch remote env")
-        })
-        .unwrap_or_default();
+        }
+    } else {
+        Default::default()
+    };
 
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
@@ -664,15 +669,20 @@ fn enable_hooks(state: &LayerSetup) {
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
-        // Closed file is a socket, so if it's already bound to a port - notify agent to stop
-        // mirroring/stealing that port.
-        socket.close();
-    } else if setup().fs_config().is_active() {
-        OPEN_FILES
-            .lock()
-            .expect("OPEN_FILES lock failed")
-            .remove(&fd);
+    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+        Some(socket) => {
+            // Closed file is a socket, so if it's already bound to a port - notify agent to stop
+            // mirroring/stealing that port.
+            socket.close();
+        }
+        _ => {
+            if setup().fs_config().is_active() {
+                OPEN_FILES
+                    .lock()
+                    .expect("OPEN_FILES lock failed")
+                    .remove(&fd);
+            }
+        }
     }
 }
 
@@ -688,9 +698,11 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    let res = FN_CLOSE(fd);
-    close_layer_fd(fd);
-    res
+    unsafe {
+        let res = FN_CLOSE(fd);
+        close_layer_fd(fd);
+        res
+    }
 }
 
 /// Hook for `libc::fork`.
@@ -698,46 +710,49 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    tracing::debug!("Process {} forking!.", std::process::id());
+    unsafe {
+        tracing::debug!("Process {} forking!.", std::process::id());
 
-    let res = FN_FORK();
+        let res = FN_FORK();
 
-    match res.cmp(&0) {
-        Ordering::Equal => {
-            tracing::debug!("Child process initializing layer.");
-            #[allow(static_mut_refs)]
-            let parent_connection = match unsafe { PROXY_CONNECTION.take() } {
-                Some(conn) => conn,
-                None => {
-                    tracing::debug!("Skipping new inptroxy connection (trace only)");
-                    return res;
-                }
-            };
+        match res.cmp(&0) {
+            Ordering::Equal => {
+                tracing::debug!("Child process initializing layer.");
+                #[allow(static_mut_refs)]
+                let parent_connection = match PROXY_CONNECTION.take() {
+                    Some(conn) => conn,
+                    None => {
+                        tracing::debug!("Skipping new inptroxy connection (trace only)");
+                        return res;
+                    }
+                };
 
-            let new_connection = ProxyConnection::new(
-                parent_connection.proxy_addr(),
-                NewSessionRequest::Forked(parent_connection.layer_id()),
-                PROXY_CONNECTION_TIMEOUT
-                    .get()
-                    .copied()
-                    .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
-            )
-            .expect("failed to establish proxy connection for child");
-            #[allow(static_mut_refs)]
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("Failed setting PROXY_CONNECTION in child fork");
-            // in macOS (and tbh sounds logical) we can't just drop the old connection in the child,
-            // as it needs to access a mutex with invalid state, so we need to forget it.
-            // better implementation would be to somehow close the underlying connections
-            // but side effect should be trivial
-            std::mem::forget(parent_connection);
+                let new_connection = ProxyConnection::new(
+                    parent_connection.proxy_addr(),
+                    NewSessionRequest::Forked(parent_connection.layer_id()),
+                    PROXY_CONNECTION_TIMEOUT
+                        .get()
+                        .copied()
+                        .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
+                )
+                .expect("failed to establish proxy connection for child");
+                #[allow(static_mut_refs)]
+                PROXY_CONNECTION
+                    .set(new_connection)
+                    .expect("Failed setting PROXY_CONNECTION in child fork");
+                // in macOS (and tbh sounds logical) we can't just drop the old connection in the
+                // child, as it needs to access a mutex with invalid state, so we
+                // need to forget it. better implementation would be to somehow
+                // close the underlying connections but side effect should be
+                // trivial
+                std::mem::forget(parent_connection);
+            }
+            Ordering::Greater => tracing::debug!("Child process id is {res}."),
+            Ordering::Less => tracing::debug!("fork failed"),
         }
-        Ordering::Greater => tracing::debug!("Child process id is {res}."),
-        Ordering::Less => tracing::debug!("fork failed"),
-    }
 
-    res
+        res
+    }
 }
 
 /// Transparently replaces `vfork` call with a safer `fork`.
@@ -852,17 +867,17 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
 /// One of the many [`libc::close`]-ish functions.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
-    close_detour(fd)
+    unsafe { close_detour(fd) }
 }
 
 #[hook_fn]
 pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int {
-    close_detour(fd)
+    unsafe { close_detour(fd) }
 }
 
 #[hook_fn]
 pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
-    close_detour(fd)
+    unsafe { close_detour(fd) }
 }
 
 /// ## Hook
@@ -877,8 +892,10 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
     fd: c_int,
     c: usize,
 ) -> c_int {
-    // In this case we call `close_layer_fd` before the original close function, because execution
-    // does not return to here after calling `FN_UV_FS_CLOSE`.
-    close_layer_fd(fd);
-    FN_UV_FS_CLOSE(a, b, fd, c)
+    unsafe {
+        // In this case we call `close_layer_fd` before the original close function, because
+        // execution does not return to here after calling `FN_UV_FS_CLOSE`.
+        close_layer_fd(fd);
+        FN_UV_FS_CLOSE(a, b, fd, c)
+    }
 }

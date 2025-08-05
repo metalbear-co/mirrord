@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError,
-        FromMirrordConfig, MirrordConfig, Result,
+        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result, from_env::FromEnv,
+        source::MirrordConfigSource,
     },
     util::MirrordToggleableConfig,
 };

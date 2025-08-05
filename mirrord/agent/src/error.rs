@@ -29,7 +29,9 @@ pub(crate) enum AgentError {
         error: Arc<dyn std::error::Error + Send + Sync>,
     },
 
-    #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
+    #[error(
+        "Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord."
+    )]
     TestError,
 
     #[error(transparent)]

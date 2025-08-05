@@ -7,18 +7,18 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use hyper::Response;
 use mirrord_protocol::{
+    ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, ChunkedResponse, DaemonTcp,
+        HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
         HttpRequest, HttpRequestMetadata, HttpResponse, IncomingTrafficTransportType,
         InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew, InternalHttpRequest,
-        LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType, TcpClose, TcpData,
-        HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
-        MODE_AGNOSTIC_HTTP_REQUESTS,
+        LayerTcpSteal, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1, NewTcpConnectionV2,
+        StealType, TcpClose, TcpData,
     },
-    ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::StreamMap;
@@ -26,6 +26,7 @@ use tracing::Level;
 
 use super::{Command, StealerCommand, StealerMessage};
 use crate::{
+    AgentError,
     error::AgentResult,
     http::filter::HttpFilter,
     incoming::{
@@ -33,8 +34,7 @@ use crate::{
         StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
-    util::{protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus, ClientId},
-    AgentError,
+    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
 };
 
 mod wait_body;

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect, IPTables,
-    Redirect, IPTABLE_STANDARD,
+    IPTABLE_STANDARD, IPTables, Redirect, error::IPTablesResult, output::OutputRedirect,
+    prerouting::PreroutingRedirect,
 };
 
 pub struct StandardRedirect<IPT: IPTables> {

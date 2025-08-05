@@ -2,9 +2,9 @@
 
 use std::{collections::HashMap, str::FromStr, time::Instant};
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
-use tracing::{info, Level};
+use tracing::{Level, info};
 use uuid::Uuid;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

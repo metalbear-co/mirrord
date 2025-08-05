@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:602d397f8e2088ca6ef229e7da0f86490153d8b7 AS chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:75752d06e0de748b7bc5e5b1a54575e3c968f5cf AS chef
 ARG TARGETARCH
 WORKDIR /build
 
@@ -9,20 +9,20 @@ RUN ./platform.sh
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # cargo-chef 0.1.69 breaks the build
-RUN cargo install cargo-chef@0.1.68
+RUN cargo install cargo-chef@0.1.72
 
 FROM chef AS planner
 
 COPY . /build/
-RUN cargo +nightly-2025-01-22 chef prepare --recipe-path recipe.json
+RUN cargo +nightly-2025-08-01 chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo +nightly-2025-01-22 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
+RUN cargo +nightly-2025-08-01 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
 
 COPY . /build/
-RUN cargo +nightly-2025-01-22 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release --locked
+RUN cargo +nightly-2025-08-01 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release --locked
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
