@@ -34,6 +34,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 - E2E test SQS with argo rollouts.
 - Updated Rust toolchain to nightly-2025-08-01.
+- Use return-dispatch action to trigger operator e2e from mirrord.
 
 ## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04
 
