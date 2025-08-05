@@ -1,4 +1,7 @@
-use std::ops::{Deref, Not};
+use std::{
+    ffi::OsStr,
+    ops::{Deref, Not},
+};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
@@ -331,29 +334,39 @@ pub async fn create_kube_config<P>(
     kube_context: Option<String>,
 ) -> Result<Config>
 where
-    P: AsRef<str>,
+    P: AsRef<str> + AsRef<OsStr>,
 {
     let kube_config_opts = KubeConfigOptions {
         context: kube_context,
         ..Default::default()
     };
 
-    let mut config = match kubeconfig {
-        Some(kubeconfig) => {
-            let kubeconfig = shellexpand::full(&kubeconfig)
+    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
+    // colon-separated lists of paths. Borrowed affectionately & with love from
+    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
+    let mut config = if let Some(kubeconfig) = kubeconfig
+        && let paths = std::env::split_paths(&kubeconfig)
+        .filter(|p| p.as_os_str().is_empty().not())
+        .collect::<Vec<_>>()
+        && paths.is_empty().not()
+    {
+        let parsed_kube_config = paths.iter().try_fold(Kubeconfig::default(), |m, p| {
+            let binding = p.to_string_lossy();
+            let expanded = shellexpand::full(&binding)
                 .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-            let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
-            Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
-        }
-        _ => {
-            if kube_config_opts.context.is_some() {
-                // if context is set, it's not in cluster so it has to be a kubeconfig.
-                Config::from_kubeconfig(&kube_config_opts).await?
-            } else {
-                // if context isn't set and user doesn't specify a kubeconfig, we infer which tries
-                // local kube or incluster configuration.
-                Config::infer().await?
-            }
+            Kubeconfig::read_from(expanded.deref())
+                .and_then(|c| m.merge(c))
+                .map_err(KubeApiError::from)
+        })?;
+        Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
+    } else {
+        if kube_config_opts.context.is_some() {
+            // if context is set, it's not in cluster so it has to be a kubeconfig.
+            Config::from_kubeconfig(&kube_config_opts).await?
+        } else {
+            // if context isn't set and user doesn't specify a kubeconfig, we infer which tries
+            // local kube or in-cluster configuration.
+            Config::infer().await?
         }
     };
 
