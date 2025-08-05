@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{ops::Not, path::Path};
 
 use xmas_elf::{ElfFile, program::Type};
 
@@ -34,7 +34,7 @@ pub fn is_binary_static(binary_path: &Path) -> bool {
         }
     };
 
-    elf.program_iter().any(|header| matches!(header.get_type(), Ok(Type::Dynamic))).not()
-
-    true
+    elf.program_iter()
+        .any(|header| matches!(header.get_type(), Ok(Type::Dynamic)))
+        .not()
 }
