@@ -762,7 +762,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 /// This hook uses a dummy pipe to handle this difference:
 /// 1. Parent process creates a pipe with O_CLOEXEC flag.
 /// 2. Parent process forks.
-/// 3. Parent process closes the writing end blocks on reading from the reading end.
+/// 3. Parent process closes the writing end and blocks on reading from the reading end.
 /// 4. The read call returns with EOF when the child process exits or execs.
 ///
 /// # Rationale
