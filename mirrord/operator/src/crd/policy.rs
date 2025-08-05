@@ -20,6 +20,9 @@ pub enum BlockedFeature {
     /// Blocks mirroring traffic.
     Mirror,
 
+    /// Blocks copy_target when used with scale_down.
+    CopyTargetScaleDown,
+
     /// So that the operator is able to list all policies with [`kube::Api`],
     /// even if it doesn't recognize blocked features used in some of them.
     #[schemars(skip)]

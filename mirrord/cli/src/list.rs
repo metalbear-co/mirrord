@@ -88,12 +88,13 @@ impl FoundTargets {
 
         let start = Instant::now();
         let mut reporter = NullReporter::default();
+        let progress = mirrord_progress::NullProgress {};
         let operator_api = if config.operator != Some(false)
-            && let Some(api) = OperatorApi::try_new(&config, &mut reporter).await?
+            && let Some(api) = OperatorApi::try_new(&config, &mut reporter, &progress).await?
         {
             tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
 
-            let api = api.prepare_client_cert(&mut reporter).await;
+            let api = api.prepare_client_cert(&mut reporter, &progress).await;
 
             api.inspect_cert_error(
                 |error| tracing::error!(%error, "failed to prepare client certificate"),

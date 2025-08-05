@@ -33,7 +33,7 @@ where
 {
     async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         create_job_agent::<P, JobVariant<T>>(self.client, self.variant, progress).await
     }
