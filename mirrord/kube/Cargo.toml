@@ -30,6 +30,30 @@ portforward = [
 # directly, to make sure they use the same kube version.
 re-export-kube = []
 
+# expose kube's features under the same names.
+# users of this library that use the re-exported kube can enable kube's features
+# by setting those features when declaring this library as a dependency.
+admission = ["kube/admission"]
+aws-lc-rs = ["kube/aws-lc-rs"]
+client = ["kube/client"]
+config = ["kube/config"]
+derive = ["kube/derive"]
+gzip = ["kube/gzip"]
+http-proxy = ["kube/http-proxy"]
+jsonpatch = ["kube/jsonpatch"]
+kubelet-debug = ["kube/kubelet-debug"]
+oauth = ["kube/oauth"]
+oidc = ["kube/oidc"]
+openssl-tls = ["kube/openssl-tls"]
+ring = ["kube/ring"]
+runtime = ["kube/runtime"]
+rustls-tls = ["kube/rustls-tls"]
+socks5 = ["kube/socks5"]
+unstable-client = ["kube/unstable-client"]
+unstable-runtime = ["kube/unstable-runtime"]
+webpki-roots = ["kube/webpki-roots"]
+ws = ["kube/ws"]
+
 [dependencies]
 mirrord-agent-env = { path = "../agent/env", features = ["k8s-openapi"] }
 mirrord-config = { path = "../config" }
