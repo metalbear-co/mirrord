@@ -20,6 +20,7 @@ mod traffic_tests {
         CONTAINER_NAME,
     };
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -43,6 +44,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -69,6 +71,7 @@ mod traffic_tests {
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
     //       they actually verify that the traffic is intercepted and forwarded (and isn't just
     //       directly sent out from the local application).
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -91,6 +94,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -114,6 +118,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore]
@@ -136,6 +141,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
@@ -151,6 +157,7 @@ mod traffic_tests {
         assert!(stdout.contains(r#""apiVersion": "v1""#))
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -174,6 +181,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -197,6 +205,7 @@ mod traffic_tests {
 
     /// Verifies that a local socket that has a port subscription can receive traffic
     /// from within the application itself.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -218,6 +227,7 @@ mod traffic_tests {
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -302,6 +312,7 @@ mod traffic_tests {
 
     /// Very similar to [`outgoing_traffic_udp_with_connect`], but it uses the outgoing traffic
     /// filter to resolve the remote host names.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -426,6 +437,7 @@ mod traffic_tests {
 
     /// Test that the process does not crash and messages are sent out normally when the
     /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -470,6 +482,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -480,6 +493,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -491,6 +505,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -501,6 +516,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -510,6 +526,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -519,6 +536,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -528,6 +546,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -546,6 +565,7 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -573,6 +593,7 @@ mod traffic_tests {
     /// 2. Run with mirrord a client application that connects to that socket, sends data, verifies
     /// its echo and panics if anything went wrong
     /// 3. Verify the client app did not panic.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -612,6 +633,7 @@ mod traffic_tests {
     /// Verify that mirrord does not interfere with ignored unix sockets and connecting to a unix
     /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
     /// case of connections to unix sockets).
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -654,6 +676,7 @@ mod traffic_tests {
     #[rstest]
     #[case::outgoing_enabled(true)]
     #[case::outgoing_disabled(false)]
+    #[cfg_attr(target_os = "windows", ignore)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_many_requests(
         #[future] basic_service: KubeService,

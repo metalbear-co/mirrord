@@ -58,6 +58,7 @@ async fn send_and_verify(
 ///
 /// In this test, [`hyper`] is used directly to send HTTP requests,
 /// as it gives us more control over the underlying TCP connections.
+#[cfg_attr(target_os = "windows", ignore)]
 #[cfg_attr(not(any(feature = "job", feature = "ephemeral")), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
