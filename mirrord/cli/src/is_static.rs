@@ -8,7 +8,7 @@ use xmas_elf::{ElfFile, program::Type};
 ///
 /// Note that mirrord *can* possibly be used with static binaries - when the actual application is a
 /// child process of the target binary, and it is dynamically linked.
-/// Therefore, static linking is *not* and indication for a hard fail.
+/// Therefore, static linking is *not* an indication for a hard fail.
 pub fn is_binary_static(binary_path: &Path) -> bool {
     let content = match std::fs::read(binary_path) {
         Ok(content) => content,
@@ -34,11 +34,7 @@ pub fn is_binary_static(binary_path: &Path) -> bool {
         }
     };
 
-    for header in elf.program_iter() {
-        if let Ok(Type::Dynamic) = header.get_type() {
-            return false;
-        }
-    }
+    elf.program_iter().any(|header| matches!(header.get_type(), Ok(Type::Dynamic))).not()
 
     true
 }

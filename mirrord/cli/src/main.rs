@@ -338,7 +338,7 @@ where
             sub_progress.subtask("checking if target binary is dynamically linked");
         if is_static::is_binary_static(Path::new(&args.binary)) {
             sub_progress.failure(Some(
-                "target binary is not dynamically linked, mirrord might not work!",
+                "target binary might not be dynamically linked, mirrord might not work!",
             ));
         } else {
             sub_progress.success(Some("target binary is dynamically linked"));

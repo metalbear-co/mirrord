@@ -75,7 +75,7 @@ pub(crate) async fn extension_exec(
             .map(Path::new)
             .is_some_and(is_static::is_binary_static);
         if is_static {
-            progress.warning("Target binary is not dynamically linked. mirrord might not work!");
+            progress.warning("Target binary might not be dynamically linked. mirrord might not work!");
         }
     }
 
