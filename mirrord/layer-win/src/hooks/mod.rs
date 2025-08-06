@@ -1,5 +1,7 @@
 //! Module responsible for providing [`initialize_hooks`].
 
+mod files;
+mod macros;
 mod process;
 
 use minhook_detours_rs::guard::DetourGuard;
