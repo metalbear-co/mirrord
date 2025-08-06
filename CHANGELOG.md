@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.156.0](https://github.com/metalbear-co/mirrord/tree/3.156.0) - 2025-08-06
+
+
+### Added
+
+- On Linux, mirrord now checks whether the target binary is dynamically linked.
+  If it's not, a warning is issued.
+
+
+### Fixed
+
+- Fixed incorrect parsing of PATH-like `kubeconfig` config values.
+  [#3457](https://github.com/metalbear-co/mirrord/issues/3457)
+- Fixed an issue where mirrord agent was not able to pass through gRPC requests
+  without scheme or authority in the URI.
+
+
+### Internal
+
+- Update links from mirrord.dev to metalbear.co/mirrord (excluding operator
+  version endpoint).
+  [#3247](https://github.com/metalbear-co/mirrord/issues/3247)
+- Added an option to configure idle ttl for the mirrord agent.
+  The agent can now be configured to keep running for some time after all
+  client connections have been closed.
+- Changed the operator E2E to be triggered only on workflow dispatch.
+- Add await-remote-run action to wait for operator-e2e workflow.
+
 ## [3.155.0](https://github.com/metalbear-co/mirrord/tree/3.155.0) - 2025-08-05
 
 

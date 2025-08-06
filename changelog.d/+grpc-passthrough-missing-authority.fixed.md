@@ -1,1 +1,0 @@
-Fixed an issue where mirrord agent was not able to pass through gRPC requests without scheme or authority in the URI.
