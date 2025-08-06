@@ -90,6 +90,7 @@ pub static VERSION: LazyLock<semver::Version> = LazyLock::new(|| {
         .expect("Bad version parsing")
 });
 
+/// Minimal protocol version that allows for sending [`DaemonMessage::OperatorPing`].
 pub static MIRRORD_OPERATOR_LATENCY_PING_PONG: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.19.8".parse().expect("Bad Identifier"));
 
