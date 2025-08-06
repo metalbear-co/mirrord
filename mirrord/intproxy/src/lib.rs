@@ -416,9 +416,6 @@ impl IntProxy {
     /// Routes most messages from the agent to the correct background task.
     ///
     /// Some messages are handled here.
-    ///
-    /// - When adding a new message, remember to add it here, otherwise it'll fall under `other` and
-    ///   error out.
     async fn handle_agent_message(
         &mut self,
         message: DaemonMessage,
@@ -532,9 +529,9 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvRes(res))
                     .await
             }
-            other => {
+            message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(
-                    UnexpectedAgentMessage(other),
+                    UnexpectedAgentMessage(message),
                 ))?;
             }
         }
