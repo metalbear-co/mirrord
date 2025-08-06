@@ -15,7 +15,7 @@ pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 ///
 /// This is our IDE friendly way of sending notification messages from the cli, be careful not to
 /// mix it (e.g. calling `progress.info`) with regular [`println!`], as the IDE may fail to parse
-/// the [`ProgressMessage`] (intellij will fail with `"failed to parse a message from mirrord
+/// the output (intellij will fail with `"failed to parse a message from mirrord
 /// binary"`), and we end up displaying an error instead.
 #[cfg_attr(feature = "implementations", enum_dispatch::enum_dispatch)]
 pub trait Progress: Sized + Send + Sync {
