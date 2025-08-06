@@ -305,6 +305,7 @@ mod test {
             pod_ips: None,
             support_ipv6: false,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
         // targetless agent pod can be configured with priority class name.

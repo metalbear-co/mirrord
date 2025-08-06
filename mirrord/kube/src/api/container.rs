@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
+use std::{collections::HashSet, net::IpAddr, sync::LazyLock, time::Duration};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
@@ -45,6 +45,8 @@ pub struct ContainerConfig {
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
+    /// How long the agent should keep running after all client connections have been closed.
+    pub idle_ttl: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +66,8 @@ pub struct ContainerParams {
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
+    /// How long the agent should keep running after all client connections have been closed.
+    pub idle_ttl: Duration,
 }
 
 impl From<ContainerConfig> for ContainerParams {
@@ -88,6 +92,7 @@ impl From<ContainerConfig> for ContainerParams {
             pod_ips: value.pod_ips,
             support_ipv6: value.support_ipv6,
             steal_tls_config: value.steal_tls_config,
+            idle_ttl: value.idle_ttl,
         }
     }
 }

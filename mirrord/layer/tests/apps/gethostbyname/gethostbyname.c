@@ -27,7 +27,7 @@ void try_gethostbyname(const char name[]) {
 
 int main(int argc, char *argv[]) {
   printf("test issue 2055: START\n");
-  try_gethostbyname("www.mirrord.dev");
+  try_gethostbyname("metalbear.co/mirrord/");
   try_gethostbyname("www.invalid.dev");
   printf("test issue 2055: SUCCESS\n");
   printf("\n");

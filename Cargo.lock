@@ -347,7 +347,7 @@ dependencies = [
  "dialoguer",
  "difference",
  "digest",
- "dirs 5.0.1",
+ "dirs",
  "elliptic-curve",
  "env_logger",
  "figment",
@@ -2139,16 +2139,7 @@ version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
 dependencies = [
- "dirs-sys 0.4.1",
-]
-
-[[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys 0.5.0",
+ "dirs-sys",
 ]
 
 [[package]]
@@ -2169,20 +2160,8 @@ checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users 0.4.6",
+ "redox_users",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users 0.5.0",
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2192,7 +2171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
 dependencies = [
  "libc",
- "redox_users 0.4.6",
+ "redox_users",
  "winapi",
 ]
 
@@ -2520,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "libc",
 ]
@@ -3647,7 +3626,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "issue1317"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3657,7 +3636,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "errno 0.3.13",
  "libc",
@@ -3666,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3674,14 +3653,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "libc",
 ]
@@ -4037,7 +4016,7 @@ checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
 
 [[package]]
 name = "listen_ports"
-version = "3.155.0"
+version = "3.156.0"
 
 [[package]]
 name = "litemap"
@@ -4273,7 +4252,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -4328,11 +4307,12 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "which 7.0.3",
+ "xmas-elf",
 ]
 
 [[package]]
 name = "mirrord-agent"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "actix-codec",
  "axum",
@@ -4388,7 +4368,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "base64 0.22.1",
  "k8s-openapi",
@@ -4401,7 +4381,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "async-trait",
  "enum_dispatch",
@@ -4417,7 +4397,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -4432,7 +4412,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "bcder",
  "chrono",
@@ -4453,7 +4433,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "base64 0.22.1",
  "bimap",
@@ -4481,7 +4461,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4491,7 +4471,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4507,7 +4487,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4538,7 +4518,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4548,7 +4528,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "actix-codec",
  "async-stream",
@@ -4573,7 +4553,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -4615,7 +4595,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4624,7 +4604,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4634,7 +4614,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4669,7 +4649,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4701,7 +4681,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "apple-codesign",
  "fs4 0.12.0",
@@ -4717,7 +4697,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "http 1.3.1",
  "pem",
@@ -4734,7 +4714,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -5103,7 +5083,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.155.0"
+version = "3.156.0"
 
 [[package]]
 name = "outref"
@@ -6051,17 +6031,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox_users"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd6f9d3d47bdd2ad6945c5015a226ec6155d0bcdfd8f7cd29f86b71f8de99d2b"
-dependencies = [
- "getrandom 0.2.16",
- "libredox",
- "thiserror 2.0.12",
-]
-
-[[package]]
 name = "ref-cast"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6251,14 +6220,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "libc",
 ]
@@ -6275,7 +6244,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.155.0"
+version = "3.156.0"
 dependencies = [
  "tokio",
 ]
@@ -6862,7 +6831,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b1fdf65dd6331831494dd616b30351c38e96e45921a27745cf98490458b90bb"
 dependencies = [
- "dirs 6.0.0",
+ "dirs",
 ]
 
 [[package]]
@@ -8669,6 +8638,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xmas-elf"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18245fcbb8b3de8dd198ce7944fdd4096986fd6cd306b0fcfa27df817bd545d6"
+dependencies = [
+ "zero",
+]
+
+[[package]]
 name = "xml-rs"
 version = "0.8.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8736,6 +8714,12 @@ dependencies = [
  "syn 2.0.104",
  "synstructure",
 ]
+
+[[package]]
+name = "zero"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fe21bcc34ca7fe6dd56cc2cb1261ea59d6b93620215aefb5ea6032265527784"
 
 [[package]]
 name = "zerocopy"

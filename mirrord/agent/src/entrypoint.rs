@@ -12,7 +12,7 @@ use std::{
 
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
-use futures::TryFutureExt;
+use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{SafeIpTables, error::IPTablesError};
@@ -802,7 +802,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         Err(AgentError::TestError)?
     }
 
+    let idle_ttl = Duration::from_secs(envs::IDDLE_TTL.from_env_or_default());
     loop {
+        let exit_idle =
+            OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));
+
         select! {
             Ok((stream, addr)) = listener.accept() => {
                 trace!(peer = %addr, "start_agent -> Connection accepted");
@@ -816,21 +820,23 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 );
             },
 
-            client = clients.join_next() => {
+            Some(client) = clients.join_next() => {
                 match client {
-                    Some(Ok(client)) => {
+                    Ok(client) => {
                         trace!(client, "start_agent -> Client finished");
                     }
-
-                    Some(Err(error)) => {
-                        error!(?error, "start_agent -> Failed to join client handler task");
-                    }
-
-                    None => {
-                        trace!("start_agent -> All clients finished, exiting main agent loop");
-                        break
+                    Err(error) => {
+                        error!(%error, "start_agent -> Failed to join client handler task");
                     }
                 }
+            }
+
+            Some(..) = exit_idle => {
+                trace!(
+                    ?idle_ttl,
+                    "start_agent -> All clients finished and idle ttl expired, exiting main agent loop"
+                );
+                break;
             }
         }
     }
