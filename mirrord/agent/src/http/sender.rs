@@ -1,5 +1,5 @@
 use hyper::{
-    Request, Response,
+    Request, Response, Version,
     body::{Body, Incoming},
     client::conn::{http1, http2},
     rt::{Read, Write},
@@ -41,13 +41,25 @@ where
         }
     }
 
-    pub async fn send(&mut self, request: Request<B>) -> hyper::Result<Response<Incoming>> {
+    pub async fn send(&mut self, mut request: Request<B>) -> hyper::Result<Response<Incoming>> {
         match self {
             Self::V1(sender) => {
                 sender.ready().await?;
                 sender.send_request(request).await
             }
             Self::V2(sender) => {
+                // Fixes https://github.com/metalbear-co/mirrord/issues/2497
+                // Inspired by https://github.com/linkerd/linkerd2-proxy/blob/c5d9f1c1e7b7dddd9d75c0d1a0dca68188f38f34/linkerd/proxy/http/src/h2.rs#L175
+                if request.uri().authority().is_none() && request.version() != Version::HTTP_11 {
+                    tracing::trace!(
+                        original_version = ?request.version(),
+                        "Request URI has no authority, changing HTTP version to {:?}",
+                        Version::HTTP_11,
+                    );
+
+                    *request.version_mut() = Version::HTTP_11;
+                }
+
                 sender.ready().await?;
                 sender.send_request(request).await
             }
