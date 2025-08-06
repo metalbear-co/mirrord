@@ -31,7 +31,7 @@ jobs:
         uses: metalbear-co/return-dispatch@main
         continue-on-error: true
         with:
-          token: ${{ secrets.OPERATOR_E2E_PAT }}
+          token: "RANDOM-STUFF"
           ref: ${{ inputs.operator_branch || 'main' }}
           repo: operator
           owner: metalbear-co
@@ -49,7 +49,7 @@ jobs:
       - name: Await Run ID ${{ steps.return_dispatch.outputs.run_id }}
         uses: metalbear-co/await-remote-run@main
         with:
-          token: ${{ secrets.OPERATOR_E2E_PAT }}
+          token: "RANDOM-STUFF"
           repo: operator
           owner: metalbear-co
           run_id: ${{ steps.return_dispatch.outputs.run_id }}
