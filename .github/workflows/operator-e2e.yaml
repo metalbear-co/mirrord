@@ -40,6 +40,11 @@ jobs:
           workflow_timeout_seconds: 7200
           workflow_job_steps_retry_seconds: 30
 
+      - name: Use the output run ID and URL
+        run: |
+          echo ${{steps.trigger-e2e.outputs.run_id}}
+          echo ${{steps.trigger-e2e.outputs.run_url}}
+
       - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
         uses: metalbear-co/await-remote-run@main
         with:
