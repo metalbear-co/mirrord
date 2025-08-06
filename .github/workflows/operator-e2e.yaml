@@ -22,10 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - name: Generate unique run ID
-        id: run-id
-        run: echo "run_id=mirrord-e2e-$(date +%s)-${{ github.run_id }}" >> $GITHUB_OUTPUT
-
       - name: Trigger operator E2E workflow and wait for completion
         id: trigger-e2e
         uses: metalbear-co/return-dispatch@main
@@ -40,19 +36,17 @@ jobs:
             {
               "mirrord_commit": "${{ inputs.mirrord_commit || github.event.pull_request.head.sha }}",
               "mirrord_branch": "${{ inputs.mirrord_branch || github.event.pull_request.head.ref }}",
-              "distinct_id": "${{ steps.run-id.outputs.run_id }}"
             }
           workflow_timeout_seconds: 7200
           workflow_job_steps_retry_seconds: 30
-          distinct_id: ${{ steps.run-id.outputs.run_id }}
 
-      - name: Await Run ID ${{ steps.run-id.outputs.run_id }}
+      - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
         uses: metalbear-co/await-remote-run@main
         with:
           token: "RANDOM-STUFF"
           repo: operator
           owner: metalbear-co
-          run_id: ${{ steps.run-id.outputs.run_id }}
+          run_id: ${{ steps.trigger-e2e.outputs.run_id }}
           run_timeout_seconds: 7200 # Optional
           poll_interval_ms: 5000 # Optional
 
@@ -61,4 +55,4 @@ jobs:
           echo "✅ Operator E2E tests completed successfully!"
           echo "Run ID: ${{ steps.trigger-e2e.outputs.run_id }}"
           echo "Run URL: ${{ steps.trigger-e2e.outputs.run_url }}"
-          echo "Distinct ID used: ${{ steps.run-id.outputs.run_id }}"
+          echo "Distinct ID used: ${{ steps.trigger-e2e.outputs.run_id }}"
