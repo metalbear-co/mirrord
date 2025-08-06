@@ -35,7 +35,7 @@ jobs:
           workflow_inputs: |
             {
               "mirrord_commit": "${{ inputs.mirrord_commit || github.event.pull_request.head.sha }}",
-              "mirrord_branch": "${{ inputs.mirrord_branch || github.event.pull_request.head.ref }}",
+              "mirrord_branch": "${{ inputs.mirrord_branch || github.event.pull_request.head.ref }}"
             }
           workflow_timeout_seconds: 7200
           workflow_job_steps_retry_seconds: 30
