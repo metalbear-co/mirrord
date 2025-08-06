@@ -49,6 +49,7 @@ where
             }
             Self::V2(sender) => {
                 // Fixes https://github.com/metalbear-co/mirrord/issues/2497
+                // Inspired by https://github.com/linkerd/linkerd2-proxy/blob/c5d9f1c1e7b7dddd9d75c0d1a0dca68188f38f34/linkerd/proxy/http/src/h2.rs#L175
                 if request.uri().authority().is_none() && request.version() != Version::HTTP_11 {
                     tracing::trace!(
                         original_version = ?request.version(),
