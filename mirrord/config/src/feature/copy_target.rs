@@ -20,6 +20,8 @@ pub enum CopyTargetFileConfig {
     Advanced {
         enabled: Option<bool>,
         scale_down: Option<bool>,
+        exclude_containers: Option<Vec<String>>,
+        exclude_init_containers: Option<Vec<String>>,
     },
 }
 
@@ -37,13 +39,19 @@ impl MirrordConfig for CopyTargetFileConfig {
             Self::Simple(enabled) => Self::Generated {
                 enabled,
                 scale_down: false,
+                exclude_containers: vec![],
+                exclude_init_containers: vec![],
             },
             Self::Advanced {
                 enabled,
                 scale_down,
+                exclude_containers,
+                exclude_init_containers,
             } => Self::Generated {
                 enabled: enabled.unwrap_or(true),
                 scale_down: scale_down.unwrap_or_default(),
+                exclude_containers: exclude_containers.unwrap_or_default(),
+                exclude_init_containers: exclude_init_containers.unwrap_or_default(),
             },
         };
 
@@ -55,14 +63,16 @@ impl FromMirrordConfig for CopyTargetConfig {
     type Generator = CopyTargetFileConfig;
 }
 
-/// Allows the user to target a pod created dynamically from the orignal [`target`](#target).
+/// Allows the user to target a pod created dynamically from the original [`target`](#target).
 /// The new pod inherits most of the original target's specification, e.g. labels.
 ///
 /// ```json
 /// {
 ///   "feature": {
 ///     "copy_target": {
-///       "scale_down": true
+///       "scale_down": true,
+///       "exclude_containers": ["my-container"],
+///       "exclude_init_containers": ["my-init-container"]
 ///     }
 ///   }
 /// }
@@ -91,6 +101,16 @@ pub struct CopyTargetConfig {
     ///     }
     /// ```
     pub scale_down: bool,
+
+    /// ### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
+    ///
+    /// Set a list of containers to be ignored by copy_target
+    pub exclude_containers: Vec<String>,
+
+    /// ### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
+    ///
+    /// Set a list of init containers to be ignored by copy_target
+    pub exclude_init_containers: Vec<String>,
 }
 
 impl CollectAnalytics for &CopyTargetConfig {

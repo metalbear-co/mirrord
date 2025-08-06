@@ -874,6 +874,13 @@ impl OperatorApi<PreparedClientCert> {
             .is_set()
             .then(|| layer_config.feature.split_queues.clone());
 
+        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
+        let exclude_init_containers = layer_config
+            .feature
+            .copy_target
+            .exclude_init_containers
+            .clone();
+
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
@@ -881,6 +888,8 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            exclude_containers,
+            exclude_init_containers,
         };
 
         let copied = copy_target_api
@@ -923,6 +932,13 @@ impl OperatorApi<PreparedClientCert> {
             .is_set()
             .then(|| layer_config.feature.split_queues.clone());
 
+        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
+        let exclude_init_containers = layer_config
+            .feature
+            .copy_target
+            .exclude_init_containers
+            .clone();
+
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
@@ -931,6 +947,8 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            exclude_containers,
+            exclude_init_containers,
         };
 
         let existing = copy_target_api
