@@ -422,7 +422,8 @@ impl DumpSession {
                     self.connection
                         .sender
                         .send(ClientMessage::OperatorPong(id))
-                        .await?;
+                        .await
+                        .ok();
                 }
                 DaemonMessage::Tcp(message) => {
                     self.handle_tcp_message(message, progress)?;

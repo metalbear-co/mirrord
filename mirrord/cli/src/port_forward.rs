@@ -582,6 +582,13 @@ impl ReversePortForwarder {
                     .send(IncomingProxyMessage::AgentSteal(msg))
                     .await
             }
+            DaemonMessage::OperatorPing(id) => {
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::OperatorPong(id))
+                    .await
+                    .ok();
+            }
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
                 LogLevel::Error => tracing::error!("agent log: {}", log_message.message),
@@ -593,10 +600,17 @@ impl ReversePortForwarder {
             DaemonMessage::Pong if self.waiting_for_pong => {
                 self.waiting_for_pong = false;
             }
-            // Includes unexpected DaemonMessage::Pong
-            other => {
+            message @ DaemonMessage::UdpOutgoing(_)
+            | message @ DaemonMessage::TcpOutgoing(_)
+            | message @ DaemonMessage::File(_)
+            | message @ DaemonMessage::GetEnvVarsResponse(_)
+            | message @ DaemonMessage::GetAddrInfoResponse(_)
+            | message @ DaemonMessage::PauseTarget(_)
+            | message @ DaemonMessage::SwitchProtocolVersionResponse(_)
+            | message @ DaemonMessage::Vpn(_)
+            | message @ DaemonMessage::Pong => {
                 return Err(PortForwardError::AgentError(format!(
-                    "unexpected message from agent: {other:?}"
+                    "unexpected message from agent: {message:?}"
                 )));
             }
         }
