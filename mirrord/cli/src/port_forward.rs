@@ -336,10 +336,25 @@ impl PortForwarder {
             DaemonMessage::Pong if self.waiting_for_pong => {
                 self.waiting_for_pong = false;
             }
-            other => {
+            DaemonMessage::OperatorPing(id) => {
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::OperatorPong(id))
+                    .await
+                    .ok();
+            }
+            message @ (DaemonMessage::File(..)
+            | DaemonMessage::Pong
+            | DaemonMessage::Tcp(..)
+            | DaemonMessage::GetEnvVarsResponse(..)
+            | DaemonMessage::PauseTarget(..)
+            | DaemonMessage::SwitchProtocolVersionResponse(..)
+            | DaemonMessage::UdpOutgoing(..)
+            | DaemonMessage::Vpn(..)
+            | DaemonMessage::TcpSteal(..)) => {
                 // includes unexepcted DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
-                    "unexpected message from agent: {other:?}"
+                    "unexpected message from agent: {message:?}"
                 )));
             }
         }
