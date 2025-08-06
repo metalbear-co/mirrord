@@ -73,6 +73,9 @@ hex.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+xmas-elf = "0.10"
+
 [build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
 
@@ -83,4 +86,3 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
-
