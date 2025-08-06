@@ -16,8 +16,15 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+implementations = [
+    "dep:indicatif",
+    "dep:serde",
+    "dep:enum_dispatch",
+]
+
 [dependencies]
-indicatif = "0.17"
-serde.workspace = true
+indicatif = { version = "0.17", optional = true }
+serde = { workspace = true, optional = true }
 serde_json.workspace = true
-enum_dispatch.workspace = true
+enum_dispatch = { workspace = true, optional = true }
