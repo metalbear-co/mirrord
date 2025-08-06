@@ -259,6 +259,7 @@ mod test {
             pod_ips: None,
             support_ipv6,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
         let update = JobVariant::new(&agent, &params).as_update();
@@ -348,6 +349,7 @@ mod test {
             pod_ips: None,
             support_ipv6,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
         let update = JobTargetedVariant::new(
