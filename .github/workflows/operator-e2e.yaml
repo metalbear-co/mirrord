@@ -16,20 +16,11 @@ on:
         required: false
         type: string
         default: "main"
-  pull_request_review:
-    types: [submitted]
 
 jobs:
   trigger-operator-e2e:
     runs-on: ubuntu-latest
     continue-on-error: true
-    # Only run for approved reviews on PRs targeting protected branches
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request_review' &&
-       github.event.review.state == 'approved' &&
-       (github.event.pull_request.base.ref == 'main' ||
-        github.event.pull_request.base.ref == 'staging'))
     steps:
       - name: Generate unique run ID
         id: run-id
