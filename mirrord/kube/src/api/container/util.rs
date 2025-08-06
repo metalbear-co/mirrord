@@ -79,8 +79,7 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     }
 
     if params.idle_ttl.is_zero().not() {
-        let secs = u32::try_from(params.idle_ttl.as_secs()).unwrap_or(u32::MAX);
-        env.push(envs::IDDLE_TTL.as_k8s_spec(&secs))
+        env.push(envs::IDDLE_TTL.as_k8s_spec(&params.idle_ttl.as_secs()))
     }
 
     env
