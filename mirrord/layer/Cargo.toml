@@ -71,5 +71,12 @@ tokio = { workspace = true, features = ["rt", "net", "macros", "fs"] }
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 apple-codesign = { version = "0.29", default-features = false }
 
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 [lib]
 crate-type = ["cdylib"]
