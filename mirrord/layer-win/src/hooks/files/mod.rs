@@ -91,7 +91,7 @@ unsafe extern "system" fn nt_write_file_hook(
 ) -> NTSTATUS {
     unsafe {
         if !file.is_null() {
-            println!("nt_read_file_hook: {}", get_file_name_by_handle(file));
+            println!("nt_write_file_hook: {}", get_file_name_by_handle(file));
         }
 
         let original = NT_WRITE_FILE_ORIGINAL.get().unwrap();
