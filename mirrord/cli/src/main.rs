@@ -240,9 +240,11 @@
 #![allow(clippy::large_enum_variant)]
 // TODO(alex): Get a big `Box` for the big variants.
 #![allow(clippy::result_large_err)]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{
-    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
+    collections::HashMap, env::vars, net::SocketAddr,
     time::Duration,
 };
 #[cfg(target_os = "macos")]
@@ -314,6 +316,8 @@ use verify_config::verify_config;
 use crate::{
     newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
 };
+#[cfg(target_os = "windows")]
+use crate::execution::windows::command::WindowsCommand;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -338,16 +342,17 @@ where
         })
         .collect::<Vec<_>>();
 
-    let execution_info = MirrordExecution::start_internal(
-        &mut config,
-        #[cfg(target_os = "macos")]
-        Some(&args.binary),
-        #[cfg(target_os = "macos")]
-        Some(binary_args.as_slice()),
-        &mut sub_progress,
-        analytics,
-    )
-    .await?;
+    let execution_info = Box::pin(async {
+        MirrordExecution::start_internal(
+            &mut config,
+            #[cfg(target_os = "macos")]
+            Some(&args.binary),
+            #[cfg(target_os = "macos")]
+            Some(binary_args.as_slice()),
+            &mut sub_progress,
+            analytics,
+        ).await
+    }).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -362,7 +367,7 @@ where
     };
 
     #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
+    let (_did_sip_patch, binary) = (false, args.binary.clone());
 
     let mut env_vars: HashMap<String, String> = vars().collect();
     env_vars.extend(execution_info.environment.clone());
@@ -378,14 +383,12 @@ where
         .collect::<Vec<_>>();
 
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
-    let binary_path = match which(&binary) {
-        Ok(pathbuf) => pathbuf,
-        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
-    };
-    let path = CString::new(binary_path.as_os_str().as_bytes())?;
+    #[cfg(not(target_os = "windows"))]
+    let _ = process_which(&binary)?;
 
     sub_progress.success(Some("ready to launch process"));
 
+    #[cfg(not(target_os = "windows"))]
     if config.experimental.browser_extension_config {
         browser::init_browser_extension(&config.feature.network, progress);
     }
@@ -406,6 +409,26 @@ where
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data).await;
 
+    progress.subtask("running process");
+    execve_process(binary, binary_args, env_vars, _did_sip_patch)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn process_which(binary: String) -> Result<>{
+    match which(&binary) {
+        Ok(pathbuf) => pathbuf,
+        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
+
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = process_which(&binary)?;
+
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
+    
     let args = binary_args
         .clone()
         .into_iter()
@@ -416,7 +439,7 @@ where
     let env = env_vars
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
-        .collect::<CliResult<Vec<_>, _>>()?;
+        .collect::<CliResult<Vec<_>, _>>()?; 
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -437,6 +460,22 @@ where
     }
 
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+#[cfg(target_os = "windows")]
+fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
+
+    let cmd = WindowsCommand::new(&binary)
+        .args(&binary_args)
+        .envs(env_vars)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    match cmd.inject_and_spawn("C:\\Users\\Daniel\\git\\mirrord\\target\\x86_64-pc-windows-msvc\\debug\\layer_win.dll".to_string()) {
+        Ok(_) => Ok(()),
+        _ => Err(CliError::BinaryExecuteFailed(binary, binary_args))
+    }
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -643,19 +682,22 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
     result?;
 
-    let execution_result = exec_process(
-        config,
-        config_file_path.as_deref(),
-        args,
-        &progress,
-        &mut analytics,
+    let execution_result = Box::pin(async move {
+        let res = exec_process(
+            config,
+            config_file_path.as_deref(),
+            args,
+            &progress,
+            &mut analytics,
         user_data,
-    )
-    .await;
+        )
+        .await;
 
-    if execution_result.is_err() && !analytics.has_error() {
-        analytics.set_error(AnalyticsError::Unknown);
-    }
+        if res.is_err() && !analytics.has_error() {
+            analytics.set_error(AnalyticsError::Unknown);
+        }
+        res
+    }).await;
 
     execution_result
 }
@@ -813,7 +855,7 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
-    let res: CliResult<(), CliError> = rt.block_on(async move {
+    let res: CliResult<(), CliError> = rt.block_on(Box::pin(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         let mut user_data = UserData::from_default_path()
@@ -879,7 +921,7 @@ fn main() -> miette::Result<()> {
         };
 
         Ok(())
-    });
+    }));
 
     rt.block_on(async move {
         tokio::time::timeout(Duration::from_secs(10), signal.drain())

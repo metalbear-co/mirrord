@@ -29,6 +29,7 @@ mod steal_tests {
         services::{basic_service, http2_service, tcp_echo_service, websocket_service},
     };
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -167,6 +168,7 @@ mod steal_tests {
 
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
     /// closes a socket.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -358,6 +360,7 @@ mod steal_tests {
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -404,6 +407,7 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -448,6 +452,7 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -531,6 +536,7 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -603,6 +609,7 @@ mod steal_tests {
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -671,6 +678,7 @@ mod steal_tests {
     /// connection of an unsupported protocol.
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -738,6 +746,7 @@ mod steal_tests {
     ///
     /// We verify that the traffic is handled by the deployed app, and the local
     /// app does not see the traffic.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -826,6 +835,7 @@ mod steal_tests {
     /// connection should be handled by the local app.
     ///
     /// We verify that the traffic is handled by the local app.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]

@@ -1,0 +1,12 @@
+[package]
+name = "mirrord-layer-win"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+winapi = { version = "0.3.9", features = ["handleapi", "libloaderapi", "winbase", "fileapi", "consoleapi"] }
+mirrord-win-str = { path = "../mirrord-win-str" }
+minhook = "0.7.1"

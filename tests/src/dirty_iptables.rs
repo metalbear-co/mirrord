@@ -28,6 +28,7 @@ use crate::utils::{
 /// Function that performs check: `SafeIpTables::ensure_iptables_clean()`
 /// Static chain/ table names: `IPTABLE_PREROUTING`, `IPTABLE_MESH`, `IPTABLE_STANDARD`,
 /// `IPTABLES_TABLE_NAME`
+#[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(120))]
