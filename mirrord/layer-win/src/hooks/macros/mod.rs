@@ -1,7 +1,5 @@
 //! Module responsible for exposing macros to create sycall hooks.
 
-//type OnceLockUnderylingType<T, U: OnceLock<&T>> = T;
-
 /// Macro to apply hook.
 ///
 /// # Arguments

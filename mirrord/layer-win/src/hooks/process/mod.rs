@@ -8,7 +8,7 @@ use winapi::{
     um::winnt::{ACCESS_MASK, HANDLE},
 };
 
-use crate::{apply_hook, process::get_export};
+use crate::apply_hook;
 
 // https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1890
 type NtCreateProcessType = unsafe extern "system" fn(
@@ -144,34 +144,32 @@ unsafe extern "system" fn nt_create_user_process_hook(
 }
 
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
-    unsafe {
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtCreateProcess",
-            nt_create_process_hook,
-            NtCreateProcessType,
-            NT_CREATE_PROCESS_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtCreateProcess",
+        nt_create_process_hook,
+        NtCreateProcessType,
+        NT_CREATE_PROCESS_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtCreateProcessEx",
-            nt_create_process_ex_hook,
-            NtCreateProcessExType,
-            NT_CREATE_PROCESS_EX_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtCreateProcessEx",
+        nt_create_process_ex_hook,
+        NtCreateProcessExType,
+        NT_CREATE_PROCESS_EX_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtCreateUserProcess",
-            nt_create_user_process_hook,
-            NtCreateUserProcessType,
-            NT_CREATE_USER_PROCESS_ORIGINAL
-        )?;
-    }
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtCreateUserProcess",
+        nt_create_user_process_hook,
+        NtCreateUserProcessType,
+        NT_CREATE_USER_PROCESS_ORIGINAL
+    )?;
 
     Ok(())
 }
