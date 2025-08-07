@@ -247,7 +247,7 @@ use std::{
     collections::HashMap, env::vars, net::SocketAddr,
     time::Duration,
 };
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use clap::{CommandFactory, Parser};
