@@ -7,7 +7,7 @@ use std::{
     str::{FromStr, Utf8Error},
 };
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 
 use base64::{Engine, engine::general_purpose};

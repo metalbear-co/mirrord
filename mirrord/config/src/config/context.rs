@@ -1,4 +1,4 @@
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::HashMap,
@@ -95,7 +95,7 @@ impl ConfigContext {
     ///
     /// This is the only way we should read environment when generating or verifying configuration.
     pub fn get_env(&self, name: &str) -> Result<String, VarError> {
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         let name = OsStr::from_bytes(name.as_bytes());
 
         #[cfg(target_os = "windows")]

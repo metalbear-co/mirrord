@@ -12,7 +12,7 @@ pub trait CommandExt {
 impl CommandExt for std::process::Command {
     fn display(&self) -> CommandDisplay {
         let envs = self.get_envs().map(|(name, value)| match value {
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             Some(value) => {
                 let mut buf =
                     Vec::with_capacity(name.as_bytes().len() + value.as_bytes().len() + 1);

@@ -51,7 +51,7 @@ impl From<StdIpSocketAddr> for SocketAddress {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 impl TryFrom<UnixAddr> for OsSockAddr {
     type Error = io::Error;
 

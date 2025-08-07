@@ -15,7 +15,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
 };
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::{
     ops::Not,
     os::unix::ffi::OsStrExt,
@@ -71,7 +71,7 @@ pub(crate) async fn proxy(
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
         warn!(%error, "Failed to set the file descriptor limit");
     }
@@ -79,7 +79,7 @@ pub(crate) async fn proxy(
     let agent_connect_info = env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
         .ok_or(InternalProxyError::MissingConnectInfo)
         .and_then(|var| {
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             let var = var.to_string_lossy();
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 InternalProxyError::DeseralizeConnectInfo(
@@ -125,7 +125,7 @@ pub(crate) async fn proxy(
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     if container_mode.not() {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }

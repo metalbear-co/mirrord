@@ -29,7 +29,7 @@ use std::{
     },
     time::Duration,
 };
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 
 use futures::{SinkExt, StreamExt};
@@ -52,7 +52,7 @@ use crate::{
     util::create_listen_socket,
 };
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
@@ -123,7 +123,7 @@ pub async fn proxy(
         .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     if let Err(error) = unsafe { detach_io() }.map_err(ExternalProxyError::SetSid) {
         tracing::warn!(%error, "unable to detach io");
     }

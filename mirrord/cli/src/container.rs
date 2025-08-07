@@ -1,7 +1,7 @@
 use std::{
     net::SocketAddr, ops::Not, path::PathBuf, process::Stdio,
 };
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::process::ExitStatusExt;
 
 use clap::ValueEnum;
@@ -220,7 +220,7 @@ pub async fn container_command(
         }
     })?;
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     if let Some(signal) = status.signal() {
         tracing::warn!("Container command was terminated by signal {signal}");
         Ok(-1)

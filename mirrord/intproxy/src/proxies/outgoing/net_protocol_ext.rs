@@ -1,14 +1,14 @@
 //! Utilities for handling multiple network protocol stacks within one
 //! [`OutgoingProxy`](super::OutgoingProxy).
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::{env, path::PathBuf};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use ::tokio::fs;
 use ::tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -16,7 +16,7 @@ use ::tokio::{
 };
 use bytes::BytesMut;
 use mirrord_intproxy_protocol::NetProtocol;
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
@@ -146,10 +146,10 @@ pub enum PreparedSocket {
 
 impl PreparedSocket {
     /// For unix listeners, relative to the temp dir.
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     async fn generate_uds_path() -> io::Result<PathBuf> {
         let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
         if !tmp_dir.exists() {

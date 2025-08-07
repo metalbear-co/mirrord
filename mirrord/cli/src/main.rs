@@ -383,12 +383,12 @@ where
         .collect::<Vec<_>>();
 
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     let _ = process_which(&binary)?;
 
     sub_progress.success(Some("ready to launch process"));
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     if config.experimental.browser_extension_config {
         browser::init_browser_extension(&config.feature.network, progress);
     }

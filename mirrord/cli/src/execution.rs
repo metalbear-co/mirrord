@@ -40,7 +40,7 @@ use crate::{
     error::CliError,
     util::{get_user_git_branch, remove_proxy_env},
 };
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use crate::extract::extract_library;
 
 #[cfg(target_os = "windows")]
@@ -197,7 +197,7 @@ impl MirrordExecution {
     {
         // Extract Layer from exe
         // currently disabled for windows
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         let lib_path = extract_library(None, progress, true)?;
 
         if !config.use_proxy {
@@ -257,7 +257,7 @@ impl MirrordExecution {
             );
         }
 
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         {
             let lib_path = lib_path.to_string_lossy().into_owned();
             // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES

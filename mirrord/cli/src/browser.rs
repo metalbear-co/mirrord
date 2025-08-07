@@ -1,4 +1,4 @@
-#![cfg(not(windows))]
+#![cfg(not(target_os = "windows"))]
 // Currently browser only supported on not(windows)
 
 use std::{process::Command, sync::LazyLock};

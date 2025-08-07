@@ -92,7 +92,7 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OpenLogFile(String, std::io::Error),
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -113,7 +113,7 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -422,7 +422,7 @@ pub(crate) enum CliError {
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     #[error(
         "Failed to execute the binary: execve failed with {}",
         nix::errno::Errno::E2BIG

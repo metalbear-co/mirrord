@@ -9,7 +9,7 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStringExt;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
