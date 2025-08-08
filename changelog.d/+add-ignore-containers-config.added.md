@@ -1,0 +1,1 @@
+Add configuration to ignore specified containers and init containers when `copy_target` is enabled.
