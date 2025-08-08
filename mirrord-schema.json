@@ -676,6 +676,24 @@
                 "null"
               ]
             },
+            "exclude_containers": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "exclude_init_containers": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "scale_down": {
               "type": [
                 "boolean",
