@@ -1,0 +1,1 @@
+Add ignored copy target containers as an operator feature.
