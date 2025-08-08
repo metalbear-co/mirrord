@@ -4659,7 +4659,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.19.7"
+version = "1.19.8"
 dependencies = [
  "actix-codec",
  "bincode",
