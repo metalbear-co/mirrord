@@ -1,1 +1,0 @@
-`mirrord_progress::Progress` implementations are now hidden behind the `implementations` feature.
