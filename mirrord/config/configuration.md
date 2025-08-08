@@ -749,14 +749,16 @@ Creates a new copy of the target. mirrord will use this copy instead of the orig
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
 
-Allows the user to target a pod created dynamically from the orignal [`target`](#target).
+Allows the user to target a pod created dynamically from the original [`target`](#target).
 The new pod inherits most of the original target's specification, e.g. labels.
 
 ```json
 {
   "feature": {
     "copy_target": {
-      "scale_down": true
+      "scale_down": true,
+      "exclude_containers": ["my-container"],
+      "exclude_init_containers": ["my-init-container"]
     }
   }
 }
@@ -769,6 +771,14 @@ The new pod inherits most of the original target's specification, e.g. labels.
   }
 }
 ```
+
+### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
+
+Set a list of containers to be ignored by copy_target
+
+### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
+
+Set a list of init containers to be ignored by copy_target
 
 ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
 

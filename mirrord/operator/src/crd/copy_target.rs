@@ -28,8 +28,10 @@ pub struct CopyTargetSpec {
     /// Split queues client side configuration.
     pub split_queues: Option<SplitQueuesConfig>,
     /// Containers that are ignored by copy target.
+    #[serde(default)]
     pub exclude_containers: Vec<String>,
     /// Init containers that are ignored by copy target.
+    #[serde(default)]
     pub exclude_init_containers: Vec<String>,
 }
 
