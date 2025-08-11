@@ -217,7 +217,7 @@ Setting this too high may cause the internal proxy to time out and exit.
 ### agent.dns.timeout {#agent-dns-timeout}
 
 Specifies how long (in seconds) the agent will wait for a DNS response before timing out.
-If not specified the agent uses default value of 1 second.
+If not specified the agent uses a default value of 1 second.
 Setting this too high may cause the internal proxy to time out and exit.
 
 ### agent.ephemeral {#agent-ephemeral}
