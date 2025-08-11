@@ -218,14 +218,18 @@ where
         let token = port_state.http_shutdown.clone();
         let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
         tokio::spawn(async move {
+            let mut token_cancelled = false;
             loop {
                 let result = tokio::select! {
                     result = requests.next() => result,
-                    _ = token.cancelled() => {
+                    _ = token.cancelled(), if token_cancelled.not() => {
                         tracing::debug!(
                             connection = ?conn.info,
                             "Gracefully shutting down a redirected HTTP connection",
                         );
+                        token_cancelled = true;
+                        // After starting the graceful shutdown,
+                        // `requests` iterator will eventually finish on its own.
                         requests.graceful_shutdown();
                         continue;
                     },
