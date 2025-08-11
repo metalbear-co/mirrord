@@ -23,6 +23,7 @@ pub mod copy_target;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod mysql_branching;
 pub mod policy;
 pub mod profile;
 pub mod session;
@@ -379,6 +380,7 @@ pub enum NewOperatorFeature {
     LayerReconnect,
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
+    MySqlBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -402,6 +404,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingDirect => {
                 "SQS queue splitting without copy target"
             }
+            NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
