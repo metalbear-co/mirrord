@@ -541,7 +541,6 @@ impl fmt::Debug for PortState {
 
 impl Drop for PortState {
     fn drop(&mut self) {
-        println!("Shutting down conn");
         self.http_shutdown.cancel();
     }
 }
