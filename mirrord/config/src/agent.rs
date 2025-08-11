@@ -551,21 +551,22 @@ impl AgentFileConfig {
     }
 }
 
+/// Configuration options for how the agent performs DNS resolution.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {
     /// ### agent.dns.timeout {#agent-dns-timeout}
     ///
-    /// When agent resolves DNS, how long to wait for a response before timeout
-    /// By default this is set to 1 (in the agent).
-    /// If the value is too high, it might cause internal proxy to timeout and exit.
+    /// Specifies how long (in seconds) the agent will wait for a DNS response before timing out.
+    /// If not specified the agent uses a default value of 1 second.
+    /// Setting this too high may cause the internal proxy to time out and exit.
     pub timeout: Option<u32>,
 
     /// ### agent.dns.attempts {#agent-dns-attempts}
     ///
-    /// When agent resolves DNS, how many attempts before failing.
-    /// If the value is too high, it might cause internal proxy to timeout and exit.
+    /// Specifies the number of DNS resolution attempts the agent will make before failing.
+    /// Setting this too high may cause the internal proxy to time out and exit.
     pub attempts: Option<u32>,
 }
 
