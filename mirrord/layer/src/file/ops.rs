@@ -3,6 +3,8 @@
 //! When operating on the paths provided from the user application, remember to verify/remap them.
 //! Canonical order of operations can be found in [`common_path_check`].
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 use std::{
@@ -11,15 +13,12 @@ use std::{
     io::SeekFrom,
     path::{Path, PathBuf},
 };
+
+use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
-
-
 use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
-#[cfg(not(target_os = "windows"))]
-use libc::{c_int, iovec, AT_FDCWD};
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{

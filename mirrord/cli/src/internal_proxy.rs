@@ -16,11 +16,10 @@ use std::{
     time::Duration,
 };
 #[cfg(not(target_os = "windows"))]
-use std::{
-    ops::Not,
-    os::unix::ffi::OsStrExt,
-};
+use std::{ops::Not, os::unix::ffi::OsStrExt};
 
+#[cfg(not(target_os = "windows"))]
+use create::util::detach_io;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
@@ -42,8 +41,6 @@ use crate::{
     user_data::UserData,
     util::create_listen_socket,
 };
-#[cfg(not(target_os = "windows"))]
-use create::util::detach_io;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.

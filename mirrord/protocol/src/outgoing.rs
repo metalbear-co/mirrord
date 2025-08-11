@@ -4,19 +4,15 @@ use std::{
     io,
     io::ErrorKind,
     net::SocketAddr as StdIpSocketAddr,
+    path::PathBuf,
 };
-
-use std::path::PathBuf;
 
 use bincode::{Decode, Encode};
 use socket2::SockAddr as OsSockAddr;
 
-use crate::{
-    ConnectionId, Payload, SerializationError,
-};
-
 #[cfg(not(target_os = "windows"))]
 use crate::outgoing::UnixAddr::{Abstract, Pathname, Unnamed};
+use crate::{ConnectionId, Payload, SerializationError};
 
 pub mod tcp;
 pub mod udp;
@@ -93,7 +89,9 @@ impl TryFrom<OsSockAddr> for SocketAddress {
 
     #[cfg(not(target_os = "windows"))]
     fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
-        let res = addr.as_socket().map(SocketAddress::Ip)
+        let res = addr
+            .as_socket()
+            .map(SocketAddress::Ip)
             .or_else(|| {
                 addr.as_pathname()
                     .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
@@ -116,9 +114,10 @@ impl TryFrom<SocketAddress> for OsSockAddr {
             #[cfg(not(target_os = "windows"))]
             SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
             #[cfg(target_os = "windows")]
-            _ => Err(
-                Self::Error::new(ErrorKind::InvalidInput, SerializationError::SocketAddress),
-            ),
+            _ => Err(Self::Error::new(
+                ErrorKind::InvalidInput,
+                SerializationError::SocketAddress,
+            )),
         }
     }
 }

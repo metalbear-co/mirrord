@@ -1,18 +1,20 @@
-use std::collections::HashMap;
-use std::error::Error;
-use std::ffi::OsStr;
-use std::fs::File;
-use std::process::{Command, Stdio};
-use std::ptr;
-use std::iter::once;
-use std::os::windows::ffi::OsStrExt;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    error::Error,
+    ffi::OsStr,
+    fs::File,
+    iter::once,
+    os::windows::ffi::OsStrExt,
+    process::{Command, Stdio},
+    ptr,
+    time::Duration,
+};
+
 use ::windows::{
-    core::{self as windows_core, PCWSTR, PWSTR},
     Win32::{
         Foundation::{
-            CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT,
-            INVALID_HANDLE_VALUE,
+            CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, INVALID_HANDLE_VALUE,
+            SetHandleInformation,
         },
         Security::SECURITY_ATTRIBUTES,
         System::{
@@ -20,13 +22,14 @@ use ::windows::{
             Threading::{self as Win32Threading, STARTF_USESTDHANDLES},
         },
     },
+    core::{self as windows_core, PCWSTR, PWSTR},
 };
+
 use crate::execution::windows::{
     env_vars::EnvMap,
     injection::SuspendedProcessExtInject,
-    process::{HandleWrapper, SuspendedProcess}, 
+    process::{HandleWrapper, SuspendedProcess},
 };
-
 
 #[derive(Debug)]
 pub struct WindowsCommand {
@@ -77,7 +80,10 @@ impl WindowsCommand {
         self
     }
 
-    fn new_annonymous_pipe(should_inherit_read: bool, should_inherit_write: bool) -> Result<(HANDLE, HANDLE), windows_core::Error> {
+    fn new_annonymous_pipe(
+        should_inherit_read: bool,
+        should_inherit_write: bool,
+    ) -> Result<(HANDLE, HANDLE), windows_core::Error> {
         let mut read_pipe_handle = HANDLE::default();
         let mut write_pipe_handle = HANDLE::default();
 
@@ -96,7 +102,6 @@ impl WindowsCommand {
                 0,
             )?;
 
-            
             if !should_inherit_read {
                 SetHandleInformation(read_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
             }
@@ -107,11 +112,11 @@ impl WindowsCommand {
         }
         Ok((read_pipe_handle, write_pipe_handle))
     }
-    
+
     pub fn inject_and_spawn(self, dll_path: String) -> Result<(), Box<dyn Error>> {
         let mut child = self.spawn_suspend()?;
         println!("Spawned process in suspended state");
-        
+
         child.inject_dll(dll_path)?;
         println!("injected dll");
 
@@ -124,25 +129,26 @@ impl WindowsCommand {
             println!("child did not die ;(");
         }
         println!("Child Stdout: {}", child.read_stdout());
-        
+
         Ok(())
     }
 
     pub fn spawn_suspend(self) -> std::io::Result<SuspendedProcess> {
-
         let (stdin_pipe_rd, stdin_pipe_wr) = {
             if let Some(_) = self.stdin {
                 // Ensure the write handle to the pipe for STDIN is not inherited.
-                Self::new_annonymous_pipe(true, false).expect("failed to open pipe for child process stdin")
+                Self::new_annonymous_pipe(true, false)
+                    .expect("failed to open pipe for child process stdin")
             } else {
                 (INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)
             }
         };
-        
+
         let (stdout_pipe_rd, stdout_pipe_wr) = {
             if let Some(_) = self.stdout {
                 // Ensure the read handle to the pipe for STDOUT is not inherited.
-                Self::new_annonymous_pipe(false, true).expect("failed to open pipe for child process stdout")
+                Self::new_annonymous_pipe(false, true)
+                    .expect("failed to open pipe for child process stdout")
             } else {
                 (INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)
             }
@@ -151,7 +157,8 @@ impl WindowsCommand {
         let (stderr_pipe_rd, stderr_pipe_wr) = {
             if let Some(_) = self.stderr {
                 // Ensure the read handle to the pipe for STDERR is not inherited.
-                Self::new_annonymous_pipe(false, true).expect("failed to open pipe for child process stderr")
+                Self::new_annonymous_pipe(false, true)
+                    .expect("failed to open pipe for child process stderr")
             } else {
                 (INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)
             }
@@ -166,16 +173,18 @@ impl WindowsCommand {
             ..Default::default()
         };
 
-        let program: Vec<u16> = OsStr::new(self.command.get_program()).encode_wide().chain(once(0)).collect();
-        let args: String = self.command
-            .get_args()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect::<Vec<String>>().join(" ");
-
-        let mut wide_cmdline: Vec<u16> = OsStr::new(&args)
+        let program: Vec<u16> = OsStr::new(self.command.get_program())
             .encode_wide()
             .chain(once(0))
             .collect();
+        let args: String = self
+            .command
+            .get_args()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect::<Vec<String>>()
+            .join(" ");
+
+        let mut wide_cmdline: Vec<u16> = OsStr::new(&args).encode_wide().chain(once(0)).collect();
 
         // todo!(take care of env_clear and self.envs empty situation)
         let environment_block = self.envs.to_windows_env_block();
@@ -192,14 +201,14 @@ impl WindowsCommand {
         let (child_stdin, child_stdout, child_stderr);
         unsafe {
             Win32Threading::CreateProcessW(
-                PCWSTR(program.as_ptr()),                    // ApplicationName
-                Some(PWSTR(wide_cmdline.as_mut_ptr())),  // CommandLine
-                Some(ptr::null()),                    // ProcessAttributes
-                Some(ptr::null()),                    // ThreadAttributes
-                true,                           // InheritHandles
+                PCWSTR(program.as_ptr()),               // ApplicationName
+                Some(PWSTR(wide_cmdline.as_mut_ptr())), // CommandLine
+                Some(ptr::null()),                      // ProcessAttributes
+                Some(ptr::null()),                      // ThreadAttributes
+                true,                                   // InheritHandles
                 creation_flags,
                 Some(lp_environment),
-                PCWSTR::null(),                 // CurrentDirectory
+                PCWSTR::null(), // CurrentDirectory
                 &startup_info,
                 &mut process_info,
             )?;
@@ -207,7 +216,7 @@ impl WindowsCommand {
             child_stdin = File::from(HandleWrapper(stdin_pipe_wr));
             // must close read side of the pipe (see: https://stackoverflow.com/q/54416116)
             CloseHandle(stdin_pipe_rd).expect("failed to close write pipe handle");
-            
+
             child_stdout = File::from(HandleWrapper(stdout_pipe_rd));
             // must close write side of the pipe (see: https://stackoverflow.com/q/54416116)
             CloseHandle(stdout_pipe_wr).expect("failed to close write pipe handle");
@@ -224,5 +233,4 @@ impl WindowsCommand {
             stderr: child_stderr,
         })
     }
-
 }

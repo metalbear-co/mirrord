@@ -1,13 +1,14 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
 use std::{
     collections::{HashMap, HashSet},
     net::{SocketAddr, ToSocketAddrs},
     str::FromStr,
     sync::{Arc, LazyLock, Mutex},
 };
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
+
 use base64::prelude::*;
 use bincode::{Decode, Encode};
 use hooks::FN_FCNTL;
@@ -24,13 +25,13 @@ use mirrord_protocol::{
 use socket2::SockAddr;
 use tracing::warn;
 
+#[cfg(not(target_os = "windows"))]
+use crate::socket::ops::{REMOTE_DNS_REVERSE_MAPPING, remote_getaddrinfo};
 use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult},
 };
-#[cfg(not(target_os = "windows"))]
-use crate::socket::ops::{REMOTE_DNS_REVERSE_MAPPING, remote_getaddrinfo};
 
 #[cfg(target_os = "macos")]
 mod apple_dnsinfo;

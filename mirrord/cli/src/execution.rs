@@ -34,14 +34,14 @@ use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
+#[cfg(not(target_os = "windows"))]
+use crate::extract::extract_library;
 use crate::{
     CliResult,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     util::{get_user_git_branch, remove_proxy_env},
 };
-#[cfg(not(target_os = "windows"))]
-use crate::extract::extract_library;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

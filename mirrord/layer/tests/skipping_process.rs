@@ -1,9 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-
 #![cfg(not(target_os = "windows"))]
-use std::os::unix::fs;
-use std::{env::temp_dir, path::Path, time::Duration};
+use std::{env::temp_dir, os::unix::fs, path::Path, time::Duration};
 
 use rstest::rstest;
 

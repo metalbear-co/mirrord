@@ -1,11 +1,12 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
 use std::{
     collections::HashSet,
     sync::{LazyLock, Mutex},
 };
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
+
 #[cfg(not(target_os = "windows"))]
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
 use mirrord_config::experimental::ExperimentalConfig;

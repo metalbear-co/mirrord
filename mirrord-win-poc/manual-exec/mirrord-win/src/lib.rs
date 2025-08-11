@@ -5,11 +5,11 @@ use std::{env, error::Error, time::Duration};
 
 use crate::{
     commandline::{CliConfig, TargetCommandline},
-    process::{injector::Injector, TargetProcess},
+    process::{TargetProcess, injector::Injector},
 };
 
 pub fn read_config() -> CliConfig {
-    CliConfig::from(env::args()).expect("Failed parsing commandline")
+    CliConfig::try_from(env::args()).expect("Failed parsing commandline")
 }
 
 pub fn run_targetless(
@@ -61,8 +61,8 @@ mod tests {
     fn targetless_without_hijack() {
         let val = "VAL";
         let commandline = TargetCommandline {
-            applicationname: DUMMY_TARGET.into(),
-            commandline: format!("ENVKEY {val}")
+            application_name: DUMMY_TARGET.into(),
+            command_line: format!("ENVKEY {val}")
                 .split_whitespace()
                 .map(|s| s.to_string())
                 .collect(),
@@ -81,8 +81,8 @@ mod tests {
     #[test]
     fn targetless_hijack_works() {
         let commandline = TargetCommandline {
-            applicationname: DUMMY_TARGET.into(),
-            commandline: format!("{ENV_HIJACKED_KEY} THIS_IS_GONNA_BE_HIJACKED")
+            application_name: DUMMY_TARGET.into(),
+            command_line: format!("{ENV_HIJACKED_KEY} THIS_IS_GONNA_BE_HIJACKED")
                 .split_whitespace()
                 .map(|s| s.to_string())
                 .collect(),

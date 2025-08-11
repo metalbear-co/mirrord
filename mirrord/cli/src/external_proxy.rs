@@ -19,6 +19,8 @@
 //!                       └────────────────┘      
 //! ```
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
@@ -29,8 +31,6 @@ use std::{
     },
     time::Duration,
 };
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::ffi::OsStrExt;
 
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
@@ -43,6 +43,8 @@ use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
 use tracing::Level;
 
+#[cfg(not(target_os = "windows"))]
+use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, ExternalProxyError},
@@ -51,9 +53,6 @@ use crate::{
     user_data::UserData,
     util::create_listen_socket,
 };
-
-#[cfg(not(target_os = "windows"))]
-use crate::util::detach_io;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.

@@ -243,10 +243,7 @@
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
-use std::{
-    collections::HashMap, env::vars, net::SocketAddr,
-    time::Duration,
-};
+use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
@@ -313,11 +310,11 @@ mod wsl;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
+#[cfg(target_os = "windows")]
+use crate::execution::windows::command::WindowsCommand;
 use crate::{
     newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
 };
-#[cfg(target_os = "windows")]
-use crate::execution::windows::command::WindowsCommand;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -351,8 +348,10 @@ where
             Some(binary_args.as_slice()),
             &mut sub_progress,
             analytics,
-        ).await
-    }).await?;
+        )
+        .await
+    })
+    .await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -414,7 +413,7 @@ where
 }
 
 #[cfg(not(target_os = "windows"))]
-fn process_which(binary: String) -> Result<>{
+fn process_which(binary: String) -> Result {
     match which(&binary) {
         Ok(pathbuf) => pathbuf,
         Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
@@ -422,13 +421,17 @@ fn process_which(binary: String) -> Result<>{
 }
 
 #[cfg(not(target_os = "windows"))]
-fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
-
+fn execve_process(
+    binary: String,
+    binary_args: Vec<String>,
+    env_vars: HashMap<String, String>,
+    _did_sip_patch: bool,
+) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
     let binary_path = process_which(&binary)?;
 
     let path = CString::new(binary_path.as_os_str().as_bytes())?;
-    
+
     let args = binary_args
         .clone()
         .into_iter()
@@ -439,7 +442,7 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
     let env = env_vars
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
-        .collect::<CliResult<Vec<_>, _>>()?; 
+        .collect::<CliResult<Vec<_>, _>>()?;
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -463,8 +466,12 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
 }
 
 #[cfg(target_os = "windows")]
-fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<String, String>, _did_sip_patch: bool)  -> CliResult<()> {
-
+fn execve_process(
+    binary: String,
+    binary_args: Vec<String>,
+    env_vars: HashMap<String, String>,
+    _did_sip_patch: bool,
+) -> CliResult<()> {
     let cmd = WindowsCommand::new(&binary)
         .args(&binary_args)
         .envs(env_vars)
@@ -472,9 +479,12 @@ fn execve_process(binary: String, binary_args: Vec<String>, env_vars: HashMap<St
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    match cmd.inject_and_spawn("C:\\Users\\Daniel\\git\\mirrord\\target\\x86_64-pc-windows-msvc\\debug\\layer_win.dll".to_string()) {
+    match cmd.inject_and_spawn(
+        "C:\\Users\\Daniel\\git\\mirrord\\target\\x86_64-pc-windows-msvc\\debug\\layer_win.dll"
+            .to_string(),
+    ) {
         Ok(_) => Ok(()),
-        _ => Err(CliError::BinaryExecuteFailed(binary, binary_args))
+        _ => Err(CliError::BinaryExecuteFailed(binary, binary_args)),
     }
 }
 
@@ -689,7 +699,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
             args,
             &progress,
             &mut analytics,
-        user_data,
+            user_data,
         )
         .await;
 
@@ -697,7 +707,8 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
             analytics.set_error(AnalyticsError::Unknown);
         }
         res
-    }).await;
+    })
+    .await;
 
     execution_result
 }

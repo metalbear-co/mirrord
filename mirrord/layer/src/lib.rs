@@ -67,6 +67,8 @@
 extern crate alloc;
 extern crate core;
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::parent_id;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -75,9 +77,6 @@ use std::{
     sync::OnceLock,
     time::Duration,
 };
-
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::process::parent_id;
 
 use ctor::ctor;
 use error::{LayerError, Result};

@@ -1,21 +1,16 @@
 #[cfg(target_os = "linux")]
 use core::ffi::{c_size_t, c_ssize_t};
+// test file not compatible for windows
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{
-    borrow::Borrow,
-    ffi::CString,
-    ptr, slice,
-    time::Duration,
-};
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
-// test file not compatible for windows
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::ffi::OsStrExt;
+use std::{borrow::Borrow, ffi::CString, ptr, slice, time::Duration};
 
 #[cfg(not(target_os = "windows"))]
 use libc::{
@@ -31,8 +26,6 @@ use mirrord_protocol::file::{
     FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
     WriteFileResponse,
 };
-#[cfg(target_os = "linux")]
-use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 #[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 use num_traits::Bounded;

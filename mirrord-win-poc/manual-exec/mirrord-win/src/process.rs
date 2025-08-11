@@ -12,18 +12,18 @@ use std::{
 };
 
 use windows::{
-    core as windows_core,
     Win32::{
         Foundation::{
-            CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT,
+            CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation,
             WAIT_OBJECT_0,
         },
         Security::SECURITY_ATTRIBUTES,
         System::{
             Pipes as Win32Pipes,
-            Threading::{self as Win32Threading, WaitForSingleObject, STARTF_USESTDHANDLES},
+            Threading::{self as Win32Threading, STARTF_USESTDHANDLES, WaitForSingleObject},
         },
     },
+    core::{self as windows_core, PCWSTR, PWSTR},
 };
 
 use crate::commandline::TargetCommandline;
@@ -56,8 +56,8 @@ impl TargetProcess {
 
         unsafe {
             Win32Threading::CreateProcessW(
-                appname.pcwstr(),
-                Some(cmdline.pwstr()),
+                Into::<PCWSTR>::into(&appname),
+                Some(Into::<PWSTR>::into(&mut cmdline)),
                 None,
                 None,
                 true,

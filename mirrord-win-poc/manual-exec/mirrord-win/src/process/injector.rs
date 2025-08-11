@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use dll_syringe::{process::OwnedProcess as InjectorOwnedProcess, Syringe};
+use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 
 use crate::process::common::TargetProcess;
 

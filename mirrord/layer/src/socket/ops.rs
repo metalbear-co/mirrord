@@ -2,22 +2,21 @@
 
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
-use std::{
-    collections::HashMap,
-    io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
-    ops::Not,
-    
-    path::PathBuf,
-    ptr::{self, copy_nonoverlapping},
-    sync::{Arc, Mutex, OnceLock},
-};
-
 #[cfg(not(target_os = "windows"))]
 use std::os::{
     fd::{BorrowedFd, FromRawFd, IntoRawFd},
     unix::io::RawFd,
 };
+use std::{
+    collections::HashMap,
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    ops::Not,
+    path::PathBuf,
+    ptr::{self, copy_nonoverlapping},
+    sync::{Arc, Mutex, OnceLock},
+};
+
 #[cfg(not(target_os = "windows"))]
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
@@ -371,19 +370,21 @@ fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
     if http_filter_used && incoming_config.ports.is_none() {
         #[cfg(not(target_os = "windows"))]
         {
-            let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
-                .inspect_err(|err| {
-                    tracing::debug!(
-                        "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
-                    )
-                })
-                .ok()
-                .and_then(|addr_storage| {
-                    addr_storage
-                        .as_sockaddr_in()
-                        .map(SockaddrIn::port)
-                        .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
-                }) {
+            let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(
+                sockfd,
+            )
+            .inspect_err(|err| {
+                tracing::debug!(
+                    "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
+                )
+            })
+            .ok()
+            .and_then(|addr_storage| {
+                addr_storage
+                    .as_sockaddr_in()
+                    .map(SockaddrIn::port)
+                    .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
+            }) {
                 if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
                     format!("Remote port {mapped_port} (mapped from local port {port})",)
                 } else {

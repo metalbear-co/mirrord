@@ -214,7 +214,6 @@ macro_rules! graceful_exit {
     };
 }
 
-
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")

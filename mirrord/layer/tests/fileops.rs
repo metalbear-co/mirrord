@@ -3,16 +3,12 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-#[cfg(target_os = "macos")]
-use std::{env, fs};
-use std::{
-    env::temp_dir,
-    path::Path,
-    time::Duration,
-};
-
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::{env, fs};
+use std::{env::temp_dir, path::Path, time::Duration};
+
 #[cfg(not(target_os = "windows"))]
 use libc::{O_RDWR, pid_t};
 use mirrord_protocol::{file::*, *};
@@ -615,15 +611,14 @@ use tokio::process::Child;
 #[cfg(target_os = "windows")]
 use windows::Win32::{
     Foundation::CloseHandle,
-    System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE},
+    System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
 };
 
 #[cfg(target_os = "windows")]
 fn terminate_tokio_child(child: &Child) -> std::io::Result<()> {
-    let pid = child.id().ok_or_else(|| std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "Failed to get child process ID",
-    ))?;
+    let pid = child.id().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::Other, "Failed to get child process ID")
+    })?;
 
     unsafe {
         let handle = OpenProcess(PROCESS_TERMINATE, false.into(), pid)?;
@@ -640,7 +635,6 @@ fn terminate_tokio_child(child: &Child) -> std::io::Result<()> {
         }
     }
 }
-
 
 /// Test go file read and close.
 /// This test also verifies the close hook, since go's `os.ReadFile` calls `Close`.

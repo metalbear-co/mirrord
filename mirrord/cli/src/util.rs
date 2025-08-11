@@ -1,10 +1,10 @@
+#[cfg(not(target_os = "windows"))]
+use std::io::Write;
 use std::{io, net::SocketAddr};
 
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
 use nix::libc;
-#[cfg(not(target_os = "windows"))]
-use std::io::Write;
 use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
 

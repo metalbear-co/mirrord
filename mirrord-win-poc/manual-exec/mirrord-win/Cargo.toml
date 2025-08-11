@@ -15,6 +15,7 @@ categories.workspace = true
 
 [dependencies]
 dll-syringe = "0.16.0"
+thiserror.workspace = true
 
 [dependencies.windows]
 version = "0.61"

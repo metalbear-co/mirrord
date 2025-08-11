@@ -1,10 +1,13 @@
-use std::fs::File;
-use std::io::Read;
-use std::os::windows::io::{FromRawHandle, RawHandle};
-use std::time::Duration;
+use std::{
+    fs::File,
+    io::Read,
+    os::windows::io::{FromRawHandle, RawHandle},
+    time::Duration,
+};
+
 use windows::Win32::{
-    Foundation::{HANDLE, WAIT_OBJECT_0,}, 
-    System::Threading::{self as Win32Threading, WaitForSingleObject}
+    Foundation::{HANDLE, WAIT_OBJECT_0},
+    System::Threading::{self as Win32Threading, WaitForSingleObject},
 };
 
 pub struct HandleWrapper(pub HANDLE);
@@ -30,7 +33,9 @@ impl SuspendedProcess {
     pub fn resume(&self) -> windows::core::Result<()> {
         unsafe {
             // ResumeThread: If the function fails, the return value is (DWORD) -1
-            if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread) == (-1i32 as u32) {
+            if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread)
+                == (-1i32 as u32)
+            {
                 return Err(windows::core::Error::from_win32());
             }
         }
@@ -54,9 +59,11 @@ impl SuspendedProcess {
         }
     }
 
-    pub fn read_stdout(&mut self) -> String{
+    pub fn read_stdout(&mut self) -> String {
         let mut contents = String::new();
-        self.stdout.read_to_string(&mut contents).expect("failed to read stdout to String");
+        self.stdout
+            .read_to_string(&mut contents)
+            .expect("failed to read stdout to String");
         contents
     }
 }

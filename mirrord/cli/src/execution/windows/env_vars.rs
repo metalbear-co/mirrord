@@ -1,11 +1,13 @@
-use std::ffi::{OsStr, OsString};
-use std::os::windows::ffi::OsStrExt;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    ffi::{OsStr, OsString},
+    os::windows::ffi::OsStrExt,
+};
 
 #[derive(Debug, Default)]
 pub struct EnvMap(pub HashMap<OsString, OsString>);
 
-impl<K, V> From<HashMap<K, V>> for EnvMap 
+impl<K, V> From<HashMap<K, V>> for EnvMap
 where
     K: Into<String>,
     V: Into<String>,
@@ -24,7 +26,6 @@ where
 //     fn to_windows_env_block(&self) -> Vec<u16>;
 // }
 impl EnvMap {
-    
     pub fn to_windows_env_block(&self) -> Vec<u16> {
         let mut block: Vec<u16> = Vec::new();
 

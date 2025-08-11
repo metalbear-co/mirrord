@@ -1,8 +1,8 @@
-use std::{borrow::Cow, ffi::OsStr, fmt};
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStrExt;
+use std::{borrow::Cow, ffi::OsStr, fmt};
 
 /// Convenience trait that allows for producing a nice display of an std/tokio command.
 pub trait CommandExt {
