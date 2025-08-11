@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.157.0](https://github.com/metalbear-co/mirrord/tree/3.157.0) - 2025-08-08
+
+### Added
+
+- Added a new configuration option to ignore specified containers and init containers
+  when copying the session target.
+
+### Internal
+
+- Fix invalid json in operator-e2e action.
+- Fix run_id from operator-e2e action.
+- `mirrord_progress::Progress` implementations are now hidden behind the
+  `implementations` feature.
+- Add ignored copy target containers as an operator feature.
+
 ## [3.156.0](https://github.com/metalbear-co/mirrord/tree/3.156.0) - 2025-08-06
 
 

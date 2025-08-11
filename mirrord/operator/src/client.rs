@@ -466,6 +466,24 @@ where
                 .require_feature(NewOperatorFeature::CopyTarget)?
         }
 
+        if layer_config
+            .feature
+            .copy_target
+            .exclude_containers
+            .is_empty()
+            .not()
+            || layer_config
+                .feature
+                .copy_target
+                .exclude_init_containers
+                .is_empty()
+                .not()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
+        }
+
         if layer_config.feature.split_queues.sqs().next().is_some() {
             self.operator
                 .spec
