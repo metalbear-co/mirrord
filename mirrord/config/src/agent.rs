@@ -551,7 +551,7 @@ impl AgentFileConfig {
     }
 }
 
-/// Specific customisation for how agent performes DNS resolution.
+/// Specific customization for how agent performes DNS resolution.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

@@ -207,7 +207,7 @@ as targetless agent containers have no capabilities.
 
 ### agent.dns {#agent-dns}
 
-Specific customisation for how agent performes DNS resolution.
+Specific customization for how agent performes DNS resolution.
 
 ### agent.dns.attempts {#agent-dns-attempts}
 
