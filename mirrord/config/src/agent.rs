@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    self, ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
-    source::MirrordConfigSource,
+    self, from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError,
+    FromMirrordConfig, MirrordConfig,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
@@ -550,7 +550,9 @@ impl AgentFileConfig {
         }
     }
 }
-
+/// ### agent.dns {#agent-dns}
+///
+/// Specific customisation for how agent performes DNS resolution.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
