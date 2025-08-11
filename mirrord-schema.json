@@ -1150,7 +1150,7 @@
         },
         "timeout": {
           "title": "agent.dns.timeout {#agent-dns-timeout}",
-          "description": "Specifies how long (in seconds) the agent will wait for a DNS response before timing out. By default this is set to 1 (in the agent). Setting this too high may cause the internal proxy to time out and exit.",
+          "description": "Specifies how long (in seconds) the agent will wait for a DNS response before timing out. If not specified the agent uses default value of 1 second. Setting this too high may cause the internal proxy to time out and exit.",
           "type": [
             "integer",
             "null"
