@@ -207,6 +207,19 @@ as targetless agent containers have no capabilities.
 
 ### agent.dns {#agent-dns}
 
+Configuration options for how the agent performs DNS resolution.
+
+### agent.dns.attempts {#agent-dns-attempts}
+
+Specifies the number of DNS resolution attempts the agent will make before failing.
+Setting this too high may cause the internal proxy to time out and exit.
+
+### agent.dns.timeout {#agent-dns-timeout}
+
+Specifies how long (in seconds) the agent will wait for a DNS response before timing out.
+If not specified the agent uses a default value of 1 second.
+Setting this too high may cause the internal proxy to time out and exit.
+
 ### agent.ephemeral {#agent-ephemeral}
 
 Runs the agent as an
