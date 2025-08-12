@@ -1,0 +1,1 @@
+mirrord-agent now sends logs when IO errors occur in outgoing connections.
