@@ -428,7 +428,7 @@ impl ClientConnectionHandler {
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
                 message = self.udp_outgoing_api.recv_from_task() => match message {
