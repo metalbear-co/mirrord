@@ -21,8 +21,8 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest, WriteFileResponse,
-        XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
+        RenameRequest, SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest,
+        WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
     },
 };
 use nix::errno::Errno;
@@ -805,6 +805,20 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     xstat(Some(Detour::Success(realpath.clone())), None, true)?;
 
     Detour::Success(realpath)
+}
+
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> Detour<()> {
+    let old_path = common_path_check(old_path?, false)?;
+    let new_path = common_path_check(new_path?, false)?;
+
+    let old_path = absolute_path(old_path);
+    let new_path = absolute_path(new_path);
+
+    Detour::Success(common::make_proxy_request_with_response(RenameRequest {
+        old_path,
+        new_path,
+    })??)
 }
 
 #[cfg(test)]

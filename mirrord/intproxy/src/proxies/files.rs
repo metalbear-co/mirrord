@@ -2,6 +2,7 @@ use core::fmt;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet, VecDeque},
+    ops::Not,
     vec,
 };
 
@@ -56,6 +57,7 @@ impl From<AgentLostFileResponse> for ToLayer {
             FileResponse::MakeDir(..) => FileResponse::MakeDir(Err(error)),
             FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
             FileResponse::Unlink(..) => FileResponse::Unlink(Err(error)),
+            FileResponse::Rename(..) => FileResponse::Rename(Err(error)),
         };
 
         debug_assert_eq!(
@@ -113,6 +115,7 @@ impl FileRequestExt for FileRequest {
             Self::RemoveDir(..) => dummy_file_response!(RemoveDir),
             Self::StatFs(..) => dummy_file_response!(XstatFs),
             Self::StatFsV2(..) => dummy_file_response!(XstatFsV2),
+            Self::Rename(..) => dummy_file_response!(Rename),
         };
 
         Some(AgentLostFileResponse(layer_id, message_id, response))
@@ -269,6 +272,7 @@ impl RouterFileOps {
             | FileRequest::RemoveDir(..)
             | FileRequest::StatFs(..)
             | FileRequest::StatFsV2(..)
+            | FileRequest::Rename(..)
             | FileRequest::UnlinkAt(UnlinkAtRequest { dirfd: None, .. }) => {}
 
             // These requests do not require any response from the agent.
@@ -351,6 +355,7 @@ impl RouterFileOps {
             | FileResponse::ReadLink(..)
             | FileResponse::MakeDir(..)
             | FileResponse::Unlink(..)
+            | FileResponse::Rename(..)
             | FileResponse::RemoveDir(..) => {}
 
             FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd: remote_fd, .. }))
@@ -541,11 +546,24 @@ impl FilesProxy {
             {
                 Err(FileResponse::XstatFs(Err(ResponseError::NotImplemented)))
             }
+            FileRequest::Rename(..)
+                if protocol_version
+                    .is_none_or(|version: &Version| RENAME_VERSION.matches(version).not()) =>
+            {
+                Err(FileResponse::Rename(Err(ResponseError::NotImplemented)))
+            }
             _ => Ok(()),
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(message_bus), ret)]
+    /// Handles the [`FileRequest`], converting a [`FilesProxyMessage`]  to a
+    /// [`ClientMessage::FileRequest`] and sending it on the [`MessageBus`]`.
+    ///
+    /// - Has a catch-all `other` for [`FileRequest`]s.
+    ///
+    /// - If you added a new file message to the procotol, you probably want to handle the version
+    ///   check in [`Self::is_request_supported`] to see if we can send it to the agent.
+    #[tracing::instrument(level = Level::DEBUG, skip(message_bus), ret)]
     async fn file_request(
         &mut self,
         request: FileRequest,

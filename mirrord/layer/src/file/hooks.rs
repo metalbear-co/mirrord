@@ -1156,6 +1156,13 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
     }
 }
 
+#[hook_guard_fn]
+unsafe extern "C" fn rename_detour(old_path: *const c_char, new_path: *mut c_char) -> c_int {
+    rename(old_path.checked_into(), new_path.checked_into())
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_RENAME(old_path, new_path) })
+}
+
 fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
@@ -1479,6 +1486,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnRealpath_darwin_extsn,
             FN_REALPATH_DARWIN_EXTSN
         );
+
+        replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
 
         #[cfg(target_os = "linux")]
         {

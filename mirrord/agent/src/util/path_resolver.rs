@@ -28,7 +28,7 @@ impl InTargetPathResolver {
         &self.root
     }
 
-    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
+    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::WARN))]
     pub fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
         let mut temp_path = PathBuf::new();
 
