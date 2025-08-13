@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.157.1](https://github.com/metalbear-co/mirrord/tree/3.157.1) - 2025-08-13
+
+
+### Fixed
+
+- Fixed an issue where the mirrord-agent would sometimes hang and linger in the
+  cluster.
+
+
+### Internal
+
+- Add another docstring to `AgentDnsConfig` so it will apear in docs correctly.
+- Added a regression unit test for graceful HTTP shutdown in the mirrord-agent.
+- mirrord-agent now sends logs when IO errors occur in outgoing connections.
+
 ## [3.157.0](https://github.com/metalbear-co/mirrord/tree/3.157.0) - 2025-08-08
 
 ### Added
