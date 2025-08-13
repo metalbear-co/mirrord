@@ -1157,7 +1157,10 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
 }
 
 #[hook_guard_fn]
-unsafe extern "C" fn rename_detour(old_path: *const c_char, new_path: *mut c_char) -> c_int {
+pub(crate) unsafe extern "C" fn rename_detour(
+    old_path: *const c_char,
+    new_path: *mut c_char,
+) -> c_int {
     rename(old_path.checked_into(), new_path.checked_into())
         .map(|()| 0)
         .unwrap_or_bypass_with(|_| unsafe { FN_RENAME(old_path, new_path) })

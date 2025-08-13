@@ -563,7 +563,7 @@ impl FilesProxy {
     ///
     /// - If you added a new file message to the procotol, you probably want to handle the version
     ///   check in [`Self::is_request_supported`] to see if we can send it to the agent.
-    #[tracing::instrument(level = Level::DEBUG, skip(message_bus), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(message_bus), ret)]
     async fn file_request(
         &mut self,
         request: FileRequest,
