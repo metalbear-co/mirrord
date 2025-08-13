@@ -131,7 +131,11 @@ pub fn mirrord_error_response<M: fmt::Display>(
     request_id: RequestId,
     port: Port,
 ) -> HttpResponse<Payload> {
-    let body = format!("mirrord-intproxy: {message}\n").into_bytes();
+    let body = format!(
+        "mirrord-intproxy v{}: {message}\n",
+        env!("CARGO_PKG_VERSION")
+    )
+    .into_bytes();
     let body = Payload::from(body);
     HttpResponse {
         connection_id,

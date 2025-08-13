@@ -1,0 +1,1 @@
+mirrord-agent and mirrord-intproxy now include the crate version in the produced HTTP 502 responses.
