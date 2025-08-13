@@ -1,12 +1,29 @@
 use kube::CustomResource;
+use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de, ser};
+
+fn serialize_config_hash<S>(hash: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: ser::Serializer,
+{
+    format!("{hash:x}").serialize(serializer)
+}
+
+fn deserialize_config_hash<'de, D>(d: D) -> Result<u64, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let str_value = String::deserialize(d)?;
+    u64::from_str_radix(&str_value, 16).map_err(de::Error::custom)
+}
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordClusterSession"
+    kind = "MirrordClusterSession",
+    status = "MirrordClusterSessionStatus"
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionSpec {
@@ -19,6 +36,43 @@ pub struct MirrordClusterSessionSpec {
 
     /// Session's [`Target`](mirrord_config::target::Target)
     pub target: SessionTarget,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterSessionStatus {
+    /// List of registed agents
+    #[serde(default)]
+    pub agents: Vec<MirrordClusterSessionAgentInfo>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterSessionAgentInfo {
+    #[serde(
+        deserialize_with = "deserialize_config_hash",
+        serialize_with = "serialize_config_hash"
+    )]
+    pub config_hash: u64,
+
+    pub ephemeral: bool,
+
+    pub name: String,
+    pub namespace: String,
+
+    pub port: u16,
+
+    pub target: SessionTarget,
+}
+
+impl From<MirrordClusterSessionAgentInfo> for AgentKubernetesConnectInfo {
+    fn from(session_agent: MirrordClusterSessionAgentInfo) -> Self {
+        AgentKubernetesConnectInfo {
+            agent_port: session_agent.port,
+            pod_name: session_agent.name,
+            pod_namespace: session_agent.namespace,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -65,4 +119,33 @@ pub struct JiraMetricsResources {
 
     /// The user's current git branch, used for sending session metrics to mirrord Jira app
     pub branch_name: String,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn correct_serde_for_connection_info() {
+        let info = MirrordClusterSessionAgentInfo {
+            config_hash: 1337,
+            ephemeral: false,
+            name: "my-pod".into(),
+            namespace: "my-namespace".into(),
+            port: 9999,
+            target: SessionTarget {
+                api_version: "v1".into(),
+                kind: "Pod".into(),
+                namespace: "my-target-namespace".into(),
+                name: Some("my-target".into()),
+                container: None,
+            },
+        };
+
+        let info_json = serde_json::to_string(&info).expect("should serialize");
+        let cloned = serde_json::from_str(&info_json).expect("should deserialize");
+
+        assert_eq!(info, cloned)
+    }
 }
