@@ -1,1 +1,0 @@
-Fixed an issue where the mirrord-agent would sometimes hang and linger in the cluster.
