@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.157.2](https://github.com/metalbear-co/mirrord/tree/3.157.2) - 2025-08-14
+
+### Added
+
+- Added periodic dump of connected processes for diagnostic purposes.
+- Added the logfile location to the `intproxy` command-line so it can be seen in
+  the process output.
+
 ## [3.157.1](https://github.com/metalbear-co/mirrord/tree/3.157.1) - 2025-08-13
 
 

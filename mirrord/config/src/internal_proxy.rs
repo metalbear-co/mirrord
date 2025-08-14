@@ -109,4 +109,21 @@ pub struct InternalProxyConfig {
     /// Defaults to true.
     #[config(default = true)]
     pub json_log: bool,
+
+    /// ### internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}
+    ///
+    /// How often to log information about connected processes in seconds.
+    ///
+    /// This feature logs details about processes that are currently connected to the internal
+    /// proxy, including their PID, process name, command line, and connection status.
+    ///
+    /// ```json
+    /// {
+    ///   "internal_proxy": {
+    ///     "process_logging_interval": 60
+    ///   }
+    /// }
+    /// ```
+    #[config(default = 60)]
+    pub process_logging_interval: u64,
 }
