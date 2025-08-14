@@ -275,6 +275,11 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        // Add logfile argument if specified in config
+        if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
+            proxy_command.arg("--logfile").arg(log_destination);
+        }
+
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
         })?;

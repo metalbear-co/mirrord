@@ -102,10 +102,13 @@ fn init_proxy_tracing_registry(
     Ok(())
 }
 
-pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
+pub fn init_intproxy_tracing_registry(
+    config: &LayerConfig,
+    logfile: Option<&Path>,
+) -> Result<(), InternalProxyError> {
     if crate::util::intproxy_container_mode().not() {
         // When the intproxy does not run in a sidecar container, it logs to a file.
-        let log_destination = &config.internal_proxy.log_destination;
+        let log_destination = logfile.unwrap_or(&config.internal_proxy.log_destination);
         init_proxy_tracing_registry(
             log_destination,
             &config.internal_proxy.log_level,
