@@ -43,7 +43,6 @@ pub static STATFS_VERSION: LazyLock<VersionReq> =
 pub static STATFS_V2_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.18.0".parse().expect("Bad Identifier"));
 
-// TODO(alex) [high]: Remember to change this.
 pub static RENAME_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.19.9".parse().expect("Bad Identifier"));
 
