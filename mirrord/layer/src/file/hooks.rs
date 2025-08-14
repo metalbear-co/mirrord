@@ -14,8 +14,8 @@ use std::{
 };
 
 use libc::{
-    self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_uint, c_void,
-    dirent, iovec, off_t, size_t, ssize_t, stat, statfs,
+    self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
+    iovec, off_t, size_t, ssize_t, stat, statfs,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
@@ -1166,31 +1166,6 @@ pub(crate) unsafe extern "C" fn rename_detour(
         .unwrap_or_bypass_with(|_| unsafe { FN_RENAME(old_path, new_path) })
 }
 
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn renameat_detour(
-    _old_fd: c_int,
-    old_path: *const c_char,
-    _new_fd: c_int,
-    new_path: *mut c_char,
-) -> c_int {
-    rename(old_path.checked_into(), new_path.checked_into())
-        .map(|()| 0)
-        .unwrap_or_bypass_with(|_| unsafe { FN_RENAME(old_path, new_path) })
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn renameat2_detour(
-    _old_fd: c_int,
-    old_path: *const c_char,
-    _new_fd: c_int,
-    new_path: *mut c_char,
-    _flags: c_uint,
-) -> c_int {
-    rename(old_path.checked_into(), new_path.checked_into())
-        .map(|()| 0)
-        .unwrap_or_bypass_with(|_| unsafe { FN_RENAME(old_path, new_path) })
-}
-
 fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
@@ -1516,20 +1491,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         );
 
         replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
-        replace!(
-            hook_manager,
-            "renameat",
-            renameat_detour,
-            FnRenameat,
-            FN_RENAMEAT
-        );
-        replace!(
-            hook_manager,
-            "renameat2",
-            renameat2_detour,
-            FnRenameat2,
-            FN_RENAMEAT2
-        );
 
         #[cfg(target_os = "linux")]
         {
