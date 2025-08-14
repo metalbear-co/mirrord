@@ -83,7 +83,7 @@ pub(crate) struct MirrordExecution {
 /// then update progress with the warnings returned.
 struct DropProgress<'a, P>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     progress: &'a P,
     cancellation_token: CancellationToken,
@@ -92,7 +92,7 @@ where
 
 impl<P> Drop for DropProgress<'_, P>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     fn drop(&mut self) {
         self.cancellation_token.cancel();
@@ -108,7 +108,7 @@ where
 /// Caller should cancel the token and wait on join handle.
 async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<'_, P>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let cancellation_token = CancellationToken::new();
     let stderr_reader_token = cancellation_token.clone();
@@ -193,7 +193,7 @@ impl MirrordExecution {
         analytics: &mut AnalyticsReporter,
     ) -> CliResult<Self>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         // Extract Layer from exe
         // currently disabled for windows
@@ -409,7 +409,7 @@ impl MirrordExecution {
         tls: Option<&SecureChannelSetup>,
     ) -> CliResult<(Self, SocketAddr)>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         if !config.use_proxy {
             remove_proxy_env();

@@ -27,6 +27,12 @@ pub struct CopyTargetSpec {
     pub scale_down: bool,
     /// Split queues client side configuration.
     pub split_queues: Option<SplitQueuesConfig>,
+    /// Containers that are ignored by copy target.
+    #[serde(default)]
+    pub exclude_containers: Vec<String>,
+    /// Init containers that are ignored by copy target.
+    #[serde(default)]
+    pub exclude_init_containers: Vec<String>,
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].

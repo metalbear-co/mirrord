@@ -294,6 +294,8 @@ mod extension;
 mod external_proxy;
 mod extract;
 mod internal_proxy;
+#[cfg(target_os = "linux")]
+mod is_static;
 mod list;
 mod logging;
 mod newsletter;
@@ -320,14 +322,29 @@ async fn exec_process<P>(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
-    progress: &P,
+    progress: &mut P,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
 ) -> CliResult<()>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+
+        let mut sub_progress =
+            sub_progress.subtask("checking if target binary is dynamically linked");
+        if is_static::is_binary_static(Path::new(&args.binary)) {
+            sub_progress.failure(Some(
+                "target binary might not be dynamically linked, mirrord might not work!",
+            ));
+        } else {
+            sub_progress.success(Some("target binary is dynamically linked"));
+        }
+    }
 
     #[cfg(target_os = "macos")]
     let binary_args = args
@@ -402,7 +419,7 @@ where
     sub_progress_config.success(Some("config summary"));
 
     // print an invitation to the newsletter on certain run count numbers
-    suggest_newsletter_signup(user_data).await;
+    suggest_newsletter_signup(user_data, progress).await;
 
     progress.subtask("running process");
     execve_process(binary, binary_args, env_vars, _did_sip_patch)
@@ -435,6 +452,8 @@ fn execve_process(
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
+
+    progress.success(Some("Ready!"));
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -509,7 +528,7 @@ fn print_config<P>(
     config_file_path: Option<&str>,
     operator_used: bool,
 ) where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     progress.info(&format!("Running command: {}", command.join(" ")));
 
@@ -665,7 +684,7 @@ fn print_config<P>(
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
-    let progress = ProgressTracker::from_env("mirrord exec");
+    let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -710,7 +729,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
             config,
             config_file_path.as_deref(),
             args,
-            &progress,
+            &mut progress,
             &mut analytics,
             user_data,
         )

@@ -203,15 +203,18 @@ impl OperatorApi<NoClientCert> {
     /// NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
     /// authentication with the cluster, for example via the kubelogin tool
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    pub async fn try_new<R>(
+    pub async fn try_new<P, R>(
         config: &LayerConfig,
         reporter: &mut R,
+        progress: &P,
     ) -> OperatorApiResult<Option<Self>>
     where
         R: Reporter,
+        P: Progress,
     {
         let base_config = Self::base_client_config(config).await?;
-        let client = Client::try_from(base_config.clone())
+        let client = progress
+            .suspend(|| Client::try_from(base_config.clone()))
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
@@ -257,10 +260,15 @@ impl OperatorApi<NoClientCert> {
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
     /// In case of failure, state of this API instance does not change.
-    #[tracing::instrument(level = Level::TRACE, skip(reporter))]
-    pub async fn prepare_client_cert<R>(self, reporter: &mut R) -> OperatorApi<MaybeClientCert>
+    #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
+    pub async fn prepare_client_cert<P, R>(
+        self,
+        reporter: &mut R,
+        progress: &P,
+    ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
+        P: Progress,
     {
         let previous_client = self.client.clone();
 
@@ -284,7 +292,8 @@ impl OperatorApi<NoClientCert> {
             config
                 .headers
                 .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-            let client = Client::try_from(config)
+            let client = progress
+                .suspend(|| Client::try_from(config))
                 .map_err(KubeApiError::from)
                 .map_err(OperatorApiError::CreateKubeClient)?;
 
@@ -455,6 +464,24 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::CopyTarget)?
+        }
+
+        if layer_config
+            .feature
+            .copy_target
+            .exclude_containers
+            .is_empty()
+            .not()
+            || layer_config
+                .feature
+                .copy_target
+                .exclude_init_containers
+                .is_empty()
+                .not()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
         }
 
         if layer_config.feature.split_queues.sqs().next().is_some() {
@@ -865,6 +892,13 @@ impl OperatorApi<PreparedClientCert> {
             .is_set()
             .then(|| layer_config.feature.split_queues.clone());
 
+        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
+        let exclude_init_containers = layer_config
+            .feature
+            .copy_target
+            .exclude_init_containers
+            .clone();
+
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
@@ -872,6 +906,8 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            exclude_containers,
+            exclude_init_containers,
         };
 
         let copied = copy_target_api
@@ -914,6 +950,13 @@ impl OperatorApi<PreparedClientCert> {
             .is_set()
             .then(|| layer_config.feature.split_queues.clone());
 
+        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
+        let exclude_init_containers = layer_config
+            .feature
+            .copy_target
+            .exclude_init_containers
+            .clone();
+
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
@@ -922,6 +965,8 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            exclude_containers,
+            exclude_init_containers,
         };
 
         let existing = copy_target_api

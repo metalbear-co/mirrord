@@ -34,7 +34,7 @@ pub async fn create_job_agent<P, V>(
     progress: &P,
 ) -> Result<AgentKubernetesConnectInfo>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
     V: ContainerVariant<Update = Job>,
 {
     let params = variant.params();
@@ -259,6 +259,7 @@ mod test {
             pod_ips: None,
             support_ipv6,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
         let update = JobVariant::new(&agent, &params).as_update();
@@ -348,6 +349,7 @@ mod test {
             pod_ips: None,
             support_ipv6,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
         let update = JobTargetedVariant::new(

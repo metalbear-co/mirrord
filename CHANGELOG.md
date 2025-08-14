@@ -8,6 +8,92 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.157.1](https://github.com/metalbear-co/mirrord/tree/3.157.1) - 2025-08-13
+
+
+### Fixed
+
+- Fixed an issue where the mirrord-agent would sometimes hang and linger in the
+  cluster.
+
+
+### Internal
+
+- Add another docstring to `AgentDnsConfig` so it will apear in docs correctly.
+- Added a regression unit test for graceful HTTP shutdown in the mirrord-agent.
+- mirrord-agent now sends logs when IO errors occur in outgoing connections.
+
+## [3.157.0](https://github.com/metalbear-co/mirrord/tree/3.157.0) - 2025-08-08
+
+### Added
+
+- Added a new configuration option to ignore specified containers and init containers
+  when copying the session target.
+
+### Internal
+
+- Fix invalid json in operator-e2e action.
+- Fix run_id from operator-e2e action.
+- `mirrord_progress::Progress` implementations are now hidden behind the
+  `implementations` feature.
+- Add ignored copy target containers as an operator feature.
+
+## [3.156.0](https://github.com/metalbear-co/mirrord/tree/3.156.0) - 2025-08-06
+
+
+### Added
+
+- On Linux, mirrord now checks whether the target binary is dynamically linked.
+  If it's not, a warning is issued.
+
+
+### Fixed
+
+- Fixed incorrect parsing of PATH-like `kubeconfig` config values.
+  [#3457](https://github.com/metalbear-co/mirrord/issues/3457)
+- Fixed an issue where mirrord agent was not able to pass through gRPC requests
+  without scheme or authority in the URI.
+
+
+### Internal
+
+- Update links from mirrord.dev to metalbear.co/mirrord (excluding operator
+  version endpoint).
+  [#3247](https://github.com/metalbear-co/mirrord/issues/3247)
+- Added an option to configure idle ttl for the mirrord agent.
+  The agent can now be configured to keep running for some time after all
+  client connections have been closed.
+- Changed the operator E2E to be triggered only on workflow dispatch.
+- Add await-remote-run action to wait for operator-e2e workflow.
+
+## [3.155.0](https://github.com/metalbear-co/mirrord/tree/3.155.0) - 2025-08-05
+
+
+### Added
+
+- When picking a target container automatically, mirrord now takes the
+  `kubectl.kubernetes.io/default-container` annotation into consideration.
+
+
+### Changed
+
+- mirrord policy CRDs now allow for blocking scale down when using the copy target feature.
+
+
+### Fixed
+
+- Fixed a bug where mirrord-layer was encountering issues due to `vfork` in the
+  user application. The fix is hidden behind the `experimental.vfork_emulation`
+  mirrord config flag.
+- Fixed issues with default mirrord CLI progress mode and interactive cluster auth plugins.
+
+
+### Internal
+
+- E2E test SQS with argo rollouts.
+- Updated Rust toolchain to nightly-2025-08-01.
+- Use return-dispatch action to trigger operator e2e from mirrord.
+
 ## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04
 
 
