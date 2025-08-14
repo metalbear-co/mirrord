@@ -154,6 +154,11 @@ impl IntproxySidecar {
 
         let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
 
+        let mut intproxy_args = vec![&config.container.cli_image, "mirrord", "intproxy"];
+        if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
+            intproxy_args.extend_from_slice(&["--logfile", log_destination]);
+        }
+
         let sidecar_container_command = ContainerRuntimeCommand::create(
             config
                 .container
@@ -161,7 +166,7 @@ impl IntproxySidecar {
                 .iter()
                 .map(String::as_str)
                 .chain(cleanup)
-                .chain([&config.container.cli_image, "mirrord", "intproxy"]),
+                .chain(intproxy_args),
         );
 
         let (runtime_binary, sidecar_args) = sidecar_command
