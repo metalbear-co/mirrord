@@ -807,7 +807,7 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     Detour::Success(realpath)
 }
 
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+#[mirrord_layer_macro::instrument(level = Level::DEBUG, ret)]
 pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> Detour<()> {
     let old_path = common_path_check(old_path?, false)?;
     let new_path = common_path_check(new_path?, false)?;

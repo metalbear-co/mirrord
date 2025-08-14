@@ -717,7 +717,7 @@ impl FileManager {
         })
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err(level = Level::DEBUG))]
     pub(crate) fn rename(&mut self, old_path: PathBuf, new_path: PathBuf) -> RemoteResult<()> {
         let old_path = self.resolve_path(&old_path)?;
         let new_path = self.resolve_path(&new_path)?;
