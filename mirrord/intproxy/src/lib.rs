@@ -227,7 +227,7 @@ impl IntProxy {
                 name = %process_info.name,
                 cmdline = ?process_info.cmdline,
                 loaded = process_info.loaded,
-                "Process connected"
+                "connected processes info"
             );
         }
     }
