@@ -69,6 +69,8 @@ extern crate core;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    fs::File,
+    io::Read,
     net::SocketAddr,
     os::unix::process::parent_id,
     panic,
@@ -91,6 +93,7 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
+use nix::errno::Errno;
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
@@ -533,6 +536,10 @@ fn sip_only_layer_start(
         exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries, skip_patch_binaries)
     };
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
+    if config.experimental.vfork_emulation {
+        unsafe { replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK) };
+    }
+
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
         mode: FsModeConfig::Local,
@@ -608,6 +615,9 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
+        if state.experimental().vfork_emulation {
+            replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
+        }
     };
 
     unsafe {
@@ -644,7 +654,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager);
+        go_hooks::enable_hooks(&mut hook_manager, state.experimental());
     }
 }
 
@@ -743,6 +753,111 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 
         res
     }
+}
+
+/// Transparently replaces `vfork` call with a safer `fork`.
+///
+/// `vfork` and `fork` calls are very similar (except performance),
+/// except that with `vfork` the parent process is blocked until the child exits or execs.
+/// This hook uses a dummy pipe to handle this difference:
+/// 1. Parent process creates a pipe with O_CLOEXEC flag.
+/// 2. Parent process forks.
+/// 3. Parent process closes the writing end and blocks on reading from the reading end.
+/// 4. The read call returns with EOF when the child process exits or execs.
+///
+/// # Rationale
+///
+/// To properly handle child processes, we need to hook functions from the `exec` family.
+/// These are often used in tandem with `vfork`. However, `vfork` requires the child process
+/// not to write to memory (it's shared with the parent). Doing it in the child process results with
+/// an undefined behavior. Since our hooks always write to memory, `vfork` is not our ally.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
+    #[cfg(target_os = "macos")]
+    let pipe_result = {
+        use std::os::fd::AsRawFd;
+
+        use nix::fcntl::{FcntlArg, FdFlag};
+
+        nix::unistd::pipe().and_then(|pipe| {
+            nix::fcntl::fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+            Ok(pipe)
+        })
+    };
+    #[cfg(target_os = "linux")]
+    let pipe_result = nix::unistd::pipe2(nix::fcntl::OFlag::O_CLOEXEC);
+
+    let (pipe_read, pipe_write) = match pipe_result {
+        Ok(pipe) => pipe,
+        Err(error) => {
+            // If we cannot create the pipe, fallback to vfork.
+            tracing::error!(
+                %error,
+                "Failed to create a dummy pipe for vfork emulation. \
+                Letting the vfork happen. This might cause unforeseen issues. \
+                {}",
+                if error == Errno::EMFILE {
+                    "Try increasing the process open files limit using `ulimit`."
+                } else {
+                    "This is most probably a bug, please report it."
+                }
+            );
+            return unsafe { FN_VFORK() };
+        }
+    };
+
+    let fork_result = unsafe { fork_detour() };
+    match fork_result.cmp(&0) {
+        // We're the child.
+        // Write end of the pipe will be dropped when we exit or exec,
+        // notifying the parent.
+        Ordering::Equal => {
+            std::mem::drop(pipe_read);
+        }
+        // We're the parent.
+        // To emulate vfork properly, we need to wait until the child
+        // drops the write end of the pipe.
+        // Regardless of what happens now, we return with success.
+        // Worst case scenario, the parent will resume without waiting for the child to
+        // exit/exec.
+        Ordering::Greater => {
+            std::mem::drop(pipe_write);
+            let mut file = File::from(pipe_read);
+            let mut buf = Vec::new();
+            match file.read_to_end(&mut buf) {
+                Ok(0) => {
+                    // Write end dropped, success.
+                }
+                Ok(..) => {
+                    tracing::error!(
+                        read_from_dummy_pipe = %String::from_utf8_lossy(&buf),
+                        "Unexpected error in vfork emulation. \
+                        This is a bug, please report it."
+                    )
+                }
+                Err(error) => {
+                    tracing::error!(
+                        read_from_dummy_pipe_error = %error,
+                        "Unexpected error in vfork emulation. \
+                        This is a bug, please report it",
+                    );
+                }
+            }
+        }
+        // fork failed, fallback to vfork.
+        Ordering::Less => {
+            std::mem::drop(pipe_read);
+            std::mem::drop(pipe_write);
+            tracing::error!(
+                error = %Errno::from_raw(fork_result),
+                "Failed to fork the current process for vfork emulation. \
+                Letting the vfork happen. This might cause unforeseen issues.",
+            );
+            return unsafe { FN_VFORK() };
+        }
+    }
+
+    fork_result
 }
 
 /// No need to guard because we call another detour which will do the guard for us.

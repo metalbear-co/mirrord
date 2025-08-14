@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use k8s_openapi::api::{apps::v1::Deployment, core::v1::Service};
-use mirrord_kube::api::kubernetes::rollout::Rollout;
+
+use std::ops::Not;
 
 use super::resource_guard::ResourceGuard;
-use crate::utils::CONTAINER_NAME;
+use crate::utils::{services::TestWorkloadType, CONTAINER_NAME};
 
 /// A service deployed to the kubernetes cluster.
 ///
@@ -12,12 +12,9 @@ use crate::utils::CONTAINER_NAME;
 pub struct KubeService {
     pub name: String,
     pub namespace: String,
-    pub service: Service,
-    pub deployment: Deployment,
-    pub rollout: Option<Rollout>,
     pub guards: Vec<ResourceGuard>,
-    pub namespace_guard: Option<ResourceGuard>,
     pub pod_name: String,
+    pub workload_type: TestWorkloadType,
 }
 
 impl KubeService {
@@ -29,28 +26,34 @@ impl KubeService {
         format!("pod/{}/container/{CONTAINER_NAME}", self.pod_name)
     }
 
+    pub fn is_rollout(&self) -> bool {
+        self.workload_type.is_rollout()
+    }
+
     pub fn rollout_target(&self) -> String {
-        if self.rollout.is_none() {
+        if self.workload_type.is_rollout().not() {
             panic!("Rollout is not enabled for this service! Don't you mean to use a deployment?");
         }
 
         format!("rollout/{}", self.name)
     }
+
+    pub fn rollout_or_deployment_target(&self) -> String {
+        if self.workload_type.is_rollout() {
+            self.rollout_target()
+        } else {
+            self.deployment_target()
+        }
+    }
 }
 
 impl Drop for KubeService {
     fn drop(&mut self) {
-        let mut deleters = self
+        let deleters = self
             .guards
             .iter_mut()
             .map(ResourceGuard::take_deleter)
             .collect::<Vec<_>>();
-
-        deleters.push(
-            self.namespace_guard
-                .as_mut()
-                .and_then(ResourceGuard::take_deleter),
-        );
 
         let deleters = deleters.into_iter().flatten().collect::<Vec<_>>();
 

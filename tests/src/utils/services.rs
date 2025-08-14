@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use chrono::Utc;
 use cluster_resource::*;
 use k8s_openapi::api::{
     apps::v1::Deployment,
@@ -44,6 +43,7 @@ pub async fn basic_service(
         None,
         None,
         false,
+        TestWorkloadType::Deployment,
     )
     .await
 }
@@ -75,6 +75,7 @@ pub async fn service_with_env(
         None,
         None,
         false,
+        TestWorkloadType::Deployment,
     )
     .await
 }
@@ -102,8 +103,54 @@ pub async fn service_with_env_and_env_from(
         env_from,
         config_maps,
         false,
+        TestWorkloadType::Deployment,
     )
     .await
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum TestWorkloadType {
+    #[default]
+    Deployment,
+    ArgoRolloutWithWorkloadRef,
+    ArgoRolloutWithTemplate,
+}
+
+impl TestWorkloadType {
+    pub fn is_rollout(&self) -> bool {
+        matches!(
+            self,
+            TestWorkloadType::ArgoRolloutWithTemplate
+                | TestWorkloadType::ArgoRolloutWithWorkloadRef
+        )
+    }
+}
+
+async fn create_rollout(
+    rollout_api: Api<Rollout>,
+    rollout: &Rollout,
+    delete_after_fail: bool,
+    guards: &mut Vec<ResourceGuard>,
+    name: &str,
+    namespace: &str,
+    kube_client: &Client,
+) {
+    let (rollout_guard, rollout) = ResourceGuard::create(rollout_api, rollout, delete_after_fail)
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "Failed to create rollout guard! Error: \n{err:?}\nRollout:\n{}",
+                serde_json::to_string_pretty(&rollout).unwrap()
+            )
+        });
+    println!(
+        "Created rollout\n{}",
+        serde_json::to_string_pretty(&rollout).unwrap()
+    );
+    guards.push(rollout_guard);
+
+    // Wait for the rollout to have at least 1 available replica
+    watch::wait_until_rollout_available(name, namespace, 1, kube_client.clone()).await;
 }
 
 /// Internal function to create a custom [`KubeService`].
@@ -129,12 +176,15 @@ pub(crate) async fn internal_service(
     env_from: Option<Vec<EnvFromSource>>,
     config_maps: Option<Vec<ConfigMap>>,
     ipv6_only: bool,
+    workload_type: TestWorkloadType,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
+    let rollout_api: Api<Rollout> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
+    let mut guards = Vec::with_capacity(4);
 
     let name = if randomize_name {
         format!("{}-{}", service_name, random_string())
@@ -149,6 +199,7 @@ pub(crate) async fn internal_service(
 
         let _ = service_api.delete(service_name, &delete_params).await;
         let _ = deployment_api.delete(service_name, &delete_params).await;
+        let _ = rollout_api.delete(service_name, &delete_params).await;
 
         service_name.to_string()
     };
@@ -159,7 +210,7 @@ pub(crate) async fn internal_service(
     );
 
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
-    let namespace_guard = ResourceGuard::create::<Namespace>(
+    if let Ok((guard, _namespace_resource)) = ResourceGuard::create::<Namespace>(
         namespace_api.clone(),
         &serde_json::from_value(json!({
             "apiVersion": "v1",
@@ -175,7 +226,9 @@ pub(crate) async fn internal_service(
         delete_after_fail,
     )
     .await
-    .ok();
+    {
+        guards.push(guard);
+    }
 
     if let Some(config_maps) = config_maps {
         let api = Api::<ConfigMap>::namespaced(kube_client.clone(), namespace);
@@ -190,12 +243,51 @@ pub(crate) async fn internal_service(
         }
     }
 
-    // `Deployment`
-    let deployment = deployment_from_json(&name, image, env, env_from);
-    let (deployment_guard, deployment) =
-        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-            .await
-            .unwrap();
+    match workload_type {
+        TestWorkloadType::Deployment => {
+            let deployment = deployment_from_json(&name, image, env, env_from, 1);
+            let (deployment_guard, _deployment) =
+                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+                    .await
+                    .unwrap();
+            guards.push(deployment_guard);
+        }
+        TestWorkloadType::ArgoRolloutWithWorkloadRef => {
+            let deployment = deployment_from_json(&name, image, env, env_from, 0);
+            let (deployment_guard, deployment) =
+                ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+                    .await
+                    .unwrap();
+            guards.push(deployment_guard);
+            let rollout = argo_rollout_from_json(&name, SpecSource::WorkloadRef(&deployment));
+            create_rollout(
+                rollout_api,
+                &rollout,
+                delete_after_fail,
+                &mut guards,
+                &name,
+                namespace,
+                &kube_client,
+            )
+            .await;
+        }
+        TestWorkloadType::ArgoRolloutWithTemplate => {
+            let rollout = argo_rollout_from_json(
+                &name,
+                SpecSource::PodTemplate(get_pod_template_json_value(&name, image, env, env_from)),
+            );
+            create_rollout(
+                rollout_api,
+                &rollout,
+                delete_after_fail,
+                &mut guards,
+                &name,
+                namespace,
+                &kube_client,
+            )
+            .await;
+        }
+    }
 
     // `Service`
     let mut service = service_from_json(&name, service_type);
@@ -206,6 +298,7 @@ pub(crate) async fn internal_service(
         ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
             .await
             .unwrap();
+    guards.push(service_guard);
 
     let ready_pod = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
         .await
@@ -222,12 +315,9 @@ pub(crate) async fn internal_service(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        service,
-        deployment,
-        rollout: None,
         pod_name,
-        guards: vec![deployment_guard, service_guard],
-        namespace_guard: namespace_guard.map(|(guard, _)| guard),
+        guards,
+        workload_type,
     }
 }
 
@@ -241,93 +331,15 @@ pub async fn service_for_mirrord_ls(
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
 ) -> KubeService {
-    let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
-
-    let kube_client = kube_client.await;
-    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
-    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-
-    let name = if randomize_name {
-        format!("{}-{}", service_name, random_string())
-    } else {
-        // If using a non-random name, delete existing resources first.
-        // Just continue if they don't exist.
-        // Force delete
-        let delete_params = DeleteParams {
-            grace_period_seconds: Some(0),
-            ..Default::default()
-        };
-
-        let _ = service_api.delete(service_name, &delete_params).await;
-        let _ = deployment_api.delete(service_name, &delete_params).await;
-
-        service_name.to_string()
-    };
-
-    println!(
-        "{} creating service {name:?} in namespace {namespace:?}",
-        format_time()
-    );
-
-    let namespace_resource: Namespace = serde_json::from_value(json!({
-        "apiVersion": "v1",
-        "kind": "Namespace",
-        "metadata": {
-            "name": namespace,
-            "labels": {
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-            }
-        },
-    }))
-    .unwrap();
-    // Create namespace and wrap it in ResourceGuard if it does not yet exist.
-    let namespace_guard = ResourceGuard::create(
-        namespace_api.clone(),
-        &namespace_resource,
-        delete_after_fail,
+    basic_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client,
     )
     .await
-    .ok();
-
-    // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env(), None);
-    let (deployment_guard, deployment) =
-        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-            .await
-            .unwrap();
-
-    // `Service`
-    let service = service_from_json(&name, service_type);
-    let (service_guard, service) =
-        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-            .await
-            .unwrap();
-
-    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client)
-        .await
-        .into_iter()
-        .next()
-        .unwrap()
-        .metadata
-        .name
-        .unwrap();
-
-    println!(
-        "{:?} done creating service {name:?} in namespace {namespace:?}",
-        chrono::Utc::now()
-    );
-
-    KubeService {
-        name,
-        namespace: namespace.to_string(),
-        service,
-        deployment,
-        rollout: None,
-        pod_name,
-        guards: vec![deployment_guard, service_guard],
-        namespace_guard: namespace_guard.map(|(guard, _)| guard),
-    }
 }
 
 /// Service that should only be reachable from inside the cluster, as a communication partner
@@ -456,121 +468,18 @@ pub async fn rollout_service(
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
 ) -> KubeService {
-    let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
-
-    let kube_client = kube_client.await;
-    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
-    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-    let rollout_api: Api<Rollout> = Api::namespaced(kube_client.clone(), namespace);
-
-    let name = if randomize_name {
-        format!("{}-{}", service_name, random_string())
-    } else {
-        // If using a non-random name, delete existing resources first.
-        // Just continue if they don't exist.
-        // Force delete
-        let delete_params = DeleteParams {
-            grace_period_seconds: Some(0),
-            ..Default::default()
-        };
-
-        let _ = service_api.delete(service_name, &delete_params).await;
-        let _ = deployment_api.delete(service_name, &delete_params).await;
-        let _ = rollout_api.delete(service_name, &delete_params).await;
-
-        service_name.to_string()
-    };
-
-    println!(
-        "{} creating service {name:?} in namespace {namespace:?}",
-        format_time()
-    );
-
-    let namespace_resource: Namespace = serde_json::from_value(json!({
-        "apiVersion": "v1",
-        "kind": "Namespace",
-        "metadata": {
-            "name": namespace,
-            "labels": {
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-            }
-        },
-    }))
-    .unwrap();
-    // Create namespace and wrap it in ResourceGuard if it does not yet exist.
-    let namespace_guard = ResourceGuard::create(
-        namespace_api.clone(),
-        &namespace_resource,
-        delete_after_fail,
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client.await,
+        default_env(),
+        None,
+        None,
+        false,
+        TestWorkloadType::ArgoRolloutWithWorkloadRef,
     )
     .await
-    .ok();
-
-    // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env(), None);
-    let (deployment_guard, deployment) =
-        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-            .await
-            .unwrap();
-    println!(
-        "Created deployment\n{}",
-        serde_json::to_string_pretty(&deployment).unwrap()
-    );
-
-    // `Service`
-    let service = service_from_json(&name, service_type);
-    let (service_guard, service) =
-        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-            .await
-            .unwrap();
-    println!(
-        "Created service\n{}",
-        serde_json::to_string_pretty(&service).unwrap()
-    );
-
-    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
-        .await
-        .into_iter()
-        .next()
-        .unwrap()
-        .metadata
-        .name
-        .unwrap();
-    println!("Created pod {pod_name:#?}");
-
-    // `Rollout`
-    let rollout = argo_rollout_from_json(&name, &deployment);
-    let (rollout_guard, rollout) =
-        ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "Failed to create rollout guard! \n{}",
-                    serde_json::to_string_pretty(&rollout).unwrap()
-                )
-            });
-    println!(
-        "Created rollout\n{}",
-        serde_json::to_string_pretty(&rollout).unwrap()
-    );
-
-    // Wait for the rollout to have at least 1 available replica
-    watch::wait_until_rollout_available(&name, namespace, 1, kube_client.clone()).await;
-
-    println!(
-        "{:?} done creating service {name} in namespace {namespace}",
-        Utc::now()
-    );
-
-    KubeService {
-        name,
-        namespace: namespace.to_string(),
-        service,
-        deployment,
-        rollout: Some(rollout),
-        pod_name,
-        guards: vec![deployment_guard, service_guard, rollout_guard],
-        namespace_guard: namespace_guard.map(|(guard, _)| guard),
-    }
 }

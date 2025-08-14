@@ -1,5 +1,6 @@
 use std::arch::naked_asm;
 
+use mirrord_config::experimental::ExperimentalConfig;
 use tracing::trace;
 
 use crate::{HookManager, go::c_abi_syscall6_handler, macros::hook_symbol};
@@ -124,7 +125,7 @@ fn post_go1_23(hook_manager: &mut HookManager) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &ExperimentalConfig) {
     if let Some(version_symbol) =
         hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")
     {
@@ -144,6 +145,10 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
             post_go1_19(hook_manager);
         } else {
             trace!("found version < 1.19, arm64 not supported - not hooking");
+        }
+
+        if experimental.vfork_emulation {
+            tracing::warn!("vfork emulation is not yet supported for Go programs on ARM64.");
         }
     }
 }

@@ -78,6 +78,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::STEAL_TLS_CONFIG.as_k8s_spec(&params.steal_tls_config));
     }
 
+    if params.idle_ttl.is_zero().not() {
+        env.push(envs::IDDLE_TTL.as_k8s_spec(&params.idle_ttl.as_secs()))
+    }
+
     env
 }
 

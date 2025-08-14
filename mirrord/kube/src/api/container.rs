@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
+use std::{collections::HashSet, net::IpAddr, sync::LazyLock, time::Duration};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
@@ -45,6 +45,8 @@ pub struct ContainerConfig {
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
+    /// How long the agent should keep running after all client connections have been closed.
+    pub idle_ttl: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +66,8 @@ pub struct ContainerParams {
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
+    /// How long the agent should keep running after all client connections have been closed.
+    pub idle_ttl: Duration,
 }
 
 impl From<ContainerConfig> for ContainerParams {
@@ -88,6 +92,7 @@ impl From<ContainerConfig> for ContainerParams {
             pod_ips: value.pod_ips,
             support_ipv6: value.support_ipv6,
             steal_tls_config: value.steal_tls_config,
+            idle_ttl: value.idle_ttl,
         }
     }
 }
@@ -128,7 +133,7 @@ where
     #[allow(async_fn_in_trait)]
     async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
-        P: Progress + Send + Sync;
+        P: Progress;
 }
 
 #[tracing::instrument(level = "trace", ret)]
@@ -179,45 +184,62 @@ pub fn check_mesh_vendor(pod: &Pod) -> Option<MeshVendor> {
     None
 }
 
-/// Choose container logic:
+/// Chooses a target container from the given list of [`ContainerStatus`]es.
 ///
-/// 1. Try to find based on given name
-/// 2. Try to find first container in pod that isn't a mesh sidecar
-/// 3. Take first container in pod
+/// 1. If `container_name` is passed, will only try to find that container. Will return [`None`] if
+///    the container does not exist.
+/// 2. If `default_container` is passed, will try to find that container.
+///    This param is only advisory, see <https://kubernetes.io/docs/reference/labels-annotations-taints/#kubectl-kubernetes-io-default-container>.
+/// 3. Otherwise, will take the first container that is not on the [`SKIP_NAMES`] list.
 ///
-/// We also check if we're in a mesh based on `MESH_LIST`, returning whether we are or not.
-#[tracing::instrument(level = "trace", ret)]
+/// The second value in the returned tuple indicates whether the container was picked from multiple
+/// options.
 pub fn choose_container<'a>(
     container_name: Option<&str>,
+    default_container: Option<&str>,
     container_statuses: &'a [ContainerStatus],
 ) -> (Option<&'a ContainerStatus>, bool) {
-    let mut picked_from_many = false;
-
     if container_statuses
         .iter()
         .any(|status| status.name == TELEPRESENCE_CONTAINER_NAME)
     {
         tracing::warn!("Telepresence container detected, stealing/mirroring might not work.");
     }
-    let container = if let Some(name) = container_name {
-        container_statuses
+
+    if let Some(name) = container_name {
+        let container = container_statuses
             .iter()
-            .find(|&status| status.name == name)
-    } else {
-        let mut container_refs = container_statuses
-            .iter()
-            .filter(|&status| !SKIP_NAMES.contains(status.name.as_str()));
-        // Choose first container that isn't part of the skip list
-        let container = container_refs.next().or_else(|| {
-            tracing::warn!(
-                "Target has only containers with names that we would otherwise skip. Picking one."
-            );
-            picked_from_many = container_statuses.len() > 1;
-            container_statuses.first()
-        });
-        picked_from_many = picked_from_many || container_refs.next().is_some();
-        container
-    };
+            .find(|&status| status.name == name);
+        return (container, false);
+    }
+
+    if let Some(name) = default_container {
+        let container = container_statuses.iter().find(|status| status.name == name);
+        if let Some(container) = container {
+            return (Some(container), false);
+        }
+    }
+
+    if container_statuses.len() > 1 {
+        tracing::trace!(
+            "Target has multiple containers and no container name was specified. \
+            Picking a target container automatically, while skipping known mesh sidecars."
+        );
+    }
+
+    let mut picked_from_many = false;
+    let mut container_refs = container_statuses
+        .iter()
+        .filter(|&status| !SKIP_NAMES.contains(status.name.as_str()));
+    // Choose first container that isn't part of the skip list
+    let container = container_refs.next().or_else(|| {
+        tracing::warn!(
+            "Target has only containers with names that we would otherwise skip. Picking one."
+        );
+        picked_from_many = container_statuses.len() > 1;
+        container_statuses.first()
+    });
+    picked_from_many = picked_from_many || container_refs.next().is_some();
 
     // container_counter is only incremented if there is no specified container name.
     (container, picked_from_many)

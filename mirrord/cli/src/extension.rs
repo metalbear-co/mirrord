@@ -14,7 +14,7 @@ async fn mirrord_exec<P>(
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let execution_info = MirrordExecution::start_internal(
         &mut config,
@@ -62,6 +62,23 @@ pub(crate) async fn extension_exec(
         progress.warning(&warning);
     }
     result?;
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+
+        use crate::is_static;
+
+        let is_static = args
+            .executable
+            .as_deref()
+            .map(Path::new)
+            .is_some_and(is_static::is_binary_static);
+        if is_static {
+            progress
+                .warning("Target binary might not be dynamically linked. mirrord might not work!");
+        }
+    }
 
     #[cfg(target_os = "macos")]
     let execution_result =

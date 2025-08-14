@@ -175,6 +175,8 @@ impl StoredAsString for bool {}
 
 impl StoredAsString for u32 {}
 
+impl StoredAsString for u64 {}
+
 impl StoredAsString for usize {}
 
 impl StoredAsString for SocketAddr {}
