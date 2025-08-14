@@ -120,6 +120,8 @@ pub(crate) async fn proxy(
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
+    let process_logging_interval =
+        Duration::from_secs(config.internal_proxy.process_logging_interval);
 
     IntProxy::new_with_connection(
         agent_conn,
@@ -133,6 +135,7 @@ pub(crate) async fn proxy(
             .tls_delivery
             .or(config.feature.network.incoming.https_delivery)
             .unwrap_or_default(),
+        process_logging_interval,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

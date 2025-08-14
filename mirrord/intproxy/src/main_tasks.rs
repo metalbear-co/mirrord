@@ -1,6 +1,8 @@
 use std::fmt;
 
-use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, MessageId, ProxyToLayerMessage};
+use mirrord_intproxy_protocol::{
+    LayerId, LayerToProxyMessage, MessageId, ProcessInfo, ProxyToLayerMessage,
+};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::net::TcpStream;
 
@@ -55,6 +57,8 @@ pub struct NewLayer {
     pub id: LayerId,
     /// [`LayerId`] of the fork parent.
     pub parent_id: Option<LayerId>,
+    /// Process information for the connecting layer.
+    pub process_info: Option<ProcessInfo>,
 }
 
 #[cfg(test)]
