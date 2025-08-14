@@ -381,10 +381,6 @@ where
         .map(Clone::clone)
         .collect::<Vec<_>>();
 
-    // since execvpe doesn't exist on macOS, resolve path with which and use execve
-    #[cfg(not(target_os = "windows"))]
-    let _ = process_which(&binary)?;
-
     sub_progress.success(Some("ready to launch process"));
 
     #[cfg(not(target_os = "windows"))]
@@ -412,12 +408,8 @@ where
     execve_process(binary, binary_args, env_vars, _did_sip_patch)
 }
 
-#[cfg(not(target_os = "windows"))]
-fn process_which(binary: String) -> Result {
-    match which(&binary) {
-        Ok(pathbuf) => pathbuf,
-        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
-    }
+fn process_which(binary: &String) -> Result<std::path::PathBuf, CliError> {
+    which(&binary).map_err(|error| CliError::BinaryWhichError(binary.clone(), error.to_string()))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -472,20 +464,41 @@ fn execve_process(
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
 ) -> CliResult<()> {
-    let cmd = WindowsCommand::new(&binary)
+    let binary_path = process_which(&binary)?;
+
+    let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
+        .ok_or(CliError::LayerFilePathMissing(
+            binary.clone(),
+            binary_args.clone(),
+            std::env::vars().collect(),
+        ))?
+        .into_string()
+        .map_err(|_| {
+            CliError::LayerFilePathMissing(
+                binary.clone(),
+                binary_args.clone(),
+                std::env::vars().collect(),
+            )
+        })?;
+
+    let mut env_vars = env_vars.clone();
+    env_vars
+        .entry("MIRRORD_LAYER_FILE".to_string())
+        .or_insert(layer_path.clone());
+
+    let cmd = WindowsCommand::new(&binary_path)
         .args(&binary_args)
         .envs(env_vars)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    match cmd.inject_and_spawn(
-        "C:\\Users\\Daniel\\git\\mirrord\\target\\x86_64-pc-windows-msvc\\debug\\layer_win.dll"
-            .to_string(),
-    ) {
-        Ok(_) => Ok(()),
-        _ => Err(CliError::BinaryExecuteFailed(binary, binary_args)),
-    }
+    let child = cmd.inject_and_spawn(layer_path.to_string()).map_err(|e| {
+        println!("{:#?}", e);
+        CliError::BinaryExecuteFailed(binary, binary_args)
+    })?;
+    println!("{:#?}", child);
+    Ok(())
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].

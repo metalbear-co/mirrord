@@ -14,7 +14,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-dll-syringe = "0.16.0"
+dll-syringe.workspace = true
 thiserror.workspace = true
 
 [dependencies.windows]

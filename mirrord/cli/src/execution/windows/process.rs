@@ -21,27 +21,16 @@ impl From<HandleWrapper> for File {
         }
     }
 }
-/// Wraps a Windows process started in suspended mode
-pub struct SuspendedProcess {
+
+#[derive(Debug)]
+pub struct WindowsProcess {
     pub process_info: Win32Threading::PROCESS_INFORMATION,
     pub stdin: File,
     pub stdout: File,
     pub stderr: File,
 }
 
-impl SuspendedProcess {
-    pub fn resume(&self) -> windows::core::Result<()> {
-        unsafe {
-            // ResumeThread: If the function fails, the return value is (DWORD) -1
-            if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread)
-                == (-1i32 as u32)
-            {
-                return Err(windows::core::Error::from_win32());
-            }
-        }
-        Ok(())
-    }
-
+impl WindowsProcess {
     pub fn join(&self, duration: Duration) -> bool {
         let res;
         unsafe {
@@ -68,11 +57,29 @@ impl SuspendedProcess {
     }
 }
 
-impl Drop for SuspendedProcess {
+impl Drop for WindowsProcess {
     fn drop(&mut self) {
         unsafe {
             let _ = ::windows::Win32::Foundation::CloseHandle(self.process_info.hProcess);
             let _ = ::windows::Win32::Foundation::CloseHandle(self.process_info.hThread);
         }
+    }
+}
+
+pub trait WindowsProcessExtSuspended {
+    fn resume(&self) -> windows::core::Result<()>;
+}
+
+impl WindowsProcessExtSuspended for WindowsProcess {
+    fn resume(&self) -> windows::core::Result<()> {
+        unsafe {
+            // ResumeThread: If the function fails, the return value is (DWORD) -1
+            if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread)
+                == (-1i32 as u32)
+            {
+                return Err(windows::core::Error::from_win32());
+            }
+        }
+        Ok(())
     }
 }

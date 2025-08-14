@@ -27,8 +27,8 @@ use ::windows::{
 
 use crate::execution::windows::{
     env_vars::EnvMap,
-    injection::SuspendedProcessExtInject,
-    process::{HandleWrapper, SuspendedProcess},
+    injection::WindowsProcessSuspendedExtInject,
+    process::{HandleWrapper, WindowsProcess, WindowsProcessExtSuspended},
 };
 
 #[derive(Debug)]
@@ -113,27 +113,17 @@ impl WindowsCommand {
         Ok((read_pipe_handle, write_pipe_handle))
     }
 
-    pub fn inject_and_spawn(self, dll_path: String) -> Result<(), Box<dyn Error>> {
-        let mut child = self.spawn_suspend()?;
-        println!("Spawned process in suspended state");
-
+    pub fn inject_and_spawn(self, dll_path: String) -> Result<WindowsProcess, Box<dyn Error>> {
+        let child = self.spawn_suspend()?;
         child.inject_dll(dll_path)?;
-        println!("injected dll");
-
         child.resume()?;
-        println!("resumed");
-
-        if child.join(Duration::from_secs(30)) {
-            println!("child is dead ;(");
-        } else {
-            println!("child did not die ;(");
-        }
-        println!("Child Stdout: {}", child.read_stdout());
-
-        Ok(())
+        Ok(child)
     }
 
-    pub fn spawn_suspend(self) -> std::io::Result<SuspendedProcess> {
+    pub fn spawn_suspend(self) -> std::io::Result<WindowsProcess>
+    where
+        WindowsProcess: WindowsProcessExtSuspended,
+    {
         let (stdin_pipe_rd, stdin_pipe_wr) = {
             if let Some(_) = self.stdin {
                 // Ensure the write handle to the pipe for STDIN is not inherited.
@@ -173,10 +163,19 @@ impl WindowsCommand {
             ..Default::default()
         };
 
-        let program: Vec<u16> = OsStr::new(self.command.get_program())
-            .encode_wide()
-            .chain(once(0))
-            .collect();
+        let program: Vec<u16> = {
+            let raw_program = OsStr::new(self.command.get_program());
+            let mut val = raw_program.encode_wide().collect::<Vec<u16>>();
+            if std::path::Path::new(&raw_program)
+                .extension()
+                .and_then(|s| s.to_str())
+                != Some("exe")
+            {
+                val.extend(OsStr::new(".exe").encode_wide());
+            }
+            val.push(0u16);
+            val
+        };
         let args: String = self
             .command
             .get_args()
@@ -226,7 +225,7 @@ impl WindowsCommand {
             CloseHandle(stderr_pipe_wr).expect("failed to close write pipe handle");
         };
 
-        Ok(SuspendedProcess {
+        Ok(WindowsProcess {
             process_info: process_info,
             stdin: child_stdin,
             stdout: child_stdout,

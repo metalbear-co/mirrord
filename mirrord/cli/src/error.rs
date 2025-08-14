@@ -240,6 +240,11 @@ pub(crate) enum CliError {
     ))]
     RosettaMissing(String),
 
+    #[allow(dead_code)]
+    #[error("Failed to execute binary `{0}` with args {1:?}, env {2:?}")]
+    #[diagnostic(help("MIRRORD_LAYER_FILE env var is missing"))]
+    LayerFilePathMissing(String, Vec<String>, Vec<(String, String)>),
+
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
