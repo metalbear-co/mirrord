@@ -16,7 +16,7 @@ use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -106,6 +106,12 @@ pub struct IntProxy {
     // most every 10/th of `PING_INTERVAL`
     ping_pong_update_debounce: Interval,
     ping_pong_update_allowed: bool,
+
+    /// Connected layer process information for periodic logging
+    connected_processes: HashMap<LayerId, ProcessInfo>,
+
+    /// Interval for logging connected process information
+    process_logging_interval: Interval,
 }
 
 impl IntProxy {
@@ -125,6 +131,7 @@ impl IntProxy {
         file_buffer_size: u64,
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
+        process_logging_interval: Duration,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
@@ -174,6 +181,9 @@ impl IntProxy {
         let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
+        let mut process_logging_interval = time::interval(process_logging_interval);
+        process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         Self {
             any_connection_accepted: false,
             background_tasks,
@@ -192,12 +202,34 @@ impl IntProxy {
             reconnect_task_queue: Default::default(),
             ping_pong_update_debounce,
             ping_pong_update_allowed: false,
+            connected_processes: HashMap::new(),
+            process_logging_interval,
         }
     }
 
     /// Check if any layer connections are still alive
     fn has_layer_connections(&self) -> bool {
         !self.task_txs.layers.is_empty()
+    }
+
+    /// Logs information about currently connected processes
+    fn log_connected_processes(&self) {
+        let count = self.connected_processes.len();
+        if count == 0 {
+            return;
+        }
+
+        tracing::info!("Connected processes ({}): ", count);
+        for (layer_id, process_info) in &self.connected_processes {
+            tracing::info!(
+                layer_id = layer_id.0,
+                pid = process_info.pid,
+                name = %process_info.name,
+                cmdline = ?process_info.cmdline,
+                loaded = process_info.loaded,
+                "connected processes info"
+            );
+        }
     }
 
     /// Runs the main event loop till a failure or success happens, if the failure is manageable, it
@@ -266,6 +298,10 @@ impl IntProxy {
                     proxy.ping_pong_update_allowed = true;
                 }
 
+                _ = proxy.process_logging_interval.tick(), if proxy.has_layer_connections() => {
+                    proxy.log_connected_processes();
+                }
+
                 _ = time::sleep(first_timeout), if !proxy.any_connection_accepted => {
                     Err(ProxyStartupError::ConnectionAcceptTimeout)?;
                 },
@@ -311,6 +347,16 @@ impl IntProxy {
             }
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
+
+                // Store process information if available
+                if let Some(process_info) = new_layer.process_info {
+                    tracing::debug!(
+                        layer_id = new_layer.id.0,
+                        ?process_info,
+                        "Storing process info for layer"
+                    );
+                    self.connected_processes.insert(new_layer.id, process_info);
+                }
 
                 let tx = self.background_tasks.register(
                     LayerConnection::new(new_layer.stream, new_layer.id),
@@ -390,6 +436,11 @@ impl IntProxy {
                     .await;
 
                 self.task_txs.layers.remove(&LayerId(id));
+
+                // Remove process information for the disconnected layer
+                if let Some(process_info) = self.connected_processes.remove(&LayerId(id)) {
+                    tracing::debug!(layer_id = id, process_name = %process_info.name, "Removed process info for disconnected layer");
+                }
             }
 
             (task_id, TaskUpdate::Finished(res)) => match res {
@@ -700,6 +751,7 @@ mod test {
             4096,
             Default::default(),
             Default::default(),
+            Duration::from_secs(60),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -790,7 +842,6 @@ mod test {
 
         proxy_handle.await.unwrap().unwrap();
     }
-
     /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
     #[tokio::test]
     async fn switch_to_failover() {
@@ -800,7 +851,6 @@ mod test {
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
-
         let proxy_addr = listener.local_addr().unwrap();
 
         let agent_conn = AgentConnection {
@@ -814,6 +864,7 @@ mod test {
             4096,
             Default::default(),
             Default::default(),
+            Duration::from_secs(60),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -901,6 +952,7 @@ mod test {
             4096,
             Default::default(),
             Default::default(),
+            Duration::from_secs(60),
         );
         tokio::time::timeout(
             Duration::from_millis(200),

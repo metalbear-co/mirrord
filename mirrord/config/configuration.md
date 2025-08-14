@@ -1842,6 +1842,23 @@ The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
 
 Defaults to `mirrord=info,warn`.
 
+### internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}
+
+How often to log information about connected processes in seconds.
+
+This feature logs details about processes that are currently connected to the internal proxy,
+including their PID, process name, command line, and connection status.
+
+```json
+{
+  "internal_proxy": {
+    "process_logging_interval": 60
+  }
+}
+```
+
+Defaults to 60 seconds.
+
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 
 How much time to wait for the first connection to the proxy in seconds.
