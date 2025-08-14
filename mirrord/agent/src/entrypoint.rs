@@ -514,6 +514,8 @@ impl ClientConnectionHandler {
                     .await?;
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
+            // Message handled exclusively by the operator, see its docs for details.
+            ClientMessage::OperatorPong(_) => (),
             ClientMessage::Tcp(message) => match &mut self.tcp_mirror_api {
                 Some(mirror_api) => mirror_api.handle_client_message(message).await?,
                 _ => {
