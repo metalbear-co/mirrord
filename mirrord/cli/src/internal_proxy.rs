@@ -164,6 +164,13 @@ pub(crate) async fn connect_and_ping(
     loop {
         match agent_conn.agent_rx.recv().await {
             Some(DaemonMessage::Pong) => break Ok(agent_conn),
+            Some(DaemonMessage::OperatorPing(id)) => {
+                agent_conn
+                    .agent_tx
+                    .send(ClientMessage::OperatorPong(id))
+                    .await
+                    .ok();
+            }
             Some(DaemonMessage::LogMessage(LogMessage {
                 level: LogLevel::Error,
                 message,
@@ -181,7 +188,18 @@ pub(crate) async fn connect_and_ping(
                     "agent closed connection with message: {reason}"
                 )));
             }
-            Some(message) => {
+
+            message @ Some(DaemonMessage::UdpOutgoing(_))
+            | message @ Some(DaemonMessage::Tcp(_))
+            | message @ Some(DaemonMessage::TcpSteal(_))
+            | message @ Some(DaemonMessage::TcpOutgoing(_))
+            | message @ Some(DaemonMessage::File(_))
+            | message @ Some(DaemonMessage::LogMessage(_))
+            | message @ Some(DaemonMessage::GetEnvVarsResponse(_))
+            | message @ Some(DaemonMessage::GetAddrInfoResponse(_))
+            | message @ Some(DaemonMessage::PauseTarget(_))
+            | message @ Some(DaemonMessage::SwitchProtocolVersionResponse(_))
+            | message @ Some(DaemonMessage::Vpn(_)) => {
                 break Err(InternalProxyError::InitialPingPongFailed(format!(
                     "agent sent an unexpected message: {message:?}"
                 )));
