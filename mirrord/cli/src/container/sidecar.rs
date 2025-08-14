@@ -155,7 +155,6 @@ impl IntproxySidecar {
         let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
 
         let mut intproxy_args = vec![&config.container.cli_image, "mirrord", "intproxy"];
-        // Add logfile argument if specified in config
         if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
             intproxy_args.extend_from_slice(&["--logfile", log_destination]);
         }

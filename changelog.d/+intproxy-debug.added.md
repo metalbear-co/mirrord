@@ -1,1 +1,1 @@
-add logfile to the intproxy commandline for easy debugging
+Added the logfile location to the intproxy command-line so it can be seen in the process output.
