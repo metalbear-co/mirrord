@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 #![feature(c_variadic)]
 #![feature(io_error_uncategorized)]
 #![feature(try_trait_v2)]
@@ -66,13 +67,14 @@
 extern crate alloc;
 extern crate core;
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::parent_id;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::File,
     io::Read,
     net::SocketAddr,
-    os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
