@@ -113,6 +113,9 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+        /// Log file destination for the intproxy.
+        #[arg(long)]
+        logfile: Option<PathBuf>,
     },
 
     /// Forward local ports to hosts available from the cluster

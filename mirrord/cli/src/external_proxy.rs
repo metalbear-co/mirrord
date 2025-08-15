@@ -2,21 +2,21 @@
 //! External proxy to pipe communication from intproxy to agent
 //!
 //! ```text
-//!                    ┌────────────────┐         
-//!                k8s │ mirrord agent  │         
-//!                    └─────┬────▲─────┘         
-//!                          │    │               
-//!                          │    │               
-//!                    ┌─────▼────┴─────┐         
-//!     container host │ external proxy │         
-//!                    └─────┬────▲─────┘         
-//!                          │    │               
-//!                          │    │               
+//!                    ┌────────────────┐
+//!                k8s │ mirrord agent  │
+//!                    └─────┬────▲─────┘
+//!                          │    │
+//!                          │    │
+//!                    ┌─────▼────┴─────┐
+//!     container host │ external proxy │
+//!                    └─────┬────▲─────┘
+//!                          │    │
+//!                          │    │
 //!                    ┌─────▼────┴─────┐◄──────┐
 //!  sidecar container │ internal proxy │       │
 //!                    └──┬─────────────┴──┐    │
 //!         run container │ mirrord-layer  ├────┘
-//!                       └────────────────┘      
+//!                       └────────────────┘
 //! ```
 
 #[cfg(not(target_os = "windows"))]
@@ -188,6 +188,9 @@ pub async fn proxy(
 
                 match message {
                     Some(DaemonMessage::Pong) => continue,
+                    Some(DaemonMessage::OperatorPing(id)) => {
+                        own_agent_conn.agent_tx.send(ClientMessage::OperatorPong(id)).await.ok();
+                    }
                     Some(DaemonMessage::LogMessage(LogMessage {
                         level: LogLevel::Error,
                         message,
@@ -207,7 +210,17 @@ pub async fn proxy(
                             )).into()
                         );
                     }
-                    Some(message) => {
+                    message @ Some(DaemonMessage::UdpOutgoing(_))
+                    | message @ Some(DaemonMessage::Tcp(_))
+                    | message @ Some(DaemonMessage::TcpSteal(_))
+                    | message @ Some(DaemonMessage::TcpOutgoing(_))
+                    | message @ Some(DaemonMessage::File(_))
+                    | message @ Some(DaemonMessage::LogMessage(_))
+                    | message @ Some(DaemonMessage::GetEnvVarsResponse(_))
+                    | message @ Some(DaemonMessage::GetAddrInfoResponse(_))
+                    | message @ Some(DaemonMessage::PauseTarget(_))
+                    | message @ Some(DaemonMessage::SwitchProtocolVersionResponse(_))
+                    | message @ Some(DaemonMessage::Vpn(_)) => {
                         return Err(
                             ExternalProxyError::PingPongFailed(format!(
                                 "agent sent an unexpected message: {message:?}"

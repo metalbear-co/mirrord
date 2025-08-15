@@ -928,9 +928,9 @@ fn main() -> miette::Result<()> {
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
             }
-            Commands::InternalProxy { port } => {
+            Commands::InternalProxy { port, logfile } => {
                 let config = mirrord_config::util::read_resolved_config()?;
-                logging::init_intproxy_tracing_registry(&config)?;
+                logging::init_intproxy_tracing_registry(&config, logfile.as_deref())?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
