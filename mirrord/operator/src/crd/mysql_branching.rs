@@ -63,7 +63,7 @@ pub struct EnvVarLocation {
 pub struct MysqlBranchDatabaseStatus {
     pub phase: BranchDatabasePhase,
     /// Time when the branch database should be deleted.
-    pub expire_time: Option<DateTime<Utc>>,
+    pub expire_time: DateTime<Utc>,
     /// Information of the session that's using this branch database.
     pub session_info: Option<SessionInfo>,
 }
