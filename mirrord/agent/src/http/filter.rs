@@ -1,5 +1,6 @@
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
+use mirrord_protocol::tcp::HttpMethodFilter;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
@@ -18,6 +19,7 @@ pub enum HttpFilter {
         /// Filters to use.
         filters: Vec<HttpFilter>,
     },
+    Method(HttpMethodFilter),
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -31,6 +33,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             mirrord_protocol::tcp::HttpFilter::Path(path) => {
                 Ok(Self::Path(Regex::new(&format!("(?i){path}"))?))
             }
+            mirrord_protocol::tcp::HttpFilter::Method(method) => Ok(Self::Method(method.clone())),
             mirrord_protocol::tcp::HttpFilter::Composite { all, filters } => {
                 let all = *all;
                 let filters = filters
@@ -89,6 +92,8 @@ impl HttpFilter {
                     })
                     .unwrap_or(false)
             }),
+
+            Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
 
             Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(parts)),
             Self::Composite {

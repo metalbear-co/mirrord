@@ -107,6 +107,9 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
+    #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
+    pub method_filter: Option<String>,
+
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// An array of HTTP filters.
@@ -231,6 +234,10 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
+        let method_filter = FromEnv::new("MIRRORD_HTTP_METHOD_FILTER")
+            .source_value(context)
+            .transpose()?;
+
         let all_of = None;
         let any_of = None;
 
@@ -241,6 +248,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         Ok(Self::Generated {
             header_filter,
             path_filter,
+            method_filter,
             all_of,
             any_of,
             ports,

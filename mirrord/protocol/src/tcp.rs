@@ -19,6 +19,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use strum_macros::{AsRefStr, EnumString, VariantNames};
 
 use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
 
@@ -208,6 +209,24 @@ impl std::ops::Deref for Filter {
     }
 }
 
+#[derive(
+    Encode, Decode, Debug, PartialEq, Eq, Clone, EnumString, strum_macros::Display, AsRefStr,
+)]
+#[strum(ascii_case_insensitive, serialize_all = "UPPERCASE")]
+pub enum HttpMethodFilter {
+    Get,
+    Head,
+    Post,
+    Put,
+    Delete,
+    Connect,
+    Options,
+    Trace,
+    Patch,
+    #[strum(to_string = "{0}")]
+    Other(String),
+}
+
 /// Describes different types of HTTP filtering available
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HttpFilter {
@@ -222,6 +241,7 @@ pub enum HttpFilter {
         /// Filters to use
         filters: Vec<HttpFilter>,
     },
+    Method(HttpMethodFilter),
 }
 
 impl Display for HttpFilter {
@@ -229,6 +249,7 @@ impl Display for HttpFilter {
         match self {
             HttpFilter::Header(filter) => write!(f, "header={filter}"),
             HttpFilter::Path(filter) => write!(f, "path={filter}"),
+            HttpFilter::Method(filter) => write!(f, "method={filter}"),
             HttpFilter::Composite { all, filters } => match all {
                 true => {
                     write!(f, "all of ")?;

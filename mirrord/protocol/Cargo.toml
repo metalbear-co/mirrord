@@ -33,6 +33,9 @@ semver = { workspace = true, features = ["serde"] }
 
 mirrord-macros = { path = "../macros" }
 
+strum.workspace = true
+strum_macros.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 nix = { workspace = true, features = ["fs"] }
