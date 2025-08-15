@@ -116,6 +116,8 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
     };
     let temp_dir = tempdir().unwrap();
 
+    // Used for debugging with breakpoint on `let server` to debug mirrord execution
+    println!("executing mirrord with args {args:?}",);
     let server = Command::new(path)
         .args(&args)
         .envs(env)

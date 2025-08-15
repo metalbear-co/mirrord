@@ -23,7 +23,6 @@ mod file_ops_tests {
         services::{basic_service, go_statfs_service},
     };
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]

@@ -166,13 +166,6 @@ impl WindowsCommand {
         let program: Vec<u16> = {
             let raw_program = OsStr::new(self.command.get_program());
             let mut val = raw_program.encode_wide().collect::<Vec<u16>>();
-            if std::path::Path::new(&raw_program)
-                .extension()
-                .and_then(|s| s.to_str())
-                != Some("exe")
-            {
-                val.extend(OsStr::new(".exe").encode_wide());
-            }
             val.push(0u16);
             val
         };

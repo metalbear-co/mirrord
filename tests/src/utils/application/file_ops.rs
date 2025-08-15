@@ -18,7 +18,7 @@ impl FileOps {
             FileOps::Python => {
                 vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
             }
-            FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
+            FileOps::Rust => vec!["../target/x86_64-pc-windows-msvc/debug/rust-e2e-fileops"],
             FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
             FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
             FileOps::GoDir23 => vec!["go-e2e-dir/23.go_test_app"],

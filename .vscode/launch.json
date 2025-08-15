@@ -4,39 +4,53 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
+    // {
+    //   "type": "lldb",
+    //   "request": "launch",
+    //   "name": "cargo test",
+    //   "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
+    //   "args": [
+    //     "test_include_complex_configuration"
+    //   ],
+    //   "cwd": "${workspaceFolder}",
+    //   "sourceMap": {},
+    //   "sourceLanguages": [
+    //     "rust"
+    //   ],
+    // },
+    // {
+    //   "name": "lldb: Attach to Child",
+    //   "type": "lldb",
+    //   "request": "attach",
+    //   "pid": "${command:pickProcess}", // or hardcode PID
+    //   "stopOnEntry": true
+    // },   
     {
       "type": "lldb",
       "request": "launch",
-      "name": "cargo test",
-      "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
-      "args": [
-        "test_include_complex_configuration"
-      ],
-      "cwd": "${workspaceFolder}",
-      "sourceMap": {},
-      "sourceLanguages": [
-        "rust"
-      ],
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "test mirrord (lldb)",
+      "name": "1. test mirrord (lldb)",
       "cargo": {
         "args": [
-          "test", "tests",
-          "--target", "x86_64-pc-windows-msvc",
+          "test", "file_ops_tests", "--manifest-path", "tests/Cargo.toml", "--no-run",
+          "--target", "x86_64-pc-windows-msvc"
         ],
         "env": {
           "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
-          "MIRRORD_TESTS_USE_BINARY": "target/x86_64-pc-windows-msvc/debug/deps/mirrord-445c7e5eeffee072.exe",
+          "RUST_BACKTRACE": "1",
+          "MIRRORD_TESTS_USE_BINARY": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
         },
         "filter": {
           "name": "tests"
         },
       },
-      "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-08b24540faf8040c.exe",
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}/tests",
+      // "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-08b24540faf8040c.exe",
+      "args": ["--nocapture"],
+      "env": {
+        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
+      },
+      "console": "integratedTerminal",
+      "preLaunchTask": "cargo: build mirrord (msvc)",
       "sourceMap": {},
       "sourceLanguages": [
         "rust"
@@ -45,25 +59,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Launch mirrord (MSVC)",
-      "program": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
-      "args": [
-        "exec", "-c",
-        "--target", "targetless",
-        "target/x86_64-pc-windows-msvc/debug/deps/target_dummy.exe", "HIJACK_ME", "VAL"
-      ],
-      "environment": [
-        {"name": "MIRRORD_DISABLE_VERSION_CHECK", "value": "true"},
-        {"name": "MIRRORD_LAYER_FILE", "value": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll"},
-        {"name": "MIRRORD_OPERATOR_ENABLE", "value": "false"},
-      ],
-      "preLaunchTask": "cargo: build mirrord (msvc)",
-      "cwd": "${workspaceFolder}",
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "debug cli [win]",
+      "name": "2. debug cli exec",
       "cargo": {
         "args": [
           "build", "-p", "mirrord", "--target", "x86_64-pc-windows-msvc" // "--release"
@@ -72,38 +68,70 @@
           "name": "mirrord"
         },
         "env": {
-          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/release/layer_win.dll",
+          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
           // "RUSTFLAGS": "-LC:/Users/Daniel/git/mirrord/target/x86_64-pc-windows-msvc/release/build/aws-lc-sys-f222e66db1014569/out/build/artifacts",
         },
-        "problemMatcher": "$rustc",
       },
       "args": [
-        "exec", "-c",
-        "--target", "targetless",
-        "target/debug/target-dummy.exe", "HIJACK_ME", "VAL"
+        "exec", "-c", "--target", "pod/http-echo-omv4wcp-55949b95bb-2jvsc/container/test", "--target-namespace", "default", "--fs-mode", "read", "-e", "--", "../target/x86_64-pc-windows-msvc/debug/rust-e2e-fileops"
       ],
-      "env": {"MIRRORD_OPERATOR_ENABLE": "false"},
-      "cwd": "${workspaceFolder}",
-      "sourceMap": {},
-      "sourceLanguages": [
-        "rust"
-      ],
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "test mirrord-win",
-      "cargo": {
-        "args": [
-          "test", "-p", "mirrord-win", "--lib"
-        ]
+      "program": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
+      "env": {
+        "MIRRORD_DISABLE_VERSION_CHECK": "true",
+        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
+        "MIRRORD_OPERATOR_ENABLE": "false",
       },
-      "cwd": "${workspaceFolder}",
+      // "preLaunchTask": "cargo: build mirrord (msvc)",
+      "cwd": "${workspaceFolder}/tests",
       "sourceMap": {},
       "sourceLanguages": [
         "rust"
       ],
     },
+    // {
+    //   "type": "lldb",
+    //   "request": "launch",
+    //   "name": "debug cli [win]",
+    //   "cargo": {
+    //     "args": [
+    //       "build", "-p", "mirrord", "--target", "x86_64-pc-windows-msvc" // "--release"
+    //     ],
+    //     "filter": {
+    //       "name": "mirrord"
+    //     },
+    //     "env": {
+    //       "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/release/layer_win.dll",
+    //       // "RUSTFLAGS": "-LC:/Users/Daniel/git/mirrord/target/x86_64-pc-windows-msvc/release/build/aws-lc-sys-f222e66db1014569/out/build/artifacts",
+    //     },
+    //     "problemMatcher": "$rustc",
+    //   },
+    //   "args": [
+    //     "exec", "-c",
+    //     "--target", "targetless",
+    //     "target/debug/target-dummy.exe", "HIJACK_ME", "VAL"
+    //   ],
+    //   "env": {"MIRRORD_OPERATOR_ENABLE": "false"},
+    //   "cwd": "${workspaceFolder}",
+    //   "sourceMap": {},
+    //   "sourceLanguages": [
+    //     "rust"
+    //   ],
+    // },
+    // {
+    //   "type": "lldb",
+    //   "request": "launch",
+    //   "name": "test mirrord-win",
+    //   "cargo": {
+    //     "args": [
+    //       "test", "-p", "mirrord-win", "--lib"
+    //     ]
+    //   },
+    //   "cwd": "${workspaceFolder}",
+    //   "sourceMap": {},
+    //   "sourceLanguages": [
+    //     "rust"
+    //   ],
+    // },
     {
       "name": "Launch golang file",
       "type": "go",

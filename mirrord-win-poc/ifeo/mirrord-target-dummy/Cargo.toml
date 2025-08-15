@@ -1,8 +1,0 @@
-[package]
-name = "mirrord-target-dummy"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-winapi = { version = "0.3.9", features = ["fileapi", "winbase", "handleapi", "synchapi", "errhandlingapi", "winerror"] }
-tokio = { version = "1.46.1", features = ["full"] }

@@ -16,14 +16,8 @@ categories.workspace = true
 [dependencies]
 dll-syringe.workspace = true
 thiserror.workspace = true
+windows.workspace = true
 
-[dependencies.windows]
-version = "0.61"
-features = [
-    "Win32_Security",
-    "Win32_System_Pipes",
-    "Win32_System_Threading",
-]
 
 [lints]
 workspace = true

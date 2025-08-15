@@ -21,14 +21,14 @@ members = [
     #"mirrord/layer/tests/apps/rebind0",
     #"sample/rust",
     #"medschool",
-    #"tests",
-    #"tests/rust-e2e-fileops",
+    "tests",
+    "tests/rust-e2e-fileops",
     #"tests/rust-unix-socket-client",
     #"tests/rust-bypassed-unix-socket",
     #"tests/issue1317",
     #"tests/rust-websockets",
     #"tests/rust-sqs-printer",
-    "mirrord-win-poc/ifeo/*",
+    #"mirrord-win-poc/ifeo/*",
     "mirrord-win-poc/manual-exec/*",
 ]
 resolver = "2"

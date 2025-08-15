@@ -421,8 +421,20 @@ where
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data, progress).await;
 
-    progress.subtask("running process");
-    execve_process(binary, binary_args, env_vars, _did_sip_patch)
+    let sub_progress = progress.subtask("running process");
+
+    Box::pin(async {
+        execve_process(
+            binary,
+            binary_args,
+            env_vars,
+            _did_sip_patch,
+            sub_progress,
+            analytics,
+        )
+        .await
+    })
+    .await
 }
 
 fn process_which(binary: &String) -> Result<std::path::PathBuf, CliError> {
@@ -430,12 +442,17 @@ fn process_which(binary: &String) -> Result<std::path::PathBuf, CliError> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn execve_process(
+async fn execve_process<P>(
     binary: String,
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
-) -> CliResult<()> {
+    mut progress: P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
     let binary_path = process_which(&binary)?;
 
@@ -477,22 +494,35 @@ fn execve_process(
 }
 
 #[cfg(target_os = "windows")]
-fn execve_process(
+async fn execve_process<P>(
     binary: String,
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
-) -> CliResult<()> {
-    let binary_path = process_which(&binary)?;
+    mut progress: P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+
+    // Add .exe extension if necessary on Windows
+    // From CreateProcessW documentation:
+    // lpApplicationName - This parameter must include the file name extension; no default extension is assumed.
+    let binary_name = binary
+        .ends_with(".exe")
+        .then_some(binary.clone())
+        .unwrap_or_else(|| format!("{}.exe", binary));
+
+    let binary_path = process_which(&binary_name).map_err(|e| {
+        error!("process_which failed: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        e
+    })?;
 
     let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
-        .ok_or(CliError::LayerFilePathMissing(
-            binary.clone(),
-            binary_args.clone(),
-            std::env::vars().collect(),
-        ))?
-        .into_string()
-        .map_err(|_| {
+        .and_then(|os_str| os_str.into_string().ok())
+        .ok_or_else(|| {
             CliError::LayerFilePathMissing(
                 binary.clone(),
                 binary_args.clone(),
@@ -512,12 +542,22 @@ fn execve_process(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let child = cmd.inject_and_spawn(layer_path.to_string()).map_err(|e| {
-        println!("{:#?}", e);
-        CliError::BinaryExecuteFailed(binary, binary_args)
+    // On Windows, we need to manually handle process replacement
+    let mut process = cmd.inject_and_spawn(layer_path).map_err(|e| {
+        error!("Failed to create process: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
     })?;
-    println!("{:#?}", child);
-    Ok(())
+
+    progress.success(Some("Ready!"));
+
+    // Wait for process and handle I/O
+    let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
+        error!("Process failed: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        1
+    });
+    std::process::exit(exit_code);
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
