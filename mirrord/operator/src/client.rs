@@ -27,12 +27,16 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::Level;
+use tracing::{Level, instrument::WithSubscriber};
 
 use crate::{
+    client::database_branches::{
+        DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
+    },
     crd::{
         MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
+        mysql_branching::MysqlBranchDatabase,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
@@ -42,6 +46,7 @@ use crate::{
 
 mod conn_wrapper;
 mod connect_params;
+mod database_branches;
 mod discovery;
 pub mod error;
 mod upgrade;
@@ -618,6 +623,12 @@ impl OperatorApi<PreparedClientCert> {
             (false, None)
         };
 
+        let branch_db_ids = if layer_config.feature.db_branches.is_empty().not() {
+            Some(self.prepare_branch_dbs(layer_config, progress).await?)
+        } else {
+            None
+        };
+
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
@@ -1127,6 +1138,58 @@ impl OperatorApi<PreparedClientCert> {
             connection,
             session.operator_protocol_version.clone(),
         ))
+    }
+
+    /// Prepare branch databases, and return database IDs.
+    ///
+    /// 1. List reusable branch databases.
+    /// 2. Create new ones if any missing.
+    /// 3. Wait for all new databases to be ready.
+    #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
+    async fn prepare_branch_dbs<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<Vec<String>> {
+        let mut subtask = progress.subtask("preparing branch databases");
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .ok_or(OperatorApiError::BranchDatabase {
+                message: Some("targetless mode is unsupported".into()),
+            })?;
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+        let mysql_branch_api: Api<MysqlBranchDatabase> =
+            Api::namespaced(self.client.clone(), namespace);
+
+        let DatabaseBranchParams {
+            mysql: mut create_mysql_params,
+        } = DatabaseBranchParams::new(
+            &layer_config.feature.db_branches,
+            &target,
+            namespace,
+            self.client_cert.cert.public_key_data().as_ref(),
+        );
+
+        let reusable_mysql_branches =
+            list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
+
+        create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
+        let new_mysql_branches =
+            create_mysql_branches(&mysql_branch_api, create_mysql_params, progress).await?;
+        subtask.success(None);
+
+        let branch_ids = reusable_mysql_branches
+            .keys()
+            .chain(new_mysql_branches.keys())
+            .map(ToString::to_string)
+            .collect();
+        Ok(branch_ids)
     }
 }
 

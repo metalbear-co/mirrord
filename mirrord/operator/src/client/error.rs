@@ -77,6 +77,9 @@ pub enum OperatorApiError {
 
     #[error("copied target failed: {}", message.as_deref().unwrap_or("reason unknown"))]
     CopiedTargetFailed { message: Option<String> },
+
+    #[error("failed to prepare branch database: {}", message.as_deref().unwrap_or("reason unknown"))]
+    BranchDatabase { message: Option<String> },
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
