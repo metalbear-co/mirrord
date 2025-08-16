@@ -17,6 +17,8 @@ use crate::crd::kube_target::KubeTarget;
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MysqlBranchDatabaseSpec {
+    /// ID derived by mirrord CLI.
+    pub id: String,
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
     /// Target k8s resource to extract connection source info from.
@@ -32,30 +34,16 @@ pub struct MysqlBranchDatabaseSpec {
 pub enum ConnectionSource {
     /// A complete connection URL.
     Url(ConnectionSourceKind),
-    /// A group of connection parameters.
-    Parameters {
-        host: ConnectionSourceKind,
-        port: Option<ConnectionSourceKind>,
-        username: ConnectionSourceKind,
-        password: ConnectionSourceKind,
-        database: ConnectionSourceKind,
-    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ConnectionSourceKind {
     /// Environment variable with value defined directly in the pod template.
-    DirectEnvVar(EnvVarLocation),
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvVarLocation {
-    /// Name of the container.
-    pub container: String,
-    /// Name of the variable.
-    pub variable: String,
+    Env {
+        container: Option<String>,
+        variable: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -68,7 +56,7 @@ pub struct MysqlBranchDatabaseStatus {
     pub session_info: Option<SessionInfo>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum BranchDatabasePhase {
     /// The controller is creating the branch database.
     Pending,
