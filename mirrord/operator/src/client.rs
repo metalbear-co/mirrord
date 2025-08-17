@@ -27,7 +27,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{Level, instrument::WithSubscriber};
+use tracing::Level;
 
 use crate::{
     client::database_branches::{
@@ -655,6 +655,7 @@ impl OperatorApi<PreparedClientCert> {
                 use_proxy_api,
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
+                branch_db_ids.clone(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -713,7 +714,8 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let params = ConnectParams::new(layer_config, branch_name.clone());
+            let params =
+                ConnectParams::new(layer_config, branch_name.clone(), branch_db_ids.clone());
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
 
@@ -738,6 +740,7 @@ impl OperatorApi<PreparedClientCert> {
                     use_proxy_api,
                     layer_config.profile.as_deref(),
                     branch_name,
+                    branch_db_ids,
                 );
                 let session_id = copied
                     .status
@@ -830,6 +833,7 @@ impl OperatorApi<PreparedClientCert> {
         use_proxy: bool,
         profile: Option<&str>,
         branch_name: Option<String>,
+        db_branches: Option<Vec<String>>,
     ) -> String {
         let name = crd
             .meta()
@@ -853,6 +857,7 @@ impl OperatorApi<PreparedClientCert> {
             kafka_splits: Default::default(),
             sqs_splits: Default::default(),
             branch_name,
+            db_branches,
         };
 
         if use_proxy {
@@ -1194,6 +1199,7 @@ impl OperatorApi<PreparedClientCert> {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
@@ -1228,6 +1234,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -1248,6 +1255,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_no_proxy(
@@ -1268,6 +1276,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -1288,6 +1297,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy_profile(
@@ -1308,6 +1318,7 @@ mod test {
         Some("no-steal"),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1328,6 +1339,7 @@ mod test {
         Some("/should?be&escaped"),
         Default::default(),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped"
     )]
     #[case::deployment_container_proxy_kafka_splits(
@@ -1354,6 +1366,7 @@ mod test {
             ]),
         )]),
         Default::default(),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1381,8 +1394,31 @@ mod test {
                 ("header-2".to_string(), "filter-2".to_string()),
             ]),
         )]),
+        None,
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
+    )]
+    #[case::deployment_container_proxy_mysql_branches(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Some(vec!["branch-1".into(), "branch-2".into()]),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        ?connect=true&on_concurrent_steal=abort&db_branches=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
     #[test]
     fn target_connect_url(
@@ -1392,6 +1428,7 @@ mod test {
         #[case] profile: Option<&str>,
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
+        #[case] db_branches: Option<Vec<String>>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -1411,6 +1448,7 @@ mod test {
             kafka_splits,
             sqs_splits,
             branch_name: None,
+            db_branches,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
