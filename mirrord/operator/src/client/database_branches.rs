@@ -23,7 +23,6 @@ use crate::{
     client::error::OperatorApiError,
     crd::{
         kube_target::KubeTarget,
-        label_selector,
         mysql_branching::{
             BranchDatabasePhase, ConnectionSource as CrdConnectionSource,
             ConnectionSourceKind as CrdConnectionSourceKind, MysqlBranchDatabase,
@@ -75,7 +74,7 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
     let ready = branch_names
         .iter()
         .map(|name| {
-            await_condition(api.clone(), &name, |db: Option<&MysqlBranchDatabase>| {
+            await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
                 db.and_then(|db| {
                     db.status
                         .as_ref()
@@ -167,16 +166,11 @@ impl DatabaseBranchParams {
             let id = if let Some(id) = branch_db_config.id.clone() {
                 BranchDatabaseId(id)
             } else {
-                BranchDatabaseId::new(
-                    client_public_key,
-                    &target,
-                    namespace,
-                    &branch_db_config.name,
-                )
+                BranchDatabaseId::new(client_public_key, target, namespace, &branch_db_config.name)
             };
             match branch_db_config._type {
                 DatabaseType::MySql => {
-                    let params = MysqlBranchParams::new(&id.0.as_str(), branch_db_config, &target);
+                    let params = MysqlBranchParams::new(id.0.as_str(), branch_db_config, target);
                     mysql.insert(id, params)
                 }
             };
