@@ -433,6 +433,9 @@ pub(crate) enum CliError {
 
     #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
     OperatorCopyTargetFailed { message: Option<String> },
+
+    #[error("operator operation timed out: {}", operation)]
+    OperatorOperationTimeout { operation: String },
 }
 
 impl CliError {
@@ -515,6 +518,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CopiedTargetFailed { message } => {
                 Self::OperatorCopyTargetFailed { message }
             }
+            OperatorApiError::OperationTimeout { operation } => Self::OperatorOperationTimeout {
+                operation: operation.to_string(),
+            },
         }
     }
 }

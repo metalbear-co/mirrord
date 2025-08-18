@@ -1070,6 +1070,7 @@ mod tests {
                 copy_target: None,
                 hostname: None,
                 split_queues: None,
+                db_branches: None,
             }),
             container: None,
             operator: None,

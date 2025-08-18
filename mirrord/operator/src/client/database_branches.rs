@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use tracing::Level;
 
 use crate::{
-    client::error::OperatorApiError,
+    client::error::{OperatorApiError, OperatorOperation},
     crd::{
         kube_target::KubeTarget,
         mysql_branching::{
@@ -61,10 +61,9 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         match api.create(&kube::api::PostParams::default(), &branch).await {
             Ok(branch) => created_branches.insert(id, branch),
             Err(e) => {
-                return Err(OperatorApiError::BranchDatabase {
-                    message: Some(format!(
-                        "failed to create MySQL branch database {name}: {e}"
-                    )),
+                return Err(OperatorApiError::KubeError {
+                    error: e,
+                    operation: OperatorOperation::MysqlBranching,
                 });
             }
         };
@@ -91,8 +90,8 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         futures::future::join_all(ready),
     )
     .await
-    .map_err(|_| OperatorApiError::BranchDatabase {
-        message: Some("timed out waiting for MySQL branch databases to be ready".to_string()),
+    .map_err(|_| OperatorApiError::OperationTimeout {
+        operation: OperatorOperation::MysqlBranching,
     })?;
     subtask.success(Some("new MySQL branch databases ready"));
 
@@ -126,8 +125,9 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
     let reusable_mysql_branches = api
         .list(&list_params)
         .await
-        .map_err(|_| OperatorApiError::BranchDatabase {
-            message: Some("kube client error".to_string()),
+        .map_err(|e| OperatorApiError::KubeError {
+            error: e,
+            operation: OperatorOperation::MysqlBranching,
         })?
         .into_iter()
         .filter(|db| {
