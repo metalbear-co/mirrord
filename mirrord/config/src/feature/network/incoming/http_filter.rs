@@ -200,7 +200,9 @@ pub enum InnerFilter {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
-    Header { header: String },
+    Header {
+        header: String,
+    },
 
     /// ##### feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}
     ///
@@ -210,7 +212,13 @@ pub enum InnerFilter {
     ///
     /// Case-insensitive. Tries to find match in the path (without query) and path+query.
     /// If any of the two matches, the request is stolen.
-    Path { path: String },
+    Path {
+        path: String,
+    },
+
+    Method {
+        method: String,
+    },
 }
 
 /// <!--${internal}-->

@@ -19,7 +19,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
-use strum_macros::{AsRefStr, EnumString, VariantNames};
+use strum_macros::{AsRefStr, EnumString};
 
 use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
 

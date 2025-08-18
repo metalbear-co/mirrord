@@ -322,6 +322,9 @@ impl IncomingMode {
                 InnerFilter::Header { header } => HttpFilter::Header(
                     Filter::new(header.clone()).expect("invalid filter expression"),
                 ),
+                InnerFilter::Method { method } => HttpFilter::Method(
+                    HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+                ),
             })
             .collect();
 
