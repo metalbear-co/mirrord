@@ -1159,11 +1159,16 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn rename_detour(
     old_path: *const c_char,
-    new_path: *mut c_char,
+    new_path: *const c_char,
 ) -> c_int {
     rename(old_path.checked_into(), new_path.checked_into())
         .map(|()| 0)
-        .unwrap_or_bypass_with(|_| unsafe { FN_RENAME(old_path, new_path) })
+        .unwrap_or_bypass_with(|bypass| {
+            let old_path = update_ptr_from_bypass(old_path, &bypass);
+            let new_path = update_ptr_from_bypass(new_path, &bypass);
+
+            unsafe { FN_RENAME(old_path, new_path) }
+        })
 }
 
 fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
