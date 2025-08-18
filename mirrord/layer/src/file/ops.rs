@@ -211,7 +211,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+#[mirrord_layer_macro::instrument(level = Level::INFO, ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = common_path_check(path?, open_options.is_write())?;
 
@@ -807,10 +807,21 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     Detour::Success(realpath)
 }
 
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+#[mirrord_layer_macro::instrument(level = Level::INFO, ret)]
 pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> Detour<()> {
-    let old_path = common_path_check(old_path?, false)?;
-    let new_path = common_path_check(new_path?, false)?;
+    let old_path = common_path_check(old_path?, false);
+    let new_path = common_path_check(new_path?, false);
+
+    let (old_path, new_path) = match (old_path, new_path) {
+        (Detour::Success(old_path), Detour::Success(new_path)) => {
+            Detour::Success((old_path, new_path))
+        }
+        (
+            Detour::Bypass(Bypass::IgnoredFile(old_path)),
+            Detour::Bypass(Bypass::IgnoredFile(new_path)),
+        ) => Detour::Bypass(Bypass::IgnoredFiles(old_path, new_path)),
+        (old, new) => Detour::Success((old?, new?)),
+    }?;
 
     let old_path = absolute_path(old_path);
     let new_path = absolute_path(new_path);

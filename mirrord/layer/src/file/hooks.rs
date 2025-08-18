@@ -68,6 +68,37 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char 
     }
 }
 
+fn update_ptr_from_bypass2(ptr: *const c_char, bypass: &Bypass) -> *const c_char {
+    println!("updating from bypass");
+    if !ptr.is_null() {
+        unsafe {
+            let wat = std::ffi::CStr::from_ptr(ptr);
+            println!("ptr {wat:?}");
+        }
+    }
+
+    println!("bypass {bypass:?}");
+    let r = match bypass {
+        // For some reason, the program is trying to carry out an operation on a path that is
+        // inside mirrord's temp bin dir. The detour has returned us the original path of the file
+        // (stripped mirrord's dir path), so now we carry out the operation locally, on the stripped
+        // path.
+        #[cfg(target_os = "macos")]
+        Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => *stripped_ptr,
+        Bypass::RelativePath(path) | Bypass::IgnoredFile(path) => path.as_ptr(),
+        _ => ptr,
+    };
+
+    if !r.is_null() {
+        unsafe {
+            let wat = std::ffi::CStr::from_ptr(r);
+            println!("updated result {wat:?}");
+        }
+    }
+
+    r
+}
+
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -97,7 +128,7 @@ pub(super) unsafe extern "C" fn open_detour(
             FN_OPEN(raw_path, open_flags, mode)
         } else {
             open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|bypass| {
-                let raw_path = update_ptr_from_bypass(raw_path, &bypass);
+                let raw_path = update_ptr_from_bypass2(raw_path, &bypass);
                 FN_OPEN(raw_path, open_flags, mode)
             })
         }
@@ -1161,13 +1192,49 @@ pub(crate) unsafe extern "C" fn rename_detour(
     old_path: *const c_char,
     new_path: *const c_char,
 ) -> c_int {
+    if !old_path.is_null() {
+        unsafe {
+            let wat = std::ffi::CStr::from_ptr(old_path);
+            println!("ptr old {wat:?}");
+        }
+    }
+
+    if !new_path.is_null() {
+        unsafe {
+            let wat = std::ffi::CStr::from_ptr(new_path);
+            println!("ptr new {wat:?}");
+        }
+    }
+
     rename(old_path.checked_into(), new_path.checked_into())
         .map(|()| 0)
         .unwrap_or_bypass_with(|bypass| {
-            let old_path = update_ptr_from_bypass(old_path, &bypass);
-            let new_path = update_ptr_from_bypass(new_path, &bypass);
+            if let Bypass::IgnoredFiles(old, new) = bypass {
+                // let old_path = update_ptr_from_bypass2(old_path, &Bypass::IgnoredFile(old));
+                // let new_path = update_ptr_from_bypass2(new_path, &Bypass::IgnoredFile(new));
+                let new_path = new.into_raw();
 
-            unsafe { FN_RENAME(old_path, new_path) }
+                if !old_path.is_null() {
+                    unsafe {
+                        let wat = std::ffi::CStr::from_ptr(old_path);
+                        println!("ptr new old {wat:?}");
+                    }
+                }
+
+                if !new_path.is_null() {
+                    unsafe {
+                        let wat = std::ffi::CStr::from_ptr(new_path);
+                        println!("ptr new new {wat:?}");
+                    }
+                }
+
+                let result = unsafe { FN_RENAME(old_path, new_path) };
+                println!("rename result {result:?}, {:?}", Errno::last());
+
+                result
+            } else {
+                unsafe { FN_RENAME(old_path, new_path) }
+            }
         })
 }
 

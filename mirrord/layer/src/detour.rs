@@ -157,6 +157,9 @@ pub(crate) enum Bypass {
     /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(CString),
 
+    /// File [`PathBuf`] should be ignored (used for tests).
+    IgnoredFiles(CString, CString),
+
     /// Some operations only handle absolute [`PathBuf`]s.
     RelativePath(CString),
 
