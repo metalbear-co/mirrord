@@ -1164,9 +1164,7 @@ impl OperatorApi<PreparedClientCert> {
             .target
             .path
             .clone()
-            .ok_or(OperatorApiError::BranchDatabase {
-                message: Some("targetless mode is unsupported".into()),
-            })?;
+            .unwrap_or(Target::Targetless);
         let namespace = layer_config
             .target
             .namespace
