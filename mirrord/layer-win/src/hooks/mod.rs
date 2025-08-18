@@ -4,6 +4,8 @@ mod files;
 mod macros;
 mod process;
 
+use std::sync::OnceLock;
+
 use minhook_detours_rs::guard::DetourGuard;
 
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
