@@ -9,22 +9,22 @@ use std::{
 };
 
 use http_body_util::BodyExt;
-use hyper::{body::Incoming, http::response::Parts, StatusCode};
+use hyper::{StatusCode, body::Incoming, http::response::Parts};
 use mirrord_protocol::{
+    Payload,
     batched_body::BatchedBody,
     tcp::{
         ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
         IncomingTrafficTransportType, InternalHttpBody, InternalHttpBodyFrame,
         InternalHttpResponse,
     },
-    Payload,
 };
 use tokio::time;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 use super::{
-    http::{mirrord_error_response, ClientStore, LocalHttpError, ResponseMode, StreamingBody},
+    http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
     tasks::{HttpOut, InProxyTaskMessage},
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
@@ -312,11 +312,14 @@ impl HttpGatewayTask {
             return Ok(());
         }
 
-        if let Some(on_upgrade) = on_upgrade {
-            message_bus.send(HttpOut::Upgraded(on_upgrade)).await;
-        } else {
-            // If there was no upgrade and no error, the client can be reused.
-            self.client_store.push_idle(client);
+        match on_upgrade {
+            Some(on_upgrade) => {
+                message_bus.send(HttpOut::Upgraded(on_upgrade)).await;
+            }
+            _ => {
+                // If there was no upgrade and no error, the client can be reused.
+                self.client_store.push_idle(client);
+            }
         }
 
         Ok(())
@@ -396,24 +399,24 @@ mod test {
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};
     use hyper::{
+        Method, Request, Response, StatusCode, Version,
         body::{Frame, Incoming},
-        header::{self, HeaderValue, CONNECTION, UPGRADE},
+        header::{self, CONNECTION, HeaderValue, UPGRADE},
         server::conn::http1,
         service::service_fn,
         upgrade::Upgraded,
-        Method, Request, Response, StatusCode, Version,
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
-        tcp::{HttpRequest, InternalHttpRequest},
         ConnectionId, ToPayload,
+        tcp::{HttpRequest, InternalHttpRequest},
     };
     use rstest::rstest;
     use rustls::ServerConfig;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
-        sync::{mpsc, watch, Semaphore},
+        sync::{Semaphore, mpsc, watch},
         task,
     };
     use tokio_rustls::TlsAcceptor;
@@ -423,9 +426,9 @@ mod test {
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
         proxies::incoming::{
+            InProxyTaskError,
             tcp_proxy::{LocalTcpConnection, TcpProxyTask},
             tls::LocalTlsSetup,
-            InProxyTaskError,
         },
     };
 
@@ -595,7 +598,7 @@ mod test {
                 port: 80,
                 internal_request: InternalHttpRequest {
                     method: Method::GET,
-                    uri: "dummyecho://www.mirrord.dev/".parse().unwrap(),
+                    uri: "dummyecho://metalbear.co/mirrord/".parse().unwrap(),
                     headers: [
                         (CONNECTION, HeaderValue::from_static("upgrade")),
                         (UPGRADE, HeaderValue::from_static(TEST_PROTO)),
@@ -640,18 +643,20 @@ mod test {
                         StatusCode::SWITCHING_PROTOCOLS
                     );
                     println!("Received response from the gateway: {res:?}");
-                    assert!(res
-                        .internal_response
-                        .headers
-                        .get(CONNECTION)
-                        .filter(|v| *v == "upgrade")
-                        .is_some());
-                    assert!(res
-                        .internal_response
-                        .headers
-                        .get(UPGRADE)
-                        .filter(|v| *v == TEST_PROTO)
-                        .is_some());
+                    assert!(
+                        res.internal_response
+                            .headers
+                            .get(CONNECTION)
+                            .filter(|v| *v == "upgrade")
+                            .is_some()
+                    );
+                    assert!(
+                        res.internal_response
+                            .headers
+                            .get(UPGRADE)
+                            .filter(|v| *v == TEST_PROTO)
+                            .is_some()
+                    );
                 }
                 other => panic!("unexpected task update: {other:?}"),
             }

@@ -4,17 +4,17 @@ use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{config::ConfigContext, target::TargetType, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
-use serde::{ser::SerializeSeq, Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeSeq};
 use tracing::Level;
 
-use crate::{util, CliError, CliResult, Format, ListTargetArgs};
+use crate::{CliError, CliResult, Format, ListTargetArgs, util};
 
 /// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
 /// Primarily used by the plugins when the user picks a target to fetch fewer targets at once.
@@ -88,12 +88,13 @@ impl FoundTargets {
 
         let start = Instant::now();
         let mut reporter = NullReporter::default();
+        let progress = mirrord_progress::NullProgress {};
         let operator_api = if config.operator != Some(false)
-            && let Some(api) = OperatorApi::try_new(&config, &mut reporter).await?
+            && let Some(api) = OperatorApi::try_new(&config, &mut reporter, &progress).await?
         {
             tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
 
-            let api = api.prepare_client_cert(&mut reporter).await;
+            let api = api.prepare_client_cert(&mut reporter, &progress).await;
 
             api.inspect_cert_error(
                 |error| tracing::error!(%error, "failed to prepare client certificate"),

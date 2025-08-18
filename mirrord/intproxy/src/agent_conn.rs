@@ -9,7 +9,7 @@ use mirrord_kube::{
     api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
     error::KubeApiError,
 };
-use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
+use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,8 +19,8 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
     Retry,
+    strategy::{ExponentialBackoff, jitter},
 };
 use tracing::Level;
 
@@ -82,6 +82,18 @@ impl fmt::Debug for ReconnectFlow {
             }
             Self::Break => f.write_str("Break"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum AgentConnectionMessage {
+    ClientMessage(ClientMessage),
+    RequestReconnect,
+}
+
+impl From<ClientMessage> for AgentConnectionMessage {
+    fn from(message: ClientMessage) -> Self {
+        AgentConnectionMessage::ClientMessage(message)
     }
 }
 
@@ -170,8 +182,11 @@ impl AgentConnection {
     }
 
     #[tracing::instrument(level = Level::TRACE, name = "send_message_to_agent", skip(self), ret, err(level = Level::TRACE))]
-    async fn send(&self, msg: ClientMessage) -> Result<(), AgentChannelError> {
-        self.agent_tx.send(msg).await.map_err(|_| AgentChannelError)
+    async fn send(&self, msg: ClientMessage) -> Result<(), AgentConnectionTaskError> {
+        self.agent_tx
+            .send(msg)
+            .await
+            .map_err(|_| AgentConnectionTaskError::ChannelError)
     }
 }
 
@@ -183,15 +198,19 @@ impl fmt::Debug for AgentConnection {
     }
 }
 
-/// This error occurs when the [`AgentConnection`] fails to communicate with the inner
-/// [`tokio::task`], which handles raw IO. The original (e.g. some IO error) is not available.
 #[derive(Error, Debug)]
-#[error("agent unexpectedly closed connection")]
-pub struct AgentChannelError;
+pub enum AgentConnectionTaskError {
+    #[error("agent connection was requested to reconnect")]
+    RequestedReconnect,
+    /// This error occurs when the [`AgentConnection`] fails to communicate with the inner
+    /// [`tokio::task`], which handles raw IO. The original (e.g. some IO error) is not available.
+    #[error("agent unexpectedly closed connection")]
+    ChannelError,
+}
 
 impl BackgroundTask for AgentConnection {
-    type Error = AgentChannelError;
-    type MessageIn = ClientMessage;
+    type Error = AgentConnectionTaskError;
+    type MessageIn = AgentConnectionMessage;
     type MessageOut = ProxyMessage;
 
     #[tracing::instrument(level = Level::INFO, name = "agent_connection_main_loop", skip_all, ret, err)]
@@ -203,7 +222,10 @@ impl BackgroundTask for AgentConnection {
                         tracing::trace!("message bus closed, exiting");
                         break Ok(());
                     },
-                    Some(msg) => {
+                    Some(AgentConnectionMessage::RequestReconnect) => {
+                        break Err(AgentConnectionTaskError::RequestedReconnect)
+                    }
+                    Some(AgentConnectionMessage::ClientMessage(msg)) => {
                         if let Err(error) = self.send(msg).await {
                             tracing::error!(%error, "failed to send message to the agent");
                             break Err(error);
@@ -214,7 +236,7 @@ impl BackgroundTask for AgentConnection {
                 msg = self.agent_rx.recv() => match msg {
                     None => {
                         tracing::error!("failed to receive message from the agent, inner task down");
-                        break Err(AgentChannelError);
+                        break Err(AgentConnectionTaskError::ChannelError);
                     }
                     Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
                 },
@@ -267,7 +289,7 @@ impl RestartableBackgroundTask for AgentConnection {
                     Err(error) => {
                         tracing::error!(?error, "unable to reconnect agent");
 
-                        ControlFlow::Break(AgentChannelError)
+                        ControlFlow::Break(AgentConnectionTaskError::ChannelError)
                     }
                 }
             }

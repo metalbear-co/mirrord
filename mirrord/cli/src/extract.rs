@@ -8,7 +8,7 @@ use const_random::const_random;
 use mirrord_progress::Progress;
 use tracing::debug;
 
-use crate::{error::CliError, CliResult};
+use crate::{CliResult, error::CliError};
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]
@@ -37,7 +37,7 @@ pub(crate) fn extract_library<P>(
     prefix: bool,
 ) -> CliResult<PathBuf>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let mut progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
@@ -83,7 +83,7 @@ where
 #[cfg(target_os = "macos")]
 pub(crate) fn extract_arm64<P>(progress: &P, prefix: bool) -> CliResult<PathBuf>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let mut progress = progress.subtask("extracting arm64 layer library");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"))

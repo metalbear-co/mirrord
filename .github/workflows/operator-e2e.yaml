@@ -4,32 +4,60 @@ on:
   workflow_dispatch:
     inputs:
       mirrord_commit:
-        description: 'Mirrord commit to use for E2E tests'
+        description: "Mirrord commit to use for E2E tests"
         required: true
         type: string
       mirrord_branch:
-        description: 'Mirrord branch to use for E2E tests'
+        description: "Mirrord branch to use for E2E tests"
         required: true
         type: string
       operator_branch:
-        description: 'Operator branch to use for E2E tests'
+        description: "Operator branch to use for E2E tests"
         required: false
         type: string
-        default: 'main'
+        default: "main"
 
 jobs:
   trigger-operator-e2e:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
-      - name: Trigger operator E2E workflow
-        uses: metalbear-co/repository-dispatch@main
+      - name: Trigger operator E2E workflow and wait for completion
+        id: trigger-e2e
+        uses: metalbear-co/return-dispatch@main
+        continue-on-error: true
         with:
           token: ${{ secrets.OPERATOR_E2E_PAT }}
-          repository: metalbear-co/operator
-          event-type: operator-e2e-test-from-mirrord
-          client-payload: |
+          ref: ${{ inputs.operator_branch || 'main' }}
+          repo: operator
+          owner: metalbear-co
+          workflow: operator-e2e.yaml
+          workflow_inputs: |
             {
-              "branch": "${{ inputs.operator_branch }}",
-              "mirrord_commit": "${{ inputs.mirrord_commit }}",
-              "mirrord_branch": "${{ inputs.mirrord_branch }}"
+              "mirrord_commit": "${{ inputs.mirrord_commit || github.event.pull_request.head.sha }}",
+              "mirrord_branch": "${{ inputs.mirrord_branch || github.event.pull_request.head.ref }}"
             }
+          workflow_timeout_seconds: 7200
+          workflow_job_steps_retry_seconds: 30
+
+      - name: Use the output run ID and URL
+        run: |
+          echo ${{steps.trigger-e2e.outputs.run_id}}
+          echo ${{steps.trigger-e2e.outputs.run_url}}
+
+      - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
+        uses: metalbear-co/await-remote-run@main
+        with:
+          token: ${{ secrets.OPERATOR_E2E_PAT }}
+          repo: operator
+          owner: metalbear-co
+          run_id: ${{ steps.trigger-e2e.outputs.run_id }}
+          run_timeout_seconds: 7200 # Optional
+          poll_interval_ms: 5000 # Optional
+
+      - name: Show operator E2E results
+        run: |
+          echo "✅ Operator E2E tests completed successfully!"
+          echo "Run ID: ${{ steps.trigger-e2e.outputs.run_id }}"
+          echo "Run URL: ${{ steps.trigger-e2e.outputs.run_url }}"
+          echo "Distinct ID used: ${{ steps.trigger-e2e.outputs.run_id }}"

@@ -8,18 +8,18 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
-    config::ConfigError, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM,
-    feature::env::mapper::EnvVarsRemapper, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigError,
+    external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{
-    tcp::HTTP_COMPOSITE_FILTER_VERSION, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
-    LogLevel,
+    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
+    tcp::HTTP_COMPOSITE_FILTER_VERSION,
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::{sip_patch, SipPatchOptions};
+use mirrord_sip::{SipPatchOptions, sip_patch};
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
@@ -30,16 +30,16 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
 use crate::{
-    connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
+    CliResult,
+    connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
-    CliResult,
 };
 
 /// Environment variable for saving the execution kind for analytics.
@@ -79,7 +79,7 @@ pub(crate) struct MirrordExecution {
 /// then update progress with the warnings returned.
 struct DropProgress<'a, P>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     progress: &'a P,
     cancellation_token: CancellationToken,
@@ -88,7 +88,7 @@ where
 
 impl<P> Drop for DropProgress<'_, P>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     fn drop(&mut self) {
         self.cancellation_token.cancel();
@@ -102,9 +102,9 @@ where
 
 /// Creates a task that reads stderr and returns a vector of warnings at the end.
 /// Caller should cancel the token and wait on join handle.
-async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<P>
+async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<'_, P>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let cancellation_token = CancellationToken::new();
     let stderr_reader_token = cancellation_token.clone();
@@ -189,7 +189,7 @@ impl MirrordExecution {
         analytics: &mut AnalyticsReporter,
     ) -> CliResult<Self>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let lib_path = extract_library(None, progress, true)?;
 
@@ -275,6 +275,10 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
+            proxy_command.arg("--logfile").arg(log_destination);
+        }
+
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
         })?;
@@ -336,7 +340,7 @@ impl MirrordExecution {
                     log_info,
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
-                             // closure.
+                // closure.
             })
             .transpose()?;
 
@@ -399,7 +403,7 @@ impl MirrordExecution {
         tls: Option<&SecureChannelSetup>,
     ) -> CliResult<(Self, SocketAddr)>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         if !config.use_proxy {
             remove_proxy_env();

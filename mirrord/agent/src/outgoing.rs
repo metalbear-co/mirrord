@@ -2,15 +2,15 @@ use std::{collections::HashMap, fmt, time::Duration};
 
 use bytes::Bytes;
 use mirrord_protocol::{
+    ConnectionId, DaemonMessage, LogMessage, RemoteError, ResponseError,
     outgoing::{tcp::*, *},
-    ConnectionId, RemoteError, ResponseError,
 };
 use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
 use tokio::{
     io::{self, AsyncWriteExt, ReadHalf, WriteHalf},
     select,
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, error::SendError},
     time,
 };
 use tokio_stream::StreamExt;
@@ -38,7 +38,7 @@ pub(crate) struct TcpOutgoingApi {
     layer_tx: Sender<LayerTcpOutgoing>,
 
     /// Reads the daemon messages from the [`TcpOutgoingTask`].
-    daemon_rx: Receiver<DaemonTcpOutgoing>,
+    daemon_rx: Receiver<DaemonMessage>,
 }
 
 impl TcpOutgoingApi {
@@ -76,7 +76,7 @@ impl TcpOutgoingApi {
 
     /// Receives a [`DaemonTcpOutgoing`] message from the background task.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonTcpOutgoing> {
+    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonMessage> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.wait_assert_running().await),
@@ -94,7 +94,7 @@ struct TcpOutgoingTask {
     /// Optional pid of agent's target. Used in [`SocketStream::connect`].
     pid: Option<u64>,
     layer_rx: Receiver<LayerTcpOutgoing>,
-    daemon_tx: Sender<DaemonTcpOutgoing>,
+    daemon_tx: Sender<DaemonMessage>,
 }
 
 impl Drop for TcpOutgoingTask {
@@ -129,7 +129,7 @@ impl TcpOutgoingTask {
     fn new(
         pid: Option<u64>,
         layer_rx: Receiver<LayerTcpOutgoing>,
-        daemon_tx: Sender<DaemonTcpOutgoing>,
+        daemon_tx: Sender<DaemonMessage>,
     ) -> Self {
         Self {
             next_connection_id: 0,
@@ -181,7 +181,7 @@ impl TcpOutgoingTask {
         &mut self,
         connection_id: ConnectionId,
         read: io::Result<Option<Bytes>>,
-    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
+    ) -> Result<(), SendError<DaemonMessage>> {
         match read {
             // New bytes came in from a peer connection.
             // We pass them to the layer.
@@ -190,8 +190,9 @@ impl TcpOutgoingTask {
                     connection_id,
                     bytes: read.into(),
                 }));
-
-                self.daemon_tx.send(message).await?;
+                self.daemon_tx
+                    .send(DaemonMessage::TcpOutgoing(message))
+                    .await?;
             }
 
             // An error occurred when reading from a peer connection.
@@ -209,8 +210,16 @@ impl TcpOutgoingTask {
                 self.writers.remove(&connection_id);
                 TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
-                let daemon_message = DaemonTcpOutgoing::Close(connection_id);
-                self.daemon_tx.send(daemon_message).await?;
+                self.daemon_tx
+                    .send(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                        "read from outgoing connection {connection_id} failed: {error}"
+                    ))))
+                    .await?;
+                self.daemon_tx
+                    .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                        connection_id,
+                    )))
+                    .await?;
             }
 
             // EOF occurred in one of peer connections.
@@ -222,12 +231,13 @@ impl TcpOutgoingTask {
                     "Peer connection shutdown, sending 0-sized read message.",
                 );
 
-                let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
+                let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
                     bytes: vec![].into(),
                 }));
-
-                self.daemon_tx.send(daemon_message).await?;
+                self.daemon_tx
+                    .send(DaemonMessage::TcpOutgoing(message))
+                    .await?;
 
                 // If the writing half is not found, it means that the layer has already shut down
                 // its side of the connection. We send a closing message to clean
@@ -241,7 +251,9 @@ impl TcpOutgoingTask {
                     TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                     self.daemon_tx
-                        .send(DaemonTcpOutgoing::Close(connection_id))
+                        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                            connection_id,
+                        )))
                         .await?;
                 }
             }
@@ -255,7 +267,7 @@ impl TcpOutgoingTask {
     async fn handle_layer_msg(
         &mut self,
         message: LayerTcpOutgoing,
-    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
+    ) -> Result<(), SendError<DaemonMessage>> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.
@@ -296,7 +308,9 @@ impl TcpOutgoingTask {
                 );
 
                 self.daemon_tx
-                    .send(DaemonTcpOutgoing::Connect(daemon_connect))
+                    .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(
+                        daemon_connect,
+                    )))
                     .await?;
 
                 Ok(())
@@ -343,7 +357,9 @@ impl TcpOutgoingTask {
                                 .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                             self.daemon_tx
-                                .send(DaemonTcpOutgoing::Close(connection_id))
+                                .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                                    connection_id,
+                                )))
                                 .await?;
 
                             Ok(())
@@ -363,7 +379,14 @@ impl TcpOutgoingTask {
                             "Failed to handle layer write, sending close message to the client.",
                         );
                         self.daemon_tx
-                            .send(DaemonTcpOutgoing::Close(connection_id))
+                            .send(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                "write to outgoing connection {connection_id} failed: {error}"
+                            ))))
+                            .await?;
+                        self.daemon_tx
+                            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
+                                connection_id,
+                            )))
                             .await?;
 
                         Ok(())

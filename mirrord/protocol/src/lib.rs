@@ -77,6 +77,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 pub use codec::*;
 pub use error::*;
 pub use payload::{Payload, ToPayload};
+use semver::VersionReq;
 
 pub type Port = u16;
 pub type ConnectionId = u64;
@@ -90,6 +91,10 @@ pub static VERSION: LazyLock<semver::Version> = LazyLock::new(|| {
         .parse()
         .expect("Bad version parsing")
 });
+
+/// Minimal protocol version that allows for sending [`DaemonMessage::OperatorPing`].
+pub static MIRRORD_OPERATOR_LATENCY_PING_PONG: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.19.8".parse().expect("Bad Identifier"));
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVars(pub String);

@@ -676,6 +676,24 @@
                 "null"
               ]
             },
+            "exclude_containers": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "exclude_init_containers": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "scale_down": {
               "type": [
                 "boolean",
@@ -965,6 +983,14 @@
             "boolean",
             "null"
           ]
+        },
+        "vfork_emulation": {
+          "title": "_experimental_ vfork_emulation {#experimental-vfork_emulation}",
+          "description": "Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.\n\nNote that for Go applications on ARM64, this feature is not yet supported, and this setting is ignored.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
@@ -1109,11 +1135,12 @@
       "additionalProperties": false
     },
     "FileAgentDnsConfig": {
+      "description": "Configuration options for how the agent performs DNS resolution.",
       "type": "object",
       "properties": {
         "attempts": {
           "title": "agent.dns.attempts {#agent-dns-attempts}",
-          "description": "When agent resolves DNS, how many attempts before failing. If the value is too high, it might cause internal proxy to timeout and exit.",
+          "description": "Specifies the number of DNS resolution attempts the agent will make before failing. Setting this too high may cause the internal proxy to time out and exit.",
           "type": [
             "integer",
             "null"
@@ -1123,7 +1150,7 @@
         },
         "timeout": {
           "title": "agent.dns.timeout {#agent-dns-timeout}",
-          "description": "When agent resolves DNS, how long to wait for a response before timeout By default this is set to 1 (in the agent). If the value is too high, it might cause internal proxy to timeout and exit.",
+          "description": "Specifies how long (in seconds) the agent will wait for a DNS response before timing out. If not specified the agent uses a default value of 1 second. Setting this too high may cause the internal proxy to time out and exit.",
           "type": [
             "integer",
             "null"
@@ -1514,6 +1541,16 @@
             "string",
             "null"
           ]
+        },
+        "process_logging_interval": {
+          "title": "internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}",
+          "description": "How often to log information about connected processes in seconds.\n\nThis feature logs details about processes that are currently connected to the internal proxy, including their PID, process name, command line, and connection status.\n\n```json { \"internal_proxy\": { \"process_logging_interval\": 60 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
         "socket_timeout": {
           "description": "<!--${internal}-->\n\nSometimes the cpu is too busy with other tasks and the internal proxy sockets end up timing out. It's set at a ridiculous high value to prevent this from happening when a user hits a breakpoint while debugging, and stays stopped for a while, which sometimes results in mirrord not working when they resume.\n\n```json { \"internal_proxy\": { \"socket_timeout\": 31536000 } } ```",

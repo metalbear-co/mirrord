@@ -19,11 +19,11 @@ use mirrord_intproxy_protocol::NetProtocol;
 #[cfg(not(windows))]
 use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
-    outgoing::{
-        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, LayerWrite,
-        SocketAddress,
-    },
     ClientMessage, ConnectionId,
+    outgoing::{
+        LayerClose, LayerConnect, LayerWrite, SocketAddress, tcp::LayerTcpOutgoing,
+        udp::LayerUdpOutgoing,
+    },
 };
 #[cfg(not(windows))]
 use rand::distr::{Alphanumeric, SampleString};
@@ -114,7 +114,9 @@ impl NetProtocolExt for NetProtocol {
                     PreparedSocket::UnixListener(UnixListener::bind(path)?)
                 }
                 Self::Datagrams => {
-                    tracing::error!("layer requested intercepting outgoing datagrams over unix socket, this is not supported");
+                    tracing::error!(
+                        "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
+                    );
                     panic!("layer requested outgoing datagrams over unix sockets");
                 }
             },
@@ -233,10 +235,7 @@ impl ConnectedSocket {
                 let bytes_sent = socket.send(bytes).await?;
 
                 if bytes_sent != bytes.len() {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "failed to send all bytes",
-                    ))?;
+                    Err(io::Error::other("failed to send all bytes"))?;
                 }
 
                 Ok(())

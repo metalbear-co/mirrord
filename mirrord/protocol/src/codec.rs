@@ -6,12 +6,13 @@ use std::{
 };
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{error::DecodeError, Decode, Encode};
+use bincode::{Decode, Encode, error::DecodeError};
 use bytes::{Buf, BufMut, BytesMut};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
+    ResponseError,
     dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::{
@@ -20,7 +21,6 @@ use crate::{
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
-    ResponseError,
 };
 
 /// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].
@@ -142,6 +142,10 @@ pub enum ClientMessage {
     ReadyForLogs,
     Vpn(ClientVpn),
     GetAddrInfoRequestV2(GetAddrInfoRequestV2),
+    /// Pong message that replies to [`DaemonMessage::OperatorPing`].
+    ///
+    /// Has the same ID that we got from the [`DaemonMessage::OperatorPing`].
+    OperatorPong(u128),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -191,6 +195,12 @@ pub enum DaemonMessage {
     PauseTarget(crate::pause::DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
     Vpn(ServerVpn),
+    /// Ping message that comes from the operator to mirrord.
+    ///
+    /// - Unlike other `DaemonMessage`s, this should never come from the agent!
+    ///
+    /// Holds the unique id of this ping.
+    OperatorPing(u128),
 }
 
 pub struct ProtocolCodec<I, O> {
@@ -228,7 +238,7 @@ impl<I: bincode::Decode<()>, O> Decoder for ProtocolCodec<I, O> {
                 Ok(Some(message))
             }
             Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
+            Err(err) => Err(io::Error::other(err.to_string())),
         }
     }
 }
@@ -240,7 +250,7 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
         let encoded = match bincode::encode_to_vec(msg, self.config) {
             Ok(encoded) => encoded,
             Err(err) => {
-                return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
+                return Err(io::Error::other(err.to_string()));
             }
         };
         dst.reserve(encoded.len());
@@ -255,7 +265,7 @@ mod tests {
     use bytes::BytesMut;
 
     use super::*;
-    use crate::{tcp::TcpData, Payload};
+    use crate::{Payload, tcp::TcpData};
 
     #[test]
     fn sanity_client_encode_decode() {

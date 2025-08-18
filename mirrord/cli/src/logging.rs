@@ -4,7 +4,7 @@ use futures::StreamExt;
 use mirrord_config::LayerConfig;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 use crate::{
     config::Commands,
@@ -102,10 +102,13 @@ fn init_proxy_tracing_registry(
     Ok(())
 }
 
-pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
+pub fn init_intproxy_tracing_registry(
+    config: &LayerConfig,
+    logfile: Option<&Path>,
+) -> Result<(), InternalProxyError> {
     if crate::util::intproxy_container_mode().not() {
         // When the intproxy does not run in a sidecar container, it logs to a file.
-        let log_destination = &config.internal_proxy.log_destination;
+        let log_destination = logfile.unwrap_or(&config.internal_proxy.log_destination);
         init_proxy_tracing_registry(
             log_destination,
             &config.internal_proxy.log_level,
@@ -155,7 +158,7 @@ pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), Extern
 pub async fn pipe_intproxy_sidecar_logs<'s, S>(
     config: &LayerConfig,
     stream: S,
-) -> Result<impl Future<Output = ()> + 's, InternalProxyError>
+) -> Result<impl Future<Output = ()> + 's + use<'s, S>, InternalProxyError>
 where
     S: Stream<Item = std::io::Result<String>> + 's,
 {

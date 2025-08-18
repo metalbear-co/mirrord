@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use k8s_openapi::{
+    DeepMerge,
     api::core::v1::{
         Capabilities, Container, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
         SecurityContext, Volume, VolumeMount,
     },
-    DeepMerge,
 };
 use kube::api::ObjectMeta;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
@@ -14,8 +14,8 @@ use mirrord_config::agent::AgentConfig;
 use super::util::agent_env;
 use crate::api::{
     container::{
-        util::{base_command_line, get_capabilities, DEFAULT_TOLERATIONS},
         ContainerParams, ContainerVariant,
+        util::{DEFAULT_TOLERATIONS, base_command_line, get_capabilities},
     },
     runtime::RuntimeData,
 };
@@ -286,8 +286,8 @@ mod test {
 
     use crate::api::{
         container::{
-            pod::{PodTargetedVariant, PodVariant},
             ContainerParams, ContainerVariant,
+            pod::{PodTargetedVariant, PodVariant},
         },
         runtime::{ContainerRuntime, RuntimeData},
     };
@@ -305,6 +305,7 @@ mod test {
             pod_ips: None,
             support_ipv6: false,
             steal_tls_config: Default::default(),
+            idle_ttl: Default::default(),
         };
 
         // targetless agent pod can be configured with priority class name.

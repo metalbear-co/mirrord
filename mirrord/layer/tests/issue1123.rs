@@ -2,7 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 use std::{path::Path, time::Duration};
 
-use mirrord_protocol::{tcp::LayerTcp, ClientMessage};
+use mirrord_protocol::{ClientMessage, tcp::LayerTcp};
 use rstest::rstest;
 
 mod common;

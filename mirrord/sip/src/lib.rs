@@ -2,6 +2,8 @@
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
 #![deny(unused_crate_dependencies)]
+// TODO(alex): Get a big `Box` for the big variants.
+#![allow(clippy::result_large_err)]
 
 mod codesign;
 mod error;
@@ -56,23 +58,23 @@ mod main {
     use apple_codesign::{CodeSignatureFlags, MachFile};
     use fs4::fs_std::FileExt;
     use object::{
-        macho::{self, MachHeader64, LC_RPATH},
+        Architecture, Endianness, FileKind,
+        macho::{self, LC_RPATH, MachHeader64},
         read::{
             self,
             macho::{FatArch, LoadCommandVariant::Rpath, MachHeader},
         },
-        Architecture, Endianness, FileKind,
     };
     use once_cell::sync::Lazy;
-    use tracing::{debug, error, trace, warn};
+    use tracing::{trace, warn};
     use which::which;
 
     use super::*;
     pub use crate::error::SipError;
     use crate::{
+        SipError::{FileNotFound, UnlikelyError},
         error::Result,
         main::SipStatus::{NoSip, SipBinary, SipScript},
-        SipError::{FileNotFound, UnlikelyError},
     };
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
@@ -276,12 +278,12 @@ mod main {
         let mut load_commands = mach_header.load_commands(Endianness::default(), binary, 0)?;
         let mut rpath_entries = Vec::new();
         while let Some(load_command) = load_commands.next()? {
-            if load_command.cmd() == LC_RPATH {
-                if let Ok(Rpath(rpath_command)) = load_command.variant() {
-                    rpath_entries.push(from_utf8(
-                        load_command.string(Endianness::default(), rpath_command.path)?,
-                    )?)
-                }
+            if load_command.cmd() == LC_RPATH
+                && let Ok(Rpath(rpath_command)) = load_command.variant()
+            {
+                rpath_entries.push(from_utf8(
+                    load_command.string(Endianness::default(), rpath_command.path)?,
+                )?)
             }
         }
         Ok(rpath_entries)
@@ -330,8 +332,7 @@ mod main {
         if output.exists() {
             trace!(
                 "Using existing SIP-patched version of {:?}: {:?}",
-                path,
-                output
+                path, output
             );
             return Ok(output);
         }
@@ -342,8 +343,7 @@ mod main {
 
         trace!(
             "{:?} is a SIP protected binary, making non protected version at: {:?}",
-            path,
-            output
+            path, output
         );
         let data = std::fs::read(path)?;
 
@@ -374,11 +374,12 @@ mod main {
         std::fs::set_permissions(&signed_temp_file, std::fs::metadata(path)?.permissions())?;
 
         // Move the temp binary into its final location if no other process/thread already did.
-        if let Err(err) = signed_temp_file.persist_noclobber(&output) {
-            if err.error.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(SipError::BinaryMoveFailed(err.error));
-            }
+        if let Err(err) = signed_temp_file.persist_noclobber(&output)
+            && err.error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(SipError::BinaryMoveFailed(err.error));
         }
+
         Ok(output)
     }
 
@@ -393,9 +394,7 @@ mod main {
 
         trace!(
             "Shebang points to: {:?}. Patching the interpreter and making a version of {:?} with an altered shebang at: {:?}",
-            shebang.interpreter_path,
-            original_path,
-            patched_path,
+            shebang.interpreter_path, original_path, patched_path,
         );
 
         let data = std::fs::read(original_path)?;
@@ -500,15 +499,13 @@ mod main {
     fn is_code_signed(data: &[u8]) -> bool {
         if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
-                if let Ok(Some(signature)) = macho.code_signature() {
-                    if let Ok(Some(blob)) = signature.code_directory() {
-                        if blob
-                            .flags
-                            .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
-                        {
-                            return true;
-                        }
-                    }
+                if let Ok(Some(signature)) = macho.code_signature()
+                    && let Ok(Some(blob)) = signature.code_directory()
+                    && blob
+                        .flags
+                        .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                {
+                    return true;
                 }
             }
         }
@@ -623,7 +620,7 @@ mod main {
                 } else {
                     frameworks_dir
                 };
-                env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value);
+                unsafe { env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value) };
                 break;
             }
         }
@@ -721,6 +718,20 @@ mod main {
             try_write_start_log_to_file(log_file, binary_path, &status, &log_info);
         };
 
+        //    ______________________________
+        //  / \                             \
+        // |   |  ATTENTION! DANGER AHEAD!  |
+        //  \_ |                            |
+        //     |  ATTENTION! DANGER AHEAD!  |
+        //     |                            |
+        //     |  ATTENTION! DANGER AHEAD!  |
+        //     |   _________________________|___
+        //     |  /                            /
+        //     \_/____________________________/
+        //
+        // DO NOT INTRODUCE NEW TRACING LOGS OR CHANGE THE LEVEL OF EXISTING LOGS - tracing logs are
+        // NOT fork safe, and have been known to cause issues, including forcing the user's
+        // machine to restart.
         let patch_result = match status {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
@@ -745,24 +756,22 @@ mod main {
                 // The full error is: `{ code: 24, kind: Uncategorized, message: "Too many open
                 // files" }`. This error was encountered in the past when using mirrord with Air
                 // (hot reloader).
-                error!(
-                    "Too many files open when trying to patch {binary_path}. Try increasing the \
-                    file limit using `ulimit`."
-                );
-                Err(SipError::IO(err))
+                Err(SipError::TooManyFilesOpen(binary_path.to_string()))
             }
             Err(SipError::IO(err)) if err.kind() == ErrorKind::NotFound => {
+                // In the future, if we know there are other kind of error we can ignore, add them
+                // to this match arm
                 trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
-                    This is not necessarily an error."
+                    This type of `error` happens during normal execution flow."
                 );
                 // E.g. `env` tries to execute a bunch of non-existing files and fails, and
                 // that's just its valid flow.
                 Ok(None)
             }
             Err(err) => {
-                debug!(
+                trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
                     This is not necessarily an error."
@@ -1091,17 +1100,21 @@ mod main {
             let is_frameworks_path = |path: &str| path == frameworks_path;
 
             // Verify that the path was not there before.
-            assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .map(|value| value.split(':').any(is_frameworks_path))
-                .unwrap_or_default());
+            assert!(
+                !env::var(FRAMEWORKS_ENV_VAR_NAME)
+                    .map(|value| value.split(':').any(is_frameworks_path))
+                    .unwrap_or_default()
+            );
 
             set_fallback_frameworks_path_if_mac_app(Path::new(example_path));
 
             // Verify that the path is there after.
-            assert!(env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .unwrap()
-                .split(':')
-                .any(is_frameworks_path));
+            assert!(
+                env::var(FRAMEWORKS_ENV_VAR_NAME)
+                    .unwrap()
+                    .split(':')
+                    .any(is_frameworks_path)
+            );
         }
 
         #[test]

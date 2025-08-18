@@ -2,8 +2,8 @@ use std::{path::Path, time::Duration};
 
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
     LayerFileConfig,
+    config::{ConfigContext, MirrordConfig},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -11,8 +11,8 @@ use tokio::{sync::mpsc, time::Instant};
 use tracing::Level;
 
 use crate::{
-    connection::create_and_connect, util::remove_proxy_env, CliError, CliResult, DiagnoseArgs,
-    DiagnoseCommand,
+    CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
+    util::remove_proxy_env,
 };
 
 /// Sends a ping the connection and expects a pong.
@@ -29,6 +29,10 @@ async fn ping(
     loop {
         let result = match receiver.recv().await {
             Some(DaemonMessage::Pong) => Ok(()),
+            Some(DaemonMessage::OperatorPing(id)) => {
+                sender.send(ClientMessage::OperatorPong(id)).await.ok();
+                Ok(())
+            }
             Some(DaemonMessage::LogMessage(..)) => continue,
             Some(DaemonMessage::Close(message)) => Err(CliError::PingPongFailed(format!(
                 "agent closed connection with message: {message}"

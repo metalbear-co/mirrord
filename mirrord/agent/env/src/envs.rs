@@ -74,3 +74,8 @@ pub const EXCLUDE_FROM_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_E
 /// Enables mirroring implementation based on iptables.
 pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_PASSTHROUGH_MIRRORING");
+
+/// Controls how long the agent should keep running after all client connections have been closed.
+///
+/// Specified in seconds.
+pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL");

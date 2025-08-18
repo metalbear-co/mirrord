@@ -5,8 +5,8 @@ use mirrord_progress::Progress;
 use crate::{
     api::{
         container::{
-            job::{create_job_agent, JobVariant},
             ContainerApi, ContainerVariant,
+            job::{JobVariant, create_job_agent},
         },
         kubernetes::AgentKubernetesConnectInfo,
     },
@@ -33,7 +33,7 @@ where
 {
     async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         create_job_agent::<P, JobVariant<T>>(self.client, self.variant, progress).await
     }

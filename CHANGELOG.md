@@ -8,6 +8,164 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.157.2](https://github.com/metalbear-co/mirrord/tree/3.157.2) - 2025-08-14
+
+### Added
+
+- Added periodic dump of connected processes for diagnostic purposes.
+- Added the logfile location to the `intproxy` command-line so it can be seen in
+  the process output.
+
+## [3.157.1](https://github.com/metalbear-co/mirrord/tree/3.157.1) - 2025-08-13
+
+
+### Fixed
+
+- Fixed an issue where the mirrord-agent would sometimes hang and linger in the
+  cluster.
+
+
+### Internal
+
+- Add another docstring to `AgentDnsConfig` so it will apear in docs correctly.
+- Added a regression unit test for graceful HTTP shutdown in the mirrord-agent.
+- mirrord-agent now sends logs when IO errors occur in outgoing connections.
+
+## [3.157.0](https://github.com/metalbear-co/mirrord/tree/3.157.0) - 2025-08-08
+
+### Added
+
+- Added a new configuration option to ignore specified containers and init containers
+  when copying the session target.
+
+### Internal
+
+- Fix invalid json in operator-e2e action.
+- Fix run_id from operator-e2e action.
+- `mirrord_progress::Progress` implementations are now hidden behind the
+  `implementations` feature.
+- Add ignored copy target containers as an operator feature.
+
+## [3.156.0](https://github.com/metalbear-co/mirrord/tree/3.156.0) - 2025-08-06
+
+
+### Added
+
+- On Linux, mirrord now checks whether the target binary is dynamically linked.
+  If it's not, a warning is issued.
+
+
+### Fixed
+
+- Fixed incorrect parsing of PATH-like `kubeconfig` config values.
+  [#3457](https://github.com/metalbear-co/mirrord/issues/3457)
+- Fixed an issue where mirrord agent was not able to pass through gRPC requests
+  without scheme or authority in the URI.
+
+
+### Internal
+
+- Update links from mirrord.dev to metalbear.co/mirrord (excluding operator
+  version endpoint).
+  [#3247](https://github.com/metalbear-co/mirrord/issues/3247)
+- Added an option to configure idle ttl for the mirrord agent.
+  The agent can now be configured to keep running for some time after all
+  client connections have been closed.
+- Changed the operator E2E to be triggered only on workflow dispatch.
+- Add await-remote-run action to wait for operator-e2e workflow.
+
+## [3.155.0](https://github.com/metalbear-co/mirrord/tree/3.155.0) - 2025-08-05
+
+
+### Added
+
+- When picking a target container automatically, mirrord now takes the
+  `kubectl.kubernetes.io/default-container` annotation into consideration.
+
+
+### Changed
+
+- mirrord policy CRDs now allow for blocking scale down when using the copy target feature.
+
+
+### Fixed
+
+- Fixed a bug where mirrord-layer was encountering issues due to `vfork` in the
+  user application. The fix is hidden behind the `experimental.vfork_emulation`
+  mirrord config flag.
+- Fixed issues with default mirrord CLI progress mode and interactive cluster auth plugins.
+
+
+### Internal
+
+- E2E test SQS with argo rollouts.
+- Updated Rust toolchain to nightly-2025-08-01.
+- Use return-dispatch action to trigger operator e2e from mirrord.
+
+## [3.154.1](https://github.com/metalbear-co/mirrord/tree/3.154.1) - 2025-08-04
+
+
+### Fixed
+
+- Fixed an issue where `mirrord dump` command was not receiving HTTP traffic
+  from an agent configured to use passthrough mirroring.
+- Fixed an issue with how mirrord-intproxy handles operator connection errors.
+  [#3432](https://github.com/metalbear-co/mirrord/issues/3432)
+
+
+### Internal
+
+- Fixed an issue where `~/.mirrord/data.json` content was reset with each
+  mirrord session.
+- Fixed mangled output from some of the Python E2E apps.
+
+## [3.154.0](https://github.com/metalbear-co/mirrord/tree/3.154.0) - 2025-07-30
+
+
+### Added
+
+- Add machine_id to UserData so it can be used in analytics.
+- Extended `MirrordKafkaClientConfig` CRD with a kind of a SASL OAUTH token
+  provider to use.
+
+
+### Fixed
+
+- Added "Ready!" message when `mirrord port-forward` command finishes setup.
+- Fixed a bug in `kube` crate which did not show messages printed out from
+  interactive cluster auth.
+- Fixed progress message printed when mirrord automatically adds probe ports to
+  `feature.network.incoming.http_filter.ports`.
+- Reverted changes to SIP log levels that might cause bad instructions under
+  the hood.
+
+
+### Internal
+
+- Add derive for PartialEq and Eq traits to MirrordSessionSpec and nested
+  structs.
+
+## [3.153.0](https://github.com/metalbear-co/mirrord/tree/3.153.0) - 2025-07-28
+
+
+### Added
+
+- Added the `mirrord newsletter` command, which opens the sign-up page in the
+  browser.
+
+
+### Changed
+
+- Passthrough mirroring is now enabled by default, unless mirrord for Teams is
+  used.
+
+
+### Fixed
+
+- Fixed a bug where the SIP patching process was discarding too many open files error
+  during layer injection.
+- Fixed a typo in Istio Ambient warning message.
+
 ## [3.152.1](https://github.com/metalbear-co/mirrord/tree/3.152.1) - 2025-07-22
 
 

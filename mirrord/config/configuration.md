@@ -207,6 +207,19 @@ as targetless agent containers have no capabilities.
 
 ### agent.dns {#agent-dns}
 
+Configuration options for how the agent performs DNS resolution.
+
+### agent.dns.attempts {#agent-dns-attempts}
+
+Specifies the number of DNS resolution attempts the agent will make before failing.
+Setting this too high may cause the internal proxy to time out and exit.
+
+### agent.dns.timeout {#agent-dns-timeout}
+
+Specifies how long (in seconds) the agent will wait for a DNS response before timing out.
+If not specified the agent uses a default value of 1 second.
+Setting this too high may cause the internal proxy to time out and exit.
+
 ### agent.ephemeral {#agent-ephemeral}
 
 Runs the agent as an
@@ -598,6 +611,14 @@ Enables trusting any certificate on macOS, useful for <https://github.com/golang
 
 Uses /dev/null for creating local fake files (should be better than using /tmp)
 
+### _experimental_ vfork_emulation {#experimental-vfork_emulation}
+
+Enables vfork emulation within the mirrord-layer.
+Might solve rare stack corruption issues.  
+
+Note that for Go applications on ARM64, this feature is not yet supported,
+and this setting is ignored.
+
 ## external_proxy {#root-external_proxy}
 
 Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
@@ -741,14 +762,16 @@ Creates a new copy of the target. mirrord will use this copy instead of the orig
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
 
-Allows the user to target a pod created dynamically from the orignal [`target`](#target).
+Allows the user to target a pod created dynamically from the original [`target`](#target).
 The new pod inherits most of the original target's specification, e.g. labels.
 
 ```json
 {
   "feature": {
     "copy_target": {
-      "scale_down": true
+      "scale_down": true,
+      "exclude_containers": ["my-container"],
+      "exclude_init_containers": ["my-init-container"]
     }
   }
 }
@@ -761,6 +784,14 @@ The new pod inherits most of the original target's specification, e.g. labels.
   }
 }
 ```
+
+### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
+
+Set a list of containers to be ignored by copy_target
+
+### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
+
+Set a list of init containers to be ignored by copy_target
 
 ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
 
@@ -920,21 +951,21 @@ The logic for choosing the behavior is as follows:
    specified order if two lists match the same path, we will use the first one (and we do not
    guarantee what is first).
 
-    **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
-    behaviour.
+   **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
+   behaviour.
 
 3. There are pre-defined exceptions to the set FS mode.
-    1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
-       are read locally by default.
-    2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
-       are read remotely by default when the mode is `localwithoverrides`.
-    3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
-       under the running user's home directory will not be found by the application when the
-       mode is not `local`.
+  1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
+     are read locally by default.
+  2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
+     are read remotely by default when the mode is `localwithoverrides`.
+  3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
+     under the running user's home directory will not be found by the application when the mode
+     is not `local`.
 
-    In order to override that default setting for a path, or a pattern, include it the
-    appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
-    though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
+  In order to override that default setting for a path, or a pattern, include it the
+  appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
+  though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
     add `"^/etc/."` to the `read_only` set.
 
 4. If none of the above match, use the default behavior (mode).
@@ -1810,6 +1841,23 @@ Set the log level for the internal proxy.
 The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
 
 Defaults to `mirrord=info,warn`.
+
+### internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}
+
+How often to log information about connected processes in seconds.
+
+This feature logs details about processes that are currently connected to the internal proxy,
+including their PID, process name, command line, and connection status.
+
+```json
+{
+  "internal_proxy": {
+    "process_logging_interval": 60
+  }
+}
+```
+
+Defaults to 60 seconds.
 
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 

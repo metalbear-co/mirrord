@@ -1,12 +1,12 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     error::{Error, Report},
     fmt,
     ops::Not,
     sync::Arc,
 };
 
-use futures::{future::Shared, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use tokio::sync::{
     mpsc::{self, error::TrySendError},
@@ -16,15 +16,15 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use super::{
-    connection::{http::RedirectedHttp, tcp::RedirectedTcp, ConnectionInfo, MaybeHttp},
+    PortRedirector, Redirected,
+    connection::{ConnectionInfo, MaybeHttp, http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
     steal_handle::{StealHandle, StolenTraffic},
     tls::StealTlsHandlerStore,
-    PortRedirector, Redirected,
 };
 use crate::{
     http::extract_requests::{ExtractedRequest, ExtractedRequests},
-    incoming::{mirror_handle::MirrorHandle, MirroredTraffic},
+    incoming::{MirroredTraffic, mirror_handle::MirrorHandle},
 };
 
 /// A task responsible for redirecting incoming connections.
@@ -218,15 +218,19 @@ where
         let token = port_state.http_shutdown.clone();
         let mut requests = ExtractedRequests::new(TokioIo::new(conn.stream), http_version);
         tokio::spawn(async move {
+            let mut shutting_down = false;
             loop {
                 let result = tokio::select! {
                     result = requests.next() => result,
-                    _ = token.cancelled() => {
+                    _ = token.cancelled(), if shutting_down.not() => {
                         tracing::debug!(
                             connection = ?conn.info,
                             "Gracefully shutting down a redirected HTTP connection",
                         );
+                        // After starting the graceful shutdown,
+                        // `requests` iterator will eventually finish on its own.
                         requests.graceful_shutdown();
+                        shutting_down = true;
                         continue;
                     },
                 };
@@ -543,11 +547,14 @@ impl Drop for PortState {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
+    use std::{ops::Not, time::Duration};
 
+    use bytes::Bytes;
+    use http_body_util::Empty;
+    use hyper_util::rt::TokioIo;
     use rstest::rstest;
 
-    use crate::incoming::{test::DummyRedirector, RedirectorTask};
+    use crate::incoming::{RedirectorTask, StolenTraffic, test::DummyRedirector};
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]
@@ -574,5 +581,60 @@ mod test {
             .wait_for(|state| state.has_redirections([]))
             .await
             .unwrap();
+    }
+
+    /// Regression test for a bug with HTTP graceful shutdown.
+    ///
+    /// Verifies that [`RedirectorTask`] can handle port unsubscribe during an HTTP exchange.
+    ///
+    /// See <https://github.com/metalbear-co/mirrord/commit/e7805085d8fb61f94b04ac01254b61be86fad3a0>.
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    // We explicitly use the `current_thread` flavor,
+    // as the bug was about hugging the Tokio runtime thread.
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_graceful_shutdown_regression() {
+        let (redirector, mut state, mut conn_tx) = DummyRedirector::new();
+        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default());
+        let redirector_task = tokio::spawn(task.run());
+
+        handle.steal(80).await.unwrap();
+        let client_conn = conn_tx
+            .make_connection("127.0.0.1:80".parse().unwrap())
+            .await;
+
+        let http_client_task = tokio::spawn(async {
+            let (mut sender, client_conn) =
+                hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(client_conn))
+                    .await
+                    .unwrap();
+            tokio::spawn(client_conn);
+            sender.ready().await.unwrap();
+            let response = sender
+                .send_request(hyper::Request::new(Default::default()))
+                .await
+                .unwrap();
+            response.status()
+        });
+
+        let StolenTraffic::Http(http) = handle.next().await.unwrap().unwrap() else {
+            unreachable!()
+        };
+        // Stealing client unsubscribes the port.
+        // This should trigger graceful shutdown on the HTTP connection.
+        handle.stop_steal(80);
+        // Wait for the RedirectorTask to process.
+        state.wait_for(|state| state.dirty.not()).await.unwrap();
+
+        // Stealing client exits.
+        // The HTTP client should get 502.
+        std::mem::drop(http);
+        let response_code = http_client_task.await.unwrap();
+        assert_eq!(response_code, hyper::StatusCode::BAD_GATEWAY);
+
+        // The whole agent exits.
+        // Redirector task should exit.
+        std::mem::drop(handle);
+        redirector_task.await.unwrap().unwrap();
     }
 }

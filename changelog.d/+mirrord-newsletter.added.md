@@ -1,1 +1,0 @@
-Added the `mirrord newsletter` command, which opens the sign-up page in the browser.

@@ -2,7 +2,7 @@ use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
-use kube::{api::LogParams, Api};
+use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use regex::Regex;
@@ -76,6 +76,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 
     if params.steal_tls_config.is_empty().not() {
         env.push(envs::STEAL_TLS_CONFIG.as_k8s_spec(&params.steal_tls_config));
+    }
+
+    if params.idle_ttl.is_zero().not() {
+        env.push(envs::IDDLE_TTL.as_k8s_spec(&params.idle_ttl.as_secs()))
     }
 
     env

@@ -1,19 +1,19 @@
 //! Implementation of `layer <-> proxy` connection through a [`TcpStream`].
 
 use mirrord_intproxy_protocol::{
-    codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
     LayerId, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
+    codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
 };
 use tokio::net::{
-    tcp::{OwnedReadHalf, OwnedWriteHalf},
     TcpStream,
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 use tracing::Level;
 
 use crate::{
+    ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus},
     main_tasks::FromLayer,
-    ProxyMessage,
 };
 
 /// Handles logic of a single `layer <-> proxy` connection.

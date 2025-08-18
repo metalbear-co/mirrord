@@ -18,7 +18,8 @@ pub(crate) fn remove_proxy_env() {
         if lower_key == "http_proxy" || lower_key == "https_proxy" {
             // we set instead of unset since this way extension
             // will be able to propogate it as well.
-            std::env::set_var(key, "")
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(key, "") }
         }
     }
 }
@@ -26,26 +27,30 @@ pub(crate) fn remove_proxy_env() {
 /// Used to pipe std[in/out/err] to "/dev/null" to prevent any printing to prevent any unwanted
 /// side effects
 unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
-    let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
-    libc::dup2(devnull_fd, fd);
-    libc::close(devnull_fd);
+    unsafe {
+        let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
+        libc::dup2(devnull_fd, fd);
+        libc::close(devnull_fd);
+    }
 }
 
 /// Create a new session for the proxy process, detaching from the original terminal.
 /// This makes the process not to receive signals from the "mirrord" process or it's parent
 /// terminal fixes some side effects such as <https://github.com/metalbear-co/mirrord/issues/1232>
 pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
-    nix::unistd::setsid()?;
+    unsafe {
+        nix::unistd::setsid()?;
 
-    // flush before redirection
-    {
-        // best effort
-        let _ = std::io::stdout().lock().flush();
+        // flush before redirection
+        {
+            // best effort
+            let _ = std::io::stdout().lock().flush();
+        }
+        for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+            redirect_fd_to_dev_null(fd);
+        }
+        Ok(())
     }
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
-        redirect_fd_to_dev_null(fd);
-    }
-    Ok(())
 }
 
 /// Creates a listening socket using socket2

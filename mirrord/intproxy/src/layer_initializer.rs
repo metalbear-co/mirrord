@@ -1,17 +1,17 @@
 use std::{io, net::SocketAddr};
 
 use mirrord_intproxy_protocol::{
-    codec::{AsyncDecoder, AsyncEncoder, CodecError},
     LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProxyToLayerMessage,
+    codec::{AsyncDecoder, AsyncEncoder, CodecError},
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::Level;
 
 use crate::{
+    ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus},
     main_tasks::NewLayer,
-    ProxyMessage,
 };
 
 #[derive(Error, Debug)]
@@ -59,14 +59,14 @@ impl LayerInitializer {
         let id = self.next_layer_id;
         self.next_layer_id.0 += 1;
 
-        let parent_id = match msg.inner {
+        let (parent_id, process_info) = match msg.inner {
             LayerToProxyMessage::NewSession(NewSessionRequest::New(process_info)) => {
                 tracing::info!(?process_info, "New session");
-                None
+                (None, Some(process_info))
             }
             LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => {
                 tracing::info!(?parent, "Forked session");
-                Some(parent)
+                (Some(parent), None)
             }
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
@@ -87,6 +87,7 @@ impl LayerInitializer {
             stream,
             id,
             parent_id,
+            process_info,
         })
     }
 }

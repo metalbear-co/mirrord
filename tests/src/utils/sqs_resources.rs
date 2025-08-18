@@ -41,8 +41,9 @@ use serde::Serialize;
 
 use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
-    kube_service::KubeService, resource_guard::ResourceGuard,
-    services::service_with_env_and_env_from,
+    kube_service::KubeService,
+    resource_guard::ResourceGuard,
+    services::{internal_service, TestWorkloadType},
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -102,6 +103,10 @@ impl SqsTestResources {
 
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
+    }
+
+    pub fn target(&self) -> String {
+        self.k8s_service.rollout_or_deployment_target()
     }
 
     /// Count the temp queues created by the SQS-operator for this test instance.
@@ -270,8 +275,7 @@ async fn sqs_queue(
 /// * `fallback_queues` - if not `None`, then a fallback will be set using the given queues.
 pub async fn create_queue_registry_resource(
     kube_client: &Client,
-    namespace: &str,
-    deployment_name: &str,
+    kube_service: &KubeService,
     use_regex: bool,
     fallback_queues: Option<(&QueueInfo, &QueueInfo)>,
 ) {
@@ -335,15 +339,21 @@ pub async fn create_queue_registry_resource(
         ])
     };
 
-    let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client.clone(), namespace);
+    let qr_api: Api<MirrordWorkloadQueueRegistry> =
+        Api::namespaced(kube_client.clone(), &kube_service.namespace);
+    let workload_type = if kube_service.is_rollout() {
+        QueueConsumerType::Rollout
+    } else {
+        QueueConsumerType::Deployment
+    };
     let queue_registry = MirrordWorkloadQueueRegistry::new(
         QUEUE_REGISTRY_RESOURCE_NAME,
         MirrordWorkloadQueueRegistrySpec {
             queues,
             consumer: QueueConsumer {
-                name: deployment_name.to_string(),
+                name: kube_service.name.clone(),
                 container: None,
-                workload_type: QueueConsumerType::Deployment,
+                workload_type,
             },
         },
     );
@@ -351,7 +361,7 @@ pub async fn create_queue_registry_resource(
         .create(&PostParams::default(), &queue_registry)
         .await
         .expect("Could not create queue splitter in E2E test.");
-    println!("MirrordWorkloadQueueRegistry resource created at namespace {namespace} with name {QUEUE_REGISTRY_RESOURCE_NAME}");
+    println!("MirrordWorkloadQueueRegistry resource created at namespace {} with name {QUEUE_REGISTRY_RESOURCE_NAME}", kube_service.namespace);
 }
 
 /// Name of the environment variable that holds the configuration for this app.
@@ -400,6 +410,7 @@ struct SqsConsumerServiceConfig {
     with_fallback_json: bool,
     with_env_from: bool,
     with_value_from: bool,
+    workload_type: TestWorkloadType,
 }
 
 /// Create a microservice for the sqs test application.
@@ -416,6 +427,7 @@ async fn sqs_consumer_service(
         with_fallback_json,
         with_env_from,
         with_value_from,
+        workload_type,
     }: SqsConsumerServiceConfig,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
@@ -554,7 +566,7 @@ async fn sqs_consumer_service(
         }]
     });
 
-    service_with_env_and_env_from(
+    internal_service(
         &namespace,
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
@@ -564,6 +576,8 @@ async fn sqs_consumer_service(
         serde_json::to_value(env).unwrap(),
         env_from,
         config_maps,
+        false,
+        workload_type,
     )
     .await
 }
@@ -701,6 +715,7 @@ pub async fn sqs_test_resources(
     with_fallback_json: bool,
     with_env_from: bool,
     with_value_from: bool,
+    workload_type: TestWorkloadType,
 ) -> SqsTestResources {
     let mut guards = Vec::new();
 
@@ -735,14 +750,14 @@ pub async fn sqs_test_resources(
             with_fallback_json,
             with_env_from,
             with_value_from,
+            workload_type,
         },
     )
     .await;
 
     create_queue_registry_resource(
         &kube_client,
-        &k8s_service.namespace,
-        &k8s_service.name,
+        &k8s_service,
         use_regex,
         with_fallback_json.then_some((&queue1, &queue2)),
     )

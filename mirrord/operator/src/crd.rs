@@ -274,6 +274,7 @@ pub enum OperatorFeatures {
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
+    CopyTargetExcludeContainers,
     SessionManagement,
     SqsQueueSplitting,
     KafkaQueueSplitting,
@@ -292,6 +293,7 @@ impl Display for NewOperatorFeature {
         let name = match self {
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
+            NewOperatorFeature::CopyTargetExcludeContainers => "copy target excluded containers",
             NewOperatorFeature::SessionManagement => "session management",
             NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
             NewOperatorFeature::KafkaQueueSplitting => "Kafka queue splitting",

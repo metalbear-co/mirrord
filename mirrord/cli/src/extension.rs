@@ -1,8 +1,10 @@
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::{config::ConfigContext, LayerConfig};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
-use crate::{config::ExtensionExecArgs, execution::MirrordExecution, CliResult};
+use crate::{
+    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, user_data::UserData,
+};
 
 /// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
@@ -12,7 +14,7 @@ async fn mirrord_exec<P>(
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
 where
-    P: Progress + Send + Sync,
+    P: Progress,
 {
     let execution_info = MirrordExecution::start_internal(
         &mut config,
@@ -33,7 +35,11 @@ where
 }
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch) -> CliResult<()> {
+pub(crate) async fn extension_exec(
+    args: ExtensionExecArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
@@ -44,13 +50,35 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
+    let mut analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        Default::default(),
+        watch,
+        user_data.machine_id(),
+    );
 
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
     }
     result?;
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+
+        use crate::is_static;
+
+        let is_static = args
+            .executable
+            .as_deref()
+            .map(Path::new)
+            .is_some_and(is_static::is_binary_static);
+        if is_static {
+            progress
+                .warning("Target binary might not be dynamically linked. mirrord might not work!");
+        }
+    }
 
     #[cfg(target_os = "macos")]
     let execution_result =

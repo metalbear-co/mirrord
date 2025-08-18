@@ -11,11 +11,11 @@ use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
+    SOCKETS,
     detour::{Bypass, Detour},
     hooks::HookManager,
     replace,
-    socket::{UserSocket, SHARED_SOCKETS_ENV_VAR},
-    SOCKETS,
+    socket::{SHARED_SOCKETS_ENV_VAR, UserSocket},
 };
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
@@ -51,11 +51,13 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 
 #[cfg(not(target_os = "macos"))]
 unsafe fn environ() -> *const *const c_char {
-    extern "C" {
-        static environ: *const *const c_char;
-    }
+    unsafe {
+        unsafe extern "C" {
+            static environ: *const *const c_char;
+        }
 
-    environ
+        environ
+    }
 }
 
 /// Hook for `libc::execv` for linux only.
@@ -65,11 +67,12 @@ unsafe fn environ() -> *const *const c_char {
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    let envp = environ();
-    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
-        FN_EXECVE(path, argv, envp.leak())
-    } else {
-        FN_EXECVE(path, argv, envp)
+    unsafe {
+        let envp = environ();
+        match prepare_execve_envp(envp.checked_into()) {
+            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
+            _ => FN_EXECVE(path, argv, envp),
+        }
     }
 }
 
@@ -83,10 +86,11 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
-        FN_EXECVE(path, argv, envp.leak())
-    } else {
-        FN_EXECVE(path, argv, envp)
+    unsafe {
+        match prepare_execve_envp(envp.checked_into()) {
+            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
+            _ => FN_EXECVE(path, argv, envp),
+        }
     }
 }
 
@@ -120,23 +124,27 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    match patch_sip_for_new_process(path, argv, envp) {
-        Detour::Success((path, argv, envp)) => {
-            match prepare_execve_envp(Detour::Success(envp.clone())) {
-                Detour::Success(envp) => {
-                    FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak())
+    unsafe {
+        match patch_sip_for_new_process(path, argv, envp) {
+            Detour::Success((path, argv, envp)) => {
+                match prepare_execve_envp(Detour::Success(envp.clone())) {
+                    Detour::Success(envp) => {
+                        FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak())
+                    }
+                    _ => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
                 }
-                _ => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
             }
+            _ => FN_EXECVE(path, argv, envp),
         }
-        _ => FN_EXECVE(path, argv, envp),
     }
 }
 
 /// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
-    #[cfg(not(target_os = "macos"))]
-    replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
+    unsafe {
+        #[cfg(not(target_os = "macos"))]
+        replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
 
-    replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
+        replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
+    }
 }

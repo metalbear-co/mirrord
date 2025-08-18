@@ -1,30 +1,33 @@
-use std::ops::{Deref, Not};
+use std::{
+    ffi::OsStr,
+    ops::{Deref, Not},
+};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
+    config::{KubeConfigOptions, Kubeconfig},
 };
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::{
+    LayerConfig,
     agent::AgentConfig,
     feature::network::NetworkConfig,
     target::{Target, TargetConfig},
-    LayerConfig,
 };
 use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, Level};
+use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
     api::{
         container::{
+            ContainerApi, ContainerParams,
             ephemeral::EphemeralTargetedVariant,
             job::{JobTargetedVariant, JobVariant},
             targeted::Targeted,
             targetless::Targetless,
-            ContainerApi, ContainerParams,
         },
         runtime::{RuntimeData, RuntimeDataProvider},
     },
@@ -46,14 +49,15 @@ impl KubernetesAPI {
     ///
     /// If [`LayerConfig::target`] specifies a targetless run,
     /// replaces [`AgentConfig::namespace`] with the target namespace.
-    pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_config(
+    pub async fn create<P: Progress>(config: &LayerConfig, progress: &P) -> Result<Self> {
+        let client_config = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-        .await?
-        .try_into()?;
+        .await?;
+
+        let client = progress.suspend(|| client_config.try_into())?;
 
         let mut agent = config.agent.clone();
         if config
@@ -84,7 +88,7 @@ impl KubernetesAPI {
 
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         // filter openshift to make it a lot faster
         if Discovery::new(self.client.clone())
@@ -208,7 +212,7 @@ impl KubernetesAPI {
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
-        P: Progress + Send + Sync,
+        P: Progress,
     {
         let (params, runtime_data) = self
             .create_agent_params(target_config, container_config)
@@ -330,24 +334,42 @@ pub async fn create_kube_config<P>(
     kube_context: Option<String>,
 ) -> Result<Config>
 where
-    P: AsRef<str>,
+    P: AsRef<OsStr>,
 {
     let kube_config_opts = KubeConfigOptions {
         context: kube_context,
         ..Default::default()
     };
 
-    let mut config = if let Some(kubeconfig) = kubeconfig {
-        let kubeconfig = shellexpand::full(&kubeconfig)
-            .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-        let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
+    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
+    // colon-separated lists of paths. Borrowed affectionately & with love from
+    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
+    let mut config = if let Some(kubeconfig) = kubeconfig
+        && let paths = std::env::split_paths(&kubeconfig)
+            .filter_map(|p| {
+                let path_str = p.as_os_str().to_string_lossy().into_owned();
+                path_str.is_empty().not().then_some(path_str)
+            })
+            .collect::<Vec<_>>()
+        && paths.is_empty().not()
+    {
+        let parsed_kube_config =
+            paths
+                .iter()
+                .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
+                    let expanded = shellexpand::full(&path_str)
+                        .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+                    Kubeconfig::read_from(expanded.deref())
+                        .and_then(|config| merged_kubeconfig.merge(config))
+                        .map_err(KubeApiError::from)
+                })?;
         Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
     } else if kube_config_opts.context.is_some() {
         // if context is set, it's not in cluster so it has to be a kubeconfig.
         Config::from_kubeconfig(&kube_config_opts).await?
     } else {
-        // if context isn't set and user doesn't specify a kubeconfig, we infer which tries local
-        // kube or incluster configuration.
+        // if context isn't set and user doesn't specify a kubeconfig, we infer which tries
+        // local kube or in-cluster configuration.
         Config::infer().await?
     };
 

@@ -17,6 +17,7 @@ use thiserror::Error;
 
 use crate::{
     container::{CommandDisplay, IntproxySidecarError},
+    dump::DumpSessionError,
     port_forward::PortForwardError,
     profile::ProfileError,
 };
@@ -164,11 +165,15 @@ pub(crate) enum CliError {
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
     /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
+    ))]
     CreateKubeApiFailed(KubeApiError),
 
     #[error("Failed to list mirrord targets: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
+    ))]
     ListTargetsFailed(KubeApiError),
 
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
@@ -237,7 +242,9 @@ pub(crate) enum CliError {
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
     #[error("Failed to access env file at `{0}`: {1}")]
-    #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"
+    ))]
     EnvFileAccessError(PathBuf, dotenvy::Error),
 
     #[cfg(target_os = "macos")]
@@ -330,7 +337,9 @@ pub(crate) enum CliError {
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]
-    #[diagnostic(help("If the problem refers to mirrord operator license, visit https://app.metalbear.co to manage or renew your license.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "If the problem refers to mirrord operator license, visit https://app.metalbear.co to manage or renew your license.{GENERAL_HELP}"
+    ))]
     OperatorApiForbidden(OperatorOperation, String),
 
     #[error(
@@ -365,7 +374,9 @@ pub(crate) enum CliError {
     OperatorReturnedUnknownTargetType(String),
 
     #[error("Failed to make secondary agent connection: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
+    ))]
     PortForwardingSetupError(KubeApiError),
 
     #[error("Failed to make secondary agent connection (TLS): {0}")]
@@ -417,8 +428,8 @@ pub(crate) enum CliError {
     ))]
     ExecveE2Big,
 
-    #[error("Failed starting a mirrord dump session: {0}")]
-    DumpError(String),
+    #[error("mirrord dump session failed: {0}")]
+    DumpError(#[from] DumpSessionError),
 
     #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
     OperatorCopyTargetFailed { message: Option<String> },
@@ -434,7 +445,7 @@ impl CliError {
         error: KubeApiError,
         fallback: F,
     ) -> Self {
-        use kube::{client::AuthError, Error};
+        use kube::{Error, client::AuthError};
 
         match error {
             KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
@@ -454,7 +465,7 @@ impl CliError {
 
 impl From<OperatorApiError> for CliError {
     fn from(value: OperatorApiError) -> Self {
-        use kube::{client::AuthError, Error};
+        use kube::{Error, client::AuthError};
 
         match value {
             OperatorApiError::UnsupportedFeature {
@@ -508,10 +519,6 @@ impl From<OperatorApiError> for CliError {
     }
 }
 
-#[derive(Debug, Error)]
-#[error("unsupported runtime version")]
-pub struct UnsupportedRuntimeVariant;
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -521,20 +528,20 @@ mod tests {
 
     use http_body_util::Full;
     use hyper::{
+        Request, Response,
         body::{Bytes, Incoming},
         service::service_fn,
-        Request, Response,
     };
     use hyper_util::{
         rt::{TokioExecutor, TokioIo},
         server::conn::auto::Builder,
     };
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::ListParams, Api};
+    use kube::{Api, api::ListParams};
     use rustls::{
-        crypto::aws_lc_rs::default_provider,
-        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
         ServerConfig,
+        crypto::aws_lc_rs::default_provider,
+        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
     };
     use tokio::{net::TcpListener, sync::Notify};
     use tokio_rustls::TlsAcceptor;

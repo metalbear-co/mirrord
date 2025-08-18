@@ -16,18 +16,18 @@ use std::{
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
-use mirrord_config::{config::ConfigContext, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR};
-use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
+use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext};
+use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
+    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::{sip_patch, SipPatchOptions};
+use mirrord_sip::{SipPatchOptions, sip_patch};
 use rstest::fixture;
 pub use tests::utils::process::TestProcess;
 use tokio::{
@@ -36,7 +36,7 @@ use tokio::{
     process::Command,
 };
 use tracing::subscriber::DefaultGuard;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
@@ -87,7 +87,10 @@ pub fn init_tracing() -> DefaultGuard {
                 }
                 // File creation failure makes the output go to `stderr`.
                 Err(error) => {
-                    println!("Failed to create intproxy log file at {}: {error}. Intproxy logs will be flushed to stderr", logs_file.display());
+                    println!(
+                        "Failed to create intproxy log file at {}: {error}. Intproxy logs will be flushed to stderr",
+                        logs_file.display()
+                    );
                     let subscriber = subscriber.with_writer(io::stderr).finish();
                     tracing::subscriber::set_default(subscriber)
                 }
@@ -124,6 +127,7 @@ impl TestIntProxy {
                 0,
                 Duration::from_secs(3),
                 Default::default(),
+                Duration::from_secs(60),
             );
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
