@@ -623,7 +623,7 @@ impl OperatorApi<PreparedClientCert> {
             (false, None)
         };
 
-        let branch_db_ids = if layer_config.feature.db_branches.is_empty().not() {
+        let mysql_branch_ids = if layer_config.feature.db_branches.is_empty().not() {
             Some(self.prepare_branch_dbs(layer_config, progress).await?)
         } else {
             None
@@ -655,7 +655,7 @@ impl OperatorApi<PreparedClientCert> {
                 use_proxy_api,
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
-                branch_db_ids.clone(),
+                mysql_branch_ids.clone().unwrap_or_default(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -714,8 +714,11 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            let params =
-                ConnectParams::new(layer_config, branch_name.clone(), branch_db_ids.clone());
+            let params = ConnectParams::new(
+                layer_config,
+                branch_name.clone(),
+                mysql_branch_ids.clone().unwrap_or_default(),
+            );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
 
@@ -740,7 +743,7 @@ impl OperatorApi<PreparedClientCert> {
                     use_proxy_api,
                     layer_config.profile.as_deref(),
                     branch_name,
-                    branch_db_ids,
+                    mysql_branch_ids.unwrap_or_default(),
                 );
                 let session_id = copied
                     .status
@@ -833,7 +836,7 @@ impl OperatorApi<PreparedClientCert> {
         use_proxy: bool,
         profile: Option<&str>,
         branch_name: Option<String>,
-        db_branches: Option<Vec<String>>,
+        mysql_branches: Vec<String>,
     ) -> String {
         let name = crd
             .meta()
@@ -857,7 +860,7 @@ impl OperatorApi<PreparedClientCert> {
             kafka_splits: Default::default(),
             sqs_splits: Default::default(),
             branch_name,
-            db_branches,
+            mysql_branches,
         };
 
         if use_proxy {
@@ -1189,12 +1192,12 @@ impl OperatorApi<PreparedClientCert> {
             create_mysql_branches(&mysql_branch_api, create_mysql_params, progress).await?;
         subtask.success(None);
 
-        let branch_ids = reusable_mysql_branches
+        let mysql_branch_ids = reusable_mysql_branches
             .keys()
             .chain(new_mysql_branches.keys())
             .map(ToString::to_string)
             .collect();
-        Ok(branch_ids)
+        Ok(mysql_branch_ids)
     }
 }
 
@@ -1234,7 +1237,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -1255,7 +1258,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_no_proxy(
@@ -1276,7 +1279,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -1297,7 +1300,7 @@ mod test {
         None,
         Default::default(),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy_profile(
@@ -1318,7 +1321,7 @@ mod test {
         Some("no-steal"),
         Default::default(),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1339,7 +1342,7 @@ mod test {
         Some("/should?be&escaped"),
         Default::default(),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped"
     )]
     #[case::deployment_container_proxy_kafka_splits(
@@ -1366,7 +1369,7 @@ mod test {
             ]),
         )]),
         Default::default(),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1394,7 +1397,7 @@ mod test {
                 ("header-2".to_string(), "filter-2".to_string()),
             ]),
         )]),
-        None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1416,9 +1419,9 @@ mod test {
         None,
         Default::default(),
         Default::default(),
-        Some(vec!["branch-1".into(), "branch-2".into()]),
+        vec!["branch-1".into(), "branch-2".into()],
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&db_branches=%5B%22branch-1%22%2C%22branch-2%22%5D",
+        ?connect=true&on_concurrent_steal=abort&mysql_branches=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
     #[test]
     fn target_connect_url(
@@ -1428,7 +1431,7 @@ mod test {
         #[case] profile: Option<&str>,
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
-        #[case] db_branches: Option<Vec<String>>,
+        #[case] mysql_branches: Vec<String>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -1448,7 +1451,7 @@ mod test {
             kafka_splits,
             sqs_splits,
             branch_name: None,
-            db_branches,
+            mysql_branches,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);

@@ -31,15 +31,15 @@ pub struct ConnectParams<'a> {
     pub branch_name: Option<String>,
 
     /// IDs of the database branches to use for the connection.
-    #[serde(with = "db_branches_serde")]
-    pub db_branches: Option<Vec<String>>,
+    #[serde(with = "mysql_branches_serde")]
+    pub mysql_branches: Vec<String>,
 }
 
 impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
-        db_branches: Option<Vec<String>>,
+        mysql_branches: Vec<String>,
     ) -> Self {
         Self {
             connect: true,
@@ -48,7 +48,7 @@ impl<'a> ConnectParams<'a> {
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
-            db_branches,
+            mysql_branches,
         }
     }
 }
@@ -75,21 +75,19 @@ mod queue_splits_serde {
     }
 }
 
-mod db_branches_serde {
+mod mysql_branches_serde {
     use serde::Serializer;
 
-    pub fn serialize<S>(db_branches: &Option<Vec<String>>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(mysql_branches: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match db_branches {
-            None => serializer.serialize_none(),
-            Some(vec) if vec.is_empty() => serializer.serialize_none(),
-            Some(vec) => {
-                let as_json =
-                    serde_json::to_string(vec).expect("serialization to memory should not fail");
-                serializer.serialize_str(&as_json)
-            }
+        if mysql_branches.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(mysql_branches)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
         }
     }
 }
