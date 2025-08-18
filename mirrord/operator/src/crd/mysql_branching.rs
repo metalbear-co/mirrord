@@ -1,4 +1,4 @@
-use std::fmt::Formatter;
+use std::{collections::HashMap, fmt::Formatter};
 
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
@@ -52,8 +52,9 @@ pub struct MysqlBranchDatabaseStatus {
     pub phase: BranchDatabasePhase,
     /// Time when the branch database should be deleted.
     pub expire_time: DateTime<Utc>,
-    /// Information of the session that's using this branch database.
-    pub session_info: Option<SessionInfo>,
+    /// Information of sessions that are using this branch database.
+    #[serde(default)]
+    pub session_info: HashMap<u64, SessionInfo>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
@@ -62,8 +63,6 @@ pub enum BranchDatabasePhase {
     Pending,
     /// The branch database is ready to use.
     Ready,
-    /// The branch database is in use by a session.
-    InUse,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
@@ -71,7 +70,6 @@ impl std::fmt::Display for BranchDatabasePhase {
         match self {
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
-            BranchDatabasePhase::InUse => write!(f, "InUse"),
         }
     }
 }
