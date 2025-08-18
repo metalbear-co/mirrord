@@ -110,7 +110,7 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
     } else {
         Some(format!(
             "{} in ({})",
-            labels::MIRRORD_BRANCH_DB_ID_LABEL,
+            labels::MIRRORD_MYSQL_BRANCH_ID_LABEL,
             params
                 .keys()
                 .map(|id| id.as_ref())
@@ -247,7 +247,7 @@ impl MysqlBranchParams {
             mysql_version: config.version.clone(),
         };
         let labels = BTreeMap::from([(
-            labels::MIRRORD_BRANCH_DB_ID_LABEL.to_string(),
+            labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),
             id.to_string(),
         )]);
         Self { name, labels, spec }
@@ -255,5 +255,5 @@ impl MysqlBranchParams {
 }
 
 pub(crate) mod labels {
-    pub(crate) const MIRRORD_BRANCH_DB_ID_LABEL: &str = "mirrord-branch-db-id";
+    pub(crate) const MIRRORD_MYSQL_BRANCH_ID_LABEL: &str = "mirrord-mysql-branch-id";
 }
