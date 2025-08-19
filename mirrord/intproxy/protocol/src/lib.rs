@@ -82,8 +82,8 @@ pub struct LayerId(pub u64);
 /// # Note
 ///
 /// Sharing state between [`exec`](https://man7.org/linux/man-pages/man3/exec.3.html) calls is currently not supported.
-/// Therefore, when the layer initializes, it has empty [`NewSessionRequest::parent`] and does not
-/// inherit any state.
+/// Therefore, when the layer initializes, it has empty [`NewSessionRequest::parent_layer`] and does
+/// not inherit any state.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct NewSessionRequest {
     /// If the layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour,
