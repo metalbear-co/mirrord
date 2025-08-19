@@ -21,6 +21,8 @@ pub struct MysqlBranchDatabaseSpec {
     pub id: String,
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
+    /// MySQL database name.
+    pub database_name: String,
     /// Target k8s resource to extract connection source info from.
     pub target: KubeTarget,
     /// The duration in seconds this branch database will live idling.
