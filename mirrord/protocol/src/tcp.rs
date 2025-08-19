@@ -209,6 +209,16 @@ impl std::ops::Deref for Filter {
     }
 }
 
+/// HTTP filter for HTTP methods.
+///
+/// Supports all the standard methods, plus a `Other` variant for custom methods (why would anyone
+/// do that).
+///
+/// Related to `HttpFilterConfig`. We convert the `HttpFilterConfig` `method_filter` or `method` in
+/// a `InnerFilter` from a `String` to this type.
+///
+/// The conversion is case-insensitive, but converting it back to `String` returns an uppercase
+/// string.
 #[derive(
     Encode, Decode, Debug, PartialEq, Eq, Clone, EnumString, strum_macros::Display, AsRefStr,
 )]
@@ -241,6 +251,7 @@ pub enum HttpFilter {
         /// Filters to use
         filters: Vec<HttpFilter>,
     },
+    /// Filter by method ("POST")
     Method(HttpMethodFilter),
 }
 

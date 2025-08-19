@@ -107,6 +107,12 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
+    /// ##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
+    ///
+    ///
+    /// Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods).
+    ///
+    /// Case-insensitive. If the request method matches the filter, the request is stolen.
     #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
     pub method_filter: Option<String>,
 
@@ -125,6 +131,7 @@ pub struct HttpFilterConfig {
     ///   "all_of": [
     ///     { "header": "x-user: my-user$" },
     ///     { "path": "^/api/v1/my-endpoint" }
+    ///     { "method": "post" }
     ///   ]
     /// }
     /// ```
@@ -145,6 +152,7 @@ pub struct HttpFilterConfig {
     ///   "any_of": [
     ///     { "header": "^x-user: my-user$" },
     ///     { "path": "^/api/v1/my-endpoint" }
+    ///     { "method": "post" }
     ///   ]
     /// }
     /// ```
