@@ -275,12 +275,13 @@ fn load_only_layer_start(config: &LayerConfig) {
 
     let new_connection = ProxyConnection::new(
         address,
-        NewSessionRequest::New(
-            EXECUTABLE_ARGS
+        NewSessionRequest {
+            process_info: EXECUTABLE_ARGS
                 .get()
                 .expect("EXECUTABLE_ARGS MUST BE SET")
                 .to_process_info(config),
-        ),
+            parent_layer: None,
+        },
         *PROXY_CONNECTION_TIMEOUT
             .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout)),
     )
@@ -422,7 +423,10 @@ fn layer_start(mut config: LayerConfig) {
         let address = setup().proxy_address();
         let new_connection = ProxyConnection::new(
             address,
-            NewSessionRequest::New(process_info),
+            NewSessionRequest {
+                process_info,
+                parent_layer: None,
+            },
             proxy_connection_timeout,
         )
         .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
@@ -729,7 +733,13 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 
                 let new_connection = ProxyConnection::new(
                     parent_connection.proxy_addr(),
-                    NewSessionRequest::Forked(parent_connection.layer_id()),
+                    NewSessionRequest {
+                        parent_layer: Some(parent_connection.layer_id()),
+                        process_info: EXECUTABLE_ARGS
+                            .get()
+                            .expect("should always be set in layer constructor")
+                            .to_process_info(setup().layer_config()),
+                    },
                     PROXY_CONNECTION_TIMEOUT
                         .get()
                         .copied()
