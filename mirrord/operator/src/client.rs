@@ -623,7 +623,7 @@ impl OperatorApi<PreparedClientCert> {
             (false, None)
         };
 
-        let mysql_branch_ids = if layer_config.feature.db_branches.is_empty().not() {
+        let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
             Some(self.prepare_branch_dbs(layer_config, progress).await?)
         } else {
             None
@@ -655,7 +655,7 @@ impl OperatorApi<PreparedClientCert> {
                 use_proxy_api,
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
-                mysql_branch_ids.clone().unwrap_or_default(),
+                mysql_branch_names.clone().unwrap_or_default(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -717,7 +717,7 @@ impl OperatorApi<PreparedClientCert> {
             let params = ConnectParams::new(
                 layer_config,
                 branch_name.clone(),
-                mysql_branch_ids.clone().unwrap_or_default(),
+                mysql_branch_names.clone().unwrap_or_default(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
@@ -743,7 +743,7 @@ impl OperatorApi<PreparedClientCert> {
                     use_proxy_api,
                     layer_config.profile.as_deref(),
                     branch_name,
-                    mysql_branch_ids.unwrap_or_default(),
+                    mysql_branch_names.unwrap_or_default(),
                 );
                 let session_id = copied
                     .status
@@ -836,7 +836,7 @@ impl OperatorApi<PreparedClientCert> {
         use_proxy: bool,
         profile: Option<&str>,
         branch_name: Option<String>,
-        mysql_branches: Vec<String>,
+        mysql_branch_names: Vec<String>,
     ) -> String {
         let name = crd
             .meta()
@@ -860,7 +860,7 @@ impl OperatorApi<PreparedClientCert> {
             kafka_splits: Default::default(),
             sqs_splits: Default::default(),
             branch_name,
-            mysql_branches,
+            mysql_branch_names,
         };
 
         if use_proxy {
@@ -1181,21 +1181,19 @@ impl OperatorApi<PreparedClientCert> {
             namespace,
             self.client_cert.cert.public_key_data().as_ref(),
         );
+        let mysql_branch_names = create_mysql_params
+            .values()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>();
 
         let reusable_mysql_branches =
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
 
         create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
-        let new_mysql_branches =
-            create_mysql_branches(&mysql_branch_api, create_mysql_params, progress).await?;
+        create_mysql_branches(&mysql_branch_api, create_mysql_params, progress).await?;
         subtask.success(None);
 
-        let mysql_branch_ids = reusable_mysql_branches
-            .keys()
-            .chain(new_mysql_branches.keys())
-            .map(ToString::to_string)
-            .collect();
-        Ok(mysql_branch_ids)
+        Ok(mysql_branch_names)
     }
 }
 
@@ -1419,7 +1417,7 @@ mod test {
         Default::default(),
         vec!["branch-1".into(), "branch-2".into()],
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&mysql_branches=%5B%22branch-1%22%2C%22branch-2%22%5D",
+        ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
     #[test]
     fn target_connect_url(
@@ -1429,7 +1427,7 @@ mod test {
         #[case] profile: Option<&str>,
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
-        #[case] mysql_branches: Vec<String>,
+        #[case] mysql_branch_names: Vec<String>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -1449,7 +1447,7 @@ mod test {
             kafka_splits,
             sqs_splits,
             branch_name: None,
-            mysql_branches,
+            mysql_branch_names,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
