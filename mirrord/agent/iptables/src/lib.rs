@@ -307,23 +307,30 @@ where
 
 /// Returns correct [`IPTablesWrapper`] to use for traffic redirection.
 ///
-/// If `nftables` is `false`, this function will return the ip[6]tables-legacy wrapper.
+/// If `nftables` is `false`, this function will return the `ip[6]tables-legacy` wrapper.
 ///
-/// If `nftables` is `true`, this function will return the ip[6]tables-nft wrapper.
+/// If `nftables` is `true`, this function will return the `ip[6]tables-nft` wrapper.
 ///
 /// If `nftables` is [`None`], this function will choose between legacy and nftables:
-/// 1. If mesh rules are found with ip[6]tables-nft, ip[6]tables-nft wrapper will be returned.
-/// 2. Otherwise, ip[6]tables-legacy wrapper will be returned.
+/// 1. If mesh rules are found with `ip[6]tables-nft`, `ip[6]tables-nft` wrapper will be returned.
+/// 2. Otherwise, `ip[6]tables-legacy` wrapper will be returned.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
-    /// Whether we should use nftables when no backend is explicitly configured.
+    /// Whether we should use nftables when no backend is explicitly configured,
+    /// separately for IPv4 and IPv6 (supposedly it is be possible to use different iptables'
+    /// backends for the protocols, at the same time).
     ///
-    /// Initialized with the first call of this function, when the `nftables` argument is not
-    /// provided.
-    static DETECTED_NFTABLES: OnceLock<bool> = OnceLock::new();
+    /// Respective [`OnceLock`] is initialized with the first call of this function, if the
+    /// `nftables` argument is not provided.
+    static DETECTED_NFTABLES: (OnceLock<bool>, OnceLock<bool>) = (OnceLock::new(), OnceLock::new());
+    let detected = if ip6 {
+        &DETECTED_NFTABLES.1
+    } else {
+        &DETECTED_NFTABLES.0
+    };
 
     // If `nftables` or `DETECTED_NFTABLES` is set, always return early.
     // This function calls itself recursively later.
-    let nftables = nftables.or_else(|| DETECTED_NFTABLES.get().copied());
+    let nftables = nftables.or_else(|| detected.get().copied());
     if let Some(nftables) = nftables {
         let path = match (nftables, ip6) {
             (true, true) => "/usr/sbin/ip6tables-nft",
@@ -347,7 +354,7 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
             );
         })
         .is_ok_and(|detected_mesh| detected_mesh.is_some());
-    let _ = DETECTED_NFTABLES.set(nft_rules_present);
+    let _ = detected.set(nft_rules_present);
 
     if nft_rules_present {
         nft_wrapper
