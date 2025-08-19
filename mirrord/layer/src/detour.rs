@@ -157,7 +157,9 @@ pub(crate) enum Bypass {
     /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(CString),
 
-    /// File [`PathBuf`] should be ignored (used for tests).
+    /// Multiple file [`PathBuf`] that should be ignored.
+    ///
+    /// Used for functions that must apply `fs.mapping` to multiple files on bypass.
     IgnoredFiles(CString, CString),
 
     /// Some operations only handle absolute [`PathBuf`]s.

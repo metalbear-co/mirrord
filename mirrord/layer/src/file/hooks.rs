@@ -54,7 +54,11 @@ type stat64 = stat;
 
 /// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
 /// a different one according to the bypass.
+///
 /// We pass reference to bypass to make sure the bypass lives with the pointer.
+///
+/// When we're dealing with [`Bypass::RelativePath`] or [`Bypass::IgnoredFile`], and `fs.mapping` is
+/// being used, this means that we return the remapped path.
 fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char {
     match bypass {
         // For some reason, the program is trying to carry out an operation on a path that is
@@ -1156,6 +1160,7 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
     }
 }
 
+/// Hook for [`rename`](https://www.gnu.org/software/libc/manual/html_node/Renaming-Files.html).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn rename_detour(
     old_path: *const c_char,

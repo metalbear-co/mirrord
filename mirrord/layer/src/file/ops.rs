@@ -807,6 +807,11 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     Detour::Success(realpath)
 }
 
+/// Renames a file/dir from `old_path` to `new_path`, replacing the original.
+///
+/// - When `fs.mapping` config is being used, we need to remap both `old_path` and `new_path`, so we
+///   cannot do the usual `common_path_check(...)?` on each path, as this would return only 1 of the
+///   paths remapped.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> Detour<()> {
     let old_path = common_path_check(old_path?, false);
