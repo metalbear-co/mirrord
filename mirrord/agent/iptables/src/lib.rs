@@ -315,17 +315,20 @@ where
 /// 1. If mesh rules are found with `ip[6]tables-nft`, `ip[6]tables-nft` wrapper will be returned.
 /// 2. Otherwise, `ip[6]tables-legacy` wrapper will be returned.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
-    /// Whether we should use nftables when no backend is explicitly configured,
-    /// separately for IPv4 and IPv6 (supposedly it is be possible to use different iptables'
-    /// backends for the protocols, at the same time).
+    /// Whether we should use ip6tables-nft when no backend is explicitly configured,
     ///
-    /// Respective [`OnceLock`] is initialized with the first call of this function, if the
+    /// Initialized with the first call of this function for IPv6, if the
     /// `nftables` argument is not provided.
-    static DETECTED_NFTABLES: (OnceLock<bool>, OnceLock<bool>) = (OnceLock::new(), OnceLock::new());
+    static DETECTED_NFTABLES_V6: OnceLock<bool> = OnceLock::new();
+    /// Whether we should use iptables-nft when no backend is explicitly configured,
+    ///
+    /// Initialized with the first call of this function for IPv4, if the
+    /// `nftables` argument is not provided.
+    static DETECTED_NFTABLES_V4: OnceLock<bool> = OnceLock::new();
     let detected_nftables = if ip6 {
-        &DETECTED_NFTABLES.1
+        &DETECTED_NFTABLES_V6
     } else {
-        &DETECTED_NFTABLES.0
+        &DETECTED_NFTABLES_V4
     };
 
     // If `nftables` or `detected_nftables` is set, always return early.
