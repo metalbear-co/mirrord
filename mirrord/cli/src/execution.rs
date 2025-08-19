@@ -219,7 +219,7 @@ impl MirrordExecution {
         if config.feature.network.incoming.http_filter.is_composite()
             && agent_protocol_version
                 .as_ref()
-                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(&version))
+                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(version))
                 .unwrap_or(false)
                 .not()
         {
@@ -238,7 +238,7 @@ impl MirrordExecution {
             .has_method_filter()
             && agent_protocol_version
                 .as_ref()
-                .map(|version| HTTP_METHOD_FILTER_VERSION.matches(&version))
+                .map(|version| HTTP_METHOD_FILTER_VERSION.matches(version))
                 .unwrap_or(false)
                 .not()
         {

@@ -126,10 +126,10 @@ impl NormalizedHeaders {
 
 #[cfg(test)]
 mod test {
-    use std::ops::Not;
+    use std::{ops::Not, str::FromStr};
 
     use hyper::Request;
-    use mirrord_protocol::tcp::{self, Filter};
+    use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter};
 
     use super::HttpFilter;
 
@@ -140,11 +140,13 @@ mod test {
             filters: vec![
                 tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_string()).unwrap()),
                 tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
+                tcp::HttpFilter::Method(HttpMethodFilter::from_str("get").unwrap()),
             ],
         };
 
         // should match
         let mut input = Request::builder()
+            .method("GET")
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "a-bazillion")
             .body(())
@@ -156,6 +158,7 @@ mod test {
 
         // should fail
         let mut input = Request::builder()
+            .method("POST")
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
@@ -174,11 +177,13 @@ mod test {
                 tcp::HttpFilter::Header(Filter::new("dungeon-key: heavy".to_string()).unwrap()),
                 tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
                 tcp::HttpFilter::Path(Filter::new("path/for/v8".to_string()).unwrap()),
+                tcp::HttpFilter::Method(HttpMethodFilter::from_str("get").unwrap()),
             ],
         };
 
         // should match
         let mut input = Request::builder()
+            .method("GET")
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
@@ -190,6 +195,7 @@ mod test {
 
         // should fail
         let mut input = Request::builder()
+            .method("POST")
             .uri("https://www.balconia.gov/api/path/to/v3")
             .header("brass-key", "nothin")
             .body(())

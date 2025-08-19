@@ -20,6 +20,7 @@ enum TestedStealVariant {
     Path,
     AllOf,
     AnyOf,
+    Method,
 }
 
 impl TestedStealVariant {
@@ -27,6 +28,7 @@ impl TestedStealVariant {
         serde_json::json!({
             "path_filter": matches!(self, Self::Path).then(|| "/some/path"),
             "header_filter": matches!(self, Self::Header).then(|| "some: header"),
+            "method_filter": matches!(self, Self::Method).then(|| "GET"),
             "all_of": matches!(self, Self::AllOf).then(|| serde_json::json!([
                 { "path": "/some/path" },
                 { "header": "some: header" },
@@ -93,6 +95,7 @@ async fn test_issue2817(
         TestedStealVariant::Unfiltered,
         TestedStealVariant::Header,
         TestedStealVariant::Path,
+        TestedStealVariant::Method,
         TestedStealVariant::AllOf,
         TestedStealVariant::AnyOf
     )]
