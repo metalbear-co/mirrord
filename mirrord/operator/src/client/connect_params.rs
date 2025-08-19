@@ -32,14 +32,14 @@ pub struct ConnectParams<'a> {
 
     /// IDs of the database branches to use for the connection.
     #[serde(with = "mysql_branches_serde")]
-    pub mysql_branches: Vec<String>,
+    pub mysql_branch_names: Vec<String>,
 }
 
 impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
-        mysql_branches: Vec<String>,
+        mysql_branch_names: Vec<String>,
     ) -> Self {
         Self {
             connect: true,
@@ -48,7 +48,7 @@ impl<'a> ConnectParams<'a> {
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
-            mysql_branches,
+            mysql_branch_names,
         }
     }
 }
