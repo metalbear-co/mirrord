@@ -266,7 +266,7 @@ impl MirrordExecution {
         proxy_command
             .arg("intproxy")
             // Start of debug args. Don't add real args after this point,
-            // `_debug_args` field will swallow them.
+            // `_debug_args` Clap field will swallow them.
             .arg("--log-destination")
             .arg(config.internal_proxy.log_destination.as_os_str())
             .stdout(std::process::Stdio::piped())
@@ -431,7 +431,7 @@ impl MirrordExecution {
         proxy_command
             .arg("extproxy")
             // Start of debug args. Don't add real args after this point,
-            // `_debug_args` field will swallow them.
+            // `_debug_args` Clap field will swallow them.
             .arg("--extproxy-log-destination")
             .arg(config.external_proxy.log_destination.as_os_str())
             .arg("--intproxy-log-destination")
