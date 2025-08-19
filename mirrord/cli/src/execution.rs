@@ -287,6 +287,10 @@ impl MirrordExecution {
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command
             .arg("intproxy")
+            // Start of debug args. Don't add real args after this point,
+            // `_debug_args` Clap field will swallow them.
+            .arg("--log-destination")
+            .arg(config.internal_proxy.log_destination.as_os_str())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null())
@@ -296,10 +300,6 @@ impl MirrordExecution {
                 serde_json::to_string(&connect_info)?,
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
-
-        if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
-            proxy_command.arg("--logfile").arg(log_destination);
-        }
 
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
@@ -452,6 +452,12 @@ impl MirrordExecution {
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command
             .arg("extproxy")
+            // Start of debug args. Don't add real args after this point,
+            // `_debug_args` Clap field will swallow them.
+            .arg("--extproxy-log-destination")
+            .arg(config.external_proxy.log_destination.as_os_str())
+            .arg("--intproxy-log-destination")
+            .arg(config.internal_proxy.log_destination.as_os_str())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null())
