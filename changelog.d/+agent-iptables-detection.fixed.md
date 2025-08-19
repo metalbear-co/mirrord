@@ -1,0 +1,1 @@
+Fixed a bug in automatic iptables backend detection in the mirrord agent.
