@@ -216,9 +216,17 @@ impl IntProxy {
         }
     }
 
-    /// Runs main event loop of this proxy.
-    /// Expects to accept the first layer connection within the given `first_timeout`.
+    /// Runs the main event loop of this proxy.
+    ///
+    /// Fails if the first layer connection is not accepted within the given `first_timeout`.
     /// Exits after `idle_timeout` when there are no more layer connections.
+    ///
+    /// # Returns
+    ///
+    /// 1. [`ControlFlow::Continue`] if a critical error was encountered. The [`FailoverStrategy`]
+    ///    can be run in order to handle pending and future layer requests.
+    /// 2. [`ControlFlow::Break`] if the proxy exited normally, or no layer connection was accepted
+    ///    within the given `first_timeout`.
     async fn run_inner(
         self,
         first_timeout: Duration,
