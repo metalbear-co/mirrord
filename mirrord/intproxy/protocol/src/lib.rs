@@ -57,7 +57,9 @@ pub enum LayerToProxyMessage {
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct ProcessInfo {
     /// Process ID.
-    pub pid: u32,
+    pub pid: i32,
+    /// ID of the parent process.
+    pub parent_pid: i32,
     /// Process name.
     pub name: String,
     /// Command line
@@ -80,15 +82,16 @@ pub struct LayerId(pub u64);
 /// # Note
 ///
 /// Sharing state between [`exec`](https://man7.org/linux/man-pages/man3/exec.3.html) calls is currently not supported.
-/// Therefore, when the layer initializes, it uses [`NewSessionRequest::New`] and does not inherit
-/// any state.
+/// Therefore, when the layer initializes, it has empty [`NewSessionRequest::parent_layer`] and does
+/// not inherit any state.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
-pub enum NewSessionRequest {
-    /// Layer initialized from its constructor, has a fresh state.
-    New(ProcessInfo),
-    /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
-    /// It inherits state from its parent.
-    Forked(LayerId),
+pub struct NewSessionRequest {
+    /// If the layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour,
+    /// this is its parent layer id.
+    ///
+    /// The layer inherits state from its parent.
+    pub parent_layer: Option<LayerId>,
+    pub process_info: ProcessInfo,
 }
 
 /// Supported network protocols when intercepting outgoing connections.
