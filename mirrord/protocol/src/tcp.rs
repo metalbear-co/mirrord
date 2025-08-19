@@ -244,6 +244,16 @@ pub enum HttpFilter {
     Method(HttpMethodFilter),
 }
 
+impl HttpFilter {
+    pub fn has_method_filter(&self) -> bool {
+        match self {
+            HttpFilter::Composite { filters, .. } => filters.iter().any(|f| f.has_method_filter()),
+            HttpFilter::Method(..) => true,
+            _ => false,
+        }
+    }
+}
+
 impl Display for HttpFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -301,6 +311,18 @@ impl StealType {
         | StealType::FilteredHttpEx(port, ..)
         | StealType::FilteredHttp(port, ..)) = self;
         *port
+    }
+
+    pub fn has_method_filter(&self) -> bool {
+        match self {
+            StealType::FilteredHttpEx(_, HttpFilter::Method(_)) => true,
+            StealType::FilteredHttpEx(_, HttpFilter::Composite { filters, .. })
+                if filters.iter().any(|filter| filter.has_method_filter()) =>
+            {
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -449,6 +471,9 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 
 /// Minimal mirrord-protocol version that allows [`HttpFilter::Composite`]
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
+
+pub static HTTP_METHOD_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows:

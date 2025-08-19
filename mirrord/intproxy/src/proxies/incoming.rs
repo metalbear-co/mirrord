@@ -15,17 +15,18 @@ use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
-    MessageId, PortSubscription, ProxyToLayerMessage,
+    MessageId, PortSubscribe, PortSubscription, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     ClientMessage, ConnectionId, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
-        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
-        NewTcpConnectionV2, TcpData,
+        ChunkedResponse, DaemonTcp, HTTP_METHOD_FILTER_VERSION, HttpRequest, HttpRequestMetadata,
+        IncomingTrafficTransportType, InternalHttpBodyFrame, InternalHttpRequest, LayerTcp,
+        LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType, TcpData,
     },
 };
+use semver::Version;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
@@ -90,6 +91,9 @@ pub enum IncomingProxyError {
     SocketSetupFailed(#[source] io::Error),
     #[error("subscribing port failed: {0}")]
     SubscriptionFailed(#[source] ResponseError),
+
+    #[error("HTTP method filter is not supported for this protocol version {0:?}!")]
+    HttpMethodFilterNotSupported(Option<Version>),
 }
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
@@ -186,6 +190,9 @@ pub struct IncomingProxy {
     http_gateways: ConnectionMap<HashMap<RequestId, HttpGatewayHandle>>,
     /// Running [`BackgroundTask`]s utilized by this proxy.
     tasks: BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>,
+
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    protocol_version: Option<Version>,
 }
 
 impl IncomingProxy {
@@ -210,6 +217,7 @@ impl IncomingProxy {
             tcp_proxies: Default::default(),
             http_gateways: Default::default(),
             tasks: Default::default(),
+            protocol_version: None,
         }
     }
 
@@ -629,6 +637,25 @@ impl IncomingProxy {
     ) -> Result<(), IncomingProxyError> {
         match message {
             IncomingProxyMessage::LayerRequest(message_id, layer_id, req) => match req {
+                IncomingRequest::PortSubscribe(PortSubscribe {
+                    subscription: PortSubscription::Steal(steal_type),
+                    ..
+                }) if steal_type.has_method_filter()
+                    && self
+                        .protocol_version
+                        .as_ref()
+                        .is_some_and(|version| HTTP_METHOD_FILTER_VERSION.matches(&version))
+                        .not() =>
+                {
+                    tracing::error!(
+                        ?self.protocol_version,
+                        "HTTP method filter is not supported for this protocol version!"
+                    );
+
+                    return Err(IncomingProxyError::HttpMethodFilterNotSupported(
+                        self.protocol_version.clone(),
+                    ));
+                }
                 IncomingRequest::PortSubscribe(subscribe) => {
                     let msg = self
                         .subscriptions
@@ -638,6 +665,7 @@ impl IncomingProxy {
                         message_bus.send(msg).await;
                     }
                 }
+
                 IncomingRequest::PortUnsubscribe(unsubscribe) => {
                     let msg = self.subscriptions.layer_unsubscribed(layer_id, unsubscribe);
 
@@ -679,8 +707,9 @@ impl IncomingProxy {
                 self.subscriptions.layer_forked(msg.parent, msg.child);
             }
 
-            IncomingProxyMessage::AgentProtocolVersion(version) => {
-                self.response_mode = ResponseMode::from(&version);
+            IncomingProxyMessage::AgentProtocolVersion(protocol_version) => {
+                self.response_mode = ResponseMode::from(&protocol_version);
+                self.protocol_version.replace(protocol_version);
             }
 
             IncomingProxyMessage::ConnectionRefresh => {
