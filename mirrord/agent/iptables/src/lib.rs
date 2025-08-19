@@ -322,15 +322,15 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     /// Respective [`OnceLock`] is initialized with the first call of this function, if the
     /// `nftables` argument is not provided.
     static DETECTED_NFTABLES: (OnceLock<bool>, OnceLock<bool>) = (OnceLock::new(), OnceLock::new());
-    let detected = if ip6 {
+    let detected_nftables = if ip6 {
         &DETECTED_NFTABLES.1
     } else {
         &DETECTED_NFTABLES.0
     };
 
-    // If `nftables` or `DETECTED_NFTABLES` is set, always return early.
+    // If `nftables` or `detected_nftables` is set, always return early.
     // This function calls itself recursively later.
-    let nftables = nftables.or_else(|| detected.get().copied());
+    let nftables = nftables.or_else(|| detected_nftables.get().copied());
     if let Some(nftables) = nftables {
         let path = match (nftables, ip6) {
             (true, true) => "/usr/sbin/ip6tables-nft",
@@ -344,23 +344,30 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     }
 
     let nft_wrapper = get_iptables(Some(true), ip6);
-    let nft_rules_present = MeshVendor::detect(&nft_wrapper)
-        .inspect_err(|error| {
-            tracing::warn!(
-                %error,
-                command = nft_wrapper.tables.cmd,
-                "Failed to detect mesh rules with nftables, \
-                assuming no mesh rules and falling back to legacy iptables.",
-            );
-        })
-        .is_ok_and(|detected_mesh| detected_mesh.is_some());
-    let _ = detected.set(nft_rules_present);
+    let nft_mesh = MeshVendor::detect(&nft_wrapper).inspect_err(|error| {
+        tracing::warn!(
+            %error,
+            command = nft_wrapper.tables.cmd,
+            "Failed to detect mesh rules with nftables, \
+            assuming no mesh rules and falling back to legacy iptables.",
+        );
+    });
 
-    if nft_rules_present {
+    let nft_rules_present = nft_mesh.as_ref().is_ok_and(Option::is_some);
+    let _ = detected_nftables.set(nft_rules_present);
+    let wrapper = if nft_rules_present {
         nft_wrapper
     } else {
         get_iptables(Some(false), ip6)
-    }
+    };
+
+    tracing::info!(
+        cmd = wrapper.tables.cmd,
+        detect_mesh_in_nft_result = ?nft_mesh,
+        "Using iptables backend picked based on mesh rules detection."
+    );
+
+    wrapper
 }
 
 #[cfg(test)]
