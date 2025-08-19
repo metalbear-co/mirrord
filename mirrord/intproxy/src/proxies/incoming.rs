@@ -15,15 +15,15 @@ use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
-    MessageId, PortSubscribe, PortSubscription, ProxyToLayerMessage,
+    MessageId, PortSubscription, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     ClientMessage, ConnectionId, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedResponse, DaemonTcp, HTTP_METHOD_FILTER_VERSION, HttpRequest, HttpRequestMetadata,
-        IncomingTrafficTransportType, InternalHttpBodyFrame, InternalHttpRequest, LayerTcp,
-        LayerTcpSteal, NewTcpConnectionV1, NewTcpConnectionV2, StealType, TcpData,
+        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
+        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
+        NewTcpConnectionV2, TcpData,
     },
 };
 use semver::Version;
@@ -637,25 +637,6 @@ impl IncomingProxy {
     ) -> Result<(), IncomingProxyError> {
         match message {
             IncomingProxyMessage::LayerRequest(message_id, layer_id, req) => match req {
-                IncomingRequest::PortSubscribe(PortSubscribe {
-                    subscription: PortSubscription::Steal(steal_type),
-                    ..
-                }) if steal_type.has_method_filter()
-                    && self
-                        .protocol_version
-                        .as_ref()
-                        .is_some_and(|version| HTTP_METHOD_FILTER_VERSION.matches(&version))
-                        .not() =>
-                {
-                    tracing::error!(
-                        ?self.protocol_version,
-                        "HTTP method filter is not supported for this protocol version!"
-                    );
-
-                    return Err(IncomingProxyError::HttpMethodFilterNotSupported(
-                        self.protocol_version.clone(),
-                    ));
-                }
                 IncomingRequest::PortSubscribe(subscribe) => {
                     let msg = self
                         .subscriptions

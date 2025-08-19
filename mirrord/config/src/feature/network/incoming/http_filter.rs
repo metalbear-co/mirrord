@@ -178,6 +178,20 @@ impl HttpFilterConfig {
         self.all_of.is_some() || self.any_of.is_some()
     }
 
+    pub fn has_method_filter(&self) -> bool {
+        self.method_filter.is_some()
+            || self.all_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+            || self.any_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+    }
+
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
         if let Some(ports) = self.ports.as_ref()
             && self.is_filter_set()
