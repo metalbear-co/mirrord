@@ -5,7 +5,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::crd::kube_target::KubeTarget;
+use crate::crd::{kube_target::KubeTarget, session::MirrordClusterSessionOwner};
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -81,10 +81,6 @@ impl std::fmt::Display for BranchDatabasePhase {
 pub struct SessionInfo {
     /// Session id.
     pub id: u64,
-    /// Unique session user id.
-    pub user_id: String,
-    /// Session creator's k8s username.
-    pub k8s_username: String,
-    /// Session creator's local username.
-    pub local_username: String,
+    /// Owner info of the session.
+    pub owner: MirrordClusterSessionOwner,
 }
