@@ -157,7 +157,8 @@ impl ExecuteArgs {
 
     pub(crate) fn to_process_info(&self, config: &LayerConfig) -> ProcessInfo {
         ProcessInfo {
-            pid: std::process::id(),
+            pid: nix::unistd::getpid().as_raw(),
+            parent_pid: nix::unistd::getppid().as_raw(),
             name: self.exec_name.clone(),
             cmdline: self
                 .args
