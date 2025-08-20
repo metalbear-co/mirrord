@@ -21,13 +21,10 @@ use tracing::Level;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
-    crd::{
-        kube_target::KubeTarget,
-        mysql_branching::{
-            BranchDatabasePhase, ConnectionSource as CrdConnectionSource,
-            ConnectionSourceKind as CrdConnectionSourceKind, MysqlBranchDatabase,
-            MysqlBranchDatabaseSpec,
-        },
+    crd::mysql_branching::{
+        BranchDatabasePhase, ConnectionSource as CrdConnectionSource,
+        ConnectionSourceKind as CrdConnectionSourceKind, MysqlBranchDatabase,
+        MysqlBranchDatabaseSpec,
     },
 };
 
@@ -243,7 +240,7 @@ impl MysqlBranchParams {
             id: id.to_string(),
             database_name: config.name.clone(),
             connection_source,
-            target: KubeTarget::from(target.clone()),
+            target: target.clone(),
             ttl_secs: config.ttl_secs.unwrap_or(Self::MYSQL_BRANCH_DEFAULT_TTL),
             mysql_version: config.version.clone(),
         };
