@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.157.3](https://github.com/metalbear-co/mirrord/tree/3.157.3) - 2025-08-20
+
+
+### Added
+
+- Add rtt metrics to the PingPong (so we can check mirrord<->operator latency).
+
+
+### Changed
+
+- mirrord-agent and mirrord-intproxy now include the crate version in the
+  produced HTTP 502 responses.
+
+
+### Fixed
+
+- Fixed a bug in automatic iptables backend detection in the mirrord agent.
+
+
+### Internal
+
+- Added logic for adding debug args to `mirrord intproxy` and `mirrord
+  extproxy`.
+- Improved internal proxy debug logs.
+
 ## [3.157.2](https://github.com/metalbear-co/mirrord/tree/3.157.2) - 2025-08-14
 
 ### Added
