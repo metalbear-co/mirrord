@@ -13,7 +13,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Add rtt metrics to the PingPong (so we can check mirrord<->operator latency).
+- Add rtt metrics (prometheus) for checking mirrord and operator latency.
 
 
 ### Changed
