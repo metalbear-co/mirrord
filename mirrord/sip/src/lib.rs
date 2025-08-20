@@ -1145,10 +1145,13 @@ mod main {
                 SipStatus::SipBinary(_),
             ));
             assert!(matches!(
-                get_sip_status(signed_temp_file_path, SipPatchOptions {
-                    patch: &[],
-                    skip: &[signed_temp_file_path.to_string()],
-                })
+                get_sip_status(
+                    signed_temp_file_path,
+                    SipPatchOptions {
+                        patch: &[],
+                        skip: &[signed_temp_file_path.to_string()],
+                    }
+                )
                 .unwrap(),
                 SipStatus::NoSip,
             ));
