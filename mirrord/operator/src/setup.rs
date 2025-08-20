@@ -30,6 +30,7 @@ use thiserror::Error;
 use crate::crd::{
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
+    mysql_branching::MysqlBranchDatabase,
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
     session::MirrordClusterSession,
@@ -103,6 +104,7 @@ pub struct SetupOptions {
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
     pub stateful_sessions: bool,
+    pub mysql_branching: bool,
 }
 
 #[derive(Debug)]
@@ -123,6 +125,7 @@ pub struct Operator {
     sqs_splitting: bool,
     kafka_splitting: bool,
     stateful_sessions: bool,
+    mysql_branching: bool,
 }
 
 impl Operator {
@@ -136,6 +139,7 @@ impl Operator {
             kafka_splitting,
             application_auto_pause,
             stateful_sessions,
+            mysql_branching,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -200,6 +204,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             stateful_sessions,
+            mysql_branching,
         }
     }
 }
@@ -290,6 +295,11 @@ impl OperatorSetup for Operator {
         if self.stateful_sessions {
             writer.write_all(b"---\n")?;
             MirrordClusterSession::crd().to_writer(&mut writer)?;
+        }
+
+        if self.mysql_branching {
+            writer.write_all(b"---\n")?;
+            MysqlBranchDatabase::crd().to_writer(&mut writer)?;
         }
 
         Ok(())
