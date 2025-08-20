@@ -2,10 +2,11 @@ use std::{collections::HashMap, fmt::Formatter};
 
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
+use mirrord_config::target::Target;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::crd::{kube_target::KubeTarget, session::MirrordClusterSessionOwner};
+use crate::crd::session::MirrordClusterSessionOwner;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -24,7 +25,7 @@ pub struct MysqlBranchDatabaseSpec {
     /// MySQL database name.
     pub database_name: String,
     /// Target k8s resource to extract connection source info from.
-    pub target: KubeTarget,
+    pub target: Target,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// MySQL server image version, e.g. "8.0".
