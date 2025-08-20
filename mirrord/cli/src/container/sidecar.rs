@@ -1,4 +1,4 @@
-use std::{fmt, io, net::SocketAddr, ops::Not, path::PathBuf, process::Stdio, time::Duration};
+use std::{fmt, io, net::SocketAddr, ops::Not, process::Stdio, time::Duration};
 
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
