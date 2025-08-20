@@ -780,6 +780,12 @@ pub(super) struct OperatorSetupParams {
         hide = true
     )]
     pub(super) stateful_sessions: bool,
+
+    /// Enable MySQL database branching.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a mysql branching component.
+    #[arg(long, visible_alias = "mysql", default_value_t = false)]
+    pub(super) mysql_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.
