@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::{net::IpAddr, path::PathBuf};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -76,4 +76,7 @@ pub struct ContainerConfig {
     ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
+
+    #[config(default = PathBuf::from(r"/var/run/mirrord/mirrord-tls.pem"))]
+    pub container_tls_path: PathBuf,
 }

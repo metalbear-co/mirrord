@@ -134,11 +134,15 @@ impl IntproxySidecar {
             let client_pem_path = tls.client_pem().to_str().ok_or_else(|| {
                 IntproxySidecarError::NonUtf8Path(tls.client_pem().to_string_lossy().into_owned())
             })?;
-            let container_path = "/tmp/mirrord-tls.pem";
-            sidecar_command.add_volume(client_pem_path, container_path, true);
+
+            sidecar_command.add_volume(
+                client_pem_path,
+                &config.container.container_tls_path.to_string_lossy(),
+                true,
+            );
             AgentConnectInfo::ExternalProxy {
                 proxy_addr: extproxy_addr,
-                tls_pem: Some(PathBuf::from(container_path)),
+                tls_pem: Some(config.container.container_tls_path.clone()),
             }
         } else {
             AgentConnectInfo::ExternalProxy {
