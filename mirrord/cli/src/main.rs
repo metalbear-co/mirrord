@@ -505,7 +505,6 @@ async fn execve_process<P>(
 where
     P: Progress,
 {
-
     // Add .exe extension if necessary on Windows
     // From CreateProcessW documentation:
     // lpApplicationName - This parameter must include the file name extension; no default extension is assumed.

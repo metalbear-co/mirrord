@@ -31,93 +31,90 @@ pub struct WindowsProcess {
 
 impl WindowsProcess {
     pub async fn join_std_pipes(&mut self) -> windows::core::Result<i32> {
-        use std::{
-            io::{self, Read, Write},
-            sync::{
-                Arc,
-                atomic::{AtomicBool, Ordering},
-            },
-        };
-
-        let process_done = Arc::new(AtomicBool::new(false));
+        use std::io::{self, Read, Write};
 
         // Spawn a task to copy stdout
         let mut stdout = std::mem::replace(
             &mut self.stdout,
             File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
         );
-        let process_done_stdout = process_done.clone();
-        let stdout_handle = tokio::task::spawn_blocking(move || {
-            let mut buffer = [0; 1024];
-            while !process_done_stdout.load(Ordering::Relaxed) {
-                match stdout.read(&mut buffer) {
-                    Ok(0) => break, // EOF
-                    Ok(n) => {
-                        io::stdout().write_all(&buffer[..n]).ok();
-                        io::stdout().flush().ok();
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-
-        // Spawn a task to copy stderr
         let mut stderr = std::mem::replace(
             &mut self.stderr,
             File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
         );
-        let process_done_stderr = process_done.clone();
-        let stderr_handle = tokio::task::spawn_blocking(move || {
-            let mut buffer = [0; 1024];
-            while !process_done_stderr.load(Ordering::Relaxed) {
-                match stderr.read(&mut buffer) {
-                    Ok(0) => break, // EOF
-                    Ok(n) => {
-                        io::stderr().write_all(&buffer[..n]).ok();
-                        io::stderr().flush().ok();
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
 
-        // Spawn a task to handle stdin
-        let mut stdin = std::mem::replace(
-            &mut self.stdin,
-            File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
-        );
-        let process_done_stdin = process_done.clone();
-        let stdin_handle = tokio::task::spawn_blocking(move || {
-            let mut buffer = [0; 1024];
-            while !process_done_stdin.load(Ordering::Relaxed) {
-                match io::stdin().read(&mut buffer) {
-                    Ok(0) => break, // EOF
+        let stdout_handle = tokio::task::spawn_blocking(move || {
+            let mut buffer = [0; 4096];
+            let mut all_output = Vec::new();
+            
+            loop {
+                match stdout.read(&mut buffer) {
+                    Ok(0) => {
+                        break; // EOF
+                    }
                     Ok(n) => {
-                        if stdin.write_all(&buffer[..n]).is_err() || stdin.flush().is_err() {
+                        all_output.extend_from_slice(&buffer[..n]);
+                        // Immediately write to stdout
+                        if let Err(_) = io::stdout().write_all(&buffer[..n]) {
                             break;
                         }
+                        let _ = io::stdout().flush();
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+            
+            all_output
+        });
+
+        let stderr_handle = tokio::task::spawn_blocking(move || {
+            let mut buffer = [0; 4096];
+            loop {
+                match stderr.read(&mut buffer) {
+                    Ok(0) => {
+                        break; // EOF
+                    }
+                    Ok(n) => {
+                        if let Err(_) = io::stderr().write_all(&buffer[..n]) {
+                            break;
+                        }
+                        let _ = io::stderr().flush();
+                    }
+                    Err(_) => {
+                        break;
+                    }
                 }
             }
         });
 
-        // Wait for the process to complete with a reasonable timeout
-        self.join(Duration::from_secs(300)); // 5 minutes timeout
+        // Wait for the process to complete asynchronously
+        let exit_code = tokio::task::spawn_blocking({
+            let process_handle_raw = self.process_info.hProcess.0 as usize;
+            move || {
+                unsafe {
+                    let process_handle = HANDLE(process_handle_raw as *mut std::ffi::c_void);
+                    WaitForSingleObject(process_handle, u32::MAX);
+                    
+                    // Get exit code
+                    let mut exit_code: u32 = 0;
+                    if windows::Win32::System::Threading::GetExitCodeProcess(process_handle, &mut exit_code).is_ok() {
+                        exit_code as i32
+                    } else {
+                        1
+                    }
+                }
+            }
+        }).await.unwrap_or(1);
 
-        // Signal I/O tasks to finish
-        process_done.store(true, Ordering::Relaxed);
-
-        // Wait a short time for I/O tasks to complete
-        let _ = tokio::time::timeout(Duration::from_secs(1), async {
+        // Wait for I/O tasks to complete
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;
-            let _ = stdin_handle.await;
-        })
-        .await;
+        }).await;
 
-        // Return the exit code
-        self.exit_code()
+        Ok(exit_code)
     }
 
     pub fn join(&self, duration: Duration) -> bool {
