@@ -17,15 +17,6 @@ use crate::{
 #[error("agent sent an unexpected message: {0:?}")]
 pub struct UnexpectedAgentMessage(pub DaemonMessage);
 
-/// Convenience error type for internal errors. Used to wrap all internal errors.
-#[derive(Error, Debug)]
-pub(crate) enum InternalProxyError {
-    #[error(transparent)]
-    Startup(#[from] ProxyStartupError),
-    #[error(transparent)]
-    Runtime(#[from] ProxyRuntimeError),
-}
-
 /// This kind of error causes a partial failure of the proxy, meaning that for these errors does
 /// exist a failover strategy, so in case of incurring of this error, the proxy change behavior,
 /// according to [`crate::FailoverStrategy`]

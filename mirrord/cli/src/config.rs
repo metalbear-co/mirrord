@@ -99,6 +99,14 @@ pub(super) enum Commands {
         /// Port on which the extproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+        /// Debug arguments.
+        ///
+        /// These are passed only for visibility in `ps` output,
+        /// to improve debugging experience.
+        ///
+        /// Should not be used from within the extproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
     },
 
     /// Spawned:
@@ -112,9 +120,14 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
-        /// Log file destination for the intproxy.
-        #[arg(long)]
-        logfile: Option<PathBuf>,
+        /// Debug arguments.
+        ///
+        /// These are passed only for visibility in `ps` output,
+        /// to improve debugging experience.
+        ///
+        /// Should not be used from within the intproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
     },
 
     /// Forward local ports to hosts available from the cluster
