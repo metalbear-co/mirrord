@@ -389,8 +389,7 @@ with mirroring non HTTP/1 traffic.
 
 When this is set, `network_interface` setting is ignored.
 
-Defaults to `false` in mirrord for Teams.
-Otherwise, defaults to `true`.
+Defaults to true.
 
 ### agent.priority_class {#agent-priority_class}
 
