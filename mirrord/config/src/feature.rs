@@ -125,5 +125,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("copy_target", &self.copy_target);
         analytics.add("hostname", self.hostname);
         analytics.add("split_queues", &self.split_queues);
+        analytics.add("db_branches", &self.db_branches);
     }
 }
