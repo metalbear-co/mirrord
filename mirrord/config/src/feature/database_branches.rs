@@ -75,6 +75,7 @@ pub enum DatabaseType {
 
 /// Options for connecting to the database.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConnectionSource {
     Url(ConnectionSourceKind),
 }

@@ -1175,12 +1175,7 @@ impl OperatorApi<PreparedClientCert> {
 
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,
-        } = DatabaseBranchParams::new(
-            &layer_config.feature.db_branches,
-            &target,
-            namespace,
-            self.client_cert.cert.public_key_data().as_ref(),
-        );
+        } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
         let mysql_branch_names = create_mysql_params
             .values()
             .map(|p| p.name.clone())
@@ -1190,7 +1185,7 @@ impl OperatorApi<PreparedClientCert> {
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
 
         create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
-        create_mysql_branches(&mysql_branch_api, create_mysql_params, progress).await?;
+        create_mysql_branches(&mysql_branch_api, create_mysql_params, &subtask).await?;
         subtask.success(None);
 
         Ok(mysql_branch_names)

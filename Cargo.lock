@@ -4674,7 +4674,6 @@ dependencies = [
  "bincode",
  "chrono",
  "futures",
- "hex",
  "http 1.3.1",
  "http-body-util",
  "hyper 1.7.0",
@@ -4701,6 +4700,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
