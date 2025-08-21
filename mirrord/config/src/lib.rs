@@ -429,18 +429,11 @@ impl LayerConfig {
     /// This function **does not** use [`LayerConfig::RESOLVED_CONFIG_ENV`] nor
     /// [`LayerConfig::decode`]. It resolves the config from scratch.
     pub fn resolve(context: &mut ConfigContext) -> Result<Self, ConfigError> {
-        let mut config = if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
+        if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
             LayerFileConfig::from_path(path)?.generate_config(context)
         } else {
             LayerFileConfig::default().generate_config(context)
-        }?;
-
-        // OSS-specific adjustment
-        //
-        // `agent.passthrough_mirroring` is enabled by default in OSS.
-        config.agent.passthrough_mirroring = config.agent.passthrough_mirroring.or(Some(true));
-
-        Ok(config)
+        }
     }
 
     /// Verifies that there are no conflicting settings in this config.

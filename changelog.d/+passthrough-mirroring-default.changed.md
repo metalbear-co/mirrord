@@ -1,0 +1,1 @@
+`agent.passthrough_mirroring` now defaults to `true` in both OSS and mfT.

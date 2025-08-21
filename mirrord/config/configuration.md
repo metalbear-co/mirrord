@@ -389,8 +389,7 @@ with mirroring non HTTP/1 traffic.
 
 When this is set, `network_interface` setting is ignored.
 
-Defaults to `false` in mirrord for Teams.
-Otherwise, defaults to `true`.
+Defaults to true.
 
 ### agent.priority_class {#agent-priority_class}
 
@@ -1846,8 +1845,8 @@ Defaults to `mirrord=info,warn`.
 
 How often to log information about connected processes in seconds.
 
-This feature logs details about processes that are currently connected to the internal proxy,
-including their PID, process name, command line, and connection status.
+This feature logs details about processes that are currently connected to the internal
+proxy, including their PID, process name, command line, and connection status.
 
 ```json
 {
@@ -1856,8 +1855,6 @@ including their PID, process name, command line, and connection status.
   }
 }
 ```
-
-Defaults to 60 seconds.
 
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 
