@@ -245,7 +245,7 @@ impl OperatorApi<NoClientCert> {
                 match discovery::operator_installed(&client).await {
                     // operator is required, but we failed for some reason
                     Err(..) if config.operator == Some(true) => error,
-                    // we tried to find the operator, it's not there, but it isn't required
+                    // the operator is not installed, or discovery failed and the operator is not required
                     Ok(false) | Err(..) => {
                         return Ok(None);
                     }
