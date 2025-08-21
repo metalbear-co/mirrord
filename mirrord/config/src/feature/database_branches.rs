@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,12 @@ impl Deref for DatabaseBranchesConfig {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DatabaseBranchesConfig {
+    pub fn mysql(&self) -> impl '_ + Iterator<Item = &DatabaseBranchConfig> {
+        self.0.iter().filter(|db| db._type == DatabaseType::MySql)
     }
 }
 
@@ -99,4 +106,10 @@ impl MirrordConfig for DatabaseBranchesConfig {
 
 impl FromMirrordConfig for DatabaseBranchesConfig {
     type Generator = Self;
+}
+
+impl CollectAnalytics for &DatabaseBranchesConfig {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("mysql_branch_count", self.mysql().count());
+    }
 }
