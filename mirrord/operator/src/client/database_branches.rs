@@ -16,8 +16,8 @@ use mirrord_config::{
     target::{Target, TargetDisplay},
 };
 use mirrord_progress::Progress;
-use sha2::{Digest, Sha256};
 use tracing::Level;
+use uuid::Uuid;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
@@ -96,6 +96,10 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
 }
 
 /// Given parameters of all MySQL branch databases needed for a session, list reusable ones.
+///
+/// A MySQL branch is considered reusable if
+/// 1. it has a user specified unique ID, and
+/// 2. it is in the "Ready" phase.
 pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
     api: &Api<MysqlBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MysqlBranchParams>,
@@ -109,8 +113,10 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
             "{} in ({})",
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL,
             params
-                .keys()
-                .map(|id| id.as_ref())
+                .iter()
+                .filter_map(
+                    |(id, _)| matches!(id, BranchDatabaseId::Specified(_)).then(|| id.as_ref())
+                )
                 .collect::<Vec<_>>()
                 .join(",")
         ))
@@ -134,7 +140,7 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
                 false
             }
         })
-        .map(|db| (BranchDatabaseId(db.spec.id.clone()), db))
+        .map(|db| (db.spec.id.clone().into(), db))
         .collect::<HashMap<_, _>>();
 
     subtask.success(Some(&format!(
@@ -152,22 +158,17 @@ impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
     /// We derive branch database ID from inputs unless the user explicitly specifies it.
-    pub(crate) fn new(
-        config: &DatabaseBranchesConfig,
-        target: &Target,
-        namespace: &str,
-        client_public_key: &[u8],
-    ) -> Self {
+    pub(crate) fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
         let mut mysql = HashMap::new();
         for branch_db_config in config.0.iter() {
             let id = if let Some(id) = branch_db_config.id.clone() {
-                BranchDatabaseId(id)
+                BranchDatabaseId::specified(id)
             } else {
-                BranchDatabaseId::new(client_public_key, target, namespace, &branch_db_config.name)
+                BranchDatabaseId::generate_new()
             };
             match branch_db_config._type {
                 DatabaseType::MySql => {
-                    let params = MysqlBranchParams::new(id.0.as_str(), branch_db_config, target);
+                    let params = MysqlBranchParams::new(id.as_ref(), branch_db_config, target);
                     mysql.insert(id, params)
                 }
             };
@@ -182,34 +183,44 @@ impl DatabaseBranchParams {
 /// This Id is used for selecting reusable branch database and should not be confused with
 /// Kubernetes resource uid.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct BranchDatabaseId(String);
+pub(crate) enum BranchDatabaseId {
+    Specified(String),
+    Generated(String),
+}
 
 impl BranchDatabaseId {
-    pub(crate) fn new(
-        client_public_key: &[u8],
-        target: &Target,
-        namespace: &str,
-        database_name: &str,
-    ) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(client_public_key);
-        hasher.update(target.to_string());
-        hasher.update(namespace);
-        hasher.update(database_name);
-        let hash = hasher.finalize();
-        Self(hex::encode(hash))
+    /// Use a specified ID directly.
+    pub(crate) fn specified(value: String) -> Self {
+        Self::Specified(value)
+    }
+
+    /// Generate a new UUID.
+    pub(crate) fn generate_new() -> Self {
+        Self::Generated(Uuid::new_v4().to_string())
+    }
+}
+
+impl From<String> for BranchDatabaseId {
+    fn from(value: String) -> Self {
+        BranchDatabaseId::Specified(value)
     }
 }
 
 impl std::fmt::Display for BranchDatabaseId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        match self {
+            BranchDatabaseId::Specified(id) | BranchDatabaseId::Generated(id) => {
+                write!(f, "{}", id)
+            }
+        }
     }
 }
 
 impl AsRef<str> for BranchDatabaseId {
     fn as_ref(&self) -> &str {
-        &self.0
+        match self {
+            BranchDatabaseId::Specified(id) | BranchDatabaseId::Generated(id) => id.as_ref(),
+        }
     }
 }
 

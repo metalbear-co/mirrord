@@ -156,9 +156,6 @@ rcgen = "0.13"
 # Used by `config`, `operator`.
 schemars = { version = "0.8.11" }
 
-# Used by `operator`.
-sha2 = { version = "0.10" }
-
 # Used by `config`, `vpn`.
 ipnet = "2.8"
 
@@ -195,7 +192,7 @@ uuid = { version = "1.17", features = ["v4", "serde"] }
 # Used by `cli`, `auth`
 fs4 = { version = "0.13", features = ["tokio"], default-features = false }
 
-# Used by `cli`, `sip`, `operator`.
+# Used by `cli`, `sip`
 hex = "0.4"
 
 # Used by `config`, `protocol`.
