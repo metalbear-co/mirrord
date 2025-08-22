@@ -8,12 +8,14 @@ use thiserror::Error;
 pub enum Error {
     #[error("Failed applying hook for function {0}, dll {1}")]
     FailedApplyingAPIHook(String, String),
+
     #[error("Environment variable for intproxy address is missing: {0}")]
     MissingEnvIntProxyAddr(VarError),
     #[error("Intproxy address malformed: {0}")]
     MalformedIntProxyAddr(AddrParseError),
-    #[error("Intproxy address {0} is unreachable")]
-    UnreachableIntProxyAddr(SocketAddr),
+    #[error("Intproxy address {0} is unreachable: {1}")]
+    UnreachableIntProxyAddr(SocketAddr, std::io::Error),
 }
 
+#[allow(unused)]
 pub type Result<T> = std::result::Result<T, Error>;

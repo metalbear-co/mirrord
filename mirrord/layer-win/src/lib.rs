@@ -21,7 +21,7 @@ pub(crate) mod proxy_connection;
 
 /// Global variable holding the [`DetourGuard`]. Must be mutable as
 /// applying, creating, etc... hooks modifies internal state.
-pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
+pub(crate) static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
     unsafe {
@@ -40,20 +40,19 @@ fn release_detour_guard() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
+pub(crate) static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
 fn initialize_proxy_connection() -> anyhow::Result<()> {
     let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-        .map_err(|x| error::Error::MissingEnvIntProxyAddr(x))?
+        .map_err(error::Error::MissingEnvIntProxyAddr)?
         .parse::<SocketAddr>()
-        .map_err(|x| error::Error::MalformedIntProxyAddr(x))?;
+        .map_err(error::Error::MalformedIntProxyAddr)?;
 
     let new_connection = ProxyConnection::new(address)?;
-    unsafe {
-        dbg!(&new_connection);
-        PROXY_CONNECTION.set(new_connection).expect("Could not initialize PROXY_CONNECTION");
+    dbg!(&new_connection);
 
-        println!("[+] ...initialized proxy_conn...");
+    unsafe {
+        PROXY_CONNECTION.set(new_connection).expect("Could not initialize PROXY_CONNECTION");
     }
 
     Ok(())
