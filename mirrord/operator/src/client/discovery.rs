@@ -1,8 +1,9 @@
 use kube::{Client, Resource, api::GroupVersionKind, discovery};
+use tracing::Level;
 
 use crate::crd::MirrordOperatorCrd;
 
-#[tracing::instrument(level = "trace", skip_all, ret, err)]
+#[tracing::instrument(level = Level::TRACE, skip_all, ret, err)]
 pub async fn operator_installed(client: &Client) -> kube::Result<bool> {
     let gvk = GroupVersionKind {
         group: MirrordOperatorCrd::group(&()).into_owned(),
