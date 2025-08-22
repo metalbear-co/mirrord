@@ -555,11 +555,11 @@ fn sip_only_layer_start(
         readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
     };
     let debugger_ports = DebuggerPorts::from_env();
-    let setup = LayerSetup::new(config, debugger_ports, true);
+    let layer_setup = LayerSetup::new(config, debugger_ports, true);
 
-    SETUP.set(setup).expect("SETUP set failed");
+    SETUP.set(layer_setup).expect("SETUP set failed");
 
-    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
