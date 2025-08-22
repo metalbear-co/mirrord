@@ -109,12 +109,21 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ vfork_emulation {#experimental-vfork_emulation}
     ///
     /// Enables vfork emulation within the mirrord-layer.
-    /// Might solve rare stack corruption issues.  
+    /// Might solve rare stack corruption issues.
     ///
     /// Note that for Go applications on ARM64, this feature is not yet supported,
     /// and this setting is ignored.
     #[config(default = false)]
     pub vfork_emulation: bool,
+
+    /// ### _experimental_ hook_rename {#experimental-hook_rename}
+    ///
+    /// Enables hooking the `rename` function.
+    ///
+    /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
+    /// `twig`, to create and rename temporary files.
+    #[config(default = false)]
+    pub hook_rename: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {

@@ -650,7 +650,7 @@ fn enable_hooks(state: &LayerSetup) {
     }
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, state) };
     }
 
     #[cfg(all(

@@ -44,7 +44,7 @@ pub static STATFS_V2_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.18.0".parse().expect("Bad Identifier"));
 
 pub static RENAME_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.19.9".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.20.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes

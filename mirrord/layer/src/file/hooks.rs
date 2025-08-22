@@ -46,14 +46,15 @@ use crate::{
     },
     hooks::HookManager,
     replace,
+    setup::LayerSetup,
 };
 
 #[cfg(target_os = "macos")]
 #[allow(non_camel_case_types)]
 type stat64 = stat;
 
-/// Take the original raw c_char pointer and a resulting bypass, and return either the original pointer or
-/// a different one according to the bypass.
+/// Take the original raw c_char pointer and a resulting bypass, and return either the original
+/// pointer or a different one according to the bypass.
 ///
 /// We pass reference to bypass to make sure the bypass lives with the pointer.
 ///
@@ -1359,7 +1360,7 @@ pub(crate) unsafe extern "C" fn unlinkat_detour(
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
+pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &LayerSetup) {
     unsafe {
         replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
         replace!(hook_manager, "open64", open64_detour, FnOpen64, FN_OPEN64);
@@ -1507,7 +1508,9 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_REALPATH_DARWIN_EXTSN
         );
 
-        replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
+        if state.experimental().hook_rename {
+            replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
+        }
 
         #[cfg(target_os = "linux")]
         {
