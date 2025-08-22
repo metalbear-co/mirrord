@@ -110,7 +110,7 @@ pub struct HttpFilterConfig {
     /// ##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
     ///
     ///
-    /// Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods).
+    /// Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.
     ///
     /// Case-insensitive. If the request method matches the filter, the request is stolen.
     #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
