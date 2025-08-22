@@ -462,10 +462,9 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
-// TODO(alex) [high]: Remember to change this!
 /// Minimal mirrord-protocol version that allows [`HttpFilter::Method`]
 pub static HTTP_METHOD_FILTER_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.20.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows:
 /// 1. [`DaemonTcp::NewConnectionV2`]
