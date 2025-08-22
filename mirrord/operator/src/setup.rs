@@ -156,9 +156,11 @@ impl Operator {
             kafka_splitting,
             application_auto_pause,
             stateful_sessions,
+            mysql_branching,
         });
         let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
-        let user_cluster_role = OperatorClusterUserRole::new();
+        let user_cluster_role =
+            OperatorClusterUserRole::new(OperatorClusterUserRoleOptions { mysql_branching });
 
         let (role, role_binding) = kafka_splitting
             .then(|| {
@@ -563,6 +565,7 @@ pub struct OperatorClusterRoleOptions {
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
     pub stateful_sessions: bool,
+    pub mysql_branching: bool,
 }
 
 #[derive(Debug)]
@@ -794,6 +797,32 @@ impl OperatorClusterRole {
             });
         }
 
+        if options.mysql_branching {
+            rules.extend([
+                PolicyRule {
+                    api_groups: Some(vec![MysqlBranchDatabase::group(&()).into_owned()]),
+                    resources: Some(vec![MysqlBranchDatabase::plural(&()).into_owned()]),
+                    verbs: ["list", "get", "watch", "delete", "update", "patch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec![MysqlBranchDatabase::group(&()).into_owned()]),
+                    resources: Some(vec![format!(
+                        "{}/status",
+                        MysqlBranchDatabase::plural(&()).into_owned()
+                    )]),
+                    verbs: ["get", "update", "patch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+            ])
+        }
+
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_CLUSTER_ROLE_NAME.to_owned()),
@@ -994,51 +1023,79 @@ impl OperatorApiService {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct OperatorClusterUserRoleOptions {
+    pub mysql_branching: bool,
+}
+
 #[derive(Debug)]
 pub struct OperatorClusterUserRole(ClusterRole);
 
 impl OperatorClusterUserRole {
-    pub fn new() -> Self {
+    pub fn new(options: OperatorClusterUserRoleOptions) -> Self {
+        let mut rules = vec![
+            PolicyRule {
+                api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                resources: Some(vec![
+                    "copytargets".to_owned(),
+                    "mirrordoperators".to_owned(),
+                    "targets".to_owned(),
+                    "targets/port-locks".to_owned(),
+                    MirrordOperatorUser::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["get".to_owned(), "list".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                resources: Some(vec![
+                    "mirrordoperators/certificate".to_owned(),
+                    "copytargets".to_owned(),
+                ]),
+                verbs: vec!["create".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                resources: Some(vec!["targets".to_owned(), "copytargets".to_owned()]),
+                verbs: vec!["proxy".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                resources: Some(vec!["sessions".to_owned()]),
+                verbs: vec!["deletecollection".to_owned(), "delete".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![MirrordClusterProfile::group(&()).into_owned()]),
+                resources: Some(vec![MirrordClusterProfile::plural(&()).into_owned()]),
+                verbs: vec!["list", "get"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            }
+        ];
+
+        if options.mysql_branching {
+            rules.extend([PolicyRule {
+                api_groups: Some(vec![MysqlBranchDatabase::group(&()).into_owned()]),
+                resources: Some(vec![MysqlBranchDatabase::plural(&()).into_owned()]),
+                verbs: vec!["create", "list", "get", "watch"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            }]);
+        }
+
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
                 ..Default::default()
             },
-            rules: Some(vec![
-                PolicyRule {
-                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
-                    resources: Some(vec![
-                        "copytargets".to_owned(),
-                        "mirrordoperators".to_owned(),
-                        "targets".to_owned(),
-                        "targets/port-locks".to_owned(),
-                        MirrordOperatorUser::plural(&()).into_owned(),
-                    ]),
-                    verbs: vec!["get".to_owned(), "list".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
-                    resources: Some(vec![
-                        "mirrordoperators/certificate".to_owned(),
-                        "copytargets".to_owned(),
-                    ]),
-                    verbs: vec!["create".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
-                    resources: Some(vec!["targets".to_owned(), "copytargets".to_owned()]),
-                    verbs: vec!["proxy".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
-                    resources: Some(vec!["sessions".to_owned()]),
-                    verbs: vec!["deletecollection".to_owned(), "delete".to_owned()],
-                    ..Default::default()
-                },
-            ]),
+            rules: Some(rules),
             ..Default::default()
         };
 
@@ -1048,7 +1105,7 @@ impl OperatorClusterUserRole {
 
 impl Default for OperatorClusterUserRole {
     fn default() -> Self {
-        Self::new()
+        Self::new(Default::default())
     }
 }
 
