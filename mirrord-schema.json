@@ -652,7 +652,7 @@
         },
         "container_tls_path": {
           "title": "container.container_tls_path {#container-container_tls_path}",
-          "description": "When using TLS with `mirrord container` (TLS is enabled by default), you can specify the path where the certificate `.pem` file will be created, in the container.\n\nDefaults to `\"/var/run/mirrord/mirrord-tls.pem\"`.",
+          "description": "When using TLS with `mirrord container` (TLS is enabled by default), you can specify the path where the certificate `.pem` file will be created, in the container.\n\nDefaults to `\"/mirrord/mirrord-tls.pem\"`.",
           "type": [
             "string",
             "null"

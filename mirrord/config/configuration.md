@@ -518,7 +518,7 @@ Don't add `--rm` to sidecar command to prevent cleanup.
 When using TLS with `mirrord container` (TLS is enabled by default), you can specify the
 path where the certificate `.pem` file will be created, in the container.
 
-Defaults to `"/var/run/mirrord/mirrord-tls.pem"`.
+Defaults to `"/mirrord/mirrord-tls.pem"`.
 
 ### container.override_host_ip {#container-override_host_ip}
 

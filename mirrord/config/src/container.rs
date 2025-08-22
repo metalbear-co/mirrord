@@ -82,7 +82,7 @@ pub struct ContainerConfig {
     /// When using TLS with `mirrord container` (TLS is enabled by default), you can specify the
     /// path where the certificate `.pem` file will be created, in the container.
     ///
-    /// Defaults to `"/var/run/mirrord/mirrord-tls.pem"`.
-    #[config(default = PathBuf::from(r"/var/run/mirrord/mirrord-tls.pem"))]
+    /// Defaults to `"/mirrord/mirrord-tls.pem"`.
+    #[config(default = PathBuf::from(r"/mirrord/mirrord-tls.pem"))]
     pub container_tls_path: PathBuf,
 }
