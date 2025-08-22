@@ -240,11 +240,17 @@ impl OperatorApi<NoClientCert> {
                 }));
             }
 
+            // kube api failed to get the operator, let's see if it's installed though
             Err(error @ kube::Error::Api(..)) => {
                 match discovery::operator_installed(&client).await {
+                    // operator is required, but we failed for some reason
+                    Err(..) if config.operator == Some(true) => error,
+                    // the operator is not installed, or discovery failed and the operator is not
+                    // required
                     Ok(false) | Err(..) => {
                         return Ok(None);
                     }
+                    // the operator is there, but we failed getting it
                     Ok(true) => error,
                 }
             }
