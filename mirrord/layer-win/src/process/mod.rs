@@ -2,7 +2,7 @@
 
 use std::ffi::c_void;
 
-use str_win::{string_to_u16_buffer, string_to_u8_buffer};
+use str_win::{string_to_u8_buffer, string_to_u16_buffer};
 use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress};
 
 pub fn get_module_base<T: AsRef<str>>(module: T) -> *mut c_void {

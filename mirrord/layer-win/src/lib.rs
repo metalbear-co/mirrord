@@ -1,7 +1,8 @@
 #![allow(static_mut_refs)]
-use std::thread;
+use std::{net::SocketAddr, sync::OnceLock, thread};
 
 use minhook_detours_rs::guard::DetourGuard;
+use mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
@@ -10,14 +11,53 @@ use winapi::{
     },
 };
 
-use crate::hooks::initialize_hooks;
+use crate::{hooks::initialize_hooks, proxy_connection::ProxyConnection};
 
-mod error;
-mod hooks;
-mod macros;
-pub mod process;
+pub(crate) mod error;
+pub(crate) mod hooks;
+pub(crate) mod macros;
+pub(crate) mod process;
+pub(crate) mod proxy_connection;
 
+/// Global variable holding the [`DetourGuard`]. Must be mutable as
+/// applying, creating, etc... hooks modifies internal state.
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
+
+fn initialize_detour_guard() -> anyhow::Result<()> {
+    unsafe {
+        DETOUR_GUARD = Some(DetourGuard::new()?);
+    }
+
+    Ok(())
+}
+
+fn release_detour_guard() -> anyhow::Result<()> {
+    unsafe {
+        // This will release the hooking engine, removing all hooks.
+        DETOUR_GUARD.as_mut().unwrap().try_close()?;
+    }
+
+    Ok(())
+}
+
+pub static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
+
+fn initialize_proxy_connection() -> anyhow::Result<()> {
+    let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
+        .map_err(|x| error::Error::MissingEnvIntProxyAddr(x))?
+        .parse::<SocketAddr>()
+        .map_err(|x| error::Error::MalformedIntProxyAddr(x))?;
+
+    let new_connection = ProxyConnection::new(address)?;
+    unsafe {
+        dbg!(&new_connection);
+        PROXY_CONNECTION.set(new_connection).expect("Could not initialize PROXY_CONNECTION");
+
+        println!("[+] ...initialized proxy_conn...");
+    }
+
+    Ok(())
+}
 
 /// Function that gets called upon DLL initialization ([`DLL_PROCESS_ATTACH`]).
 ///
@@ -68,33 +108,14 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     TRUE
 }
 
-fn initialize_detour_guard() -> anyhow::Result<()> {
-    unsafe {
-        DETOUR_GUARD = Some({
-            let guard = DetourGuard::new().expect("Failed creating DetourGuard");
-            guard
-        });
-    }
-
-    Ok(())
-}
-
-fn release_detour_guard() -> anyhow::Result<()> {
-    unsafe {
-        // This will release the hooking engine, removing all hooks.
-        DETOUR_GUARD.as_mut().unwrap().try_close()?;
-    }
-
-    Ok(())
-}
-
 fn mirrord_start() -> anyhow::Result<()> {
-    initialize_detour_guard()?;
-
     // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
     }
+
+    initialize_proxy_connection()?;
+    initialize_detour_guard()?;
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;
