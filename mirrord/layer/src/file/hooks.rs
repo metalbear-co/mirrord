@@ -52,7 +52,7 @@ use crate::{
 #[allow(non_camel_case_types)]
 type stat64 = stat;
 
-/// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
+/// Take the original raw c_char pointer and a resulting bypass, and return either the original pointer or
 /// a different one according to the bypass.
 ///
 /// We pass reference to bypass to make sure the bypass lives with the pointer.
