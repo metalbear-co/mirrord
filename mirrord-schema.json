@@ -1256,7 +1256,7 @@
         },
         "method_filter": {
           "title": "feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}",
-          "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods).\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
+          "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
           "type": [
             "string",
             "null"
