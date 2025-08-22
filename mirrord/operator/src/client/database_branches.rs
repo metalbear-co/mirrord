@@ -106,21 +106,22 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
     let mut subtask = progress.subtask("listing reusable MySQL branch databases");
-    let label_selector = if params.is_empty() {
-        None
+
+    let specified_ids = params
+        .iter()
+        .filter_map(|(id, _)| matches!(id, BranchDatabaseId::Specified(_)).then(|| id.as_ref()))
+        .collect::<Vec<_>>();
+    let label_selector = if specified_ids.is_empty() {
+        // no branch is reusable as there is no user specified ID.
+        return Ok(HashMap::new());
     } else {
         Some(format!(
             "{} in ({})",
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL,
-            params
-                .iter()
-                .filter_map(
-                    |(id, _)| matches!(id, BranchDatabaseId::Specified(_)).then(|| id.as_ref())
-                )
-                .collect::<Vec<_>>()
-                .join(",")
+            specified_ids.join(",")
         ))
     };
+
     let list_params = ListParams {
         label_selector,
         ..Default::default()
