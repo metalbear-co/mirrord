@@ -107,6 +107,15 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
+    /// ##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
+    ///
+    ///
+    /// Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.
+    ///
+    /// Case-insensitive. If the request method matches the filter, the request is stolen.
+    #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
+    pub method_filter: Option<String>,
+
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// An array of HTTP filters.
@@ -122,6 +131,7 @@ pub struct HttpFilterConfig {
     ///   "all_of": [
     ///     { "header": "x-user: my-user$" },
     ///     { "path": "^/api/v1/my-endpoint" }
+    ///     { "method": "post" }
     ///   ]
     /// }
     /// ```
@@ -142,6 +152,7 @@ pub struct HttpFilterConfig {
     ///   "any_of": [
     ///     { "header": "^x-user: my-user$" },
     ///     { "path": "^/api/v1/my-endpoint" }
+    ///     { "method": "post" }
     ///   ]
     /// }
     /// ```
@@ -175,6 +186,20 @@ impl HttpFilterConfig {
         self.all_of.is_some() || self.any_of.is_some()
     }
 
+    pub fn has_method_filter(&self) -> bool {
+        self.method_filter.is_some()
+            || self.all_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+            || self.any_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+    }
+
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
         if let Some(ports) = self.ports.as_ref()
             && self.is_filter_set()
@@ -197,7 +222,9 @@ pub enum InnerFilter {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
-    Header { header: String },
+    Header {
+        header: String,
+    },
 
     /// ##### feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}
     ///
@@ -207,7 +234,13 @@ pub enum InnerFilter {
     ///
     /// Case-insensitive. Tries to find match in the path (without query) and path+query.
     /// If any of the two matches, the request is stolen.
-    Path { path: String },
+    Path {
+        path: String,
+    },
+
+    Method {
+        method: String,
+    },
 }
 
 /// <!--${internal}-->
@@ -231,6 +264,10 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
+        let method_filter = FromEnv::new("MIRRORD_HTTP_METHOD_FILTER")
+            .source_value(context)
+            .transpose()?;
+
         let all_of = None;
         let any_of = None;
 
@@ -241,6 +278,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         Ok(Self::Generated {
             header_filter,
             path_filter,
+            method_filter,
             all_of,
             any_of,
             ports,

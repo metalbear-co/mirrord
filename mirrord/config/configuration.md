@@ -1321,6 +1321,7 @@ Example:
   "all_of": [
     { "header": "x-user: my-user$" },
     { "path": "^/api/v1/my-endpoint" }
+    { "method": "post" }
   ]
 }
 ```
@@ -1340,6 +1341,7 @@ Example:
   "any_of": [
     { "header": "^x-user: my-user$" },
     { "path": "^/api/v1/my-endpoint" }
+    { "method": "post" }
   ]
 }
 ```
@@ -1352,6 +1354,13 @@ Supports regexes validated by the
 
 The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
 case-insensitive.
+
+##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
+
+
+Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.
+
+Case-insensitive. If the request method matches the filter, the request is stolen.
 
 ##### feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}
 

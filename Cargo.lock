@@ -4659,7 +4659,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.19.8"
+version = "1.20.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4675,6 +4675,8 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "socket2 0.5.10",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
  "thiserror 2.0.12",
  "tracing",
 ]
