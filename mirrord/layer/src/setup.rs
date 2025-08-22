@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::SocketAddr};
+use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
@@ -19,7 +19,7 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpFilter, StealType},
+    tcp::{Filter, HttpFilter, HttpMethodFilter, StealType},
 };
 use regex::RegexSet;
 
@@ -249,6 +249,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: Some(path),
                 header_filter: None,
+                method_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -259,6 +260,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: Some(header),
+                method_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -269,6 +271,18 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
+                method_filter: Some(method),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => StealHttpFilter::Filter(HttpFilter::Method(
+                HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+            )),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
@@ -277,6 +291,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
+                method_filter: None,
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
@@ -285,6 +300,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
+                method_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -305,6 +321,9 @@ impl IncomingMode {
                 }
                 InnerFilter::Header { header } => HttpFilter::Header(
                     Filter::new(header.clone()).expect("invalid filter expression"),
+                ),
+                InnerFilter::Method { method } => HttpFilter::Method(
+                    HttpMethodFilter::from_str(method).expect("invalid method filter string"),
                 ),
             })
             .collect();

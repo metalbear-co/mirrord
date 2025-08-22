@@ -1234,7 +1234,7 @@
       "properties": {
         "all_of": {
           "title": "feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}",
-          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match all of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"all_of\": [ { \"header\": \"x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } ] } ```",
+          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match all of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"all_of\": [ { \"header\": \"x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } { \"method\": \"post\" } ] } ```",
           "type": [
             "array",
             "null"
@@ -1245,7 +1245,7 @@
         },
         "any_of": {
           "title": "feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}",
-          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match at least one of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"any_of\": [ { \"header\": \"^x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } ] } ```",
+          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match at least one of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"any_of\": [ { \"header\": \"^x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } { \"method\": \"post\" } ] } ```",
           "type": [
             "array",
             "null"
@@ -1257,6 +1257,14 @@
         "header_filter": {
           "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
           "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method_filter": {
+          "title": "feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}",
+          "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
           "type": [
             "string",
             "null"
@@ -1506,6 +1514,17 @@
           ],
           "properties": {
             "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "method"
+          ],
+          "properties": {
+            "method": {
               "type": "string"
             }
           }

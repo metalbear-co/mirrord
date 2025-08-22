@@ -26,6 +26,7 @@ use mirrord_protocol::{
         NewTcpConnectionV2, TcpData,
     },
 };
+use semver::Version;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
@@ -90,6 +91,9 @@ pub enum IncomingProxyError {
     SocketSetupFailed(#[source] io::Error),
     #[error("subscribing port failed: {0}")]
     SubscriptionFailed(#[source] ResponseError),
+
+    #[error("HTTP method filter is not supported for this protocol version {0:?}!")]
+    HttpMethodFilterNotSupported(Option<Version>),
 }
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
@@ -186,6 +190,9 @@ pub struct IncomingProxy {
     http_gateways: ConnectionMap<HashMap<RequestId, HttpGatewayHandle>>,
     /// Running [`BackgroundTask`]s utilized by this proxy.
     tasks: BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>,
+
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    protocol_version: Option<Version>,
 }
 
 impl IncomingProxy {
@@ -210,6 +217,7 @@ impl IncomingProxy {
             tcp_proxies: Default::default(),
             http_gateways: Default::default(),
             tasks: Default::default(),
+            protocol_version: None,
         }
     }
 
@@ -638,6 +646,7 @@ impl IncomingProxy {
                         message_bus.send(msg).await;
                     }
                 }
+
                 IncomingRequest::PortUnsubscribe(unsubscribe) => {
                     let msg = self.subscriptions.layer_unsubscribed(layer_id, unsubscribe);
 
@@ -679,8 +688,9 @@ impl IncomingProxy {
                 self.subscriptions.layer_forked(msg.parent, msg.child);
             }
 
-            IncomingProxyMessage::AgentProtocolVersion(version) => {
-                self.response_mode = ResponseMode::from(&version);
+            IncomingProxyMessage::AgentProtocolVersion(protocol_version) => {
+                self.response_mode = ResponseMode::from(&protocol_version);
+                self.protocol_version.replace(protocol_version);
             }
 
             IncomingProxyMessage::ConnectionRefresh => {
