@@ -57,7 +57,7 @@ pub struct MysqlBranchDatabaseStatus {
     pub expire_time: DateTime<Utc>,
     /// Information of sessions that are using this branch database.
     #[serde(default)]
-    pub session_info: HashMap<u64, SessionInfo>,
+    pub session_info: HashMap<String, SessionInfo>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
@@ -81,7 +81,7 @@ impl std::fmt::Display for BranchDatabasePhase {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     /// Session id.
-    pub id: u64,
+    pub id: String,
     /// Owner info of the session.
     pub owner: MirrordClusterSessionOwner,
 }
