@@ -1070,12 +1070,9 @@ impl OperatorClusterUserRole {
             PolicyRule {
                 api_groups: Some(vec![MirrordClusterProfile::group(&()).into_owned()]),
                 resources: Some(vec![MirrordClusterProfile::plural(&()).into_owned()]),
-                verbs: vec!["list", "get"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
+                verbs: vec!["list", "get"].into_iter().map(String::from).collect(),
                 ..Default::default()
-            }
+            },
         ];
 
         if options.mysql_branching {
