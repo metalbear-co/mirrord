@@ -1176,18 +1176,26 @@ impl OperatorApi<PreparedClientCert> {
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
-        let mysql_branch_names = create_mysql_params
-            .values()
-            .map(|p| p.name.clone())
-            .collect::<Vec<_>>();
 
         let reusable_mysql_branches =
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
 
         create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
-        create_mysql_branches(&mysql_branch_api, create_mysql_params, &subtask).await?;
+        let created_mysql_branches =
+            create_mysql_branches(&mysql_branch_api, create_mysql_params, &subtask).await?;
         subtask.success(None);
 
+        let mysql_branch_names = reusable_mysql_branches
+            .values()
+            .chain(created_mysql_branches.values())
+            .map(|branch| {
+                branch
+                    .meta()
+                    .name
+                    .clone()
+                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
+            })
+            .collect::<Result<Vec<String>, _>>()?;
         Ok(mysql_branch_names)
     }
 }

@@ -4,7 +4,7 @@ use std::{
 };
 
 use kube::{
-    Api,
+    Api, Resource,
     api::{ListParams, ObjectMeta},
     runtime::wait::await_condition,
 };
@@ -15,6 +15,7 @@ use mirrord_config::{
     },
     target::{Target, TargetDisplay},
 };
+use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
 use tracing::Level;
 use uuid::Uuid;
@@ -41,13 +42,12 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
     let mut subtask = progress.subtask("creating new MySQL branch databases");
     let mut created_branches = HashMap::new();
-    let branch_names = params.values().map(|p| p.name.clone()).collect::<Vec<_>>();
 
     for (id, params) in params {
-        let name = params.name;
+        let name_prefix = params.name_prefix;
         let branch = MysqlBranchDatabase {
             metadata: ObjectMeta {
-                name: Some(name.clone()),
+                generate_name: Some(name_prefix),
                 labels: Some(params.labels),
                 ..Default::default()
             },
@@ -66,6 +66,17 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         };
     }
     subtask.info("databases created");
+
+    let branch_names = created_branches
+        .values()
+        .map(|branch| {
+            branch
+                .meta()
+                .name
+                .clone()
+                .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let ready = branch_names
         .iter()
@@ -227,7 +238,7 @@ impl AsRef<str> for BranchDatabaseId {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MysqlBranchParams {
-    pub(crate) name: String,
+    pub(crate) name_prefix: String,
     pub(crate) labels: BTreeMap<String, String>,
     pub(crate) spec: MysqlBranchDatabaseSpec,
 }
@@ -236,7 +247,7 @@ impl MysqlBranchParams {
     const MYSQL_BRANCH_DEFAULT_TTL: u64 = 120;
 
     pub(crate) fn new(id: &str, config: &DatabaseBranchConfig, target: &Target) -> Self {
-        let name = format!("{}-mysql-branch-{}", target.name(), &id[..8]);
+        let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = match &config.connection {
             ConnectionSource::Url(kind) => match kind {
                 ConnectionSourceKind::Env {
@@ -260,7 +271,11 @@ impl MysqlBranchParams {
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),
             id.to_string(),
         )]);
-        Self { name, labels, spec }
+        Self {
+            name_prefix,
+            labels,
+            spec,
+        }
     }
 }
 
