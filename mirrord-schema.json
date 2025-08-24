@@ -663,20 +663,26 @@
       "additionalProperties": false
     },
     "CopyTargetFileConfig": {
+      "title": "feature.copy_target {#copy_target}",
+      "description": "Allows the user to target a pod created dynamically from the original [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.\n\nSee the [copy target reference](https://metalbear.co/mirrord/docs/reference/copy-target/) for more details.\n\n### Minimal `copy_target` config {#copy_target-minimal}\n\n```json { \"feature\": { \"copy_target\": true } } ```\n\n### Advanced `copy_target` config {#copy_target-advanced}\n\n```json { \"feature\": { \"copy_target\": { \"enabled\": true, \"scale_down\": true, \"exclude_containers\": [\"my-container\"], \"exclude_init_containers\": [\"my-init-container\"] } } } ```",
       "anyOf": [
         {
+          "description": "Basic configuration that controls whether copy target is enabled (default false).",
           "type": "boolean"
         },
         {
+          "description": "Allows the user to specify both enabling copy target and additional configuration options.",
           "type": "object",
           "properties": {
             "enabled": {
+              "description": "Whether copy target is enabled",
               "type": [
                 "boolean",
                 "null"
               ]
             },
             "exclude_containers": {
+              "description": "List of containers to be ignored by copy_target",
               "type": [
                 "array",
                 "null"
@@ -686,6 +692,7 @@
               }
             },
             "exclude_init_containers": {
+              "description": "List of init containers to be ignored by copy_target",
               "type": [
                 "array",
                 "null"
@@ -695,6 +702,7 @@
               }
             },
             "scale_down": {
+              "description": "Scale down the target deployment to 0 for the time the copied pod is alive",
               "type": [
                 "boolean",
                 "null"
