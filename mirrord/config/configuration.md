@@ -513,6 +513,13 @@ Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 
 Don't add `--rm` to sidecar command to prevent cleanup.
 
+### container.container_tls_path {#container-container_tls_path}
+
+When using TLS with `mirrord container` (TLS is enabled by default), you can specify the
+path where the certificate `.pem` file will be created, in the container.
+
+Defaults to `"/mirrord/mirrord-tls.pem"`.
+
 ### container.override_host_ip {#container-override_host_ip}
 
 Allows to override the IP address for the internal proxy to use
