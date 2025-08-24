@@ -76,4 +76,21 @@ pub struct ContainerConfig {
     ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
+
+    /// ### container.platform {#container-platform}
+    ///
+    /// Platform specification for the target container (e.g., "linux/amd64", "linux/arm64").
+    ///
+    /// When specified, the target container will run with this platform, while the internal proxy
+    /// container will still run on the native platform and contain both architectures (x64/arm64).
+    /// The LD_PRELOAD will automatically use the correct architecture.
+    ///
+    /// ```json
+    /// {
+    ///   "container": {
+    ///     "platform": "linux/amd64"
+    ///   }
+    /// }
+    /// ```
+    pub platform: Option<String>,
 }
