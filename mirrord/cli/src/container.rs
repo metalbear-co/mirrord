@@ -67,7 +67,7 @@ fn get_mirrord_console_addr() -> Option<String> {
 fn resolve_library_path(config: &LayerConfig) -> String {
     if let Some(platform) = &config.container.platform {
         // Extract architecture from platform string (e.g., "linux/amd64" -> "amd64")
-        let arch = platform.split('/').last().unwrap_or("amd64");
+        let arch = platform.split('/').next_back().unwrap_or("amd64");
         let arch_suffix = match arch {
             "amd64" | "x86_64" => "x86_64",
             "arm64" | "aarch64" => "aarch64",
