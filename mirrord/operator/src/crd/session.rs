@@ -75,6 +75,16 @@ impl From<MirrordClusterSessionAgentInfo> for AgentKubernetesConnectInfo {
     }
 }
 
+impl From<&MirrordClusterSessionAgentInfo> for AgentKubernetesConnectInfo {
+    fn from(session_agent: &MirrordClusterSessionAgentInfo) -> Self {
+        AgentKubernetesConnectInfo {
+            agent_port: session_agent.port,
+            pod_name: session_agent.name.clone(),
+            pod_namespace: session_agent.namespace.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionOwner {
