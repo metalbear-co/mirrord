@@ -636,7 +636,7 @@
         },
         "cli_image_lib_path": {
           "title": "container.cli_image_lib_path {#container-cli_image}",
-          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.\n\nDefaults to `\"/opt/mirrord/lib/libmirrord_layer.so\"`.",
+          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.",
           "type": [
             "string",
             "null"
