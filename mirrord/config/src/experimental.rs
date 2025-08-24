@@ -113,7 +113,7 @@ pub struct ExperimentalConfig {
     ///
     /// Note that for Go applications on ARM64, this feature is not yet supported,
     /// and this setting is ignored.
-    #[config(default = false)]
+    #[config(default = true)]
     pub vfork_emulation: bool,
 }
 
