@@ -51,8 +51,7 @@ pub struct ContainerConfig {
     /// Path of the mirrord-layer lib inside the specified mirrord-cli image.
     ///
     /// Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
-    #[config(default = "/opt/mirrord/lib/libmirrord_layer.so")]
-    pub cli_image_lib_path: String,
+    pub cli_image_lib_path: Option<String>,
 
     /// ### container.override_host_ip {#container-override_host_ip}
     ///

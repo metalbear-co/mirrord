@@ -65,6 +65,10 @@ fn get_mirrord_console_addr() -> Option<String> {
 /// architecture-specific path within the multi-architecture container.
 /// If no platform is specified, returns the default path.
 fn resolve_library_path(config: &LayerConfig) -> String {
+    if let Some(path) = &config.container.cli_image_lib_path {
+        return path.clone();
+    }
+
     if let Some(platform) = &config.container.platform {
         // Extract architecture from platform string (e.g., "linux/amd64" -> "amd64")
         let arch = platform.split('/').next_back().unwrap_or("amd64");
@@ -76,9 +80,6 @@ fn resolve_library_path(config: &LayerConfig) -> String {
 
         // Return architecture-specific path
         format!("/opt/mirrord/lib/{}/libmirrord_layer.so", arch_suffix)
-    } else {
-        // Use the configured default path
-        config.container.cli_image_lib_path.clone()
     }
 }
 
