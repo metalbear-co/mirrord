@@ -24,6 +24,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
 };
+use mirrord_layer_lib::{HostnameResult, get_or_init_hostname};
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -40,7 +41,7 @@ use tracing::{error, trace};
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
-use super::{hooks::*, *};
+use super::{hooks::*, hostname_resolver::UnixHostnameResolver, *};
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
@@ -54,9 +55,6 @@ use crate::{
 /// [`connect`] with, so we can resolve it locally when neccessary.
 pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Hostname initialized from the agent with [`gethostname`].
-pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
 /// Globals used by `gethostbyname`.
 static mut GETHOSTBYNAME_HOSTNAME: Option<CString> = None;
@@ -1079,38 +1077,6 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
-/// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
-fn remote_hostname_string() -> Detour<CString> {
-    if crate::setup().local_hostname() {
-        Detour::Bypass(Bypass::LocalHostname)?;
-    }
-
-    let hostname_path = PathBuf::from("/etc/hostname");
-
-    let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
-        hostname_path,
-        OpenOptionsInternal {
-            read: true,
-            ..Default::default()
-        },
-    )?;
-
-    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 256)?;
-
-    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
-        trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
-    });
-
-    CString::new(
-        bytes
-            .into_vec()
-            .into_iter()
-            .take(read_amount as usize - 1)
-            .collect::<Vec<_>>(),
-    )
-    .map(Detour::Success)?
-}
-
 /// Resolves a hostname and set result to static global like the original `gethostbyname` does.
 ///
 /// Used by erlang/elixir to resolve DNS.
@@ -1199,7 +1165,25 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 /// Resolve hostname from remote host with caching for the result
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
-    HOSTNAME.get_or_detour_init(remote_hostname_string)
+    let resolver = UnixHostnameResolver;
+    
+    match get_or_init_hostname(&resolver) {
+        HostnameResult::Success(_) => {
+            // The hostname is cached in layer-lib, get it from there
+            match mirrord_layer_lib::get_cached_hostname() {
+                Some(cached_hostname) => Detour::Success(cached_hostname),
+                None => {
+                    // This shouldn't happen, but fallback to the resolver directly
+                    resolver.fetch_remote_hostname_detour()
+                }
+            }
+        }
+        HostnameResult::UseLocal => Detour::Bypass(crate::detour::Bypass::LocalHostname),
+        HostnameResult::Error(_) => {
+            // Fallback to the resolver implementation for compatibility
+            resolver.fetch_remote_hostname_detour()
+        }
+    }
 }
 
 /// Retrieves the contents of remote's `/etc/resolv.conf`

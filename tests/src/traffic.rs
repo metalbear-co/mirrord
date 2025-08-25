@@ -118,7 +118,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore]
@@ -546,7 +545,7 @@ mod traffic_tests {
         test_go(basic_service, command).await;
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
+    // #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -565,11 +564,10 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(600))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
         let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];

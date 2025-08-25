@@ -5,8 +5,18 @@ bindeps = true
 opt-level = 0
 debug = true
 
+[profile.debug-overflow]
+inherits = "dev"
+opt-level = 0
+debug = 2  # full debug info
+overflow-checks = true
+debug-assertions = true
+incremental = false
+
 [target.'cfg(windows)']
 rustflags = [
     "--cfg", "feature=\"windows_build\"",         # enable windows_build
-    "-C", "link-args=/STACK:8388608"  # STACKSIZE=8MB
+    "-C", "link-args=/STACK:67108864",  # STACKSIZE=64MB (extremely large for testing)
+    "-C", "overflow-checks=on",        # enable overflow checks in debug builds
+    "-C", "debug-assertions=on",       # enable debug assertions
 ]

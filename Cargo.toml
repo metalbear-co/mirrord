@@ -3,6 +3,7 @@
 members = [
     "mirrord/intproxy",
     "mirrord/str-win",
+    "mirrord/layer-lib",
     "mirrord/layer-win",
     #"tests/win",
     #"mirrord/agent/env",

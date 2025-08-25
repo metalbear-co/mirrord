@@ -22,6 +22,7 @@ workspace = true
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-layer-macro = { path = "./macro" }
+mirrord-layer-lib = { path = "../layer-lib" }
 mirrord-console = { path = "../console" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",

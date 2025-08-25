@@ -16,6 +16,7 @@ mod error;
 mod hooks;
 mod macros;
 pub mod process;
+pub mod setup;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
@@ -27,10 +28,33 @@ pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 /// * [`FALSE`] - Failed DLL attach initialization. Right after this, we will receive a
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
-fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {    
+    
+    // Temporarily disable debugger wait to test if hooks work
+    // // Wait for debugger to attach
+    // {
+    //     use winapi::um::debugapi::IsDebuggerPresent;
+    //     // Busy loop until debugger is attached
+    //     while unsafe { IsDebuggerPresent() } == 0 {
+    //         // Busy wait - no sleep to ensure immediate detection
+    //     }
+    //     // Trigger a breakpoint when debugger is attached
+    //     unsafe {
+    //         winapi::um::debugapi::DebugBreak();
+    //     }
+    // }
+    
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
-        mirrord_start().expect("Failed initializing mirrord-layer-win");
+        match mirrord_start() {
+            Ok(()) => {
+                println!("✅ mirrord-layer-win fully initialized!");
+            }
+            Err(e) => {
+                println!("❌ mirrord-layer-win initialization failed: {}", e);
+                println!("❌ Error details: {:?}", e);
+            }
+        }
     });
 
     TRUE
@@ -89,15 +113,34 @@ fn release_detour_guard() -> anyhow::Result<()> {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
+    println!("🚀 Starting mirrord-layer-win initialization...");
+    
     initialize_detour_guard()?;
+    println!("✅ DetourGuard initialized");
 
-    // TODO: turn into more structured module that handles console
+    // Initialize the Windows setup system
+    setup::initialize_setup()?;
+    println!("✅ Windows setup initialized");
+
+    // // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
     }
+    println!("✅ Console allocated");
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-    initialize_hooks(guard)?;
+    println!("🔧 About to initialize hooks...");
+    
+    match initialize_hooks(guard) {
+        Ok(()) => {
+            println!("✅ All hooks initialized successfully!");
+        }
+        Err(e) => {
+            println!("❌ Hook initialization failed: {}", e);
+            println!("❌ Error details: {:?}", e);
+            return Err(e);
+        }
+    }
 
     Ok(())
 }

@@ -7,7 +7,6 @@ use std::{
     os::windows::ffi::OsStrExt,
     process::{Command, Stdio},
     ptr,
-    time::Duration,
 };
 
 use ::windows::{
