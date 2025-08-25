@@ -47,6 +47,7 @@ async fn operator_setup(
         kafka_splitting,
         application_auto_pause,
         stateful_sessions,
+        mysql_branching,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     if !accept_tos {
@@ -97,6 +98,7 @@ async fn operator_setup(
             kafka_splitting,
             application_auto_pause,
             stateful_sessions,
+            mysql_branching,
         });
 
         match file {
