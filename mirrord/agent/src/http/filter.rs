@@ -1,5 +1,6 @@
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
+use mirrord_protocol::tcp::HttpMethodFilter;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
@@ -18,6 +19,7 @@ pub enum HttpFilter {
         /// Filters to use.
         filters: Vec<HttpFilter>,
     },
+    Method(HttpMethodFilter),
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -31,6 +33,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             mirrord_protocol::tcp::HttpFilter::Path(path) => {
                 Ok(Self::Path(Regex::new(&format!("(?i){path}"))?))
             }
+            mirrord_protocol::tcp::HttpFilter::Method(method) => Ok(Self::Method(method.clone())),
             mirrord_protocol::tcp::HttpFilter::Composite { all, filters } => {
                 let all = *all;
                 let filters = filters
@@ -90,6 +93,8 @@ impl HttpFilter {
                     .unwrap_or(false)
             }),
 
+            Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
+
             Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(parts)),
             Self::Composite {
                 all: false,
@@ -121,10 +126,10 @@ impl NormalizedHeaders {
 
 #[cfg(test)]
 mod test {
-    use std::ops::Not;
+    use std::{ops::Not, str::FromStr};
 
     use hyper::Request;
-    use mirrord_protocol::tcp::{self, Filter};
+    use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter};
 
     use super::HttpFilter;
 
@@ -135,11 +140,13 @@ mod test {
             filters: vec![
                 tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_string()).unwrap()),
                 tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
+                tcp::HttpFilter::Method(HttpMethodFilter::from_str("get").unwrap()),
             ],
         };
 
         // should match
         let mut input = Request::builder()
+            .method("GET")
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "a-bazillion")
             .body(())
@@ -151,6 +158,7 @@ mod test {
 
         // should fail
         let mut input = Request::builder()
+            .method("POST")
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
@@ -169,11 +177,13 @@ mod test {
                 tcp::HttpFilter::Header(Filter::new("dungeon-key: heavy".to_string()).unwrap()),
                 tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
                 tcp::HttpFilter::Path(Filter::new("path/for/v8".to_string()).unwrap()),
+                tcp::HttpFilter::Method(HttpMethodFilter::from_str("get").unwrap()),
             ],
         };
 
         // should match
         let mut input = Request::builder()
+            .method("GET")
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
@@ -185,6 +195,7 @@ mod test {
 
         // should fail
         let mut input = Request::builder()
+            .method("POST")
             .uri("https://www.balconia.gov/api/path/to/v3")
             .header("brass-key", "nothin")
             .body(())

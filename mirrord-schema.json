@@ -465,7 +465,7 @@
         },
         "passthrough_mirroring": {
           "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
-          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to `false` in mirrord for Teams. Otherwise, defaults to `true`.",
+          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.",
           "type": [
             "boolean",
             "null"
@@ -636,7 +636,7 @@
         },
         "cli_image_lib_path": {
           "title": "container.cli_image_lib_path {#container-cli_image}",
-          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.\n\nDefaults to `\"/opt/mirrord/lib/libmirrord_layer.so\"`.",
+          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.",
           "type": [
             "string",
             "null"
@@ -658,25 +658,39 @@
             "null"
           ],
           "format": "ip"
+        },
+        "platform": {
+          "title": "container.platform {#container-platform}",
+          "description": "Platform specification for the target container (e.g., \"linux/amd64\", \"linux/arm64\").\n\nWhen specified, the target container will run with this platform, while the internal proxy container will still run on the native platform and contain both architectures (x64/arm64). The LD_PRELOAD will automatically use the correct architecture.\n\n```json { \"container\": { \"platform\": \"linux/amd64\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
     },
     "CopyTargetFileConfig": {
+      "title": "feature.copy_target {#copy_target}",
+      "description": "Allows the user to target a pod created dynamically from the original [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.\n\nSee the [copy target reference](https://metalbear.co/mirrord/docs/reference/copy-target/) for more details.\n\n### Minimal `copy_target` config {#copy_target-minimal}\n\n```json { \"feature\": { \"copy_target\": true } } ```\n\n### Advanced `copy_target` config {#copy_target-advanced}\n\n```json { \"feature\": { \"copy_target\": { \"enabled\": true, \"scale_down\": true, \"exclude_containers\": [\"my-container\"], \"exclude_init_containers\": [\"my-init-container\"] } } } ```",
       "anyOf": [
         {
+          "description": "Basic configuration that controls whether copy target is enabled (default false).",
           "type": "boolean"
         },
         {
+          "description": "Allows the user to specify both enabling copy target and additional configuration options.",
           "type": "object",
           "properties": {
             "enabled": {
+              "description": "Whether copy target is enabled",
               "type": [
                 "boolean",
                 "null"
               ]
             },
             "exclude_containers": {
+              "description": "List of containers to be ignored by copy_target",
               "type": [
                 "array",
                 "null"
@@ -686,6 +700,7 @@
               }
             },
             "exclude_init_containers": {
+              "description": "List of init containers to be ignored by copy_target",
               "type": [
                 "array",
                 "null"
@@ -695,6 +710,7 @@
               }
             },
             "scale_down": {
+              "description": "Scale down the target deployment to 0 for the time the copied pod is alive",
               "type": [
                 "boolean",
                 "null"
@@ -1226,7 +1242,7 @@
       "properties": {
         "all_of": {
           "title": "feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}",
-          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match all of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"all_of\": [ { \"header\": \"x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } ] } ```",
+          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match all of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"all_of\": [ { \"header\": \"x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } { \"method\": \"post\" } ] } ```",
           "type": [
             "array",
             "null"
@@ -1237,7 +1253,7 @@
         },
         "any_of": {
           "title": "feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}",
-          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match at least one of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"any_of\": [ { \"header\": \"^x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } ] } ```",
+          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match at least one of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"any_of\": [ { \"header\": \"^x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } { \"method\": \"post\" } ] } ```",
           "type": [
             "array",
             "null"
@@ -1249,6 +1265,14 @@
         "header_filter": {
           "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
           "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method_filter": {
+          "title": "feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}",
+          "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
           "type": [
             "string",
             "null"
@@ -1498,6 +1522,17 @@
           ],
           "properties": {
             "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "method"
+          ],
+          "properties": {
+            "method": {
               "type": "string"
             }
           }

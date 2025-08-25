@@ -6,12 +6,20 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Payload is a wrapper for bytes, is used as message body in the protocol and by agent and
 /// intproxy as zero copy message payload
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Default)]
+#[derive(Eq, PartialEq, Hash, Clone, Default)]
 pub struct Payload(pub Bytes);
 
 impl Payload {
     pub fn into_vec(self) -> Vec<u8> {
         self.0.into()
+    }
+}
+
+impl std::fmt::Debug for Payload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Payload")
+            .field(&format_args!("{} bytes", self.0.len()))
+            .finish()
     }
 }
 

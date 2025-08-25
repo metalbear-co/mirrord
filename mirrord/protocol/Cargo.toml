@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.19.8"
+version = "1.20.1"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -32,6 +32,9 @@ socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
 
 mirrord-macros = { path = "../macros" }
+
+strum.workspace = true
+strum_macros.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true

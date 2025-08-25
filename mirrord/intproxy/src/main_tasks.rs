@@ -58,7 +58,7 @@ pub struct NewLayer {
     /// [`LayerId`] of the fork parent.
     pub parent_id: Option<LayerId>,
     /// Process information for the connecting layer.
-    pub process_info: Option<ProcessInfo>,
+    pub process_info: ProcessInfo,
 }
 
 #[cfg(test)]
