@@ -492,3 +492,10 @@ impl_request!(
     req_path = LayerToProxyMessage::GetEnv,
     res_path = ProxyToLayerMessage::GetEnv,
 );
+
+impl_request!(
+    req = RenameRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Rename,
+    res_path = ProxyToLayerMessage::File => FileResponse::Rename,
+);

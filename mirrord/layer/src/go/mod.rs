@@ -114,6 +114,9 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
                     }
                     #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+                    libc::SYS_rename => rename_detour(param1 as _, param2 as _) as i64,
+
+                    #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
                     libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
                     libc::SYS_mkdirat => {
                         mkdirat_detour(param1 as _, param2 as _, param3 as _) as i64
