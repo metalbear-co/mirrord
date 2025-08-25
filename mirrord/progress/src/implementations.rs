@@ -125,11 +125,15 @@ impl Progress for SimpleProgress {
     }
 
     fn success(&mut self, msg: Option<&str>) {
-        msg.map(|m| println!("{m}"));
+        if let Some(msg) = msg {
+            println!("{msg}");
+        }
     }
 
     fn failure(&mut self, msg: Option<&str>) {
-        msg.map(|m| println!("{m}"));
+        if let Some(msg) = msg {
+            println!("{msg}");
+        }
     }
 
     fn warning(&self, msg: &str) {
