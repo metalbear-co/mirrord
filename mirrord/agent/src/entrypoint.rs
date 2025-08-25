@@ -675,13 +675,13 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             .spawn(async move {
                 let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
                 let rules_v4 = SafeIpTables::list_mirrord_rules(
-                    &mirrord_agent_iptables::get_iptables(nftables, false)?,
+                    &mirrord_agent_iptables::get_iptables(nftables, false),
                 )
                 .await?;
                 let rules_v6 = if args.ipv6 {
                     SafeIpTables::list_mirrord_rules(&mirrord_agent_iptables::get_iptables(
                         nftables, true,
-                    )?)
+                    ))
                     .await?
                 } else {
                     vec![]
@@ -875,7 +875,7 @@ async fn clear_iptable_chain(
     let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
 
     let v4_result: Result<(), IPTablesError> = try {
-        let ipt = mirrord_agent_iptables::get_iptables(nftables, false)?;
+        let ipt = mirrord_agent_iptables::get_iptables(nftables, false);
         if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
             trace!("No iptables mirrord rules found, skipping iptables cleanup.");
         } else {
@@ -886,7 +886,7 @@ async fn clear_iptable_chain(
 
     let v6_result: Result<(), IPTablesError> = if ipv6_enabled {
         try {
-            let ipt = mirrord_agent_iptables::get_iptables(nftables, true)?;
+            let ipt = mirrord_agent_iptables::get_iptables(nftables, true);
             if SafeIpTables::list_mirrord_rules(&ipt).await?.is_empty() {
                 trace!("No ip6tables mirrord rules found, skipping ip6tables cleanup.");
             } else {

@@ -63,6 +63,9 @@ pub(crate) enum ContainerError {
         error: io::Error,
         command: CommandDisplay,
     },
+
+    #[error("Unsupported platform used: {0}")]
+    UnsupportedPlatform(String),
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.

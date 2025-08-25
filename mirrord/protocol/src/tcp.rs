@@ -19,6 +19,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use strum_macros::{AsRefStr, EnumString};
 
 use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
 
@@ -208,6 +209,34 @@ impl std::ops::Deref for Filter {
     }
 }
 
+/// HTTP filter for HTTP methods.
+///
+/// Supports all the standard methods, plus a `Other` variant for custom methods (why would anyone
+/// do that).
+///
+/// Related to `HttpFilterConfig`. We convert the `HttpFilterConfig` `method_filter` or `method` in
+/// a `InnerFilter` from a `String` to this type.
+///
+/// The conversion is case-insensitive, but converting it back to `String` returns an uppercase
+/// string.
+#[derive(
+    Encode, Decode, Debug, PartialEq, Eq, Clone, EnumString, strum_macros::Display, AsRefStr,
+)]
+#[strum(ascii_case_insensitive, serialize_all = "UPPERCASE")]
+pub enum HttpMethodFilter {
+    Get,
+    Head,
+    Post,
+    Put,
+    Delete,
+    Connect,
+    Options,
+    Trace,
+    Patch,
+    #[strum(to_string = "{0}")]
+    Other(String),
+}
+
 /// Describes different types of HTTP filtering available
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HttpFilter {
@@ -222,6 +251,8 @@ pub enum HttpFilter {
         /// Filters to use
         filters: Vec<HttpFilter>,
     },
+    /// Filter by method ("POST")
+    Method(HttpMethodFilter),
 }
 
 impl Display for HttpFilter {
@@ -229,6 +260,7 @@ impl Display for HttpFilter {
         match self {
             HttpFilter::Header(filter) => write!(f, "header={filter}"),
             HttpFilter::Path(filter) => write!(f, "path={filter}"),
+            HttpFilter::Method(filter) => write!(f, "method={filter}"),
             HttpFilter::Composite { all, filters } => match all {
                 true => {
                     write!(f, "all of ")?;
@@ -430,6 +462,10 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`HttpFilter::Method`]
+pub static HTTP_METHOD_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.20.0".parse().expect("Bad Identifier"));
+
 /// Minimal mirrord-protocol version that allows:
 /// 1. [`DaemonTcp::NewConnectionV2`]
 /// 2. Passing HTTP requests in [`DaemonMessage::Tcp`](crate::DaemonMessage::Tcp)
@@ -542,7 +578,7 @@ impl<B: fmt::Debug> fmt::Debug for InternalHttpResponse<B> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone)]
 pub struct InternalHttpBody(pub VecDeque<InternalHttpBodyFrame>);
 
 impl InternalHttpBody {
@@ -574,6 +610,14 @@ impl Body for InternalHttpBody {
 
     fn is_end_stream(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl fmt::Debug for InternalHttpBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("InternalHttpBody")
+            .field(&format_args!("{} frames", self.0.len()))
+            .finish()
     }
 }
 
