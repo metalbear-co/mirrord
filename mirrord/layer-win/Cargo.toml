@@ -19,8 +19,8 @@ crate-type = ["cdylib"]
 [dependencies]
 mirrord-layer-lib = { path = "../layer-lib" }
 mirrord-protocol = { path = "../protocol" }
-mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
-winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi"] }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", "processthreadsapi"] }
 
 # Used for internal error type set-up
 thiserror = "2.0.12" 

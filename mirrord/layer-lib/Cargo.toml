@@ -18,7 +18,11 @@ workspace = true
 
 [dependencies]
 mirrord-protocol = { path = "../protocol" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 
 libc.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.9", features = ["winbase", "debugapi"] }

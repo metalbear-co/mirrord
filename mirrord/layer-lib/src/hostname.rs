@@ -128,7 +128,7 @@ pub fn get_or_init_hostname<R: HostnameResolver>(
     if resolver.should_use_local_hostname() {
         return HostnameResult::UseLocal;
     }
-    
+
     let result = resolver.fetch_remote_hostname();
     
     match &result {

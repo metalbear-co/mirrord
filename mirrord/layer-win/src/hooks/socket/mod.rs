@@ -11,7 +11,9 @@ use std::{
 };
 
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, PortSubscribe, PortSubscription};
-use mirrord_protocol::tcp::StealType;
+use mirrord_protocol::{
+    tcp::StealType,
+};
 use mirrord_layer_lib::{HostnameResult, get_or_init_hostname, DefaultHostnameResolver};
 use mirrord_protocol::outgoing::SocketAddress;
 use minhook_detours_rs::guard::DetourGuard;
@@ -31,9 +33,11 @@ use winapi::{
 use crate::apply_hook;
 use self::hostname::{
     REMOTE_DNS_REVERSE_MAPPING, evict_old_dns_entries, 
-    extract_ip_from_hostent, get_hostname_with_resolver,
+    extract_ip_from_hostent,
     handle_hostname_ansi, handle_hostname_unicode,
-    is_remote_hostname, resolve_hostname_with_fallback
+    is_remote_hostname, resolve_hostname_with_fallback,
+    make_windows_proxy_request_with_response,
+    windows_getaddrinfo, free_managed_addrinfo, MANAGED_ADDRINFO
 };
 
 /// Windows socket state management
@@ -106,25 +110,6 @@ unsafe fn sockaddr_to_socket_addr(addr: *const SOCKADDR, addrlen: INT) -> Option
     }
 }
 
-/// Helper function to make proxy request with response (Windows version)
-fn make_windows_proxy_request_with_response<T>(request: T) -> Result<T::Response, String>
-where
-    T: mirrord_intproxy_protocol::IsLayerRequestWithResponse + std::fmt::Debug,
-    T::Response: std::fmt::Debug,
-{
-    use crate::PROXY_CONNECTION;
-    
-    PROXY_CONNECTION
-        .get()
-        .ok_or_else(|| "ProxyConnection not initialized".to_string())?
-        .make_request_with_response(request)
-        .map_err(|e| format!("Proxy request failed: {:?}", e))
-}
-
-/// Keep track of managed address info structures for proper cleanup.
-static MANAGED_ADDRINFO: LazyLock<Mutex<std::collections::HashSet<usize>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
-
 // Function type definitions for original Windows socket functions
 type SocketFn = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
 static SOCKET_ORIGINAL: OnceLock<&SocketFn> = OnceLock::new();
@@ -161,6 +146,9 @@ type GetaddrinfoFn = unsafe extern "system" fn(
     result: *mut *mut ADDRINFOA
 ) -> INT;
 static GETADDRINFO_ORIGINAL: OnceLock<&GetaddrinfoFn> = OnceLock::new();
+
+type FreeaddrinfoFn = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
+static FREEADDRINFO_ORIGINAL: OnceLock<&FreeaddrinfoFn> = OnceLock::new();
 
 // Kernel32 hostname functions that Python might use
 type GetComputerNameAFn = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
@@ -691,41 +679,55 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) }
 }
 
-/// Hook for getaddrinfo to handle DNS resolution 
+/// Hook for getaddrinfo to handle DNS resolution with full mirrord functionality
+/// 
+/// This follows the same pattern as the Unix layer but uses Windows types and calling conventions.
+/// It converts Windows ADDRINFOA structures and makes DNS requests through the mirrord agent.
 unsafe extern "system" fn getaddrinfo_detour(
-    node_name: *const i8,
-    service_name: *const i8,
-    hints: *const ADDRINFOA,
-    result: *mut *mut ADDRINFOA
+    raw_node: *const i8,
+    raw_service: *const i8,
+    raw_hints: *const ADDRINFOA,
+    out_addr_info: *mut *mut ADDRINFOA
 ) -> INT {
     tracing::debug!("getaddrinfo_detour called");
     
-    if !node_name.is_null() {
-        // SAFETY: Validate the string pointer before dereferencing
-        if let Ok(hostname_cstr) = unsafe { std::ffi::CStr::from_ptr(node_name) }.to_str() {
-            tracing::debug!("getaddrinfo: resolving hostname: {}", hostname_cstr);
-            
-            // Check if this is our remote hostname
-            if is_remote_hostname(hostname_cstr) {
-                tracing::debug!("getaddrinfo: intercepting resolution for our hostname: {}", hostname_cstr);
-                
-                // Try to resolve with fallback logic
-                if let Some(fallback_hostname) = resolve_hostname_with_fallback(hostname_cstr) {
-                    let result_fallback = unsafe { GETADDRINFO_ORIGINAL.get().unwrap()(fallback_hostname.as_ptr(), service_name, hints, result) };
-                    if result_fallback == 0 {
-                        tracing::debug!("getaddrinfo: successfully resolved with fallback");
-                        return result_fallback;
-                    }
-                }
+    unsafe {
+        // Convert raw pointers to safe Rust types, mirroring Unix implementation
+        let rawish_node = (!raw_node.is_null()).then(|| std::ffi::CStr::from_ptr(raw_node));
+        let rawish_service = (!raw_service.is_null()).then(|| std::ffi::CStr::from_ptr(raw_service));
+        let rawish_hints = raw_hints.as_ref();
+
+        // Try to get the hostname for mirrord DNS resolution
+        match windows_getaddrinfo(rawish_node, rawish_service, rawish_hints) {
+            Ok(c_addr_info_ptr) => {
+                // Success - store the result and track it for cleanup
+                out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
+                MANAGED_ADDRINFO
+                    .lock()
+                    .expect("MANAGED_ADDRINFO lock failed")
+                    .insert(c_addr_info_ptr as usize);
+                0 // Success
             }
-        } else {
-            tracing::debug!("getaddrinfo: invalid UTF-8 in hostname, calling original");
+            Err(_) => {
+                // Fall back to original Windows getaddrinfo
+                tracing::debug!("getaddrinfo: falling back to original Windows function");
+                GETADDRINFO_ORIGINAL.get().unwrap()(raw_node, raw_service, raw_hints, out_addr_info)
+            }
         }
     }
-    
-    // For all other hostnames or if our hostname resolution fails, call original function
-    tracing::debug!("getaddrinfo: calling original function");
-    unsafe { GETADDRINFO_ORIGINAL.get().unwrap()(node_name, service_name, hints, result) }
+}
+
+/// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
+/// 
+/// This follows the same pattern as the Unix layer - it checks if the structure
+/// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
+unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
+    unsafe {
+        if !free_managed_addrinfo(addrinfo) {
+            // Not one of ours - call original freeaddrinfo
+            FREEADDRINFO_ORIGINAL.get().unwrap()(addrinfo);
+        }
+    }
 }
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
@@ -869,6 +871,15 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         getaddrinfo_detour,
         GetaddrinfoFn,
         GETADDRINFO_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ws2_32",
+        "freeaddrinfo",
+        freeaddrinfo_detour,
+        FreeaddrinfoFn,
+        FREEADDRINFO_ORIGINAL
     )?;
 
     tracing::info!("Socket hooks initialized successfully");

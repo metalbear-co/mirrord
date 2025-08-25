@@ -6,17 +6,34 @@
 use std::{
     collections::HashMap,
     ffi::CString,
+    net::IpAddr,
     sync::{LazyLock, Mutex},
+    alloc::{alloc, dealloc, Layout},
+    ptr,
 };
 
-use mirrord_layer_lib::{HostnameResult, get_or_init_hostname, DefaultHostnameResolver};
-use winapi::um::winsock2::HOSTENT;
+use mirrord_layer_lib::{HostnameResult, get_or_init_hostname, unix::UnixHostnameResolver};
+use mirrord_protocol::dns::{GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord, AddressFamily, SockType};
+use winapi::{
+    um::winsock2::{HOSTENT, SOCK_STREAM, SOCK_DGRAM},
+    shared::{
+        minwindef::INT,
+        ws2def::{SOCKADDR, SOCKADDR_IN, AF_INET, AF_INET6, ADDRINFOA},
+        ws2ipdef::SOCKADDR_IN6,
+    },
+};
+
+use crate::PROXY_CONNECTION;
 
 /// Holds the pair of IP addresses with their hostnames, resolved remotely.
 /// This is the Windows equivalent of REMOTE_DNS_REVERSE_MAPPING.
 /// Uses a bounded collection to prevent memory exhaustion attacks.
 pub static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<String, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Keep track of managed address info structures for proper cleanup.
+pub static MANAGED_ADDRINFO: LazyLock<Mutex<std::collections::HashSet<usize>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
 /// Maximum number of entries in the DNS cache to prevent memory exhaustion
 pub const MAX_DNS_CACHE_SIZE: usize = 1000;
@@ -26,6 +43,45 @@ pub const MAX_COMPUTERNAME_LENGTH: usize = 15;
 
 /// Reasonable buffer limit for hostname functions to prevent abuse
 pub const REASONABLE_BUFFER_LIMIT: usize = 16 * 8; // Allow for longer DNS names
+
+/// Resolve hostname remotely through mirrord agent (similar to Unix layer's remote_getaddrinfo)
+fn remote_dns_resolve(hostname: &str) -> Result<Vec<(String, IpAddr)>, Box<dyn std::error::Error>> {
+    tracing::debug!("Performing remote DNS resolution for: {}", hostname);
+    
+    let request = GetAddrInfoRequestV2 {
+        node: hostname.to_string(),
+        service_port: 0,
+        flags: 0,
+        family: AddressFamily::Any,
+        socktype: SockType::Any,
+        protocol: 0,
+    };
+
+    // Use the Windows proxy connection directly
+    let response = unsafe {
+        let proxy_connection = PROXY_CONNECTION.get()
+            .ok_or("Proxy connection not available")?;
+        
+        proxy_connection
+            .make_request_with_response(request)
+            .map_err(|e| format!("Proxy request failed: {:?}", e))?
+    };
+    
+    let addr_info_list = response.0.map_err(|e| format!("Remote DNS resolution failed: {:?}", e))?;
+
+    // Update reverse mapping cache
+    if let Ok(mut cache) = REMOTE_DNS_REVERSE_MAPPING.lock() {
+        evict_old_dns_entries(&mut cache);
+        for lookup in addr_info_list.iter() {
+            cache.insert(lookup.ip.to_string(), lookup.name.clone());
+        }
+    }
+
+    Ok(addr_info_list
+        .into_iter()
+        .map(|LookupRecord { name, ip }| (name, ip))
+        .collect())
+}
 
 /// Implement simple LRU eviction for DNS cache to avoid clearing entire cache
 pub fn evict_old_dns_entries(cache: &mut HashMap<String, String>) {
@@ -232,10 +288,20 @@ pub fn set_remote_hostname(hostname: String) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-/// Get hostname using the hostname resolver
+/// Get hostname using the Unix hostname resolver (works for Windows too since target is Linux)
 pub fn get_hostname_with_resolver() -> HostnameResult {
-    let resolver = DefaultHostnameResolver::remote();
-    get_or_init_hostname(&resolver)
+    unsafe {
+        match PROXY_CONNECTION.get() {
+            Some(proxy) => {
+                let resolver = UnixHostnameResolver::remote(proxy);
+                get_or_init_hostname(&resolver)
+            }
+            None => {
+                tracing::warn!("ProxyConnection not initialized, falling back to local hostname");
+                HostnameResult::UseLocal
+            }
+        }
+    }
 }
 
 /// Helper function to validate input parameters for Windows hostname functions
@@ -364,21 +430,283 @@ pub fn is_remote_hostname(hostname: &str) -> bool {
 
 /// Helper function to resolve hostname with fallback logic
 pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
-    if let HostnameResult::Success(remote_hostname) = get_hostname_with_resolver() {
-        let remote_hostname_str = remote_hostname.to_string_lossy();
-        
-        // Try to resolve the full hostname if we truncated it
-        if hostname.len() < remote_hostname_str.len() {
-            tracing::debug!("Trying to resolve full hostname instead of truncated version");
-            if let Ok(full_hostname_cstr) = CString::new(remote_hostname_str.as_ref()) {
-                return Some(full_hostname_cstr);
+    tracing::debug!("resolve_hostname_with_fallback called for: {}", hostname);
+
+    // First, try to resolve the hostname using mirrord's remote DNS resolution
+    // This is the correct approach - we should resolve through the agent, not locally
+    match remote_dns_resolve(hostname) {
+        Ok(results) => {
+            if !results.is_empty() {
+                // Use the first IP address from the results
+                let (_name, ip) = &results[0];
+                tracing::debug!("Remote DNS resolution successful: {} -> {}", hostname, ip);
+                
+                // Return the IP address as a CString so gethostbyname can resolve it locally
+                if let Ok(ip_cstring) = CString::new(ip.to_string()) {
+                    return Some(ip_cstring);
+                }
+            } else {
+                tracing::warn!("Remote DNS resolution returned empty results for {}", hostname);
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Remote DNS resolution failed for {}: {}", hostname, e);
+        }
+    }
+
+    // If remote resolution fails, check if we have the hostname cached locally  
+    if let Ok(cache) = REMOTE_DNS_REVERSE_MAPPING.lock() {
+        if let Some(cached_ip) = cache.get(hostname) {
+            tracing::debug!("Found cached IP for {}: {}", hostname, cached_ip);
+            if let Ok(ip_cstring) = CString::new(cached_ip.as_str()) {
+                return Some(ip_cstring);
             }
         }
     }
+
+    // As a last resort fallback, try localhost (this may work for some cases)
+    tracing::warn!("Using localhost fallback for hostname: {} (this indicates a problem)", hostname);
+    CString::new("127.0.0.1").ok()
+}
+
+/// Helper function to make proxy request with response (Windows version)
+pub fn make_windows_proxy_request_with_response<T>(request: T) -> Result<T::Response, String>
+where
+    T: mirrord_intproxy_protocol::IsLayerRequestWithResponse + std::fmt::Debug,
+    T::Response: std::fmt::Debug,
+{
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or_else(|| "ProxyConnection not initialized".to_string())?
+            .make_request_with_response(request)
+            .map_err(|e| format!("Proxy request failed: {:?}", e))
+    }
+}
+
+/// Windows-specific getaddrinfo implementation using mirrord protocol
+/// 
+/// This function converts Windows types to mirrord protocol types and makes DNS requests
+/// through the mirrord agent, then converts the response back to Windows ADDRINFOA structures.
+pub fn windows_getaddrinfo(
+    rawish_node: Option<&std::ffi::CStr>,
+    rawish_service: Option<&std::ffi::CStr>, 
+    rawish_hints: Option<&ADDRINFOA>,
+) -> Result<*mut ADDRINFOA, String> {
     
-    // If direct resolution fails, try resolving localhost as fallback
-    tracing::debug!("Trying localhost fallback for our hostname");
-    CString::new("localhost").ok()
+    // Convert node to string
+    let node = match rawish_node {
+        Some(cstr) => match cstr.to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => return Err("Invalid UTF-8 in node name".to_string()),
+        },
+        None => return Err("Node name is required".to_string()),
+    };
+    
+    // Convert service to port number
+    let port = match rawish_service {
+        Some(cstr) => match cstr.to_str() {
+            Ok(s) => s.parse::<u16>().unwrap_or(0),
+            Err(_) => return Err("Invalid UTF-8 in service name".to_string()),
+        },
+        None => 0,
+    };
+    
+    // Convert hints to mirrord protocol types
+    let (address_family, socket_type, protocol) = match rawish_hints {
+        Some(hints) => {
+            let af = match hints.ai_family {
+                AF_INET => AddressFamily::Ipv4Only,
+                AF_INET6 => AddressFamily::Ipv6Only,
+                _ => AddressFamily::Any,
+            };
+            
+            let sock_type = match hints.ai_socktype {
+                SOCK_STREAM => SockType::Stream,
+                SOCK_DGRAM => SockType::Dgram,
+                _ => SockType::Any,
+            };
+            
+            (af, sock_type, hints.ai_protocol)
+        },
+        None => (AddressFamily::Any, SockType::Any, 0),
+    };
+    
+    // Make DNS request through mirrord agent
+    let request = GetAddrInfoRequestV2 {
+        node,
+        service_port: port,
+        family: address_family,
+        socktype: socket_type,
+        protocol,
+        flags: 0,
+    };
+    
+    let response = make_windows_proxy_request_with_response(request)
+        .map_err(|e| format!("DNS request failed: {}", e))?;
+    
+    // Convert response back to Windows ADDRINFOA structures
+    convert_dns_response_to_addrinfo(response)
+}
+
+/// Convert mirrord DNS response to Windows ADDRINFOA linked list
+/// 
+/// This allocates Windows-compatible ADDRINFOA structures that can be freed
+/// by our freeaddrinfo_detour function.
+pub fn convert_dns_response_to_addrinfo(response: GetAddrInfoResponse) -> Result<*mut ADDRINFOA, String> {
+    use std::ffi::CString;
+    
+    // Check if the response was successful
+    let dns_lookup = match response.0 {
+        Ok(lookup) => lookup,
+        Err(e) => return Err(format!("DNS lookup failed: {:?}", e)),
+    };
+    
+    if dns_lookup.is_empty() {
+        return Err("No addresses in DNS response".to_string());
+    }
+    
+    let mut first_addrinfo: *mut ADDRINFOA = ptr::null_mut();
+    let mut current_addrinfo: *mut ADDRINFOA = ptr::null_mut();
+    
+    for lookup_record in dns_lookup.into_iter() {
+        // Allocate ADDRINFOA structure
+        let layout = Layout::new::<ADDRINFOA>();
+        let addrinfo_ptr = unsafe { alloc(layout) as *mut ADDRINFOA };
+        if addrinfo_ptr.is_null() {
+            return Err("Failed to allocate ADDRINFOA".to_string());
+        }
+        
+        // Parse the IP address and create sockaddr
+        let (sockaddr_ptr, sockaddr_len, family) = match lookup_record.ip {
+            std::net::IpAddr::V4(ipv4) => {
+                let layout = Layout::new::<SOCKADDR_IN>();
+                let sockaddr_in_ptr = unsafe { alloc(layout) as *mut SOCKADDR_IN };
+                if sockaddr_in_ptr.is_null() {
+                    return Err("Failed to allocate SOCKADDR_IN".to_string());
+                }
+                
+                unsafe {
+                    (*sockaddr_in_ptr).sin_family = AF_INET as u16;
+                    (*sockaddr_in_ptr).sin_port = 0; // Port not available in LookupRecord
+                    *(*sockaddr_in_ptr).sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
+                    ptr::write_bytes((*sockaddr_in_ptr).sin_zero.as_mut_ptr(), 0, 8);
+                }
+                
+                (sockaddr_in_ptr as *mut SOCKADDR, 
+                 std::mem::size_of::<SOCKADDR_IN>() as INT, 
+                 AF_INET)
+            },
+            std::net::IpAddr::V6(ipv6) => {
+                let layout = Layout::new::<SOCKADDR_IN6>();
+                let sockaddr_in6_ptr = unsafe { alloc(layout) as *mut SOCKADDR_IN6 };
+                if sockaddr_in6_ptr.is_null() {
+                    return Err("Failed to allocate SOCKADDR_IN6".to_string());
+                }
+                
+                unsafe {
+                    (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;
+                    (*sockaddr_in6_ptr).sin6_port = 0; // Port not available in LookupRecord
+                    (*sockaddr_in6_ptr).sin6_flowinfo = 0;
+                    *(*sockaddr_in6_ptr).sin6_addr.u.Byte_mut() = ipv6.octets();
+                    // Note: sin6_scope_id field may not be available in this Windows API version
+                }
+                
+                (sockaddr_in6_ptr as *mut SOCKADDR, 
+                 std::mem::size_of::<SOCKADDR_IN6>() as INT, 
+                 AF_INET6)
+            },
+        };
+        
+        // Create canonical name if available
+        let canonname = if !lookup_record.name.is_empty() {
+            match CString::new(lookup_record.name) {
+                Ok(cstr) => cstr.into_raw(),
+                Err(_) => ptr::null_mut(),
+            }
+        } else {
+            ptr::null_mut()
+        };
+        
+        // Fill in the ADDRINFOA structure
+        unsafe {
+            (*addrinfo_ptr).ai_flags = 0;
+            (*addrinfo_ptr).ai_family = family;
+            (*addrinfo_ptr).ai_socktype = SOCK_STREAM; // Default to STREAM, could be improved
+            (*addrinfo_ptr).ai_protocol = 0;
+            (*addrinfo_ptr).ai_addrlen = sockaddr_len as usize;
+            (*addrinfo_ptr).ai_canonname = canonname;
+            (*addrinfo_ptr).ai_addr = sockaddr_ptr;
+            (*addrinfo_ptr).ai_next = ptr::null_mut();
+        }
+        
+        // Link into the list
+        if first_addrinfo.is_null() {
+            first_addrinfo = addrinfo_ptr;
+            current_addrinfo = addrinfo_ptr;
+        } else {
+            unsafe {
+                (*current_addrinfo).ai_next = addrinfo_ptr;
+                current_addrinfo = addrinfo_ptr;
+            }
+        }
+        
+        // Track this allocation for cleanup
+        MANAGED_ADDRINFO
+            .lock()
+            .expect("MANAGED_ADDRINFO lock failed")
+            .insert(addrinfo_ptr as usize);
+    }
+    
+    Ok(first_addrinfo)
+}
+
+/// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
+/// 
+/// This follows the same pattern as the Unix layer - it checks if the structure
+/// was allocated by us (tracked in MANAGED_ADDRINFO) and frees it properly.
+pub unsafe fn free_managed_addrinfo(addrinfo: *mut ADDRINFOA) -> bool {
+    use std::ffi::CString;
+    
+    let mut managed_addr_info = MANAGED_ADDRINFO
+        .lock()
+        .expect("MANAGED_ADDRINFO lock failed");
+        
+    if managed_addr_info.remove(&(addrinfo as usize)) {
+        // This is one of our allocated structures - clean it up properly
+        let mut current = addrinfo;
+        while !current.is_null() {
+            unsafe {
+                let next = (*current).ai_next;
+                
+                // Free the sockaddr structure
+                if !(*current).ai_addr.is_null() {
+                    let sockaddr_layout = if (*current).ai_family == AF_INET {
+                        Layout::new::<SOCKADDR_IN>()
+                    } else {
+                        Layout::new::<SOCKADDR_IN6>()
+                    };
+                    dealloc((*current).ai_addr as *mut u8, sockaddr_layout);
+                }
+                
+                // Free the canonical name if present
+                if !(*current).ai_canonname.is_null() {
+                    let _ = CString::from_raw((*current).ai_canonname);
+                }
+                
+                // Free the ADDRINFOA structure itself
+                let addrinfo_layout = Layout::new::<ADDRINFOA>();
+                dealloc(current as *mut u8, addrinfo_layout);
+                
+                // Remove from managed set and move to next
+                managed_addr_info.remove(&(current as usize));
+                current = next;
+            }
+        }
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]

@@ -41,7 +41,8 @@ use tracing::{error, trace};
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
-use super::{hooks::*, hostname_resolver::UnixHostnameResolver, *};
+use super::{hooks::*, *};
+use mirrord_layer_lib::UnixHostnameResolver;
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
