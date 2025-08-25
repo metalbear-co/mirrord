@@ -40,6 +40,10 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
     params: HashMap<BranchDatabaseId, MysqlBranchParams>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
+    if params.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let mut subtask = progress.subtask("creating new MySQL branch databases");
     let mut created_branches = HashMap::new();
 
@@ -116,8 +120,6 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
     params: &HashMap<BranchDatabaseId, MysqlBranchParams>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
-    let mut subtask = progress.subtask("listing reusable MySQL branch databases");
-
     let specified_ids = params
         .iter()
         .filter_map(|(id, _)| matches!(id, BranchDatabaseId::Specified(_)).then(|| id.as_ref()))
@@ -132,6 +134,8 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
             specified_ids.join(",")
         ))
     };
+
+    let mut subtask = progress.subtask("listing reusable MySQL branch databases");
 
     let list_params = ListParams {
         label_selector,
