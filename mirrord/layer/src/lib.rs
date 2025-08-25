@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 #![feature(c_variadic)]
 #![feature(io_error_uncategorized)]
 #![feature(try_trait_v2)]
@@ -66,13 +67,14 @@
 extern crate alloc;
 extern crate core;
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::parent_id;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::File,
     io::Read,
     net::SocketAddr,
-    os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
@@ -94,7 +96,7 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
-use proxy_connection::ProxyConnection;
+use mirrord_layer_lib::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -132,7 +134,6 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
-mod proxy_connection;
 mod setup;
 mod socket;
 #[cfg(target_os = "macos")]

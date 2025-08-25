@@ -15,8 +15,6 @@ pub fn get_module_base<T: AsRef<str>>(module: T) -> *mut c_void {
 pub fn get_export<T: AsRef<str>, U: AsRef<str>>(module: T, export: U) -> *mut c_void {
     let module = get_module_base(module);
     let export = string_to_u8_buffer(export);
-
-    let export_address =
-        unsafe { GetProcAddress(module as _, export.as_ptr() as _) as *mut c_void };
-    export_address
+    
+    unsafe { GetProcAddress(module as _, export.as_ptr() as _) as *mut c_void }
 }

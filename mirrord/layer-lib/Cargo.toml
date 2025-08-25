@@ -1,0 +1,28 @@
+[package]
+name = "mirrord-layer-lib"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mirrord-protocol = { path = "../protocol" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+
+libc.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.9", features = ["winbase", "debugapi"] }

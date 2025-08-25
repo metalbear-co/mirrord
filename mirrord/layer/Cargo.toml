@@ -22,6 +22,7 @@ workspace = true
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-layer-macro = { path = "./macro" }
+mirrord-layer-lib = { path = "../layer-lib" }
 mirrord-console = { path = "../console" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",
@@ -43,6 +44,9 @@ socket2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os="macos"))'.dependencies]
+nix = { workspace = true, features = ["net", "process", "signal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 syscalls = { version = "0.6", features = ["full"] }
@@ -68,6 +72,13 @@ tokio = { workspace = true, features = ["rt", "net", "macros", "fs"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 apple-codesign = { version = "0.29", default-features = false }
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
 
 [lib]
 crate-type = ["cdylib"]
