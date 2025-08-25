@@ -83,7 +83,7 @@ impl IpTablesRedirector {
 
     pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
         let ntfables = envs::NFTABLES.try_from_env().unwrap_or_default();
-        let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6)?;
+        let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6);
         let iptables = SafeIpTables::create(
             iptables,
             self.flush_connections,

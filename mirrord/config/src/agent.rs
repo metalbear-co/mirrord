@@ -420,9 +420,9 @@ pub struct AgentConfig {
     ///
     /// When this is set, `network_interface` setting is ignored.
     ///
-    /// Defaults to `false` in mirrord for Teams.
-    /// Otherwise, defaults to `true`.
-    pub passthrough_mirroring: Option<bool>,
+    /// Defaults to true.
+    #[config(default = true)]
+    pub passthrough_mirroring: bool,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

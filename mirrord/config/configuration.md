@@ -389,8 +389,7 @@ with mirroring non HTTP/1 traffic.
 
 When this is set, `network_interface` setting is ignored.
 
-Defaults to `false` in mirrord for Teams.
-Otherwise, defaults to `true`.
+Defaults to true.
 
 ### agent.priority_class {#agent-priority_class}
 
@@ -1322,6 +1321,7 @@ Example:
   "all_of": [
     { "header": "x-user: my-user$" },
     { "path": "^/api/v1/my-endpoint" }
+    { "method": "post" }
   ]
 }
 ```
@@ -1341,6 +1341,7 @@ Example:
   "any_of": [
     { "header": "^x-user: my-user$" },
     { "path": "^/api/v1/my-endpoint" }
+    { "method": "post" }
   ]
 }
 ```
@@ -1353,6 +1354,13 @@ Supports regexes validated by the
 
 The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
 case-insensitive.
+
+##### feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}
+
+
+Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.
+
+Case-insensitive. If the request method matches the filter, the request is stolen.
 
 ##### feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}
 
@@ -1846,8 +1854,8 @@ Defaults to `mirrord=info,warn`.
 
 How often to log information about connected processes in seconds.
 
-This feature logs details about processes that are currently connected to the internal proxy,
-including their PID, process name, command line, and connection status.
+This feature logs details about processes that are currently connected to the internal
+proxy, including their PID, process name, command line, and connection status.
 
 ```json
 {
@@ -1856,8 +1864,6 @@ including their PID, process name, command line, and connection status.
   }
 }
 ```
-
-Defaults to 60 seconds.
 
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 
