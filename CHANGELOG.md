@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.159.0](https://github.com/metalbear-co/mirrord/tree/3.159.0) - 2025-08-24
+
+
+### Added
+
+- Add method filter to HTTP filters.
+
+
+### Changed
+
+- Proper error message when the operator cannot be retrieved, and it's
+  required. [#3476](https://github.com/metalbear-co/mirrord/issues/3476)
+- Improve copy target schema docs
+- In SIP-patched binaries, set the identifier to start with the original
+  filename, like the codesign binary does.
+- `agent.passthrough_mirroring` now defaults to `true` in both OSS and mfT.
+- change vfork emulation to be enabled by default, fixes different issues
+  around the use of it
+- mirrord container: change to always use native arch for intproxy, improving
+  performance signficantly
+
 ## [3.158.0](https://github.com/metalbear-co/mirrord/tree/3.158.0) - 2025-08-20
 
 

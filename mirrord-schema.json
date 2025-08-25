@@ -636,7 +636,7 @@
         },
         "cli_image_lib_path": {
           "title": "container.cli_image_lib_path {#container-cli_image}",
-          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.\n\nDefaults to `\"/opt/mirrord/lib/libmirrord_layer.so\"`.",
+          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.",
           "type": [
             "string",
             "null"
@@ -658,6 +658,14 @@
             "null"
           ],
           "format": "ip"
+        },
+        "platform": {
+          "title": "container.platform {#container-platform}",
+          "description": "Platform specification for the target container (e.g., \"linux/amd64\", \"linux/arm64\").\n\nWhen specified, the target container will run with this platform, while the internal proxy container will still run on the native platform and contain both architectures (x64/arm64). The LD_PRELOAD will automatically use the correct architecture.\n\n```json { \"container\": { \"platform\": \"linux/amd64\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
