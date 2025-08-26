@@ -113,6 +113,8 @@ pub struct FeatureConfig {
     pub split_queues: SplitQueuesConfig,
 
     /// # feature.db_branches {#feature-db_branches}
+    ///
+    /// Configuration for the database branching feature.
     #[config(nested, default, unstable)]
     pub db_branches: DatabaseBranchesConfig,
 }

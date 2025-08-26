@@ -6,6 +6,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
+/// A list of configuration for database branches.
+///
+/// ```json
+/// {
+///   "feature": {
+///     "db_branches": [
+///       {
+///         "name": "my-database-name",
+///         "ttl_secs": 120,
+///         "type": "mysql",
+///         "version": "8.0",
+///         "connection": {
+///           "url": {
+///             "type": "env",
+///             "variable": "DB_CONNECTION_URL"
+///           }
+///         }
+///       }
+///     ]
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
 pub struct DatabaseBranchesConfig(pub Vec<DatabaseBranchConfig>);
 
@@ -23,7 +45,9 @@ impl DatabaseBranchesConfig {
     }
 }
 
-/// Configuration for branch databases.
+/// Configuration for a database branch.
+///
+/// By specifying a unique `id`, the branch database will be reused if not expired.
 ///
 /// Example:
 ///
@@ -68,6 +92,7 @@ pub struct DatabaseBranchConfig {
 
 /// Supported database types.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[schemars(rename = "DbBranchingDatabaseType")]
 pub enum DatabaseType {
     #[serde(rename = "mysql")]
     MySql,
@@ -75,6 +100,7 @@ pub enum DatabaseType {
 
 /// Options for connecting to the database.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionSource {
     Url(ConnectionSourceKind),
@@ -82,6 +108,7 @@ pub enum ConnectionSource {
 
 /// Different ways to source the connection options.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectionSourceKind {
     Env {
