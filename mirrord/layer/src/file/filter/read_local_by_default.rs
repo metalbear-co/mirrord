@@ -32,6 +32,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/var/tmp(/|$)",
         r"^/snap(/|$)",
         r"^/run(/|$)",
+        r"^/selinux(/|$)",
         // support for nixOS.
         r"^/nix(/|$)",
         r".+\.asdf/.+",
