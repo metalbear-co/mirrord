@@ -16,8 +16,6 @@ pub enum Error {
     MissingEnvIntProxyAddr(VarError),
     #[error("Intproxy address malformed: {0}")]
     MalformedIntProxyAddr(AddrParseError),
-    #[error("Intproxy address {0} is unreachable: {1}")]
-    UnreachableIntProxyAddr(SocketAddr, std::io::Error),
 }
 
 #[allow(unused)]

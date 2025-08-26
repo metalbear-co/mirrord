@@ -7,8 +7,7 @@ use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        consoleapi::AllocConsole,
-        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
+        consoleapi::AllocConsole, processthreadsapi::GetCurrentProcessId, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}
     },
 };
 
@@ -41,6 +40,7 @@ fn release_detour_guard() -> anyhow::Result<()> {
 pub(crate) static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
 fn initialize_proxy_connection() -> anyhow::Result<()> {
+    // Try to parse `SocketAddr` from [`MIMRRORD_LAYER_INTPROXY_ADDR`] environment variable.
     let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
         .map_err(error::Error::MissingEnvIntProxyAddr)?
         .parse::<SocketAddr>()
@@ -48,8 +48,9 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
 
     // Create session request with Windows-specific process info
     let process_info = mirrord_intproxy_protocol::ProcessInfo {
-        pid: unsafe { winapi::um::processthreadsapi::GetCurrentProcessId() as i32 },
-        parent_pid: 0, // We don't need parent PID for Windows layer
+        pid: unsafe { GetCurrentProcessId() as i32 },
+        // We don't need parent PID for Windows layer
+        parent_pid: 0,
         name: std::env::current_exe()
             .ok()
             .and_then(|path| path.file_name()?.to_str().map(String::from))
@@ -57,7 +58,8 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
         cmdline: std::env::args().collect(),
         loaded: true,
     };
-
+    
+    // Set up session request.
     let session = mirrord_intproxy_protocol::NewSessionRequest {
         parent_layer: None,
         process_info,
@@ -66,9 +68,7 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
     // Use a default timeout of 30 seconds
     let timeout = std::time::Duration::from_secs(30);
 
-    let new_connection = ProxyConnection::new(address, session, timeout)
-        .map_err(|e| anyhow::anyhow!("Failed to create proxy connection: {:?}", e))?;
-
+    let new_connection = ProxyConnection::new(address, session, timeout)?;
     unsafe {
         PROXY_CONNECTION
             .set(new_connection)
@@ -89,7 +89,8 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
-        let _ = mirrord_start();
+        mirrord_start().expect("Failed call to mirrord_start");
+        println!("mirrord-layer-win fully initialized!");
     });
 
     TRUE
@@ -128,18 +129,25 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    initialize_proxy_connection()?;
-
-    initialize_detour_guard()?;
-
-    // TODO: turn into more structured module that handles console
+    // // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
     }
+    println!("Console allocated");
+    
+    initialize_proxy_connection()?;
+    println!("ProxyConnection initialized");
+    
+    initialize_detour_guard()?;
+    println!("DetourGuard initialized");
+
+    // Initialize the Windows setup system
+    // setup::initialize_setup()?;
+    // println!("Windows setup initialized");
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-
     initialize_hooks(guard)?;
+    println!("Hooks initialized");
 
     Ok(())
 }
