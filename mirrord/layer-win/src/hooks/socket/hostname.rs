@@ -255,7 +255,7 @@ where
         validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
     {
         if let Some(dns_name) = get_hostname_with_fallback() {
-            let dns_utf16: Vec<u16> = dns_name.encode_utf16().chain(std::iter::once(0)).collect();
+            let dns_utf16: Vec<u16> = dns_name.encode_utf16().collect();
 
             if dns_utf16.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0 {
                 unsafe {

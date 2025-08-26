@@ -13,8 +13,17 @@ use winapi::{
         ntdef::PCWSTR,
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
-    um::winsock2::{
-        HOSTENT, INVALID_SOCKET, SOCK_DGRAM, SOCK_STREAM, SOCKET, SOCKET_ERROR, fd_set, timeval,
+    um::{
+        errhandlingapi::SetLastError,
+        sysinfoapi::{
+            ComputerNameDnsDomain, ComputerNameDnsFullyQualified, ComputerNameDnsHostname,
+            ComputerNameMax, ComputerNameNetBIOS, ComputerNamePhysicalDnsDomain,
+            ComputerNamePhysicalDnsFullyQualified, ComputerNamePhysicalDnsHostname,
+            ComputerNamePhysicalNetBIOS,
+        },
+        winsock2::{
+            HOSTENT, INVALID_SOCKET, SOCK_DGRAM, SOCK_STREAM, SOCKET, SOCKET_ERROR, fd_set, timeval,
+        },
     },
 };
 
