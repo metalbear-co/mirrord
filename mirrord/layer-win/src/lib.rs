@@ -2,12 +2,12 @@
 use std::{net::SocketAddr, sync::OnceLock, thread};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR;
+use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        consoleapi::AllocConsole, processthreadsapi::GetCurrentProcessId, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}
+        consoleapi::AllocConsole, debugapi::DebugBreak, processthreadsapi::GetCurrentProcessId, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}
     },
 };
 
@@ -133,8 +133,14 @@ fn mirrord_start() -> anyhow::Result<()> {
     unsafe {
         AllocConsole();
     }
-    println!("Console allocated");
-    
+
+    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
+        println!("Checking for debugger...");
+        if wait_for_debug!() {
+            unsafe { DebugBreak() };
+        }
+    }
+
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");
     
