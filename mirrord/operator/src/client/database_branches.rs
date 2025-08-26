@@ -122,7 +122,8 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
     let specified_ids = params
         .iter()
-        .filter_map(|(id, _)| matches!(id, BranchDatabaseId::Specified(_)).then(|| id.as_ref()))
+        .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
+        .map(|(id, _)| id.as_ref())
         .collect::<Vec<_>>();
     let label_selector = if specified_ids.is_empty() {
         // no branch is reusable as there is no user specified ID.
