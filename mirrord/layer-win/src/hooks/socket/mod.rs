@@ -45,8 +45,6 @@ use self::{
 };
 use crate::apply_hook;
 
-// ...existing code...
-
 // Function type definitions for original Windows socket functions
 type SocketFn = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
 static SOCKET_ORIGINAL: OnceLock<&SocketFn> = OnceLock::new();
@@ -98,9 +96,6 @@ type GetAddrInfoWFn = unsafe extern "system" fn(
     result: *mut *mut ADDRINFOW,
 ) -> INT;
 static GETADDRINFOW_ORIGINAL: OnceLock<&GetAddrInfoWFn> = OnceLock::new();
-
-type FreeAddrInfoWFn = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
-static FREEADDRINFOW_ORIGINAL: OnceLock<&FreeAddrInfoWFn> = OnceLock::new();
 
 // Kernel32 hostname functions that Python might use
 type GetComputerNameAFn = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
@@ -1248,6 +1243,7 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
         }
 
         // If we can't get remote hostname, fall back to original
+        println!("GetComputerNameExW: no remote hostname available, falling back to original");
         tracing::debug!(
             "GetComputerNameExW: no remote hostname available, falling back to original"
         );
@@ -1418,20 +1414,6 @@ unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
     }
 }
 
-/// Deallocates ADDRINFOW structures (Unicode version).
-///
-/// Currently just calls the original FreeAddrInfoW since GetAddrInfoW doesn't yet
-/// allocate managed structures (it falls back to the original function).
-unsafe extern "system" fn freeaddrinfow_detour(addrinfo: *mut ADDRINFOW) {
-    unsafe {
-        // Currently GetAddrInfoW just calls the original function,
-        // so we don't have managed ADDRINFOW structures to track yet.
-        // Just call the original FreeAddrInfoW.
-        tracing::debug!("FreeAddrInfoW: calling original function");
-        FREEADDRINFOW_ORIGINAL.get().unwrap()(addrinfo);
-    }
-}
-
 /// Hook for GetAddrInfoW (Unicode version) to handle DNS resolution
 unsafe extern "system" fn getaddrinfow_detour(
     node_name: PCWSTR,
@@ -1477,8 +1459,43 @@ unsafe extern "system" fn getaddrinfow_detour(
             let ansi_service = if service_name.is_null() {
                 std::ptr::null()
             } else {
-                // Convert service name from wide to ANSI - simplified for now
-                std::ptr::null() // TODO: Implement proper conversion
+                // Convert service name from wide to ANSI
+                let service_opt = unsafe {
+                    let mut len = 0;
+                    let mut ptr = service_name;
+                    while *ptr != 0 && len < 256 {
+                        // Safety limit for service names
+                        len += 1;
+                        ptr = ptr.add(1);
+                    }
+                    if len > 0 {
+                        let wide_slice = std::slice::from_raw_parts(service_name, len);
+                        String::from_utf16_lossy(wide_slice)
+                    } else {
+                        String::new()
+                    }
+                };
+
+                // Store the converted service name in a static buffer for the duration of the call
+                static mut SERVICE_BUFFER: [i8; 256] = [0; 256];
+                if !service_opt.is_empty() {
+                    let service_bytes = service_opt.as_bytes();
+                    if service_bytes.len() < 255 {
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                service_bytes.as_ptr(),
+                                SERVICE_BUFFER.as_mut_ptr() as *mut u8,
+                                service_bytes.len(),
+                            );
+                            SERVICE_BUFFER[service_bytes.len()] = 0; // null terminator
+                            SERVICE_BUFFER.as_ptr()
+                        }
+                    } else {
+                        std::ptr::null()
+                    }
+                } else {
+                    std::ptr::null()
+                }
             };
 
             // Convert hints from ADDRINFOW to ADDRINFOA (simplified)
@@ -1773,15 +1790,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         freeaddrinfo_detour,
         FreeaddrinfoFn,
         FREEADDRINFO_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "FreeAddrInfoW",
-        freeaddrinfow_detour,
-        FreeAddrInfoWFn,
-        FREEADDRINFOW_ORIGINAL
     )?;
 
     // Register data transfer hooks

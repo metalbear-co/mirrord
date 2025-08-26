@@ -1,5 +1,9 @@
 #![allow(static_mut_refs)]
-use std::{net::SocketAddr, sync::OnceLock, thread};
+use std::{
+    net::SocketAddr,
+    sync::{Mutex, OnceLock},
+    thread,
+};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR;
@@ -7,7 +11,9 @@ use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        consoleapi::AllocConsole, processthreadsapi::GetCurrentProcessId, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}
+        consoleapi::AllocConsole,
+        processthreadsapi::GetCurrentProcessId,
+        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
 
@@ -58,7 +64,7 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
         cmdline: std::env::args().collect(),
         loaded: true,
     };
-    
+
     // Set up session request.
     let session = mirrord_intproxy_protocol::NewSessionRequest {
         parent_layer: None,
@@ -129,21 +135,18 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    // // TODO: turn into more structured module that handles console
+    // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
     }
     println!("Console allocated");
-    
+
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");
     
     initialize_detour_guard()?;
     println!("DetourGuard initialized");
 
-    // Initialize the Windows setup system
-    // setup::initialize_setup()?;
-    // println!("Windows setup initialized");
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;

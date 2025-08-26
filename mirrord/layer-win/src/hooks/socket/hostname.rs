@@ -171,8 +171,11 @@ pub fn get_hostname_with_resolver() -> HostnameResult {
     unsafe {
         match PROXY_CONNECTION.get() {
             Some(proxy) => {
+                tracing::debug!("ProxyConnection found, using remote resolver");
                 let resolver = UnixHostnameResolver::remote(proxy);
-                get_hostname(&resolver)
+                let result = get_hostname(&resolver);
+                tracing::debug!("Remote hostname resolver result: {:?}", result);
+                result
             }
             None => {
                 tracing::warn!("ProxyConnection not initialized, falling back to local hostname");
@@ -189,10 +192,13 @@ pub fn get_hostname_with_fallback() -> Option<String> {
             let hostname_str = hostname.to_string_lossy();
 
             // Use the new resolver-based DNS hostname function
-            get_dns_hostname_with_resolver(&hostname_str)
-                .or_else(|| Some(intelligent_truncate(&hostname_str, MAX_COMPUTERNAME_LENGTH)))
+            let result = get_dns_hostname_with_resolver(&hostname_str)
+                .or_else(|| Some(intelligent_truncate(&hostname_str, MAX_COMPUTERNAME_LENGTH)));
+            result
         }
-        HostnameResult::UseLocal | HostnameResult::Error(_) => None,
+        HostnameResult::UseLocal | HostnameResult::Error(_) => {
+            None
+        }
     }
 }
 
