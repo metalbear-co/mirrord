@@ -3,6 +3,7 @@ use std::{net::SocketAddr, sync::OnceLock, thread};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR;
+use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
@@ -12,7 +13,6 @@ use winapi::{
 };
 
 use crate::hooks::initialize_hooks;
-use mirrord_layer_lib::ProxyConnection;
 
 mod error;
 mod hooks;
@@ -57,12 +57,12 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
         cmdline: std::env::args().collect(),
         loaded: true,
     };
-    
+
     let session = mirrord_intproxy_protocol::NewSessionRequest {
         parent_layer: None,
         process_info,
     };
-    
+
     // Use a default timeout of 30 seconds
     let timeout = std::time::Duration::from_secs(30);
 
@@ -70,7 +70,9 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to create proxy connection: {:?}", e))?;
 
     unsafe {
-        PROXY_CONNECTION.set(new_connection).expect("Could not initialize PROXY_CONNECTION");
+        PROXY_CONNECTION
+            .set(new_connection)
+            .expect("Could not initialize PROXY_CONNECTION");
     }
 
     Ok(())
@@ -80,37 +82,14 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
 ///
 /// # Return value
 ///
-/// * [`TRUE`] - Succesful DLL attach initialization.
+/// * [`TRUE`] - Successful DLL attach initialization.
 /// * [`FALSE`] - Failed DLL attach initialization. Right after this, we will receive a
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
-fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {    
-    
-    // Temporarily disable debugger wait to test if hooks work
-    // // Wait for debugger to attach
-    // {
-    //     use winapi::um::debugapi::IsDebuggerPresent;
-    //     // Busy loop until debugger is attached
-    //     while unsafe { IsDebuggerPresent() } == 0 {
-    //         // Busy wait - no sleep to ensure immediate detection
-    //     }
-    //     // Trigger a breakpoint when debugger is attached
-    //     unsafe {
-    //         winapi::um::debugapi::DebugBreak();
-    //     }
-    // }
-    
+fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
-        match mirrord_start() {
-            Ok(()) => {
-                println!("✅ mirrord-layer-win fully initialized!");
-            }
-            Err(e) => {
-                println!("❌ mirrord-layer-win initialization failed: {}", e);
-                println!("❌ Error details: {:?}", e);
-            }
-        }
+        let _ = mirrord_start();
     });
 
     TRUE
@@ -120,7 +99,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 ///
 /// # Return value
 ///
-/// * [`TRUE`] - Succesful DLL deattach.
+/// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     release_detour_guard().expect("Failed releasing detour guard");
@@ -132,7 +111,7 @@ fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 ///
 /// # Return value
 ///
-/// * [`TRUE`] - Succesful process thread attach initialization.
+/// * [`TRUE`] - Successful process thread attach initialization.
 /// * Anything else - Failure.
 fn thread_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     TRUE
@@ -142,44 +121,25 @@ fn thread_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 ///
 /// # Return value
 ///
-/// * [`TRUE`] - Succesful process thread deattachment.
+/// * [`TRUE`] - Successful process thread detachment.
 /// * Anything else - Failure.
 fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     TRUE
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    println!("🚀 Starting mirrord-layer-win initialization...");
-    
     initialize_proxy_connection()?;
-    println!("✅ ProxyConnection initialized");
-    
+
     initialize_detour_guard()?;
-    println!("✅ DetourGuard initialized");
 
-    // Initialize the Windows setup system
-    // setup::initialize_setup()?;
-    // println!("✅ Windows setup initialized");
-
-    // // TODO: turn into more structured module that handles console
+    // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
     }
-    println!("✅ Console allocated");
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-    println!("🔧 About to initialize hooks...");
-    
-    match initialize_hooks(guard) {
-        Ok(()) => {
-            println!("✅ All hooks initialized successfully!");
-        }
-        Err(e) => {
-            println!("❌ Hook initialization failed: {}", e);
-            println!("❌ Error details: {:?}", e);
-            return Err(e);
-        }
-    }
+
+    initialize_hooks(guard)?;
 
     Ok(())
 }

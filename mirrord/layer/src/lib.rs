@@ -93,10 +93,10 @@ use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+use mirrord_layer_lib::ProxyConnection;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
-use mirrord_layer_lib::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};

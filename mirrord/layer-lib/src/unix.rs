@@ -1,13 +1,17 @@
 //! Unix-specific hostname resolver implementation compatible with Windows
-//! 
+//!
 //! This module provides the Unix-specific implementation of hostname resolution
 //! that integrates with the existing layer infrastructure through trait boundaries.
 //! Since the remote target is always Linux, this resolver works for both Unix and Windows clients.
 
 use std::{ffi::CString, path::PathBuf};
+
 use tracing::trace;
 
-use crate::{hostname::{HostnameResolver, HostnameResult, HostnameError}, proxy_connection::ProxyConnection};
+use crate::{
+    hostname::{HostnameError, HostnameResolver, HostnameResult},
+    proxy_connection::ProxyConnection,
+};
 
 /// Unix-specific hostname resolver that fetches hostname from remote /etc/hostname
 /// Works for both Unix and Windows clients since remote target is always Linux
@@ -25,7 +29,10 @@ impl<'a> HostnameResolver for UnixHostnameResolver<'a> {
         }
 
         if let Ok(hostname) = std::env::var("MIRRORD_OVERRIDE_HOSTNAME") {
-            trace!("UnixHostnameResolver: Using hostname from MIRRORD_OVERRIDE_HOSTNAME env var: {}", hostname);
+            trace!(
+                "UnixHostnameResolver: Using hostname from MIRRORD_OVERRIDE_HOSTNAME env var: {}",
+                hostname
+            );
             if let Ok(cstring) = CString::new(hostname) {
                 return HostnameResult::Success(cstring);
             }
@@ -33,10 +40,15 @@ impl<'a> HostnameResolver for UnixHostnameResolver<'a> {
 
         // Try to fetch hostname from remote /etc/hostname via ProxyConnection
         if let Some(proxy) = &self.proxy_connection {
-            trace!("UnixHostnameResolver: Attempting to fetch hostname via ProxyConnection from /etc/hostname");
+            trace!(
+                "UnixHostnameResolver: Attempting to fetch hostname via ProxyConnection from /etc/hostname"
+            );
             match self.fetch_hostname_via_proxy(proxy) {
                 Ok(hostname) => {
-                    trace!("UnixHostnameResolver: Successfully fetched hostname via proxy: {}", hostname);
+                    trace!(
+                        "UnixHostnameResolver: Successfully fetched hostname via proxy: {}",
+                        hostname
+                    );
                     match CString::new(hostname) {
                         Ok(cstring) => return HostnameResult::Success(cstring),
                         Err(_) => {
@@ -46,17 +58,22 @@ impl<'a> HostnameResolver for UnixHostnameResolver<'a> {
                     }
                 }
                 Err(e) => {
-                    trace!("UnixHostnameResolver: Failed to fetch hostname via proxy: {}", e);
+                    trace!(
+                        "UnixHostnameResolver: Failed to fetch hostname via proxy: {}",
+                        e
+                    );
                     // Don't fail completely, fall through to local methods
                 }
             }
         }
 
         // If ProxyConnection method fails, indicate we should use local hostname
-        trace!("UnixHostnameResolver: No proxy connection available or failed, using local hostname");
+        trace!(
+            "UnixHostnameResolver: No proxy connection available or failed, using local hostname"
+        );
         HostnameResult::UseLocal
     }
-    
+
     fn should_use_local_hostname(&self) -> bool {
         self.use_local
     }
@@ -81,7 +98,9 @@ impl<'a> UnixHostnameResolver<'a> {
 
     /// Fetch hostname from remote target via ProxyConnection by reading /etc/hostname
     fn fetch_hostname_via_proxy(&self, proxy: &ProxyConnection) -> Result<String, HostnameError> {
-        use mirrord_protocol::file::{OpenFileRequest, ReadFileRequest, CloseFileRequest, OpenOptionsInternal};
+        use mirrord_protocol::file::{
+            CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
+        };
 
         // Open /etc/hostname on the remote target
         let open_request = OpenFileRequest {
@@ -94,12 +113,20 @@ impl<'a> UnixHostnameResolver<'a> {
 
         let open_response = match proxy.make_request_with_response(open_request) {
             Ok(response) => response,
-            Err(e) => return Err(HostnameError::Protocol(format!("Failed to open /etc/hostname: {e}"))),
+            Err(e) => {
+                return Err(HostnameError::Protocol(format!(
+                    "Failed to open /etc/hostname: {e}"
+                )));
+            }
         };
 
         let fd = match open_response {
             Ok(open_file_response) => open_file_response.fd,
-            Err(e) => return Err(HostnameError::Protocol(format!("Remote error opening /etc/hostname: {e:?}"))),
+            Err(e) => {
+                return Err(HostnameError::Protocol(format!(
+                    "Remote error opening /etc/hostname: {e:?}"
+                )));
+            }
         };
 
         // Read the hostname content
@@ -113,7 +140,9 @@ impl<'a> UnixHostnameResolver<'a> {
             Err(e) => {
                 // Try to close the file even if read failed
                 let _ = proxy.make_request_no_response(CloseFileRequest { fd });
-                return Err(HostnameError::Protocol(format!("Failed to read /etc/hostname: {e}")));
+                return Err(HostnameError::Protocol(format!(
+                    "Failed to read /etc/hostname: {e}"
+                )));
             }
         };
 
@@ -122,7 +151,9 @@ impl<'a> UnixHostnameResolver<'a> {
             Err(e) => {
                 // Try to close the file even if read failed
                 let _ = proxy.make_request_no_response(CloseFileRequest { fd });
-                return Err(HostnameError::Protocol(format!("Remote error reading /etc/hostname: {e:?}")));
+                return Err(HostnameError::Protocol(format!(
+                    "Remote error reading /etc/hostname: {e:?}"
+                )));
             }
         };
 
@@ -131,9 +162,11 @@ impl<'a> UnixHostnameResolver<'a> {
 
         // Convert bytes to string and trim whitespace
         let hostname = String::from_utf8_lossy(&hostname_bytes).trim().to_string();
-        
+
         if hostname.is_empty() {
-            return Err(HostnameError::Protocol("Empty hostname from /etc/hostname".to_string()));
+            return Err(HostnameError::Protocol(
+                "Empty hostname from /etc/hostname".to_string(),
+            ));
         }
 
         Ok(hostname)
@@ -154,10 +187,10 @@ mod tests {
         assert!(local_resolver.proxy_connection.is_none());
     }
 
-    #[test] 
+    #[test]
     fn test_environment_variable_hostname() {
         std::env::set_var("MIRRORD_OVERRIDE_HOSTNAME", "test-hostname");
-        
+
         // Create a resolver without proxy connection to test env var fallback
         let resolver = UnixHostnameResolver {
             use_local: false,
@@ -169,14 +202,14 @@ mod tests {
             }
             _ => panic!("Expected hostname from environment variable"),
         }
-        
+
         std::env::remove_var("MIRRORD_OVERRIDE_HOSTNAME");
     }
 
     #[test]
     fn test_override_hostname() {
         std::env::set_var("MIRRORD_OVERRIDE_HOSTNAME", "override-hostname");
-        
+
         // Create a resolver without proxy connection to test env var fallback
         let resolver = UnixHostnameResolver {
             use_local: false,
@@ -188,7 +221,7 @@ mod tests {
             }
             _ => panic!("Expected hostname from override environment variable"),
         }
-        
+
         std::env::remove_var("MIRRORD_OVERRIDE_HOSTNAME");
     }
 
@@ -196,7 +229,7 @@ mod tests {
     fn test_local_hostname_preference() {
         let resolver = UnixHostnameResolver::local();
         match resolver.fetch_remote_hostname() {
-            HostnameResult::UseLocal => {},
+            HostnameResult::UseLocal => {}
             _ => panic!("Expected UseLocal result for local resolver"),
         }
     }

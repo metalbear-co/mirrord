@@ -46,7 +46,7 @@ impl WindowsProcess {
         let stdout_handle = tokio::task::spawn_blocking(move || {
             let mut buffer = [0; 4096];
             let mut all_output = Vec::new();
-            
+
             loop {
                 match stdout.read(&mut buffer) {
                     Ok(0) => {
@@ -65,7 +65,7 @@ impl WindowsProcess {
                     }
                 }
             }
-            
+
             all_output
         });
 
@@ -96,23 +96,31 @@ impl WindowsProcess {
                 unsafe {
                     let process_handle = HANDLE(process_handle_raw as *mut std::ffi::c_void);
                     WaitForSingleObject(process_handle, u32::MAX);
-                    
+
                     // Get exit code
                     let mut exit_code: u32 = 0;
-                    if windows::Win32::System::Threading::GetExitCodeProcess(process_handle, &mut exit_code).is_ok() {
+                    if windows::Win32::System::Threading::GetExitCodeProcess(
+                        process_handle,
+                        &mut exit_code,
+                    )
+                    .is_ok()
+                    {
                         exit_code as i32
                     } else {
                         1
                     }
                 }
             }
-        }).await.unwrap_or(1);
+        })
+        .await
+        .unwrap_or(1);
 
         // Wait for I/O tasks to complete
         let _ = tokio::time::timeout(Duration::from_secs(10), async {
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;
-        }).await;
+        })
+        .await;
 
         Ok(exit_code)
     }

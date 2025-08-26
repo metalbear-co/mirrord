@@ -1,35 +1,29 @@
-#![cfg(not(target_os = "windows"))]
-
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
-#[cfg(not(target_os = "windows"))]
-use std::os::{
-    fd::{BorrowedFd, FromRawFd, IntoRawFd},
-    unix::io::RawFd,
-};
 use std::{
     collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     ops::Not,
+    os::{
+        fd::{BorrowedFd, FromRawFd, IntoRawFd},
+        unix::io::RawFd,
+    },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
     sync::{Arc, Mutex, OnceLock},
 };
 
-#[cfg(not(target_os = "windows"))]
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
 };
-use mirrord_layer_lib::{HostnameResult, get_or_init_hostname};
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
-#[cfg(not(target_os = "windows"))]
 use nix::{
     errno::Errno,
     sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
@@ -42,7 +36,6 @@ use tracing::{error, trace};
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
-use mirrord_layer_lib::UnixHostnameResolver;
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
@@ -56,6 +49,9 @@ use crate::{
 /// [`connect`] with, so we can resolve it locally when neccessary.
 pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Hostname initialized from the agent with [`gethostname`].
+pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
 /// Globals used by `gethostbyname`.
 static mut GETHOSTBYNAME_HOSTNAME: Option<CString> = None;
@@ -367,11 +363,7 @@ fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
     // It's plausible that the user did not know the port has to be in either port list to be
     // stolen when an HTTP filter is set, so show a warning.
     if http_filter_used && incoming_config.ports.is_none() {
-        #[cfg(not(target_os = "windows"))]
-        {
-            let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(
-                sockfd,
-            )
+        let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
             .inspect_err(|err| {
                 tracing::debug!(
                     "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
@@ -384,29 +376,28 @@ fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
                     .map(SockaddrIn::port)
                     .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
             }) {
-                if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
-                    format!("Remote port {mapped_port} (mapped from local port {port})",)
-                } else {
-                    format!("Port {port}")
-                }
+            if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
+                format!("Remote port {mapped_port} (mapped from local port {port})",)
             } else {
-                // `getsockname` returned an error, or a non-IP address. Not stopping execution on
-                // that, as it does not mean anything else went wrong in this run. Just emitting a
-                // warning without the port number.
-                tracing::debug!(
-                    "Could not determine the bound port of a socket, for the purpose of displaying it in a warning."
-                );
-                "A port".to_string()
-            };
-            warn!(
-                "{port_text} was not included in the filtered ports, and also not in the non-filtered \
-                ports, and will therefore be bound locally. If this is intentional, ignore this \
-                warning. If you want the http filter to apply to this port, add it to \
-                `feature.network.incoming.http_filter.ports`. \
-                If you want to steal all the traffic of this port, add it to \
-                `feature.network.incoming.ports`."
+                format!("Port {port}")
+            }
+        } else {
+            // `getsockname` returned an error, or a non-IP address. Not stopping execution on
+            // that, as it does not mean anything else went wrong in this run. Just emitting a
+            // warning without the port number.
+            tracing::debug!(
+                "Could not determine the bound port of a socket, for the purpose of displaying it in a warning."
             );
-        }
+            "A port".to_string()
+        };
+        warn!(
+            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
+            ports, and will therefore be bound locally. If this is intentional, ignore this \
+            warning. If you want the http filter to apply to this port, add it to \
+            `feature.network.incoming.http_filter.ports`. \
+            If you want to steal all the traffic of this port, add it to \
+            `feature.network.incoming.ports`."
+        );
     }
 }
 
@@ -1078,6 +1069,38 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
+/// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
+fn remote_hostname_string() -> Detour<CString> {
+    if crate::setup().local_hostname() {
+        Detour::Bypass(Bypass::LocalHostname)?;
+    }
+
+    let hostname_path = PathBuf::from("/etc/hostname");
+
+    let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
+        hostname_path,
+        OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        },
+    )?;
+
+    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 256)?;
+
+    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
+        trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
+    });
+
+    CString::new(
+        bytes
+            .into_vec()
+            .into_iter()
+            .take(read_amount as usize - 1)
+            .collect::<Vec<_>>(),
+    )
+    .map(Detour::Success)?
+}
+
 /// Resolves a hostname and set result to static global like the original `gethostbyname` does.
 ///
 /// Used by erlang/elixir to resolve DNS.
@@ -1166,25 +1189,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 /// Resolve hostname from remote host with caching for the result
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
-    let resolver = UnixHostnameResolver;
-    
-    match get_or_init_hostname(&resolver) {
-        HostnameResult::Success(_) => {
-            // The hostname is cached in layer-lib, get it from there
-            match mirrord_layer_lib::get_cached_hostname() {
-                Some(cached_hostname) => Detour::Success(cached_hostname),
-                None => {
-                    // This shouldn't happen, but fallback to the resolver directly
-                    resolver.fetch_remote_hostname_detour()
-                }
-            }
-        }
-        HostnameResult::UseLocal => Detour::Bypass(crate::detour::Bypass::LocalHostname),
-        HostnameResult::Error(_) => {
-            // Fallback to the resolver implementation for compatibility
-            resolver.fetch_remote_hostname_detour()
-        }
-    }
+    HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
 
 /// Retrieves the contents of remote's `/etc/resolv.conf`

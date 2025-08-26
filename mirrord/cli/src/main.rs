@@ -507,7 +507,8 @@ where
 {
     // Add .exe extension if necessary on Windows
     // From CreateProcessW documentation:
-    // lpApplicationName - This parameter must include the file name extension; no default extension is assumed.
+    // lpApplicationName - This parameter must include the file name extension; no default extension
+    // is assumed.
     let binary_name = binary
         .ends_with(".exe")
         .then_some(binary.clone())

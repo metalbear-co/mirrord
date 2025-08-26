@@ -1,49 +1,39 @@
 //! Module responsible for registering hooks targeting socket operation syscalls.
 
 mod hostname;
-mod utils;
 mod state;
+mod utils;
 
-use std::{
-    ptr,
-    sync::{OnceLock},
-};
+use std::{ptr, sync::OnceLock};
 
-use mirrord_layer_lib::{HostnameResult, get_or_init_hostname, DefaultHostnameResolver};
 use minhook_detours_rs::guard::DetourGuard;
 use winapi::{
     shared::{
-        minwindef::{INT},
-        ws2def::{SOCKADDR, AF_INET, AF_INET6, ADDRINFOA},
+        minwindef::INT,
+        ntdef::PCWSTR,
+        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
-    um::{
-        winsock2::{
-            SOCKET, INVALID_SOCKET, SOCK_STREAM, SOCK_DGRAM, HOSTENT, 
-            fd_set, timeval, SOCKET_ERROR,
-        },
+    um::winsock2::{
+        HOSTENT, INVALID_SOCKET, SOCK_DGRAM, SOCK_STREAM, SOCKET, SOCKET_ERROR, fd_set, timeval,
     },
 };
 
-use self::hostname::{
-    REMOTE_DNS_REVERSE_MAPPING, 
-    handle_hostname_ansi, handle_hostname_unicode,
-    is_remote_hostname, resolve_hostname_with_fallback,
-    windows_getaddrinfo, free_managed_addrinfo, MANAGED_ADDRINFO
+use self::{
+    hostname::{
+        MANAGED_ADDRINFO, REMOTE_DNS_REVERSE_MAPPING, free_managed_addrinfo, handle_hostname_ansi,
+        handle_hostname_unicode, is_remote_hostname, resolve_hostname_with_fallback,
+        windows_getaddrinfo,
+    },
+    state::{
+        ProxyConnectResult, SOCKET_MANAGER, WindowsSocketBound, WindowsSocketKind,
+        WindowsSocketState, connect_through_proxy, proxy_bind, register_accepted_socket,
+        setup_listening, socketaddr_to_windows_sockaddr,
+    },
+    utils::{
+        evict_old_cache_entries, extract_ip_from_hostent, sockaddr_to_socket_addr,
+        socket_address_to_sockaddr,
+    },
 };
-use self::utils::{sockaddr_to_socket_addr, extract_ip_from_hostent, evict_old_cache_entries};
-use self::state::{
-    WindowsSocketState,
-    WindowsSocketBound,
-    WindowsSocketKind,
-    ProxyConnectResult,
-    connect_through_proxy,
-    socketaddr_to_windows_sockaddr,
-    proxy_bind,
-    setup_listening,
-    register_accepted_socket,
-    SOCKET_MANAGER,
-};
-use self::utils::{socket_address_to_sockaddr};
 use crate::apply_hook;
 
 // ...existing code...
@@ -61,13 +51,16 @@ static LISTEN_ORIGINAL: OnceLock<&ListenFn> = OnceLock::new();
 type ConnectFn = unsafe extern "system" fn(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT;
 static CONNECT_ORIGINAL: OnceLock<&ConnectFn> = OnceLock::new();
 
-type AcceptFn = unsafe extern "system" fn(s: SOCKET, addr: *mut SOCKADDR, addrlen: *mut INT) -> SOCKET;
+type AcceptFn =
+    unsafe extern "system" fn(s: SOCKET, addr: *mut SOCKADDR, addrlen: *mut INT) -> SOCKET;
 static ACCEPT_ORIGINAL: OnceLock<&AcceptFn> = OnceLock::new();
 
-type GetsocknameFn = unsafe extern "system" fn(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT;
+type GetsocknameFn =
+    unsafe extern "system" fn(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT;
 static GETSOCKNAME_ORIGINAL: OnceLock<&GetsocknameFn> = OnceLock::new();
 
-type GetpeernameFn = unsafe extern "system" fn(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT;
+type GetpeernameFn =
+    unsafe extern "system" fn(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT;
 static GETPEERNAME_ORIGINAL: OnceLock<&GetpeernameFn> = OnceLock::new();
 
 type GethostnameFn = unsafe extern "system" fn(name: *mut i8, namelen: INT) -> INT;
@@ -79,14 +72,26 @@ static GETHOSTBYNAME_ORIGINAL: OnceLock<&GethostbynameFn> = OnceLock::new();
 
 type GetaddrinfoFn = unsafe extern "system" fn(
     node_name: *const i8,
-    service_name: *const i8, 
+    service_name: *const i8,
     hints: *const ADDRINFOA,
-    result: *mut *mut ADDRINFOA
+    result: *mut *mut ADDRINFOA,
 ) -> INT;
 static GETADDRINFO_ORIGINAL: OnceLock<&GetaddrinfoFn> = OnceLock::new();
 
 type FreeaddrinfoFn = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
 static FREEADDRINFO_ORIGINAL: OnceLock<&FreeaddrinfoFn> = OnceLock::new();
+
+// Unicode versions that Python might use
+type GetAddrInfoWFn = unsafe extern "system" fn(
+    node_name: PCWSTR,
+    service_name: PCWSTR,
+    hints: *const ADDRINFOW,
+    result: *mut *mut ADDRINFOW,
+) -> INT;
+static GETADDRINFOW_ORIGINAL: OnceLock<&GetAddrInfoWFn> = OnceLock::new();
+
+type FreeAddrInfoWFn = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
+static FREEADDRINFOW_ORIGINAL: OnceLock<&FreeAddrInfoWFn> = OnceLock::new();
 
 // Kernel32 hostname functions that Python might use
 type GetComputerNameAFn = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
@@ -96,13 +101,14 @@ type GetComputerNameWFn = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *
 static GET_COMPUTER_NAME_W_ORIGINAL: OnceLock<&GetComputerNameWFn> = OnceLock::new();
 
 // Additional hostname functions that Python might use
-type GetComputerNameExAFn = unsafe extern "system" fn(name_type: u32, lpBuffer: *mut i8, nSize: *mut u32) -> i32;
+type GetComputerNameExAFn =
+    unsafe extern "system" fn(name_type: u32, lpBuffer: *mut i8, nSize: *mut u32) -> i32;
 static GET_COMPUTER_NAME_EX_A_ORIGINAL: OnceLock<&GetComputerNameExAFn> = OnceLock::new();
 
-type GetComputerNameExWFn = unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> i32;
+type GetComputerNameExWFn =
+    unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> i32;
 static GET_COMPUTER_NAME_EX_W_ORIGINAL: OnceLock<&GetComputerNameExWFn> = OnceLock::new();
 
-// Add WSAStartup hook to debug socket initialization issues
 type WSAStartupFn = unsafe extern "system" fn(wVersionRequested: u16, lpWSAData: *mut u8) -> i32;
 static WSA_STARTUP_ORIGINAL: OnceLock<&WSAStartupFn> = OnceLock::new();
 
@@ -116,11 +122,11 @@ static IOCTLSOCKET_ORIGINAL: OnceLock<&IoctlsocketFn> = OnceLock::new();
 
 // select for socket readiness monitoring
 type SelectFn = unsafe extern "system" fn(
-    nfds: i32, 
-    readfds: *mut fd_set, 
-    writefds: *mut fd_set, 
-    exceptfds: *mut fd_set, 
-    timeout: *const timeval
+    nfds: i32,
+    readfds: *mut fd_set,
+    writefds: *mut fd_set,
+    exceptfds: *mut fd_set,
+    timeout: *const timeval,
 ) -> i32;
 static SELECT_ORIGINAL: OnceLock<&SelectFn> = OnceLock::new();
 
@@ -135,7 +141,7 @@ type WSASocketFn = unsafe extern "system" fn(
     protocol: i32,
     lpProtocolInfo: *mut u8,
     g: u32,
-    dwFlags: u32
+    dwFlags: u32,
 ) -> SOCKET;
 static WSA_SOCKET_ORIGINAL: OnceLock<&WSASocketFn> = OnceLock::new();
 
@@ -147,7 +153,7 @@ type WSAConnectFn = unsafe extern "system" fn(
     lpCallerData: *mut u8,
     lpCalleeData: *mut u8,
     lpSQOS: *mut u8,
-    lpGQOS: *mut u8
+    lpGQOS: *mut u8,
 ) -> INT;
 static WSA_CONNECT_ORIGINAL: OnceLock<&WSAConnectFn> = OnceLock::new();
 
@@ -156,7 +162,7 @@ type WSAAcceptFn = unsafe extern "system" fn(
     addr: *mut SOCKADDR,
     addrlen: *mut INT,
     lpfnCondition: *mut u8,
-    dwCallbackData: usize
+    dwCallbackData: usize,
 ) -> SOCKET;
 static WSA_ACCEPT_ORIGINAL: OnceLock<&WSAAcceptFn> = OnceLock::new();
 
@@ -167,7 +173,7 @@ type WSASendFn = unsafe extern "system" fn(
     lpNumberOfBytesSent: *mut u32,
     dwFlags: u32,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT;
 static WSA_SEND_ORIGINAL: OnceLock<&WSASendFn> = OnceLock::new();
 
@@ -178,7 +184,7 @@ type WSARecvFn = unsafe extern "system" fn(
     lpNumberOfBytesRecvd: *mut u32,
     lpFlags: *mut u32,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT;
 static WSA_RECV_ORIGINAL: OnceLock<&WSARecvFn> = OnceLock::new();
 
@@ -191,7 +197,7 @@ type WSASendToFn = unsafe extern "system" fn(
     lpTo: *const SOCKADDR,
     iTolen: INT,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT;
 static WSA_SEND_TO_ORIGINAL: OnceLock<&WSASendToFn> = OnceLock::new();
 
@@ -204,7 +210,7 @@ type WSARecvFromFn = unsafe extern "system" fn(
     lpFrom: *mut SOCKADDR,
     lpFromlen: *mut INT,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT;
 static WSA_RECV_FROM_ORIGINAL: OnceLock<&WSARecvFromFn> = OnceLock::new();
 
@@ -216,22 +222,22 @@ type SendFn = unsafe extern "system" fn(s: SOCKET, buf: *const i8, len: INT, fla
 static SEND_ORIGINAL: OnceLock<&SendFn> = OnceLock::new();
 
 type RecvfromFn = unsafe extern "system" fn(
-    s: SOCKET, 
-    buf: *mut i8, 
-    len: INT, 
-    flags: INT, 
-    from: *mut SOCKADDR, 
-    fromlen: *mut INT
+    s: SOCKET,
+    buf: *mut i8,
+    len: INT,
+    flags: INT,
+    from: *mut SOCKADDR,
+    fromlen: *mut INT,
 ) -> INT;
 static RECVFROM_ORIGINAL: OnceLock<&RecvfromFn> = OnceLock::new();
 
 type SendtoFn = unsafe extern "system" fn(
-    s: SOCKET, 
-    buf: *const i8, 
-    len: INT, 
-    flags: INT, 
-    to: *const SOCKADDR, 
-    tolen: INT
+    s: SOCKET,
+    buf: *const i8,
+    len: INT,
+    flags: INT,
+    to: *const SOCKADDR,
+    tolen: INT,
 ) -> INT;
 static SENDTO_ORIGINAL: OnceLock<&SendtoFn> = OnceLock::new();
 
@@ -244,65 +250,82 @@ static SHUTDOWN_ORIGINAL: OnceLock<&ShutdownFn> = OnceLock::new();
 
 // Socket option function types
 type SetsockoptFn = unsafe extern "system" fn(
-    s: SOCKET, 
-    level: INT, 
-    optname: INT, 
-    optval: *const i8, 
-    optlen: INT
+    s: SOCKET,
+    level: INT,
+    optname: INT,
+    optval: *const i8,
+    optlen: INT,
 ) -> INT;
 static SETSOCKOPT_ORIGINAL: OnceLock<&SetsockoptFn> = OnceLock::new();
 
 type GetsockoptFn = unsafe extern "system" fn(
-    s: SOCKET, 
-    level: INT, 
-    optname: INT, 
-    optval: *mut i8, 
-    optlen: *mut INT
+    s: SOCKET,
+    level: INT,
+    optname: INT,
+    optval: *mut i8,
+    optlen: *mut INT,
 ) -> INT;
 static GETSOCKOPT_ORIGINAL: OnceLock<&GetsockoptFn> = OnceLock::new();
 
 /// Windows socket hook for socket creation
 unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> SOCKET {
-    tracing::trace!("socket_detour -> af: {}, type: {}, protocol: {}", af, r#type, protocol);
-    
+    tracing::trace!(
+        "socket_detour -> af: {}, type: {}, protocol: {}",
+        af,
+        r#type,
+        protocol
+    );
+
     // Call the original function to create the socket
     let original = SOCKET_ORIGINAL.get().unwrap();
     let socket = unsafe { original(af, r#type, protocol) };
-    
+
     if socket != INVALID_SOCKET {
         // Determine socket kind
         let socket_kind = match r#type {
             SOCK_STREAM => WindowsSocketKind::Tcp,
             SOCK_DGRAM => WindowsSocketKind::Udp,
             _ => {
-                tracing::trace!("socket_detour -> unknown socket type {}, not managing", r#type);
+                tracing::trace!(
+                    "socket_detour -> unknown socket type {}, not managing",
+                    r#type
+                );
                 return socket;
             }
         };
         if af == AF_INET || af == AF_INET6 {
-            SOCKET_MANAGER.register_socket(socket, af, socket_kind);
+            SOCKET_MANAGER.register_socket(socket, af, socket_kind.clone());
+            tracing::trace!(
+                "socket_detour -> registered socket {} with mirrord (af: {}, kind: {:?})",
+                socket,
+                af,
+                socket_kind
+            );
         }
     }
-    
+
     socket
 }
 
 /// Windows socket hook for bind
 unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("bind_detour -> socket: {}, namelen: {}", s, namelen);
-    
+
     // Check if this socket is managed by mirrord using SocketManager
     if SOCKET_MANAGER.is_socket_managed(s) {
         // Convert Windows sockaddr to Rust SocketAddr
         if let Some(requested_addr) = unsafe { sockaddr_to_socket_addr(name, namelen) } {
-            tracing::info!("bind_detour -> mirrord binding socket to {}", requested_addr);
-            
+            tracing::info!(
+                "bind_detour -> mirrord binding socket to {}",
+                requested_addr
+            );
+
             // Use proxy bind operation from state.rs
             match proxy_bind(s, requested_addr) {
                 Ok(bound_addr) => {
                     let original = BIND_ORIGINAL.get().unwrap();
                     let result = unsafe { original(s, name, namelen) };
-                    
+
                     if result == 0 {
                         // Success - update socket state using SocketManager
                         let bound = WindowsSocketBound {
@@ -311,7 +334,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
                         SOCKET_MANAGER.set_socket_state(s, WindowsSocketState::Bound(bound));
                         tracing::info!("bind_detour -> socket {} bound through mirrord proxy", s);
                     }
-                    
+
                     return result;
                 }
                 Err(error_code) => {
@@ -321,38 +344,51 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
             }
         }
     }
-    
+
     // Fall back to original function for non-managed sockets or errors
     let original = BIND_ORIGINAL.get().unwrap();
-    unsafe { original(s, name, namelen) }
+    let result = unsafe { original(s, name, namelen) };
+    result
 }
 
 /// Windows socket hook for listen
 unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     tracing::trace!("listen_detour -> socket: {}, backlog: {}", s, backlog);
-    
+
     // Check if this socket is managed by mirrord and get bound address
     if let Some(bind_addr) = SOCKET_MANAGER.get_bound_address(s) {
-        tracing::info!("listen_detour -> mirrord socket {} transitioning to listening on {}", s, bind_addr);
-        
+        tracing::info!(
+            "listen_detour -> mirrord socket {} transitioning to listening on {}",
+            s,
+            bind_addr
+        );
+
         // Use setup_listening helper from state.rs
         match setup_listening(s, bind_addr, backlog) {
             Ok(()) => {
                 // Call original listen
                 let original = LISTEN_ORIGINAL.get().unwrap();
                 let result = unsafe { original(s, backlog) };
-                
+
                 if result == 0 {
                     // Success - update socket state to listening using SocketManager
-                    if SOCKET_MANAGER.is_socket_in_state(s, |state| matches!(state, WindowsSocketState::Bound(_))) {
+                    if SOCKET_MANAGER.is_socket_in_state(s, |state| {
+                        matches!(state, WindowsSocketState::Bound(_))
+                    }) {
                         // Get the bound state and transition to listening
-                        if let Some(WindowsSocketState::Bound(bound)) = SOCKET_MANAGER.get_socket_state(s) {
-                            SOCKET_MANAGER.set_socket_state(s, WindowsSocketState::Listening(bound));
-                            tracing::info!("listen_detour -> socket {} now listening through mirrord", s);
+                        if let Some(WindowsSocketState::Bound(bound)) =
+                            SOCKET_MANAGER.get_socket_state(s)
+                        {
+                            SOCKET_MANAGER
+                                .set_socket_state(s, WindowsSocketState::Listening(bound));
+                            tracing::info!(
+                                "listen_detour -> socket {} now listening through mirrord",
+                                s
+                            );
                         }
                     }
                 }
-                
+
                 return result;
             }
             Err(e) => {
@@ -360,55 +396,79 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
                 // Continue with original listen anyway
             }
         }
-        
+
         // Fallback - call original listen even if setup failed
         let original = LISTEN_ORIGINAL.get().unwrap();
-        unsafe { original(s, backlog) }
+        let result = unsafe { original(s, backlog) };
+        result
     } else {
         // Fall back to original function for non-managed sockets
         let original = LISTEN_ORIGINAL.get().unwrap();
-        unsafe { original(s, backlog) }
+        let result = unsafe { original(s, backlog) };
+        result
     }
 }
 
 /// Windows socket hook for connect
 unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
-    
+
     // Check if this socket is managed by mirrord
     let managed_socket = SOCKET_MANAGER.get_socket(s);
-    
+
     if let Some(user_socket) = managed_socket {
         // Convert Windows sockaddr to Rust SocketAddr
         if let Some(remote_addr) = unsafe { sockaddr_to_socket_addr(name, namelen) } {
+            tracing::debug!(
+                "connect_detour -> connecting to remote address: {:?}",
+                remote_addr
+            );
             // Try to connect through the mirrord proxy
             match connect_through_proxy(s, &user_socket, remote_addr) {
                 ProxyConnectResult::Success(connected, connection_id) => {
                     // Convert the layer address to SOCKADDR and connect
-                    match unsafe { socket_address_to_sockaddr(&connected.layer_address.as_ref().unwrap()) } {
+                    match unsafe {
+                        socket_address_to_sockaddr(&connected.layer_address.as_ref().unwrap())
+                    } {
                         Ok((sockaddr, sockaddr_len)) => {
                             // Connect to the proxy layer address
                             let original = CONNECT_ORIGINAL.get().unwrap();
-                            let result = unsafe { original(s, &sockaddr as *const SOCKADDR, sockaddr_len) };
-                            
+                            let result =
+                                unsafe { original(s, &sockaddr as *const SOCKADDR, sockaddr_len) };
+
                             if result == 0 {
-                                // Connection successful, update socket state and store connection info
-                                tracing::info!("connect_detour -> successfully connected to layer address");
-                                
-                                SOCKET_MANAGER.set_socket_state(s, WindowsSocketState::Connected(connected));
-                                
+                                // Connection successful, update socket state and store connection
+                                // info
+                                tracing::info!(
+                                    "connect_detour -> successfully connected to layer address"
+                                );
+
+                                SOCKET_MANAGER
+                                    .set_socket_state(s, WindowsSocketState::Connected(connected));
+
                                 // Store connection ID if available
                                 if let Some(conn_id) = connection_id {
                                     SOCKET_MANAGER.set_connection_id(s, conn_id);
-                                    tracing::debug!("connect_detour -> stored connection ID {} for socket {}", conn_id, s);
+                                    tracing::debug!(
+                                        "connect_detour -> stored connection ID {} for socket {}",
+                                        conn_id,
+                                        s
+                                    );
                                 } else {
-                                    tracing::debug!("connect_detour -> no connection ID provided in proxy response");
+                                    tracing::debug!(
+                                        "connect_detour -> no connection ID provided in proxy response"
+                                    );
                                 }
-                                tracing::debug!("connect_detour -> updated socket state to Connected");
+                                tracing::debug!(
+                                    "connect_detour -> updated socket state to Connected"
+                                );
                             } else {
-                                tracing::error!("connect_detour -> failed to connect to layer address: {}", result);
+                                tracing::error!(
+                                    "connect_detour -> failed to connect to layer address: {}",
+                                    result
+                                );
                             }
-                            
+
                             return result;
                         }
                         Err(e) => {
@@ -427,46 +487,66 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
             }
         }
     }
-    
+
     // Fallback to original function for all error cases and non-managed sockets
     let original = CONNECT_ORIGINAL.get().unwrap();
-    unsafe { original(s, name, namelen) }
+    let result = unsafe { original(s, name, namelen) };
+    result
 }
 
 /// Windows socket hook for accept
-unsafe extern "system" fn accept_detour(s: SOCKET, addr: *mut SOCKADDR, addrlen: *mut INT) -> SOCKET {
+unsafe extern "system" fn accept_detour(
+    s: SOCKET,
+    addr: *mut SOCKADDR,
+    addrlen: *mut INT,
+) -> SOCKET {
     tracing::trace!("accept_detour -> socket: {}", s);
-    
+
     // Call original accept first
     let original = ACCEPT_ORIGINAL.get().unwrap();
     let accepted_socket = unsafe { original(s, addr, addrlen) };
-    
+
     if accepted_socket != INVALID_SOCKET {
         // Check if the listening socket is managed and get its bound address
         if let Some(bound_addr) = SOCKET_MANAGER.get_bound_address(s) {
             // Check if listening socket is in listening state
-            if SOCKET_MANAGER.is_socket_in_state(s, |state| matches!(state, WindowsSocketState::Listening(_))) {
-                tracing::info!("accept_detour -> accepted socket {} from mirrord-managed listener", accepted_socket);
-                
+            if SOCKET_MANAGER
+                .is_socket_in_state(s, |state| matches!(state, WindowsSocketState::Listening(_)))
+            {
+                tracing::info!(
+                    "accept_detour -> accepted socket {} from mirrord-managed listener",
+                    accepted_socket
+                );
+
                 // Get peer address from accept result
                 let peer_addr = if !addr.is_null() && !addrlen.is_null() {
                     unsafe { sockaddr_to_socket_addr(addr as *const SOCKADDR, *addrlen) }
                 } else {
                     None
                 };
-                
+
                 if let Some(peer_address) = peer_addr {
                     // Get domain and kind from listening socket
                     if let Some(listening_socket) = SOCKET_MANAGER.get_socket(s) {
                         // Use register_accepted_socket helper from state.rs
-                        match register_accepted_socket(accepted_socket, listening_socket.domain, 
-                                                     listening_socket.kind.clone(), 
-                                                     peer_address, bound_addr) {
+                        match register_accepted_socket(
+                            accepted_socket,
+                            listening_socket.domain,
+                            listening_socket.kind.clone(),
+                            peer_address,
+                            bound_addr,
+                        ) {
                             Ok(()) => {
-                                tracing::info!("accept_detour -> registered accepted socket {} with mirrord", accepted_socket);
+                                tracing::info!(
+                                    "accept_detour -> registered accepted socket {} with mirrord",
+                                    accepted_socket
+                                );
                             }
                             Err(e) => {
-                                tracing::error!("accept_detour -> failed to register accepted socket: {}", e);
+                                tracing::error!(
+                                    "accept_detour -> failed to register accepted socket: {}",
+                                    e
+                                );
                             }
                         }
                     }
@@ -476,25 +556,35 @@ unsafe extern "system" fn accept_detour(s: SOCKET, addr: *mut SOCKADDR, addrlen:
             }
         }
     }
-    
+
     accepted_socket
 }
 
 /// Windows socket hook for getsockname
-unsafe extern "system" fn getsockname_detour(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT {
+unsafe extern "system" fn getsockname_detour(
+    s: SOCKET,
+    name: *mut SOCKADDR,
+    namelen: *mut INT,
+) -> INT {
     tracing::trace!("getsockname_detour -> socket: {}", s);
-    
+
     // Check if this socket is managed by mirrord and get its bound address
     if let Some(bound_addr) = SOCKET_MANAGER.get_bound_address(s) {
         // Return the bound address for bound/listening sockets
         if !name.is_null() && !namelen.is_null() {
             match unsafe { socketaddr_to_windows_sockaddr(&bound_addr, name, namelen) } {
                 Ok(()) => {
-                    tracing::trace!("getsockname_detour -> returned mirrord bound address: {}", bound_addr);
+                    tracing::trace!(
+                        "getsockname_detour -> returned mirrord bound address: {}",
+                        bound_addr
+                    );
                     return 0; // Success
                 }
                 Err(error_code) => {
-                    tracing::debug!("getsockname_detour -> failed to convert bound address: error {}", error_code);
+                    tracing::debug!(
+                        "getsockname_detour -> failed to convert bound address: error {}",
+                        error_code
+                    );
                     return SOCKET_ERROR;
                 }
             }
@@ -514,7 +604,7 @@ unsafe extern "system" fn getsockname_detour(s: SOCKET, name: *mut SOCKADDR, nam
                             );
                             *namelen = size;
                         }
-                        
+
                         tracing::trace!("getsockname_detour -> returned mirrord local address");
                         return 0; // Success
                     } else {
@@ -522,25 +612,35 @@ unsafe extern "system" fn getsockname_detour(s: SOCKET, name: *mut SOCKADDR, nam
                     }
                 }
                 Err(e) => {
-                    tracing::debug!("getsockname_detour -> failed to convert layer address: {}", e);
+                    tracing::debug!(
+                        "getsockname_detour -> failed to convert layer address: {}",
+                        e
+                    );
                     return SOCKET_ERROR;
                 }
             }
         }
     } else if SOCKET_MANAGER.is_socket_managed(s) {
         // For other managed socket states, fall back to original
-        tracing::trace!("getsockname_detour -> managed socket not in bound/connected state, using original");
+        tracing::trace!(
+            "getsockname_detour -> managed socket not in bound/connected state, using original"
+        );
     }
-    
+
     // Fall back to original function for non-managed sockets or errors
     let original = GETSOCKNAME_ORIGINAL.get().unwrap();
-    unsafe { original(s, name, namelen) }
+    let result = unsafe { original(s, name, namelen) };
+    result
 }
 
 /// Windows socket hook for getpeername
-unsafe extern "system" fn getpeername_detour(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT {
+unsafe extern "system" fn getpeername_detour(
+    s: SOCKET,
+    name: *mut SOCKADDR,
+    namelen: *mut INT,
+) -> INT {
     tracing::trace!("getpeername_detour -> socket: {}", s);
-    
+
     // Check if this socket is managed and get connected addresses
     if let Some((remote_addr, _, _)) = SOCKET_MANAGER.get_connected_addresses(s) {
         // Return the remote address for connected sockets
@@ -556,89 +656,51 @@ unsafe extern "system" fn getpeername_detour(s: SOCKET, name: *mut SOCKADDR, nam
                             );
                             *namelen = size;
                         }
-                        
+
                         tracing::trace!("getpeername_detour -> returned mirrord remote address");
                         return 0; // Success
                     } else {
-                        tracing::debug!("getpeername_detour -> buffer too small for remote address");
+                        tracing::debug!(
+                            "getpeername_detour -> buffer too small for remote address"
+                        );
                         return SOCKET_ERROR;
                     }
                 }
                 Err(e) => {
-                    tracing::debug!("getpeername_detour -> failed to convert remote address: {}", e);
+                    tracing::debug!(
+                        "getpeername_detour -> failed to convert remote address: {}",
+                        e
+                    );
                     return SOCKET_ERROR;
                 }
             }
         }
     } else if SOCKET_MANAGER.is_socket_managed(s) {
-        tracing::trace!("getpeername_detour -> managed socket not in connected state, using original");
+        tracing::trace!(
+            "getpeername_detour -> managed socket not in connected state, using original"
+        );
     }
-    
+
     // Fall back to original function for non-managed sockets or errors
     let original = GETPEERNAME_ORIGINAL.get().unwrap();
     unsafe { original(s, name, namelen) }
 }
 
-/// Windows socket hook for gethostname
-unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT {
-    tracing::debug!("gethostname_detour called with namelen: {}", namelen);
-    
-    // ALWAYS call the original first to see if that's working
-    let original = GETHOSTNAME_ORIGINAL.get().unwrap();
-    let result = unsafe { original(name, namelen) };
-    
-    if result != 0 {
-        // Original failed, return the error
-        return result;
-    }
-    
-    // Original succeeded, now try to override the result if we have a remote hostname
-    let resolver = DefaultHostnameResolver::remote();
-    match get_or_init_hostname(&resolver) {
-        HostnameResult::Success(hostname) => {
-            // Return the actual remote hostname (pod name) for testing
-            let hostname_str = hostname.to_string_lossy();
-            let hostname_bytes = hostname_str.as_bytes();
-            
-            // Check if the buffer is large enough (include null terminator)
-            if hostname_bytes.len() + 1 <= namelen as usize {
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        hostname_bytes.as_ptr() as *const i8,
-                        name,
-                        hostname_bytes.len(),
-                    );
-                    // Add null terminator
-                    *name.add(hostname_bytes.len()) = 0;
-                }
-                return 0; // Success
-            } else {
-                // Keep the original result since it fit
-                return 0;
-            }
-        }
-        HostnameResult::UseLocal | HostnameResult::Error(_) => {
-            // Keep the original result
-            return 0;
-        }
-    }
-}
-
-/// Simple pass-through hook for WSAStartup to debug socket initialization
+/// Pass-through hook for WSAStartup
 unsafe extern "system" fn wsa_startup_detour(wVersionRequested: u16, lpWSAData: *mut u8) -> i32 {
     tracing::debug!("WSAStartup called with version: {}", wVersionRequested);
-    
+
     let original = WSA_STARTUP_ORIGINAL.get().unwrap();
     let result = unsafe { original(wVersionRequested, lpWSAData) };
-    
+
     if result != 0 {
         tracing::warn!("WSAStartup failed with error: {}", result);
     }
-    
+
     result
 }
 
-/// Simple pass-through hook for WSACleanup to debug socket cleanup
+/// Pass-through hook for WSACleanup
 unsafe extern "system" fn wsa_cleanup_detour() -> i32 {
     // Pass through to original - let Windows Sockets handle cleanup
     let original = WSA_CLEANUP_ORIGINAL.get().unwrap();
@@ -654,11 +716,11 @@ unsafe extern "system" fn ioctlsocket_detour(s: SOCKET, cmd: i32, argp: *mut u32
 
 /// Socket management detour for select() - monitors socket readiness
 unsafe extern "system" fn select_detour(
-    nfds: i32, 
-    readfds: *mut fd_set, 
-    writefds: *mut fd_set, 
-    exceptfds: *mut fd_set, 
-    timeout: *const timeval
+    nfds: i32,
+    readfds: *mut fd_set,
+    writefds: *mut fd_set,
+    exceptfds: *mut fd_set,
+    timeout: *const timeval,
 ) -> i32 {
     // Pass through to original - interceptor handles I/O readiness for managed sockets
     let original = SELECT_ORIGINAL.get().unwrap();
@@ -669,9 +731,9 @@ unsafe extern "system" fn select_detour(
 unsafe extern "system" fn wsa_get_last_error_detour() -> i32 {
     let original = WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap();
     let result = unsafe { original() };
-    
+
     tracing::trace!("wsa_get_last_error_detour -> error: {}", result);
-    
+
     result
 }
 
@@ -682,9 +744,15 @@ unsafe extern "system" fn wsa_socket_detour(
     protocol: i32,
     lpProtocolInfo: *mut u8,
     g: u32,
-    dwFlags: u32
+    dwFlags: u32,
 ) -> SOCKET {
-    tracing::trace!("wsa_socket_detour -> af: {}, type: {}, protocol: {}, flags: {}", af, socket_type, protocol, dwFlags);
+    tracing::trace!(
+        "wsa_socket_detour -> af: {}, type: {}, protocol: {}, flags: {}",
+        af,
+        socket_type,
+        protocol,
+        dwFlags
+    );
     let original = WSA_SOCKET_ORIGINAL.get().unwrap();
     let socket = unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
     if socket != INVALID_SOCKET {
@@ -693,7 +761,10 @@ unsafe extern "system" fn wsa_socket_detour(
             SOCK_STREAM => WindowsSocketKind::Tcp,
             SOCK_DGRAM => WindowsSocketKind::Udp,
             _ => {
-                tracing::trace!("wsa_socket_detour -> unknown socket type {}, not managing", socket_type);
+                tracing::trace!(
+                    "wsa_socket_detour -> unknown socket type {}, not managing",
+                    socket_type
+                );
                 return socket;
             }
         };
@@ -715,10 +786,10 @@ unsafe extern "system" fn wsa_connect_detour(
     lpCallerData: *mut u8,
     lpCalleeData: *mut u8,
     lpSQOS: *mut u8,
-    lpGQOS: *mut u8
+    lpGQOS: *mut u8,
 ) -> INT {
     tracing::trace!("wsa_connect_detour -> socket: {}, namelen: {}", s, namelen);
-    
+
     // For now, pass through to original - the interceptor approach handles the data routing
     // In the future, could add similar logic to connect_detour for managed sockets
     let original = WSA_CONNECT_ORIGINAL.get().unwrap();
@@ -732,10 +803,10 @@ unsafe extern "system" fn wsa_accept_detour(
     addr: *mut SOCKADDR,
     addrlen: *mut INT,
     lpfnCondition: *mut u8,
-    dwCallbackData: usize
+    dwCallbackData: usize,
 ) -> SOCKET {
     tracing::trace!("wsa_accept_detour -> socket: {}", s);
-    
+
     // Pass through to original - interceptor handles data for managed sockets
     let original = WSA_ACCEPT_ORIGINAL.get().unwrap();
     unsafe { original(s, addr, addrlen, lpfnCondition, dwCallbackData) }
@@ -750,13 +821,27 @@ unsafe extern "system" fn wsa_send_detour(
     lpNumberOfBytesSent: *mut u32,
     dwFlags: u32,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT {
-    tracing::trace!("wsa_send_detour -> socket: {}, buffer_count: {}", s, dwBufferCount);
-    
+    tracing::trace!(
+        "wsa_send_detour -> socket: {}, buffer_count: {}",
+        s,
+        dwBufferCount
+    );
+
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = WSA_SEND_ORIGINAL.get().unwrap();
-    unsafe { original(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpOverlapped, lpCompletionRoutine) }
+    unsafe {
+        original(
+            s,
+            lpBuffers,
+            dwBufferCount,
+            lpNumberOfBytesSent,
+            dwFlags,
+            lpOverlapped,
+            lpCompletionRoutine,
+        )
+    }
 }
 
 /// Windows socket hook for WSARecv (asynchronous receive)
@@ -768,13 +853,27 @@ unsafe extern "system" fn wsa_recv_detour(
     lpNumberOfBytesRecvd: *mut u32,
     lpFlags: *mut u32,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT {
-    tracing::trace!("wsa_recv_detour -> socket: {}, buffer_count: {}", s, dwBufferCount);
-    
+    tracing::trace!(
+        "wsa_recv_detour -> socket: {}, buffer_count: {}",
+        s,
+        dwBufferCount
+    );
+
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = WSA_RECV_ORIGINAL.get().unwrap();
-    unsafe { original(s, lpBuffers, dwBufferCount, lpNumberOfBytesRecvd, lpFlags, lpOverlapped, lpCompletionRoutine) }
+    unsafe {
+        original(
+            s,
+            lpBuffers,
+            dwBufferCount,
+            lpNumberOfBytesRecvd,
+            lpFlags,
+            lpOverlapped,
+            lpCompletionRoutine,
+        )
+    }
 }
 
 /// Windows socket hook for WSASendTo (asynchronous UDP send)
@@ -788,13 +887,30 @@ unsafe extern "system" fn wsa_send_to_detour(
     lpTo: *const SOCKADDR,
     iTolen: INT,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT {
-    tracing::trace!("wsa_send_to_detour -> socket: {}, buffer_count: {}, to_len: {}", s, dwBufferCount, iTolen);
-    
+    tracing::trace!(
+        "wsa_send_to_detour -> socket: {}, buffer_count: {}, to_len: {}",
+        s,
+        dwBufferCount,
+        iTolen
+    );
+
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
-    unsafe { original(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpTo, iTolen, lpOverlapped, lpCompletionRoutine) }
+    unsafe {
+        original(
+            s,
+            lpBuffers,
+            dwBufferCount,
+            lpNumberOfBytesSent,
+            dwFlags,
+            lpTo,
+            iTolen,
+            lpOverlapped,
+            lpCompletionRoutine,
+        )
+    }
 }
 
 /// Windows socket hook for WSARecvFrom (asynchronous UDP receive)
@@ -808,70 +924,342 @@ unsafe extern "system" fn wsa_recv_from_detour(
     lpFrom: *mut SOCKADDR,
     lpFromlen: *mut INT,
     lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8
+    lpCompletionRoutine: *mut u8,
 ) -> INT {
-    tracing::trace!("wsa_recv_from_detour -> socket: {}, buffer_count: {}", s, dwBufferCount);
-    
+    tracing::trace!(
+        "wsa_recv_from_detour -> socket: {}, buffer_count: {}",
+        s,
+        dwBufferCount
+    );
+
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = WSA_RECV_FROM_ORIGINAL.get().unwrap();
-    unsafe { original(s, lpBuffers, dwBufferCount, lpNumberOfBytesRecvd, lpFlags, lpFrom, lpFromlen, lpOverlapped, lpCompletionRoutine) }
+    unsafe {
+        original(
+            s,
+            lpBuffers,
+            dwBufferCount,
+            lpNumberOfBytesRecvd,
+            lpFlags,
+            lpFrom,
+            lpFromlen,
+            lpOverlapped,
+            lpCompletionRoutine,
+        )
+    }
+}
+
+/// Windows winsock hook for gethostname
+unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT {
+    tracing::debug!("gethostname_detour called with namelen: {}", namelen);
+
+    // Validate parameters
+    if name.is_null() || namelen <= 0 {
+        tracing::debug!("gethostname: invalid parameters");
+        return SOCKET_ERROR;
+    }
+
+    // Try to get the remote hostname first
+    if let Some(remote_hostname) = hostname::get_hostname_with_fallback() {
+        tracing::debug!("gethostname: got remote hostname: '{}'", remote_hostname);
+
+        let hostname_bytes = remote_hostname.as_bytes();
+        let required_len = hostname_bytes.len() + 1; // +1 for null terminator
+
+        // Check if buffer is large enough
+        if (namelen as usize) < required_len {
+            tracing::debug!(
+                "gethostname: buffer too small, need {} bytes, have {}",
+                required_len,
+                namelen
+            );
+            return SOCKET_ERROR;
+        }
+
+        // Copy hostname to buffer
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                hostname_bytes.as_ptr(),
+                name as *mut u8,
+                hostname_bytes.len(),
+            );
+            // Add null terminator
+            *(name.add(hostname_bytes.len())) = 0;
+        }
+
+        tracing::debug!(
+            "gethostname: returning remote hostname: '{}'",
+            remote_hostname
+        );
+        return 0; // Success
+    }
+
+    // Fall back to original function if no remote hostname available
+    tracing::debug!("gethostname: no remote hostname available, calling original");
+    let original = GETHOSTNAME_ORIGINAL.get().unwrap();
+    unsafe { original(name, namelen) }
 }
 
 /// Windows kernel32 hook for GetComputerNameA
 unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *mut u32) -> i32 {
     let original = GET_COMPUTER_NAME_A_ORIGINAL.get().unwrap();
-    unsafe { handle_hostname_ansi(lpBuffer, nSize, |buf, size| unsafe { original(buf, size) }, "GetComputerNameA") }
+    unsafe {
+        handle_hostname_ansi(
+            lpBuffer,
+            nSize,
+            |buf, size| original(buf, size),
+            "GetComputerNameA",
+        )
+    }
 }
 
 /// Windows kernel32 hook for GetComputerNameW
 unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: *mut u32) -> i32 {
     let original = GET_COMPUTER_NAME_W_ORIGINAL.get().unwrap();
-    unsafe { handle_hostname_unicode(lpBuffer, nSize, |buf, size| unsafe { original(buf, size) }, "GetComputerNameW") }
+    unsafe {
+        handle_hostname_unicode(
+            lpBuffer,
+            nSize,
+            |buf, size| original(buf, size),
+            "GetComputerNameW",
+        )
+    }
 }
 
 /// Windows kernel32 hook for GetComputerNameExA
-unsafe extern "system" fn get_computer_name_ex_a_detour(name_type: u32, lpBuffer: *mut i8, nSize: *mut u32) -> i32 {
-    tracing::debug!("GetComputerNameExA hook called with name_type: {}", name_type);
-    
-    const COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME: u32 = 5;
-    
-    // Only handle the DNS hostname type
-    if name_type == COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME {
-        let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
-        return unsafe { handle_hostname_ansi(lpBuffer, nSize, |buf, size| unsafe { original(name_type, buf, size) }, "GetComputerNameExA") };
+unsafe extern "system" fn get_computer_name_ex_a_detour(
+    name_type: u32,
+    lpBuffer: *mut i8,
+    nSize: *mut u32,
+) -> i32 {
+    use winapi::um::{errhandlingapi::SetLastError, sysinfoapi::*};
+
+    tracing::debug!(
+        "GetComputerNameExA hook called with name_type: {}",
+        name_type
+    );
+
+    const ERROR_MORE_DATA: u32 = 234;
+    const ERROR_INVALID_PARAMETER: u32 = 87;
+
+    // Validate input parameters first
+    if nSize.is_null() {
+        unsafe {
+            SetLastError(ERROR_INVALID_PARAMETER);
+        }
+        return 0; // FALSE
     }
-    
-    // For other name types, call original function
+
+    // Handle invalid name_type (ComputerNameMax and beyond)
+    if name_type >= ComputerNameMax {
+        unsafe {
+            SetLastError(ERROR_INVALID_PARAMETER);
+        }
+        return 0; // FALSE
+    }
+
+    // For hostname-related types that Python uses, try to return our remote hostname
+    let should_intercept = match name_type {
+        ComputerNameDnsHostname
+        | ComputerNameDnsFullyQualified
+        | ComputerNamePhysicalDnsHostname
+        | ComputerNamePhysicalDnsFullyQualified => true,
+        _ => false,
+    };
+
+    if should_intercept {
+        if let Some(dns_name) = hostname::get_hostname_with_fallback() {
+            tracing::debug!("GetComputerNameExA: got remote hostname: '{}'", dns_name);
+
+            // Determine what form of the hostname to return based on name_type
+            let hostname_to_return = match name_type {
+                ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => {
+                    // Return uppercase version for NetBIOS types
+                    dns_name.to_uppercase()
+                }
+                _ => {
+                    // Return as-is for DNS types
+                    dns_name
+                }
+            };
+
+            let dns_bytes = hostname_to_return.as_bytes();
+            let required_size = dns_bytes.len(); // Size without null terminator
+            let current_buffer_size = unsafe { *nSize } as usize;
+
+            tracing::debug!(
+                "GetComputerNameExA: hostname_to_return='{}', len={}, buffer_size={}",
+                hostname_to_return,
+                required_size,
+                current_buffer_size
+            );
+
+            // Check if buffer is large enough (needs space for characters + null terminator)
+            if current_buffer_size < required_size + 1 {
+                // Buffer too small - set required size and return ERROR_MORE_DATA
+                unsafe {
+                    *nSize = (required_size + 1) as u32; // Include null terminator in required size
+                }
+                unsafe {
+                    SetLastError(ERROR_MORE_DATA);
+                }
+                tracing::debug!(
+                    "GetComputerNameExA: buffer too small for name_type {}, need {} chars, have {}",
+                    name_type,
+                    required_size + 1,
+                    current_buffer_size
+                );
+                return 0; // FALSE
+            }
+
+            // Buffer is large enough - copy the hostname
+            if !lpBuffer.is_null() && current_buffer_size > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        dns_bytes.as_ptr(),
+                        lpBuffer as *mut u8,
+                        dns_bytes.len(),
+                    );
+                    // Add null terminator
+                    *(lpBuffer.add(dns_bytes.len())) = 0;
+                    *nSize = required_size as u32; // Set actual length (excluding null terminator)
+                }
+                tracing::debug!(
+                    "GetComputerNameExA: returning remote hostname for name_type {}: '{}' ({} chars)",
+                    name_type,
+                    hostname_to_return,
+                    required_size
+                );
+                return 1; // TRUE - Success
+            } else {
+                // Invalid buffer pointer
+                unsafe {
+                    SetLastError(ERROR_INVALID_PARAMETER);
+                }
+                return 0; // FALSE
+            }
+        }
+
+        // If we can't get remote hostname, fall back to original
+        tracing::debug!(
+            "GetComputerNameExA: no remote hostname available for name_type {}, falling back to original",
+            name_type
+        );
+    }
+
+    // For domain types, NetBIOS types when we don't have a hostname, or other name types, call
+    // original function
     let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
     unsafe { original(name_type, lpBuffer, nSize) }
 }
 
 /// Windows kernel32 hook for GetComputerNameExW
-unsafe extern "system" fn get_computer_name_ex_w_detour(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> i32 {
-    tracing::debug!("GetComputerNameExW hook called with name_type: {}", name_type);
-    
-    const COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME: u32 = 5;
-    
-    // Only handle the DNS hostname type
-    if name_type == COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME {
-        let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
-        return unsafe { handle_hostname_unicode(lpBuffer, nSize, |buf, size| unsafe { original(name_type, buf, size) }, "GetComputerNameExW") };
+unsafe extern "system" fn get_computer_name_ex_w_detour(
+    name_type: u32,
+    lpBuffer: *mut u16,
+    nSize: *mut u32,
+) -> i32 {
+    tracing::debug!(
+        "GetComputerNameExW hook called with name_type: {}",
+        name_type
+    );
+
+    const ERROR_MORE_DATA: u32 = 234;
+    const ERROR_INVALID_PARAMETER: u32 = 87;
+
+    // Validate input parameters first
+    if nSize.is_null() {
+        unsafe {
+            SetLastError(ERROR_INVALID_PARAMETER);
+        }
+        return 0; // FALSE
     }
-    
-    // For other name types, call original function
-    let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
-    unsafe { original(name_type, lpBuffer, nSize) }
+
+    // Handle valid name types (0-7)
+    if name_type < ComputerNameMax {
+        // Try to get the remote hostname for supported types
+        if let Some(hostname) = hostname::get_hostname_with_fallback() {
+            // Transform hostname based on name_type
+            let result_name = match name_type {
+                ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => hostname.to_uppercase(), /* NetBIOS variants - uppercase */
+                ComputerNameDnsHostname
+                | ComputerNameDnsFullyQualified
+                | ComputerNamePhysicalDnsHostname
+                | ComputerNamePhysicalDnsFullyQualified => hostname, /* DNS variants - as-is */
+                ComputerNameDnsDomain | ComputerNamePhysicalDnsDomain => String::new(), /* Domain variants - empty (no domain info available) */
+                _ => unreachable!(),
+            };
+
+            // Convert to UTF-16
+            let name_utf16: Vec<u16> = result_name.encode_utf16().collect();
+            let required_size = name_utf16.len();
+
+            let current_buffer_size = unsafe { *nSize } as usize;
+
+            // Check if buffer is large enough (needs space for characters + null terminator)
+            if current_buffer_size < name_utf16.len() {
+                // Buffer too small - set required size and return ERROR_MORE_DATA
+                unsafe {
+                    *nSize = required_size as u32;
+                }
+                unsafe {
+                    SetLastError(ERROR_MORE_DATA);
+                }
+                tracing::debug!(
+                    "GetComputerNameExW: buffer too small, need {} chars, have {}",
+                    required_size,
+                    current_buffer_size
+                );
+                return 0; // FALSE
+            }
+
+            // Buffer is large enough - copy the hostname
+            if !lpBuffer.is_null() && current_buffer_size > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(name_utf16.as_ptr(), lpBuffer, name_utf16.len());
+                    *nSize = required_size as u32; // Set actual length (excluding null terminator)
+                }
+                tracing::debug!(
+                    "GetComputerNameExW: returning remote hostname for type {}: '{}' ({} chars)",
+                    name_type,
+                    result_name,
+                    required_size
+                );
+                tracing::error!("GetComputerNameExW: WSAGetLastError: {}", unsafe {
+                    WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap()()
+                });
+                return 1; // TRUE - Success
+            } else {
+                // Invalid buffer pointer
+                unsafe {
+                    SetLastError(ERROR_INVALID_PARAMETER);
+                }
+                return 0; // FALSE
+            }
+        }
+
+        // If we can't get remote hostname, fall back to original
+        tracing::debug!(
+            "GetComputerNameExW: no remote hostname available, falling back to original"
+        );
+        let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
+        return unsafe { original(name_type, lpBuffer, nSize) };
+    }
+
+    // Invalid name_type (ComputerNameMax and above)
+    unsafe {
+        SetLastError(ERROR_INVALID_PARAMETER);
+    }
+    return 0; // FALSE
 }
 
 /// Hook for gethostbyname to handle DNS resolution of our modified hostname
 unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT {
-    tracing::debug!("gethostbyname_detour called");
-    
     if name.is_null() {
         tracing::debug!("gethostbyname: name is null, calling original");
         return unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) };
     }
-    
+
     // SAFETY: Validate the string pointer before dereferencing
     let hostname_cstr = match unsafe { std::ffi::CStr::from_ptr(name) }.to_str() {
         Ok(s) => s,
@@ -880,30 +1268,46 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
             return unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) };
         }
     };
-    
+
     tracing::debug!("gethostbyname: resolving hostname: {}", hostname_cstr);
-    
+
     // Check if this is our remote hostname
     if is_remote_hostname(hostname_cstr) {
-        tracing::debug!("gethostbyname: intercepting resolution for our hostname: {}", hostname_cstr);
-        
+        tracing::debug!(
+            "gethostbyname: intercepting resolution for our hostname: {}",
+            hostname_cstr
+        );
+
         // Check if we have a cached mapping for this hostname
         match REMOTE_DNS_REVERSE_MAPPING.lock() {
             Ok(mapping) => {
                 if let Some(target_ip) = mapping.get(hostname_cstr) {
-                    tracing::debug!("gethostbyname: found cached IP mapping {} -> {}", hostname_cstr, target_ip);
-                    
+                    tracing::debug!(
+                        "gethostbyname: found cached IP mapping {} -> {}",
+                        hostname_cstr,
+                        target_ip
+                    );
+
                     // Try to resolve the target IP address using original function
                     if let Ok(target_cstr) = std::ffi::CString::new(target_ip.as_str()) {
-                        // SECURITY: Validate the cached IP is actually an IP address, not a hostname
-                        if target_ip.parse::<std::net::IpAddr>().is_ok() || target_ip == "localhost" {
-                            let result = unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(target_cstr.as_ptr()) };
+                        // SECURITY: Validate the cached IP is actually an IP address, not a
+                        // hostname
+                        if target_ip.parse::<std::net::IpAddr>().is_ok() || target_ip == "localhost"
+                        {
+                            let result = unsafe {
+                                GETHOSTBYNAME_ORIGINAL.get().unwrap()(target_cstr.as_ptr())
+                            };
                             if !result.is_null() {
-                                tracing::debug!("gethostbyname: successfully resolved cached mapping");
+                                tracing::debug!(
+                                    "gethostbyname: successfully resolved cached mapping"
+                                );
                                 return result;
                             }
                         } else {
-                            tracing::error!("gethostbyname: cached entry '{}' is not a valid IP address, removing", target_ip);
+                            tracing::error!(
+                                "gethostbyname: cached entry '{}' is not a valid IP address, removing",
+                                target_ip
+                            );
                             // Note: We can't modify the mapping here since we only have a read lock
                         }
                     }
@@ -913,13 +1317,14 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
                 tracing::warn!("gethostbyname: failed to acquire cache lock: {}", e);
             }
         }
-        
+
         // Try to resolve with fallback logic
         if let Some(fallback_hostname) = resolve_hostname_with_fallback(hostname_cstr) {
-            let result = unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(fallback_hostname.as_ptr()) };
+            let result =
+                unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(fallback_hostname.as_ptr()) };
             if !result.is_null() {
                 tracing::debug!("gethostbyname: successfully resolved with fallback");
-                
+
                 // Cache this mapping for future use
                 match REMOTE_DNS_REVERSE_MAPPING.lock() {
                     Ok(mut mapping) => {
@@ -928,39 +1333,47 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
                             // Check cache size limit and evict if necessary
                             evict_old_cache_entries(&mut mapping, 1000);
                             mapping.insert(hostname_cstr.to_string(), ip_str);
-                            tracing::debug!("gethostbyname: cached mapping {} -> IP", hostname_cstr);
+                            tracing::debug!(
+                                "gethostbyname: cached mapping {} -> IP",
+                                hostname_cstr
+                            );
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("gethostbyname: failed to acquire cache lock for storing: {}", e);
+                        tracing::warn!(
+                            "gethostbyname: failed to acquire cache lock for storing: {}",
+                            e
+                        );
                     }
                 }
                 return result;
             }
         }
     }
-    
+
     // For all other hostnames or if our hostname resolution fails, call original function
-    tracing::debug!("gethostbyname: calling original function for hostname: {}", hostname_cstr);
+    tracing::debug!(
+        "gethostbyname: calling original function for hostname: {}",
+        hostname_cstr
+    );
     unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) }
 }
 
 /// Hook for getaddrinfo to handle DNS resolution with full mirrord functionality
-/// 
+///
 /// This follows the same pattern as the Unix layer but uses Windows types and calling conventions.
 /// It converts Windows ADDRINFOA structures and makes DNS requests through the mirrord agent.
 unsafe extern "system" fn getaddrinfo_detour(
     raw_node: *const i8,
     raw_service: *const i8,
     raw_hints: *const ADDRINFOA,
-    out_addr_info: *mut *mut ADDRINFOA
+    out_addr_info: *mut *mut ADDRINFOA,
 ) -> INT {
-    tracing::debug!("getaddrinfo_detour called");
-    
     unsafe {
         // Convert raw pointers to safe Rust types, mirroring Unix implementation
         let rawish_node = (!raw_node.is_null()).then(|| std::ffi::CStr::from_ptr(raw_node));
-        let rawish_service = (!raw_service.is_null()).then(|| std::ffi::CStr::from_ptr(raw_service));
+        let rawish_service =
+            (!raw_service.is_null()).then(|| std::ffi::CStr::from_ptr(raw_service));
         let rawish_hints = raw_hints.as_ref();
 
         // Try to get the hostname for mirrord DNS resolution
@@ -984,7 +1397,7 @@ unsafe extern "system" fn getaddrinfo_detour(
 }
 
 /// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
-/// 
+///
 /// This follows the same pattern as the Unix layer - it checks if the structure
 /// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
 unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
@@ -996,10 +1409,103 @@ unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
     }
 }
 
+/// Deallocates ADDRINFOW structures (Unicode version).
+///
+/// Currently just calls the original FreeAddrInfoW since GetAddrInfoW doesn't yet
+/// allocate managed structures (it falls back to the original function).
+unsafe extern "system" fn freeaddrinfow_detour(addrinfo: *mut ADDRINFOW) {
+    unsafe {
+        // Currently GetAddrInfoW just calls the original function,
+        // so we don't have managed ADDRINFOW structures to track yet.
+        // Just call the original FreeAddrInfoW.
+        tracing::debug!("FreeAddrInfoW: calling original function");
+        FREEADDRINFOW_ORIGINAL.get().unwrap()(addrinfo);
+    }
+}
+
+/// Hook for GetAddrInfoW (Unicode version) to handle DNS resolution
+unsafe extern "system" fn getaddrinfow_detour(
+    node_name: PCWSTR,
+    service_name: PCWSTR,
+    hints: *const ADDRINFOW,
+    result: *mut *mut ADDRINFOW,
+) -> INT {
+    if node_name.is_null() {
+        tracing::debug!("GetAddrInfoW: node_name is null, calling original");
+        return unsafe {
+            GETADDRINFOW_ORIGINAL.get().unwrap()(node_name, service_name, hints, result)
+        };
+    }
+
+    // Convert the wide string to a regular string properly
+    let hostname_opt = unsafe {
+        let mut len = 0;
+        let mut ptr = node_name;
+        while *ptr != 0 && len < 1024 {
+            // Safety limit
+            len += 1;
+            ptr = ptr.add(1);
+        }
+        if len > 0 {
+            let wide_slice = std::slice::from_raw_parts(node_name, len);
+            String::from_utf16_lossy(wide_slice)
+        } else {
+            String::new()
+        }
+    };
+
+    tracing::debug!("GetAddrInfoW: resolving hostname: '{}'", hostname_opt);
+
+    // Check if this is our remote hostname that we need to intercept
+    if is_remote_hostname(&hostname_opt) {
+        tracing::debug!(
+            "GetAddrInfoW: intercepting DNS resolution for our remote hostname: {}",
+            hostname_opt
+        );
+
+        // For now, convert to ANSI and use our existing getaddrinfo logic
+        if let Ok(hostname_cstr) = std::ffi::CString::new(hostname_opt.clone()) {
+            let ansi_service = if service_name.is_null() {
+                std::ptr::null()
+            } else {
+                // Convert service name from wide to ANSI - simplified for now
+                std::ptr::null() // TODO: Implement proper conversion
+            };
+
+            // Convert hints from ADDRINFOW to ADDRINFOA (simplified)
+            let ansi_hints: *const ADDRINFOA = std::ptr::null(); // TODO: Convert properly
+            let mut ansi_result: *mut ADDRINFOA = std::ptr::null_mut();
+
+            // Call our existing ANSI getaddrinfo hook logic
+            let ansi_ret = unsafe {
+                getaddrinfo_detour(
+                    hostname_cstr.as_ptr(),
+                    ansi_service,
+                    ansi_hints,
+                    &mut ansi_result,
+                )
+            };
+
+            if ansi_ret == 0 && !ansi_result.is_null() {
+                // TODO: Convert ADDRINFOA result back to ADDRINFOW
+                // For now, fall back to original function
+                tracing::debug!("GetAddrInfoW: TODO - implement ADDRINFOA to ADDRINFOW conversion");
+            }
+        }
+    }
+
+    // For all other hostnames or if conversion fails, call original function
+    tracing::debug!(
+        "GetAddrInfoW: calling original function for hostname: {}",
+        hostname_opt
+    );
+    unsafe { GETADDRINFOW_ORIGINAL.get().unwrap()(node_name, service_name, hints, result) }
+}
+
 /// Data transfer detour for recv() - receives data from a socket
-/// 
-/// Note: For mirrord-managed outgoing connections, data flows automatically through 
-/// the interceptor. This detour just passes through to the original recv() which 
+///
+/// Note: For mirrord-managed outgoing connections, data flows automatically through
+/// the interceptor. This detour just passes through to the original recv() which
 /// operates on the socket connected to the interceptor.
 unsafe extern "system" fn recv_detour(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT {
     // Pass through to original - interceptor handles data routing for managed sockets
@@ -1008,9 +1514,9 @@ unsafe extern "system" fn recv_detour(s: SOCKET, buf: *mut i8, len: INT, flags: 
 }
 
 /// Data transfer detour for send() - sends data to a socket
-/// 
-/// Note: For mirrord-managed outgoing connections, data flows automatically through 
-/// the interceptor. This detour just passes through to the original send() which 
+///
+/// Note: For mirrord-managed outgoing connections, data flows automatically through
+/// the interceptor. This detour just passes through to the original send() which
 /// operates on the socket connected to the interceptor.
 unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT {
     // Pass through to original - interceptor handles data routing for managed sockets
@@ -1019,16 +1525,16 @@ unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags
 }
 
 /// Data transfer detour for recvfrom() - receives data from a socket with source address
-/// 
+///
 /// Note: UDP/datagram sockets typically aren't managed by mirrord outgoing connections,
 /// so this is primarily a pass-through for compatibility.
 unsafe extern "system" fn recvfrom_detour(
-    s: SOCKET, 
-    buf: *mut i8, 
-    len: INT, 
-    flags: INT, 
-    from: *mut SOCKADDR, 
-    fromlen: *mut INT
+    s: SOCKET,
+    buf: *mut i8,
+    len: INT,
+    flags: INT,
+    from: *mut SOCKADDR,
+    fromlen: *mut INT,
 ) -> INT {
     // Pass through to original
     let original = RECVFROM_ORIGINAL.get().unwrap();
@@ -1036,16 +1542,16 @@ unsafe extern "system" fn recvfrom_detour(
 }
 
 /// Data transfer detour for sendto() - sends data to a socket with destination address
-/// 
+///
 /// Note: UDP/datagram sockets typically aren't managed by mirrord outgoing connections,
 /// so this is primarily a pass-through for compatibility.
 unsafe extern "system" fn sendto_detour(
-    s: SOCKET, 
-    buf: *const i8, 
-    len: INT, 
-    flags: INT, 
-    to: *const SOCKADDR, 
-    tolen: INT
+    s: SOCKET,
+    buf: *const i8,
+    len: INT,
+    flags: INT,
+    to: *const SOCKADDR,
+    tolen: INT,
 ) -> INT {
     // Pass through to original
     let original = SENDTO_ORIGINAL.get().unwrap();
@@ -1057,7 +1563,7 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     // Clean up mirrord state for managed sockets
     SOCKET_MANAGER.remove_connection_id(s);
     SOCKET_MANAGER.remove_socket(s);
-    
+
     // Call the original function
     let original = CLOSESOCKET_ORIGINAL.get().unwrap();
     unsafe { original(s) }
@@ -1072,11 +1578,11 @@ unsafe extern "system" fn shutdown_detour(s: SOCKET, how: INT) -> INT {
 
 /// Socket option detour for setsockopt() - sets socket options
 unsafe extern "system" fn setsockopt_detour(
-    s: SOCKET, 
-    level: INT, 
-    optname: INT, 
-    optval: *const i8, 
-    optlen: INT
+    s: SOCKET,
+    level: INT,
+    optname: INT,
+    optval: *const i8,
+    optlen: INT,
 ) -> INT {
     // Pass through to original - interceptor handles socket option management for managed sockets
     let original = SETSOCKOPT_ORIGINAL.get().unwrap();
@@ -1085,11 +1591,11 @@ unsafe extern "system" fn setsockopt_detour(
 
 /// Socket option detour for getsockopt() - gets socket options
 unsafe extern "system" fn getsockopt_detour(
-    s: SOCKET, 
-    level: INT, 
-    optname: INT, 
-    optval: *mut i8, 
-    optlen: *mut INT
+    s: SOCKET,
+    level: INT,
+    optname: INT,
+    optval: *mut i8,
+    optlen: *mut INT,
 ) -> INT {
     // Pass through to original - interceptor handles socket option queries for managed sockets
     let original = GETSOCKOPT_ORIGINAL.get().unwrap();
@@ -1099,7 +1605,7 @@ unsafe extern "system" fn getsockopt_detour(
 /// Initialize socket hooks by setting up detours for Windows socket functions
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
     tracing::info!("Initializing socket hooks");
-    
+
     // Register core socket operations
     apply_hook!(
         guard,
@@ -1110,14 +1616,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         SOCKET_ORIGINAL
     )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "bind",
-        bind_detour,
-        BindFn,
-        BIND_ORIGINAL
-    )?;
+    apply_hook!(guard, "ws2_32", "bind", bind_detour, BindFn, BIND_ORIGINAL)?;
 
     apply_hook!(
         guard,
@@ -1164,15 +1663,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         GETPEERNAME_ORIGINAL
     )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "gethostname",
-        gethostname_detour,
-        GethostnameFn,
-        GETHOSTNAME_ORIGINAL
-    )?;
-
     // Register GetComputerNameExW hook - this is what Python's socket.gethostname() actually uses
     apply_hook!(
         guard,
@@ -1182,7 +1672,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         GetComputerNameExWFn,
         GET_COMPUTER_NAME_EX_W_ORIGINAL
     )?;
-    
+
     apply_hook!(
         guard,
         "kernel32",
@@ -1191,7 +1681,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         GetComputerNameExAFn,
         GET_COMPUTER_NAME_EX_A_ORIGINAL
     )?;
-    
+
     apply_hook!(
         guard,
         "kernel32",
@@ -1210,7 +1700,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         GET_COMPUTER_NAME_W_ORIGINAL
     )?;
 
-    // Add WSAStartup hook to debug socket initialization issues
+    // WSAStartup hook
     apply_hook!(
         guard,
         "ws2_32",
@@ -1243,10 +1733,28 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     apply_hook!(
         guard,
         "ws2_32",
+        "gethostname",
+        gethostname_detour,
+        GethostnameFn,
+        GETHOSTNAME_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ws2_32",
         "getaddrinfo",
         getaddrinfo_detour,
         GetaddrinfoFn,
         GETADDRINFO_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ws2_32",
+        "GetAddrInfoW",
+        getaddrinfow_detour,
+        GetAddrInfoWFn,
+        GETADDRINFOW_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1258,24 +1766,19 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         FREEADDRINFO_ORIGINAL
     )?;
 
-    // Register data transfer hooks
     apply_hook!(
         guard,
         "ws2_32",
-        "recv",
-        recv_detour,
-        RecvFn,
-        RECV_ORIGINAL
+        "FreeAddrInfoW",
+        freeaddrinfow_detour,
+        FreeAddrInfoWFn,
+        FREEADDRINFOW_ORIGINAL
     )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "send",
-        send_detour,
-        SendFn,
-        SEND_ORIGINAL
-    )?;
+    // Register data transfer hooks
+    apply_hook!(guard, "ws2_32", "recv", recv_detour, RecvFn, RECV_ORIGINAL)?;
+
+    apply_hook!(guard, "ws2_32", "send", send_detour, SendFn, SEND_ORIGINAL)?;
 
     apply_hook!(
         guard,
@@ -1426,6 +1929,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         WSA_RECV_FROM_ORIGINAL
     )?;
 
-    tracing::info!("Socket hooks initialized successfully (including Node.js WSA async I/O support)");
+    tracing::info!(
+        "Socket hooks initialized successfully (including Node.js WSA async I/O support)"
+    );
     Ok(())
 }
