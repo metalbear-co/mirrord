@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.159.1](https://github.com/metalbear-co/mirrord/tree/3.159.1) - 2025-08-27
+
+### Changed
+
+- Default "/run/" and "/selinux" to local.
+- SimpleProgress implementation now handles prints nicely instead of debug
+  print.
+- Changed some Debug implementations to not print HTTP body.
+
+### Fixed
+
+- Removed conntrack-related bogus warnings from mirrord-agent logs.
+
 ## [3.159.0](https://github.com/metalbear-co/mirrord/tree/3.159.0) - 2025-08-24
 
 
