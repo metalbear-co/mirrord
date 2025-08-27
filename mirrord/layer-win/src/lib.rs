@@ -37,7 +37,9 @@ fn initialize_detour_guard() -> anyhow::Result<()> {
 fn release_detour_guard() -> anyhow::Result<()> {
     unsafe {
         // This will release the hooking engine, removing all hooks.
-        DETOUR_GUARD.as_mut().unwrap().try_close()?;
+        if let Some(guard) = DETOUR_GUARD.as_mut() {
+            guard.try_close()?;
+        }
     }
 
     Ok(())
@@ -142,9 +144,8 @@ fn mirrord_start() -> anyhow::Result<()> {
 
     if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
         println!("Checking for debugger...");
-        if wait_for_debug!() {
-            unsafe { DebugBreak() };
-        }
+        wait_for_debug!();
+        unsafe { DebugBreak() };
     }
 
     initialize_proxy_connection()?;

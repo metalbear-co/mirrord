@@ -7,19 +7,13 @@
 #[macro_export]
 macro_rules! wait_for_debug {
     () => {
-        (|| -> bool {
-            loop {
-                unsafe {
-                    if winapi::um::debugapi::IsDebuggerPresent() == 0 {
-                        winapi::um::synchapi::Sleep(0); 
-                    } else {
-                        return true;
-                    }
+        {
+            unsafe {
+                while winapi::um::debugapi::IsDebuggerPresent() == 0 {
+                    // must busy-wait for the debugger and not sleep
+                    // winapi::um::synchapi::Sleep(0);
                 }
             }
-
-            #[allow(unreachable_code)]
-            false
-        })()
+        }
     };
 }
