@@ -115,6 +115,16 @@ pub struct ExperimentalConfig {
     /// and this setting is ignored.
     #[config(default = true)]
     pub vfork_emulation: bool,
+
+    /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
+    ///
+    /// Tells mirrord to consider permission errors during DNS lookups to be fatal.
+    ///
+    /// If DNS lookup from the mirrord-agent fails with a permission denied error,
+    /// this usually means that the Kubernetes cluster is hardened,
+    /// and the agent needs to be run in the privileged mode.
+    #[config(default = true)]
+    pub dns_permission_error_fatal: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -131,5 +141,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
         analytics.add("vfork_emulation", self.vfork_emulation);
+        analytics.add(
+            "dns_permission_error_fatal",
+            self.dns_permission_error_fatal,
+        );
     }
 }
