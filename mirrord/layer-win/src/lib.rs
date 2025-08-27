@@ -12,7 +12,8 @@ use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
         consoleapi::AllocConsole,
-        debugapi::DebugBreak, processthreadsapi::GetCurrentProcessId,
+        debugapi::DebugBreak,
+        processthreadsapi::GetCurrentProcessId,
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
@@ -150,10 +151,9 @@ fn mirrord_start() -> anyhow::Result<()> {
 
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");
-    
+
     initialize_detour_guard()?;
     println!("DetourGuard initialized");
-
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;

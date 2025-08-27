@@ -43,6 +43,12 @@ impl WindowsProcess {
             File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
         );
 
+        // temporarily disable stdin as it causes hang on cleanup
+        // let mut stdin = std::mem::replace(
+        //     &mut self.stdin,
+        //     File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
+        // );
+
         let stdout_handle = tokio::task::spawn_blocking(move || {
             let mut buffer = [0; 4096];
             let mut all_output = Vec::new();
@@ -89,6 +95,27 @@ impl WindowsProcess {
             }
         });
 
+        // temporarily disable stdin as it causes hang on cleanup
+        // // Spawn a task to copy stdin
+        // let stdin_handle = tokio::task::spawn_blocking(move || {
+        //     let mut buffer = [0; 4096];
+        //     loop {
+        //         match stdin.read(&mut buffer) {
+        //             Ok(0) => {
+        //                 break; // EOF
+        //             }
+        //             Ok(n) => {
+        //                 if let Err(_) = io::stdin().read_exact(&mut buffer[..n]) {
+        //                     break;
+        //                 }
+        //             }
+        //             Err(_) => {
+        //                 break;
+        //             }
+        //         }
+        //     }
+        // });
+
         // Wait for the process to complete asynchronously
         let exit_code = tokio::task::spawn_blocking({
             let process_handle_raw = self.process_info.hProcess.0 as usize;
@@ -119,36 +146,11 @@ impl WindowsProcess {
         let _ = tokio::time::timeout(Duration::from_secs(10), async {
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;
+            // let _ = stdin_handle.await;
         })
         .await;
 
         Ok(exit_code)
-    }
-
-    pub fn join(&self, duration: Duration) -> bool {
-        let timeout_ms = duration.as_millis().try_into().unwrap_or(u32::MAX); // Use maximum timeout if duration is too large
-
-        let res;
-        unsafe {
-            res = WaitForSingleObject(self.process_info.hProcess, timeout_ms);
-        }
-        match res {
-            WAIT_OBJECT_0 => true,
-            _ => false,
-        }
-    }
-
-    /// Get the exit code of the process. Returns 1 if unable to get the exit code.
-    /// This matches Unix behavior where processes that fail to execute
-    /// typically return exit code 1.
-    pub fn exit_code(&self) -> windows::core::Result<i32> {
-        use windows::Win32::System::Threading::GetExitCodeProcess;
-        let mut exit_code: u32 = 1; // Default to 1 if we fail to get the real exit code
-        unsafe {
-            GetExitCodeProcess(self.process_info.hProcess, &mut exit_code as *mut u32)
-                .map_err(|_| windows::core::Error::from_win32())?;
-        }
-        Ok(exit_code as i32)
     }
 }
 

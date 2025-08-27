@@ -196,9 +196,7 @@ pub fn get_hostname_with_fallback() -> Option<String> {
                 .or_else(|| Some(intelligent_truncate(&hostname_str, MAX_COMPUTERNAME_LENGTH)));
             result
         }
-        HostnameResult::UseLocal | HostnameResult::Error(_) => {
-            None
-        }
+        HostnameResult::UseLocal | HostnameResult::Error(_) => None,
     }
 }
 
