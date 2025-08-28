@@ -571,7 +571,7 @@ This option applies only on macOS.
 ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
 
 Whether to terminate the session when a permission denied error
-occurs during DNS resolution. Such error often means that the Kubernetes cluster is
+occurs during DNS resolution. This error often means that the Kubernetes cluster is
 hardened, and the mirrord-agent is not fully functional without `agent.privileged`
 enabled.
 
