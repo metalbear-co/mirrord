@@ -125,9 +125,12 @@ impl TestIntProxy {
                 agent_conn,
                 listener,
                 0,
-                Duration::from_secs(3),
+                // Duration::from_secs(3),
                 Default::default(),
                 Duration::from_secs(60),
+                &ExperimentalFileConfig::default()
+                    .generate_config(&mut Default::default())
+                    .unwrap(),
             );
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))

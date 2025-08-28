@@ -146,7 +146,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::new(experimental.dns_permission_error_fatal),
+            SimpleProxy::new(experimental.dns_permission_error_fatal.unwrap_or_default()),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
@@ -684,6 +684,7 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
     use mirrord_intproxy_protocol::{
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
@@ -726,7 +727,9 @@ mod test {
             4096,
             Default::default(),
             Duration::from_secs(60),
-            Default::default(),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -843,7 +846,9 @@ mod test {
             4096,
             Default::default(),
             Duration::from_secs(60),
-            Default::default(),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -935,7 +940,9 @@ mod test {
             4096,
             Default::default(),
             Duration::from_secs(60),
-            Default::default(),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         tokio::time::timeout(
             Duration::from_millis(200),
