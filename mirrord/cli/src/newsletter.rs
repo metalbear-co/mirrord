@@ -8,7 +8,7 @@ use crate::user_data::UserData;
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
 const NEWSLETTER_SIGNUP_URL: &str =
-    "https://metalbear.co/newsletter?utm_medium=cli&utm_source=newsletter";
+    "https://metalbear.com/newsletter?utm_medium=cli&utm_source=newsletter";
 
 /// How many times mirrord can be run before inviting the user to sign up to the newsletter the
 /// first time.

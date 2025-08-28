@@ -335,9 +335,9 @@ struct AnalyticsReport {
     error: Option<AnalyticsError>,
 }
 
-const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.co/api/v1/event";
+const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
 
-/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
+/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
 #[tracing::instrument(level = Level::TRACE)]
 async fn send_analytics(report: AnalyticsReport) {
     let client = reqwest::Client::new();

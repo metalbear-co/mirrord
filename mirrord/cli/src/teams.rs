@@ -16,7 +16,7 @@ fn get_open_command() -> Command {
 /// In case of failure, prints the link.
 pub async fn navigate_to_intro() {
     const MIRRORD_FOR_TEAMS_URL: &str =
-        "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=teamscmd&utm_medium=cli";
+        "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=teamscmd&utm_medium=cli";
 
     match get_open_command().arg(MIRRORD_FOR_TEAMS_URL).output().await {
         Ok(output) if output.status.success() => {}

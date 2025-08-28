@@ -28,7 +28,7 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 /// Which environment variables to load from the remote pod are controlled by setting either
 /// [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 ///
-/// See the environment variables [reference](https://metalbear.co/mirrord/docs/reference/env/) for more details.
+/// See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
 ///
 /// ```json
 /// {

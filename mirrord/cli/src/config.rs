@@ -30,7 +30,7 @@ use thiserror::Error;
     about,
     long_about = r#"
 Encountered an issue? Have a feature request?
-Join our Slack at https://metalbear.co/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.co"#
+Join our Slack at https://metalbear.com/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.com"#
 )]
 pub(super) struct Cli {
     #[command(subcommand)]
@@ -719,7 +719,7 @@ pub(super) enum OperatorCommand {
 
 #[derive(Args, Debug)]
 pub(super) struct OperatorSetupParams {
-    /// ToS can be read here <https://metalbear.co/legal/terms>
+    /// ToS can be read here <https://metalbear.com/legal/terms>
     #[arg(long)]
     pub(super) accept_tos: bool,
 

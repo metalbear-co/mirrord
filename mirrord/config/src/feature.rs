@@ -15,7 +15,7 @@ pub mod split_queues;
 /// Controls mirrord features.
 ///
 /// See the
-/// [technical reference, Technical Reference](https://metalbear.co/mirrord/docs/reference/)
+/// [technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)
 /// to learn more about what each feature does.
 ///
 /// The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options
@@ -85,7 +85,7 @@ pub struct FeatureConfig {
     /// ## feature.copy_target {#feature-copy_target}
     ///
     /// Creates a new copy of the target. mirrord will use this copy instead of the original target
-    /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.co/mirrord/docs/overview/teams/?utm_source=copytarget).
+    /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
     ///
     /// This feature is not compatible with rollout targets and running without a target
     /// (`targetless` mode).
