@@ -38,9 +38,10 @@ pub enum SimpleProxyError {
     UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
 
     #[error(
-        "mirrord-agent failed DNS lookup, permission denied. \
+        "mirrord-agent failed to perform DNS lookup, permission denied. \
         This indicates that your Kubernetes cluster is hardened, \
-        and you need to use privileged agents (agent.privileged configuration option)"
+        and the agent might not be fully functional. \
+        You might need to enable agent.privileged configuration option"
     )]
     DnsPermissionDenied,
 }
