@@ -16,7 +16,11 @@ use std::{
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
-use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext};
+use mirrord_config::{
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    config::{ConfigContext, MirrordConfig},
+    experimental::ExperimentalFileConfig,
+};
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
@@ -125,9 +129,11 @@ impl TestIntProxy {
                 agent_conn,
                 listener,
                 0,
-                Duration::from_secs(3),
                 Default::default(),
                 Duration::from_secs(60),
+                &ExperimentalFileConfig::default()
+                    .generate_config(&mut Default::default())
+                    .unwrap(),
             );
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))

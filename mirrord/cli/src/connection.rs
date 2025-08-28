@@ -132,37 +132,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         ));
     }
 
-    if config.feature.copy_target.enabled {
-        return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
-    }
-
-    match (
-        // user in mutipod without operator
-        matches!(
-            config.target,
-            mirrord_config::target::TargetConfig {
-                path: Some(
-                    mirrord_config::target::Target::Deployment { .. }
-                        | mirrord_config::target::Target::Rollout(..)
-                ),
-                ..
-            }
-        ),
-        // user using http filter(s) without operator
-        config.feature.network.incoming.http_filter.is_filter_set(),
-    ) {
-        (true, true) => {
-            // only show user one of the two msgs - each user should always be shown same msg
-            if user_persistent_random_message_select() {
-                show_multipod_warning(progress)?
-            } else {
-                show_http_filter_warning(progress)?
-            }
-        }
-        (true, false) => show_multipod_warning(progress)?,
-        (false, true) => show_http_filter_warning(progress)?,
-        _ => (),
-    };
+    process_config_oss(config, progress)?;
 
     let k8s_api = KubernetesAPI::create(config, progress)
         .await
@@ -205,6 +175,49 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         AgentConnectInfo::DirectKubernetes(agent_connect_info),
         AgentConnection { sender, receiver },
     ))
+}
+
+/// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
+/// operator.
+fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -> CliResult<()> {
+    if config.feature.copy_target.enabled {
+        return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
+    }
+
+    match (
+        // user in mutipod without operator
+        matches!(
+            config.target,
+            mirrord_config::target::TargetConfig {
+                path: Some(
+                    mirrord_config::target::Target::Deployment { .. }
+                        | mirrord_config::target::Target::Rollout(..)
+                ),
+                ..
+            }
+        ),
+        // user using http filter(s) without operator
+        config.feature.network.incoming.http_filter.is_filter_set(),
+    ) {
+        (true, true) => {
+            // only show user one of the two msgs - each user should always be shown same msg
+            if user_persistent_random_message_select() {
+                show_multipod_warning(progress)?
+            } else {
+                show_http_filter_warning(progress)?
+            }
+        }
+        (true, false) => show_multipod_warning(progress)?,
+        (false, true) => show_http_filter_warning(progress)?,
+        _ => (),
+    };
+
+    config.experimental.dns_permission_error_fatal = config
+        .experimental
+        .dns_permission_error_fatal
+        .or(Some(true));
+
+    Ok(())
 }
 
 fn user_persistent_random_message_select() -> bool {
