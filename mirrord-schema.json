@@ -916,6 +916,14 @@
             "null"
           ]
         },
+        "dns_permission_error_fatal": {
+          "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
+          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. Such error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
