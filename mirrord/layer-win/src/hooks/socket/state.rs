@@ -56,14 +56,12 @@ pub struct WindowsUserSocket {
 /// Managed socket collection that encapsulates all socket operations
 pub struct SocketManager {
     sockets: Mutex<HashMap<SOCKET, Arc<WindowsUserSocket>>>,
-    connection_ids: Mutex<HashMap<SOCKET, ConnectionId>>,
 }
 
 impl SocketManager {
     fn new() -> Self {
         Self {
             sockets: Mutex::new(HashMap::new()),
-            connection_ids: Mutex::new(HashMap::new()),
         }
     }
 
@@ -74,34 +72,63 @@ impl SocketManager {
             kind,
             state: WindowsSocketState::Initialized,
         });
-        if let Ok(mut sockets) = self.sockets.lock() {
-            sockets.insert(socket, user_socket);
-            tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
-        }
+
+        let mut sockets = match self.sockets.lock() {
+            Ok(sockets) => sockets,
+            Err(poisoned) => {
+                tracing::warn!(
+                    "SocketManager: sockets mutex was poisoned during registration, attempting recovery"
+                );
+                poisoned.into_inner()
+            }
+        };
+
+        sockets.insert(socket, user_socket);
+        tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
     }
 
     /// Update the state of a managed socket
     pub fn set_socket_state(&self, socket: SOCKET, new_state: WindowsSocketState) {
-        if let Ok(mut sockets) = self.sockets.lock() {
-            if let Some(socket_ref) = sockets.get_mut(&socket) {
-                if let Some(socket_mut) = Arc::get_mut(socket_ref) {
-                    socket_mut.state = new_state;
-                } else {
-                    let mut new_socket = (**socket_ref).clone();
-                    new_socket.state = new_state;
-                    sockets.insert(socket, Arc::new(new_socket));
-                }
+        let mut sockets = match self.sockets.lock() {
+            Ok(sockets) => sockets,
+            Err(poisoned) => {
+                tracing::warn!(
+                    "SocketManager: sockets mutex was poisoned during state update, attempting recovery"
+                );
+                poisoned.into_inner()
+            }
+        };
+
+        if let Some(socket_ref) = sockets.get_mut(&socket) {
+            if let Some(socket_mut) = Arc::get_mut(socket_ref) {
+                socket_mut.state = new_state;
+            } else {
+                let mut new_socket = (**socket_ref).clone();
+                new_socket.state = new_state;
+                sockets.insert(socket, Arc::new(new_socket));
             }
         }
     }
 
     /// Remove a socket from the managed collection
     pub fn remove_socket(&self, socket: SOCKET) {
-        if let Ok(mut sockets) = self.sockets.lock() {
-            sockets.remove(&socket);
-        }
-        if let Ok(mut ids) = self.connection_ids.lock() {
-            ids.remove(&socket);
+        let mut sockets = match self.sockets.lock() {
+            Ok(sockets) => sockets,
+            Err(poisoned) => {
+                tracing::warn!(
+                    "SocketManager: sockets mutex was poisoned during removal, attempting recovery"
+                );
+                poisoned.into_inner()
+            }
+        };
+
+        let sockets_removed = sockets.remove(&socket).is_some();
+
+        if sockets_removed {
+            tracing::debug!(
+                "SocketManager: Removed socket {} from mirrord tracking",
+                socket
+            );
         }
     }
 
@@ -162,28 +189,6 @@ impl SocketManager {
             )),
             _ => None,
         })
-    }
-
-    /// Set connection ID for a socket
-    pub fn set_connection_id(&self, socket: SOCKET, conn_id: ConnectionId) {
-        if let Ok(mut ids) = self.connection_ids.lock() {
-            ids.insert(socket, conn_id);
-        }
-    }
-
-    /// Remove connection ID for a socket
-    pub fn remove_connection_id(&self, socket: SOCKET) {
-        if let Ok(mut ids) = self.connection_ids.lock() {
-            ids.remove(&socket);
-        }
-    }
-
-    /// Get connection ID for a socket
-    pub fn get_connection_id(&self, socket: SOCKET) -> Option<ConnectionId> {
-        self.connection_ids
-            .lock()
-            .ok()
-            .and_then(|ids| ids.get(&socket).cloned())
     }
 }
 
@@ -423,6 +428,196 @@ pub fn connect_through_proxy(
         Err(e) => {
             tracing::debug!("connect_through_proxy -> proxy request failed: {:?}", e);
             ProxyConnectResult::Fallback
+        }
+    }
+}
+
+/// Handle successful proxy connection result, updating socket state
+pub fn handle_connection_success(
+    socket: SOCKET,
+    connected: WindowsSocketConnected,
+    function_name: &str,
+) -> Result<(SOCKADDR, INT), Box<dyn std::error::Error>> {
+    use crate::hooks::socket::utils::socket_address_to_sockaddr;
+
+    // Convert the layer address to SOCKADDR and connect
+    let (sockaddr, sockaddr_len) =
+        unsafe { socket_address_to_sockaddr(&connected.layer_address.as_ref().unwrap())? };
+
+    // Update socket state first
+    SOCKET_MANAGER.set_socket_state(socket, WindowsSocketState::Connected(connected));
+
+    tracing::debug!("{} -> updated socket state to Connected", function_name);
+
+    Ok((sockaddr, sockaddr_len))
+}
+
+/// Log connection result and return it
+pub fn log_connection_result(result: INT, function_name: &str) -> INT {
+    if result == 0 {
+        tracing::info!(
+            "{} -> successfully connected to layer address",
+            function_name
+        );
+    } else {
+        tracing::error!(
+            "{} -> failed to connect to layer address: {}",
+            function_name,
+            result
+        );
+    }
+    result
+}
+
+/// Result of socket configuration validation
+#[derive(Debug)]
+pub enum SocketValidationResult {
+    /// Socket should be intercepted
+    Intercept,
+    /// Socket should fall back to original function
+    Fallback,
+    /// Socket is not managed by mirrord
+    NotManaged,
+}
+
+/// Check if a socket is managed and if outgoing traffic should be intercepted
+pub fn validate_socket_for_outgoing(socket: SOCKET, function_name: &str) -> SocketValidationResult {
+    let Some(user_socket) = SOCKET_MANAGER.get_socket(socket) else {
+        return SocketValidationResult::NotManaged;
+    };
+
+    tracing::debug!(
+        "{} -> socket {} is managed, kind: {:?}",
+        function_name,
+        socket,
+        user_socket.kind
+    );
+
+    // Check if outgoing traffic is enabled for this socket type
+    let should_intercept = match user_socket.kind {
+        WindowsSocketKind::Tcp => {
+            let tcp_outgoing = crate::layer_config().feature.network.outgoing.tcp;
+            tracing::info!(
+                "{} -> TCP outgoing enabled: {}",
+                function_name,
+                tcp_outgoing
+            );
+            tcp_outgoing
+        }
+        WindowsSocketKind::Udp => {
+            let udp_outgoing = crate::layer_config().feature.network.outgoing.udp;
+            tracing::info!(
+                "{} -> UDP outgoing enabled: {}",
+                function_name,
+                udp_outgoing
+            );
+            udp_outgoing
+        }
+    };
+
+    if should_intercept {
+        SocketValidationResult::Intercept
+    } else {
+        tracing::info!(
+            "{} -> outgoing traffic disabled for {:?}, falling back to original",
+            function_name,
+            user_socket.kind
+        );
+        SocketValidationResult::Fallback
+    }
+}
+
+/// Result of complete proxy connection attempt including validation and preparation
+pub enum ProxyConnectionResult {
+    /// Connection was successfully prepared, returns prepared sockaddr and length
+    Success((SOCKADDR, INT)),
+    /// Connection should fall back to original (not managed, disabled, or failed)
+    Fallback,
+}
+
+/// Complete proxy connection flow that handles validation, conversion, and preparation
+///
+/// This function encapsulates the entire flow from raw sockaddr to prepared connection:
+/// 1. Validates socket for outgoing traffic interception
+/// 2. Converts Windows sockaddr to Rust SocketAddr
+/// 3. Attempts proxy connection through mirrord
+/// 4. Handles connection success and prepares final sockaddr
+///
+/// Returns either a prepared sockaddr ready for the original connect function,
+/// or Fallback to indicate the caller should use the original function.
+pub fn attempt_proxy_connection(
+    socket: SOCKET,
+    name: *const SOCKADDR,
+    namelen: INT,
+    function_name: &str,
+) -> ProxyConnectionResult {
+    use crate::hooks::socket::utils::sockaddr_to_socket_addr;
+
+    // Validate socket and check configuration
+    match validate_socket_for_outgoing(socket, function_name) {
+        SocketValidationResult::Intercept => {
+            // Get the socket state (we know it exists from validation)
+            let user_socket = match SOCKET_MANAGER.get_socket(socket) {
+                Some(socket) => socket,
+                None => {
+                    tracing::error!(
+                        "{} -> socket {} validated but not found in manager",
+                        function_name,
+                        socket
+                    );
+                    return ProxyConnectionResult::Fallback;
+                }
+            };
+
+            // Convert Windows sockaddr to Rust SocketAddr
+            let remote_addr = match unsafe { sockaddr_to_socket_addr(name, namelen) } {
+                Some(addr) => addr,
+                None => {
+                    tracing::warn!(
+                        "{} -> failed to convert sockaddr, falling back to original",
+                        function_name
+                    );
+                    return ProxyConnectionResult::Fallback;
+                }
+            };
+
+            // Try to connect through the mirrord proxy
+            match connect_through_proxy(socket, &*user_socket, remote_addr) {
+                ProxyConnectResult::Success(connected, _connection_id) => {
+                    // Handle connection success and prepare sockaddr
+                    match handle_connection_success(socket, connected, function_name) {
+                        Ok((sockaddr, sockaddr_len)) => {
+                            tracing::debug!(
+                                "{} -> proxy connection successful, prepared sockaddr",
+                                function_name
+                            );
+                            ProxyConnectionResult::Success((sockaddr, sockaddr_len))
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "{} -> failed to handle connection success: {}, falling back to original",
+                                function_name,
+                                e
+                            );
+                            ProxyConnectionResult::Fallback
+                        }
+                    }
+                }
+                ProxyConnectResult::Fallback => {
+                    tracing::debug!(
+                        "{} -> proxy connect failed, falling back to original",
+                        function_name
+                    );
+                    ProxyConnectionResult::Fallback
+                }
+            }
+        }
+        SocketValidationResult::NotManaged | SocketValidationResult::Fallback => {
+            tracing::debug!(
+                "{} -> socket not managed or fallback mode, using original",
+                function_name
+            );
+            ProxyConnectionResult::Fallback
         }
     }
 }

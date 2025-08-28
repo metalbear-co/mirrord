@@ -46,7 +46,10 @@
       },
       "cwd": "${workspaceFolder}/tests",
       // "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-08b24540faf8040c.exe",
-      "args": ["--nocapture", "--test-threads=1"],
+      "args": [
+        // "--features", "cli", 
+        "--", "--nocapture", "--test-threads=1"
+      ],
       "env": {
         "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
         "RUST_BACKTRACE": "full",

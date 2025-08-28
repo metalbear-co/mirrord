@@ -1,9 +1,6 @@
 //! `layer-win` errors.
 
-use std::{
-    env::VarError,
-    net::{AddrParseError, SocketAddr},
-};
+use std::{env::VarError, net::AddrParseError};
 
 use thiserror::Error;
 

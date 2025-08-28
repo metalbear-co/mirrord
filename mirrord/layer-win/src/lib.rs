@@ -1,12 +1,15 @@
 #![allow(static_mut_refs)]
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(clippy::too_many_arguments)]
 use std::{
     net::SocketAddr,
     sync::{Mutex, OnceLock},
-    thread,
+    thread::{self, JoinHandle},
 };
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
+use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
@@ -26,6 +29,15 @@ mod macros;
 pub mod process;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
+static INIT_THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+
+/// Global configuration for the layer
+static CONFIG: OnceLock<LayerConfig> = OnceLock::new();
+
+/// Get access to the layer configuration
+pub fn layer_config() -> &'static LayerConfig {
+    CONFIG.get().expect("Layer configuration not initialized")
+}
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
     unsafe {
@@ -54,6 +66,14 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
         .map_err(error::Error::MissingEnvIntProxyAddr)?
         .parse::<SocketAddr>()
         .map_err(error::Error::MalformedIntProxyAddr)?;
+
+    // Read and initialize configuration
+    let config = mirrord_config::util::read_resolved_config()
+        .map_err(|e| anyhow::anyhow!("Failed to read mirrord configuration: {}", e))?;
+
+    CONFIG
+        .set(config)
+        .map_err(|_| anyhow::anyhow!("Configuration already initialized"))?;
 
     // Create session request with Windows-specific process info
     let process_info = mirrord_intproxy_protocol::ProcessInfo {
@@ -97,10 +117,15 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Avoid running logic in [`DllMain`] to prevent exceptions.
-    let _ = thread::spawn(|| {
+    let handle = thread::spawn(|| {
         mirrord_start().expect("Failed call to mirrord_start");
         println!("mirrord-layer-win fully initialized!");
     });
+
+    // Store the thread handle for cleanup
+    if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock() {
+        *thread_handle = Some(handle);
+    }
 
     TRUE
 }
@@ -112,7 +137,21 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    release_detour_guard().expect("Failed releasing detour guard");
+    // Wait for initialization thread to complete (without spawning new threads)
+    if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock() {
+        if let Some(handle) = thread_handle.take() {
+            // This may block but it's safer than spawning threads during detach
+            let _ = handle.join();
+        }
+    }
+
+    // Release detour guard - use unwrap_or to avoid panicking during detach
+    if let Err(e) = release_detour_guard() {
+        eprintln!(
+            "Warning: Failed releasing detour guard during DLL detach: {}",
+            e
+        );
+    }
 
     TRUE
 }
