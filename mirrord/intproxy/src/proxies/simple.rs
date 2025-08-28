@@ -41,7 +41,7 @@ pub enum SimpleProxyError {
         "mirrord-agent failed to perform DNS lookup, permission denied. \
         This indicates that your Kubernetes cluster is hardened, \
         and the agent might not be fully functional. \
-        You might need to enable agent.privileged configuration option"
+        You might need to enable the `agent.privileged` configuration option"
     )]
     DnsPermissionDenied,
 }
