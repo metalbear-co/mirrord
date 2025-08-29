@@ -2,8 +2,8 @@ FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:75752d06e0de7
 ARG TARGETARCH
 WORKDIR /app
 
-COPY ./mirrord/agent/platform.sh /app/
-RUN ./platform.sh
+#COPY ./mirrord/agent/platform.sh /app/
+#RUN ./platform.sh
 
 # this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true

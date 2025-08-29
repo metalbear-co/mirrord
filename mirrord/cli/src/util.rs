@@ -1,6 +1,9 @@
-use std::{io, io::Write, net::SocketAddr};
+#[cfg(not(target_os = "windows"))]
+use std::io::Write;
+use std::{io, net::SocketAddr};
 
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
+#[cfg(not(target_os = "windows"))]
 use nix::libc;
 use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
@@ -26,6 +29,7 @@ pub(crate) fn remove_proxy_env() {
 
 /// Used to pipe std[in/out/err] to "/dev/null" to prevent any printing to prevent any unwanted
 /// side effects
+#[cfg(not(target_os = "windows"))]
 unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
     unsafe {
         let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
@@ -37,6 +41,7 @@ unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
 /// Create a new session for the proxy process, detaching from the original terminal.
 /// This makes the process not to receive signals from the "mirrord" process or it's parent
 /// terminal fixes some side effects such as <https://github.com/metalbear-co/mirrord/issues/1232>
+#[cfg(not(target_os = "windows"))]
 pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
     unsafe {
         nix::unistd::setsid()?;

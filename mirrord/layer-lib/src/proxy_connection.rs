@@ -1,3 +1,5 @@
+//! Common ProxyConnection implementation shared between Unix and Windows layers.
+
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -111,7 +113,6 @@ impl ProxyConnection {
         }
     }
 
-    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     pub fn make_request_with_response<T>(&self, request: T) -> Result<T::Response>
     where
         T: IsLayerRequestWithResponse + Debug,
@@ -122,7 +123,6 @@ impl ProxyConnection {
         T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
     }
 
-    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     pub fn make_request_no_response<T: IsLayerRequest + Debug>(
         &self,
         request: T,
