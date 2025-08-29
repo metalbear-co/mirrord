@@ -488,16 +488,16 @@ pub trait WindowsAddrInfo: Sized {
     // Field accessor methods for Drop implementation
     /// Get the ai_next field
     unsafe fn ai_next(&self) -> *mut Self;
-    
+
     /// Get the ai_addr field
     unsafe fn ai_addr(&self) -> *mut SOCKADDR;
-    
+
     /// Get the ai_family field
     unsafe fn ai_family(&self) -> i32;
-    
+
     /// Get the ai_canonname field
     unsafe fn ai_canonname(&self) -> Self::CanonName;
-    
+
     /// Free the canonical name
     unsafe fn free_canonname(canonname: Self::CanonName);
 }
@@ -558,19 +558,19 @@ impl WindowsAddrInfo for ADDRINFOA {
     unsafe fn ai_next(&self) -> *mut Self {
         self.ai_next
     }
-    
+
     unsafe fn ai_addr(&self) -> *mut SOCKADDR {
         self.ai_addr
     }
-    
+
     unsafe fn ai_family(&self) -> i32 {
         self.ai_family
     }
-    
+
     unsafe fn ai_canonname(&self) -> Self::CanonName {
         self.ai_canonname
     }
-    
+
     unsafe fn free_canonname(canonname: Self::CanonName) {
         if !canonname.is_null() {
             unsafe {
@@ -642,19 +642,19 @@ impl WindowsAddrInfo for ADDRINFOW {
     unsafe fn ai_next(&self) -> *mut Self {
         self.ai_next
     }
-    
+
     unsafe fn ai_addr(&self) -> *mut SOCKADDR {
         self.ai_addr
     }
-    
+
     unsafe fn ai_family(&self) -> i32 {
         self.ai_family
     }
-    
+
     unsafe fn ai_canonname(&self) -> Self::CanonName {
         self.ai_canonname
     }
-    
+
     unsafe fn free_canonname(canonname: Self::CanonName) {
         if !canonname.is_null() {
             unsafe {
@@ -728,18 +728,18 @@ impl ManagedAddrInfoAny {
 
 impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
     /// Create a new managed ADDRINFO from a raw pointer
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure the pointer is valid and was allocated by our system
     pub unsafe fn new(ptr: *mut T) -> Self {
         Self { ptr }
     }
-    
+
     /// Get the raw pointer (for returning to Windows API)
     pub fn as_ptr(&self) -> *mut T {
         self.ptr
     }
-    
+
     /// Release ownership of the pointer (caller becomes responsible for cleanup)
     #[allow(dead_code)]
     pub fn release(mut self) -> *mut T {
@@ -758,7 +758,7 @@ impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
                 let mut current = self.ptr;
                 while !current.is_null() {
                     let next = (*current).ai_next();
-                    
+
                     // Free the sockaddr structure
                     let addr = (*current).ai_addr();
                     if !addr.is_null() {
@@ -769,15 +769,15 @@ impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
                         };
                         std::alloc::dealloc(addr as *mut u8, sockaddr_layout);
                     }
-                    
+
                     // Free the canonical name
                     let canonname = (*current).ai_canonname();
                     T::free_canonname(canonname);
-                    
+
                     // Free the ADDRINFO structure itself
                     let addrinfo_layout = Layout::new::<T>();
                     std::alloc::dealloc(current as *mut u8, addrinfo_layout);
-                    
+
                     current = next;
                 }
             }
@@ -888,7 +888,7 @@ impl GetAddrInfoResponseExtWin for GetAddrInfoResponse {
                 }
             }
 
-            // Note: We can't insert into MANAGED_ADDRINFO here because we don't have 
+            // Note: We can't insert into MANAGED_ADDRINFO here because we don't have
             // the ManagedAddrInfo wrapper. This tracking is done in the calling functions.
             // guard.insert(addrinfo_ptr as usize, ...);
         }

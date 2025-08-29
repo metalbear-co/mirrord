@@ -1,5 +1,4 @@
 // Dedicated module for Windows socket state management
-use crate::socket::WindowsDnsResolver;
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -18,6 +17,7 @@ use winapi::{
 };
 
 use super::{hostname::make_windows_proxy_request_with_response, utils::SocketAddrExtWin};
+use crate::socket::WindowsDnsResolver;
 
 // Helper function to convert Windows socket types to SocketKind
 fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {

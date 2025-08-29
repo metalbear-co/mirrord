@@ -18,6 +18,11 @@ use mirrord_config::feature::network::{
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
 use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+// Re-export shared types from layer-lib
+pub(crate) use mirrord_layer_lib::socket::{
+    Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketAddrExt, SocketKind,
+    SocketState, UserSocket, is_ignored_port,
+};
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
@@ -30,12 +35,6 @@ use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult},
-};
-
-// Re-export shared types from layer-lib
-pub(crate) use mirrord_layer_lib::socket::{
-    OutgoingSelector, ConnectionThrough, SocketState, SocketKind, UserSocket, Connected, Bound,
-    SocketAddrExt, is_ignored_port, DnsResolver, ProtocolAndAddressFilterExt,
 };
 
 #[cfg(target_os = "macos")]
@@ -149,11 +148,9 @@ impl DnsResolver for UnixDnsResolver {
         if crate::setup().remote_dns_enabled() {
             match remote_getaddrinfo(hostname.to_string(), port, 0, family, 0, protocol) {
                 Ok(res) => Ok(res.into_iter().map(|(_, ip)| ip).collect()),
-                Err(HookError::ResponseError(ResponseError::DnsLookup(
-                    DnsLookupError {
-                        kind: ResolveErrorKindInternal::NoRecordsFound(..),
-                    },
-                ))) => Ok(vec![]),
+                Err(HookError::ResponseError(ResponseError::DnsLookup(DnsLookupError {
+                    kind: ResolveErrorKindInternal::NoRecordsFound(..),
+                }))) => Ok(vec![]),
                 Err(e) => {
                     tracing::error!(error = ?e, "Remote resolution of OutgoingFilter failed");
                     Err(e)
@@ -194,9 +191,9 @@ impl OutgoingSelector {
         protocol: NetProtocol,
     ) -> HookResult<ConnectionThrough> {
         let resolver = UnixDnsResolver;
-        
+
         let result = self.get_connection_through_with_resolver(address, protocol, &resolver)?;
-        
+
         // Apply Unix-specific address resolution for local connections
         match result {
             ConnectionThrough::Local(addr) => {

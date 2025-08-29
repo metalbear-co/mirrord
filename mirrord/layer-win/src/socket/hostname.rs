@@ -16,15 +16,13 @@ use std::{
 use mirrord_layer_lib::{HostnameResult, get_hostname, unix::UnixHostnameResolver};
 use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
 use winapi::{
-    shared::{
-        ws2def::{AF_INET, AF_INET6},
-    },
+    shared::ws2def::{AF_INET, AF_INET6},
     um::winsock2::{SOCK_DGRAM, SOCK_STREAM},
 };
 
 use super::utils::{
-    GetAddrInfoResponseExtWin, WindowsAddrInfo, ManagedAddrInfo, ManagedAddrInfoAny, evict_old_cache_entries, intelligent_truncate,
-    validate_buffer_params,
+    GetAddrInfoResponseExtWin, ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo,
+    evict_old_cache_entries, intelligent_truncate, validate_buffer_params,
 };
 use crate::PROXY_CONNECTION;
 
@@ -49,7 +47,9 @@ pub const MAX_COMPUTERNAME_LENGTH: usize = 15;
 pub const REASONABLE_BUFFER_LIMIT: usize = 16 * 8; // Allow for longer DNS names
 
 /// Resolve hostname remotely through mirrord agent (similar to Unix layer's remote_getaddrinfo)
-pub fn remote_dns_resolve(hostname: &str) -> Result<Vec<(String, IpAddr)>, Box<dyn std::error::Error>> {
+pub fn remote_dns_resolve(
+    hostname: &str,
+) -> Result<Vec<(String, IpAddr)>, Box<dyn std::error::Error>> {
     tracing::debug!("Performing remote DNS resolution for: {}", hostname);
 
     let request = GetAddrInfoRequestV2 {
@@ -518,7 +518,7 @@ pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> boo
 
     // Find and remove the managed info by pointer address
     let ptr_address = addrinfo as usize;
-    
+
     if let Some(_managed_info) = managed_addr_info.remove(&ptr_address) {
         // The Drop implementation of ManagedAddrInfo will handle cleanup automatically
         tracing::debug!("Freed managed ADDRINFO at {:p}", addrinfo);

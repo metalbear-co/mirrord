@@ -132,6 +132,12 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
+        println!("Checking for debugger...");
+        wait_for_debug!();
+        unsafe { DebugBreak() };
+    }
+
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let handle = thread::spawn(|| {
         mirrord_start().expect("Failed call to mirrord_start");
@@ -199,12 +205,6 @@ fn mirrord_start() -> anyhow::Result<()> {
     // TODO: turn into more structured module that handles console
     unsafe {
         AllocConsole();
-    }
-
-    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
-        println!("Checking for debugger...");
-        wait_for_debug!();
-        unsafe { DebugBreak() };
     }
 
     initialize_proxy_connection()?;

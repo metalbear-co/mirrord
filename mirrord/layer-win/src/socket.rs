@@ -8,14 +8,21 @@ mod hostname;
 mod state;
 mod utils;
 
-use std::{sync::OnceLock, ffi::CStr};
+use std::{
+    ffi::CStr,
+    net::{IpAddr, SocketAddr},
+    sync::OnceLock,
+};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::socket::{Bound, SocketKind, SocketState, OutgoingSelector};
+use mirrord_layer_lib::socket::{
+    Bound, DnsResolver,
+    SocketKind, SocketState,
+};
 use winapi::{
     shared::{
         minwindef::INT,
-        ntdef::{PCWSTR, PCSTR},
+        ntdef::PCSTR,
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
     um::{
@@ -29,26 +36,24 @@ use winapi::{
         winsock2::{HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, fd_set, timeval},
     },
 };
+use windows_strings::PCWSTR;
 
 use self::{
     hostname::{
         MANAGED_ADDRINFO, REMOTE_DNS_REVERSE_MAPPING, free_managed_addrinfo, handle_hostname_ansi,
         handle_hostname_unicode, is_remote_hostname, resolve_hostname_with_fallback,
-        windows_getaddrinfo
+        windows_getaddrinfo,
     },
     state::{
         SOCKET_MANAGER, log_connection_result, proxy_bind, register_accepted_socket,
         setup_listening,
     },
     utils::{
-        SocketAddrExtWin, SocketAddressExtWin, evict_old_cache_entries, extract_ip_from_hostent,
-        ManagedAddrInfoAny,
+        ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, evict_old_cache_entries,
+        extract_ip_from_hostent,
     },
 };
 use crate::{apply_hook, layer_config};
-use mirrord_layer_lib::socket::{DnsResolver, ConnectionThrough, ProtocolAndAddressFilterExt};
-use mirrord_intproxy_protocol::NetProtocol;
-use std::net::{IpAddr, SocketAddr};
 
 /// Windows-specific DNS resolver implementation
 struct WindowsDnsResolver;
@@ -73,7 +78,11 @@ impl DnsResolver for WindowsDnsResolver {
                 match (hostname, 0u16).to_socket_addrs() {
                     Ok(addresses) => Ok(addresses.map(|addr| addr.ip()).collect()),
                     Err(local_err) => {
-                        tracing::debug!("Local DNS resolution also failed for {}: {}", hostname, local_err);
+                        tracing::debug!(
+                            "Local DNS resolution also failed for {}: {}",
+                            hostname,
+                            local_err
+                        );
                         Ok(vec![]) // No records found
                     }
                 }
@@ -1461,12 +1470,11 @@ unsafe extern "system" fn getaddrinfo_detour(
     raw_hints: *const ADDRINFOA,
     out_addr_info: *mut *mut ADDRINFOA,
 ) -> INT {
-
     let node_opt = match Option::from(raw_node) {
         Some(ptr) => {
             let cstr = unsafe { CStr::from_ptr(ptr) };
             Some(str_win::u8_buffer_to_string(cstr.to_bytes()))
-        },
+        }
         None => None,
     };
     tracing::warn!("getaddrinfo_detour called for hostname: {:?}", node_opt);
@@ -1475,7 +1483,7 @@ unsafe extern "system" fn getaddrinfo_detour(
         Some(ptr) => {
             let cstr = unsafe { CStr::from_ptr(ptr) };
             Some(str_win::u8_buffer_to_string(cstr.to_bytes()))
-        },
+        }
         None => None,
     };
 
@@ -1511,35 +1519,13 @@ unsafe extern "system" fn getaddrinfow_detour(
     tracing::warn!("GetAddrInfoW_detour called");
 
     let node_opt = match Option::from(node_name) {
-        Some(ptr) => {
-            // Convert PCWSTR to slice for str_win
-            let len = unsafe {
-                let mut len = 0;
-                while *ptr.offset(len) != 0 {
-                    len += 1;
-                }
-                len as usize
-            };
-            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-            Some(str_win::u16_buffer_to_string(slice))
-        },
+        Some(ptr) => unsafe { Some(str_win::u16_buffer_to_string(PCWSTR::from(ptr).as_wide())) },
         None => None,
     };
     tracing::warn!("GetAddrInfoW_detour called for hostname: {:?}", node_opt);
 
     let service_opt = match Option::from(service_name) {
-        Some(ptr) => {
-            // Convert PCWSTR to slice for str_win
-            let len = unsafe {
-                let mut len = 0;
-                while *ptr.offset(len) != 0 {
-                    len += 1;
-                }
-                len as usize
-            };
-            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-            Some(str_win::u16_buffer_to_string(slice))
-        },
+        Some(ptr) => unsafe { Some(str_win::u16_buffer_to_string(PCWSTR::from(ptr).as_wide())) },
         None => None,
     };
 
@@ -1590,7 +1576,6 @@ unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
 }
 
 // TODO: freeaddrinfow
-
 
 /// Data transfer detour for recv() - receives data from a socket
 ///

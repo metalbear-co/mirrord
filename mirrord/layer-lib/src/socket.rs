@@ -102,7 +102,6 @@ impl From<SocketKind> for NetProtocol {
     }
 }
 
-
 // TODO(alex): We could treat `sockfd` as being the same as `&self` for socket ops, we currently
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
@@ -268,7 +267,7 @@ impl OutgoingSelector {
             )),
         }
     }
-    
+
     /// Checks if the `address` matches the specified outgoing filter.
     ///
     /// Returns either a [`ConnectionThrough::Remote`] or a [`ConnectionThrough::Local`], with the
@@ -357,7 +356,6 @@ impl OutgoingSelector {
 /// [`ProtocolAndAddressFilter`] extension.
 /// Advanced filter matching with DNS resolution capability
 pub trait ProtocolAndAddressFilterExt {
-    
     /// Matches the outgoing connection request (given as [[`SocketAddr`], [`NetProtocol`]] pair)
     /// against this filter.
     ///
