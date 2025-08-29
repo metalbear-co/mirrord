@@ -284,11 +284,11 @@ pub fn intelligent_truncate(text: &str, max_len: usize) -> String {
 
     // No important patterns found, use simple truncation
     // Try to break at word boundaries if possible
-    if let Some(dash_pos) = text[..max_len].rfind('-') {
-        if dash_pos > max_len / 2 {
-            // Only use if it's not too short
-            return text[..dash_pos].to_string();
-        }
+    if let Some(dash_pos) = text[..max_len].rfind('-')
+        && dash_pos > max_len / 2
+    {
+        // Only use if it's not too short
+        return text[..dash_pos].to_string();
     }
 
     // Fallback to simple truncation
@@ -327,7 +327,7 @@ pub unsafe fn extract_ip_from_hostent(hostent: *mut HOSTENT) -> Option<String> {
     }
 
     // SAFETY: Validate pointer alignment and basic sanity checks
-    if (first_addr_ptr as usize) % std::mem::align_of::<u8>() != 0 {
+    if !(first_addr_ptr as usize).is_multiple_of(std::mem::align_of::<u8>()) {
         tracing::warn!("extract_ip_from_hostent: misaligned address pointer");
         return None;
     }
@@ -367,25 +367,13 @@ pub unsafe fn extract_ip_from_hostent(hostent: *mut HOSTENT) -> Option<String> {
                 let ip_bytes =
                     unsafe { std::slice::from_raw_parts(first_addr_ptr as *const u8, 16) };
                 // Convert to proper IPv6 string format with colon notation
-                Some(format!(
-                    "{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}",
-                    ip_bytes[0],
-                    ip_bytes[1],
-                    ip_bytes[2],
-                    ip_bytes[3],
-                    ip_bytes[4],
-                    ip_bytes[5],
-                    ip_bytes[6],
-                    ip_bytes[7],
-                    ip_bytes[8],
-                    ip_bytes[9],
-                    ip_bytes[10],
-                    ip_bytes[11],
-                    ip_bytes[12],
-                    ip_bytes[13],
-                    ip_bytes[14],
-                    ip_bytes[15]
-                ))
+                let ip: Vec<String> = ip_bytes
+                    .windows(2)
+                    .map(|x| format!("{:02x}{:02x}", x[0], x[1]))
+                    .collect();
+                let ip = ip.join(":");
+
+                Some(ip)
             } else {
                 tracing::warn!(
                     "extract_ip_from_hostent: IPv6 address has invalid length {}",

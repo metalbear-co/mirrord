@@ -1,8 +1,12 @@
 //! `layer-win` errors.
 
+pub(crate) mod windows;
+
 use std::{env::VarError, net::AddrParseError};
 
 use thiserror::Error;
+
+use crate::error::windows::WindowsError;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -13,6 +17,11 @@ pub enum Error {
     MissingEnvIntProxyAddr(VarError),
     #[error("Intproxy address malformed: {0}")]
     MalformedIntProxyAddr(AddrParseError),
+
+    #[error("Failed allocating console: {0}")]
+    FailedAllocatingConsole(WindowsError),
+    #[error("Failed redirecting Std handles: {0}")]
+    FailedRedirectingStdHandles(WindowsError),
 }
 
 #[allow(unused)]

@@ -15,10 +15,7 @@ use std::{
 };
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::socket::{
-    Bound, DnsResolver,
-    SocketKind, SocketState,
-};
+use mirrord_layer_lib::socket::{Bound, DnsResolver, SocketKind, SocketState};
 use winapi::{
     shared::{
         minwindef::INT,
@@ -96,100 +93,100 @@ impl DnsResolver for WindowsDnsResolver {
 }
 
 // Function type definitions for original Windows socket functions
-type SocketFn = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
-static SOCKET_ORIGINAL: OnceLock<&SocketFn> = OnceLock::new();
+type SocketType = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
+static SOCKET_ORIGINAL: OnceLock<&SocketType> = OnceLock::new();
 
-type BindFn = unsafe extern "system" fn(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT;
-static BIND_ORIGINAL: OnceLock<&BindFn> = OnceLock::new();
+type BindType = unsafe extern "system" fn(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT;
+static BIND_ORIGINAL: OnceLock<&BindType> = OnceLock::new();
 
-type ListenFn = unsafe extern "system" fn(s: SOCKET, backlog: INT) -> INT;
-static LISTEN_ORIGINAL: OnceLock<&ListenFn> = OnceLock::new();
+type ListenType = unsafe extern "system" fn(s: SOCKET, backlog: INT) -> INT;
+static LISTEN_ORIGINAL: OnceLock<&ListenType> = OnceLock::new();
 
-type ConnectFn = unsafe extern "system" fn(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT;
-static CONNECT_ORIGINAL: OnceLock<&ConnectFn> = OnceLock::new();
+type ConnectType = unsafe extern "system" fn(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT;
+static CONNECT_ORIGINAL: OnceLock<&ConnectType> = OnceLock::new();
 
-type AcceptFn =
+type AcceptType =
     unsafe extern "system" fn(s: SOCKET, addr: *mut SOCKADDR, addrlen: *mut INT) -> SOCKET;
-static ACCEPT_ORIGINAL: OnceLock<&AcceptFn> = OnceLock::new();
+static ACCEPT_ORIGINAL: OnceLock<&AcceptType> = OnceLock::new();
 
-type GetsocknameFn =
+type GetSockNameType =
     unsafe extern "system" fn(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT;
-static GETSOCKNAME_ORIGINAL: OnceLock<&GetsocknameFn> = OnceLock::new();
+static GET_SOCK_NAME_ORIGINAL: OnceLock<&GetSockNameType> = OnceLock::new();
 
-type GetpeernameFn =
+type GetPeerNameType =
     unsafe extern "system" fn(s: SOCKET, name: *mut SOCKADDR, namelen: *mut INT) -> INT;
-static GETPEERNAME_ORIGINAL: OnceLock<&GetpeernameFn> = OnceLock::new();
+static GET_PEER_NAME_ORIGINAL: OnceLock<&GetPeerNameType> = OnceLock::new();
 
-type GethostnameFn = unsafe extern "system" fn(name: *mut i8, namelen: INT) -> INT;
-static GETHOSTNAME_ORIGINAL: OnceLock<&GethostnameFn> = OnceLock::new();
+type GetHostNameType = unsafe extern "system" fn(name: *mut i8, namelen: INT) -> INT;
+static GET_HOST_NAME_ORIGINAL: OnceLock<&GetHostNameType> = OnceLock::new();
 
 // DNS resolution functions that Python socket.gethostbyname uses
-type GethostbynameFn = unsafe extern "system" fn(name: *const i8) -> *mut HOSTENT;
-static GETHOSTBYNAME_ORIGINAL: OnceLock<&GethostbynameFn> = OnceLock::new();
+type GetHostByNameType = unsafe extern "system" fn(name: *const i8) -> *mut HOSTENT;
+static GET_HOST_BY_NAME_ORIGINAL: OnceLock<&GetHostByNameType> = OnceLock::new();
 
-type GetaddrinfoFn = unsafe extern "system" fn(
+type GetAddrInfoType = unsafe extern "system" fn(
     node_name: PCSTR,
     service_name: PCSTR,
     hints: *const ADDRINFOA,
     result: *mut *mut ADDRINFOA,
 ) -> INT;
-static GETADDRINFO_ORIGINAL: OnceLock<&GetaddrinfoFn> = OnceLock::new();
+static GET_ADDR_INFO_ORIGINAL: OnceLock<&GetAddrInfoType> = OnceLock::new();
 
-type FreeaddrinfoFn = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
-static FREEADDRINFO_ORIGINAL: OnceLock<&FreeaddrinfoFn> = OnceLock::new();
+type FreeAddrInfoType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
+static FREE_ADDR_INFO_ORIGINAL: OnceLock<&FreeAddrInfoType> = OnceLock::new();
 
 // Unicode versions that Python might use
-type GetAddrInfoWFn = unsafe extern "system" fn(
+type GetAddrInfoWType = unsafe extern "system" fn(
     node_name: PCWSTR,
     service_name: PCWSTR,
     hints: *const ADDRINFOW,
     result: *mut *mut ADDRINFOW,
 ) -> INT;
-static GETADDRINFOW_ORIGINAL: OnceLock<&GetAddrInfoWFn> = OnceLock::new();
+static GET_ADDR_INFO_W_ORIGINAL: OnceLock<&GetAddrInfoWType> = OnceLock::new();
 
 // Kernel32 hostname functions that Python might use
-type GetComputerNameAFn = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_A_ORIGINAL: OnceLock<&GetComputerNameAFn> = OnceLock::new();
+type GetComputerNameAType = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
+static GET_COMPUTER_NAME_A_ORIGINAL: OnceLock<&GetComputerNameAType> = OnceLock::new();
 
-type GetComputerNameWFn = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_W_ORIGINAL: OnceLock<&GetComputerNameWFn> = OnceLock::new();
+type GetComputerNameWType = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *mut u32) -> i32;
+static GET_COMPUTER_NAME_W_ORIGINAL: OnceLock<&GetComputerNameWType> = OnceLock::new();
 
 // Additional hostname functions that Python might use
-type GetComputerNameExAFn =
+type GetComputerNameExAType =
     unsafe extern "system" fn(name_type: u32, lpBuffer: *mut i8, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_EX_A_ORIGINAL: OnceLock<&GetComputerNameExAFn> = OnceLock::new();
+static GET_COMPUTER_NAME_EX_A_ORIGINAL: OnceLock<&GetComputerNameExAType> = OnceLock::new();
 
-type GetComputerNameExWFn =
+type GetComputerNameExWType =
     unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_EX_W_ORIGINAL: OnceLock<&GetComputerNameExWFn> = OnceLock::new();
+static GET_COMPUTER_NAME_EX_W_ORIGINAL: OnceLock<&GetComputerNameExWType> = OnceLock::new();
 
-type WSAStartupFn = unsafe extern "system" fn(wVersionRequested: u16, lpWSAData: *mut u8) -> i32;
-static WSA_STARTUP_ORIGINAL: OnceLock<&WSAStartupFn> = OnceLock::new();
+type WSAStartupType = unsafe extern "system" fn(wVersionRequested: u16, lpWSAData: *mut u8) -> i32;
+static WSA_STARTUP_ORIGINAL: OnceLock<&WSAStartupType> = OnceLock::new();
 
 // Add WSACleanup hook to complete Winsock lifecycle management
-type WSACleanupFn = unsafe extern "system" fn() -> i32;
-static WSA_CLEANUP_ORIGINAL: OnceLock<&WSACleanupFn> = OnceLock::new();
+type WSACleanupType = unsafe extern "system" fn() -> i32;
+static WSA_CLEANUP_ORIGINAL: OnceLock<&WSACleanupType> = OnceLock::new();
 
 // ioctlsocket for socket I/O control (used for non-blocking mode)
-type IoctlsocketFn = unsafe extern "system" fn(s: SOCKET, cmd: i32, argp: *mut u32) -> i32;
-static IOCTLSOCKET_ORIGINAL: OnceLock<&IoctlsocketFn> = OnceLock::new();
+type IoCtlSocketType = unsafe extern "system" fn(s: SOCKET, cmd: i32, argp: *mut u32) -> i32;
+static IOCTL_SOCKET_ORIGINAL: OnceLock<&IoCtlSocketType> = OnceLock::new();
 
 // select for socket readiness monitoring
-type SelectFn = unsafe extern "system" fn(
+type SelectType = unsafe extern "system" fn(
     nfds: i32,
     readfds: *mut fd_set,
     writefds: *mut fd_set,
     exceptfds: *mut fd_set,
     timeout: *const timeval,
 ) -> i32;
-static SELECT_ORIGINAL: OnceLock<&SelectFn> = OnceLock::new();
+static SELECT_ORIGINAL: OnceLock<&SelectType> = OnceLock::new();
 
 // WSAGetLastError for getting detailed error information
-type WSAGetLastErrorFn = unsafe extern "system" fn() -> i32;
-static WSA_GET_LAST_ERROR_ORIGINAL: OnceLock<&WSAGetLastErrorFn> = OnceLock::new();
+type WSAGetLastErrorType = unsafe extern "system" fn() -> i32;
+static WSA_GET_LAST_ERROR_ORIGINAL: OnceLock<&WSAGetLastErrorType> = OnceLock::new();
 
 // WSASocket for advanced socket creation (used by Node.js internally)
-type WSASocketFn = unsafe extern "system" fn(
+type WSASocketType = unsafe extern "system" fn(
     af: i32,
     socket_type: i32,
     protocol: i32,
@@ -197,10 +194,10 @@ type WSASocketFn = unsafe extern "system" fn(
     g: u32,
     dwFlags: u32,
 ) -> SOCKET;
-static WSA_SOCKET_ORIGINAL: OnceLock<&WSASocketFn> = OnceLock::new();
+static WSA_SOCKET_ORIGINAL: OnceLock<&WSASocketType> = OnceLock::new();
 
 // WSA async I/O functions that Node.js uses for overlapped operations
-type WSAConnectFn = unsafe extern "system" fn(
+type WSAConnectType = unsafe extern "system" fn(
     s: SOCKET,
     name: *const SOCKADDR,
     namelen: INT,
@@ -209,18 +206,18 @@ type WSAConnectFn = unsafe extern "system" fn(
     lpSQOS: *mut u8,
     lpGQOS: *mut u8,
 ) -> INT;
-static WSA_CONNECT_ORIGINAL: OnceLock<&WSAConnectFn> = OnceLock::new();
+static WSA_CONNECT_ORIGINAL: OnceLock<&WSAConnectType> = OnceLock::new();
 
-type WSAAcceptFn = unsafe extern "system" fn(
+type WSAAcceptType = unsafe extern "system" fn(
     s: SOCKET,
     addr: *mut SOCKADDR,
     addrlen: *mut INT,
     lpfnCondition: *mut u8,
     dwCallbackData: usize,
 ) -> SOCKET;
-static WSA_ACCEPT_ORIGINAL: OnceLock<&WSAAcceptFn> = OnceLock::new();
+static WSA_ACCEPT_ORIGINAL: OnceLock<&WSAAcceptType> = OnceLock::new();
 
-type WSASendFn = unsafe extern "system" fn(
+type WSASendType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
     dwBufferCount: u32,
@@ -229,9 +226,9 @@ type WSASendFn = unsafe extern "system" fn(
     lpOverlapped: *mut u8,
     lpCompletionRoutine: *mut u8,
 ) -> INT;
-static WSA_SEND_ORIGINAL: OnceLock<&WSASendFn> = OnceLock::new();
+static WSA_SEND_ORIGINAL: OnceLock<&WSASendType> = OnceLock::new();
 
-type WSARecvFn = unsafe extern "system" fn(
+type WSARecvType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
     dwBufferCount: u32,
@@ -240,9 +237,9 @@ type WSARecvFn = unsafe extern "system" fn(
     lpOverlapped: *mut u8,
     lpCompletionRoutine: *mut u8,
 ) -> INT;
-static WSA_RECV_ORIGINAL: OnceLock<&WSARecvFn> = OnceLock::new();
+static WSA_RECV_ORIGINAL: OnceLock<&WSARecvType> = OnceLock::new();
 
-type WSASendToFn = unsafe extern "system" fn(
+type WSASendToType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
     dwBufferCount: u32,
@@ -253,9 +250,9 @@ type WSASendToFn = unsafe extern "system" fn(
     lpOverlapped: *mut u8,
     lpCompletionRoutine: *mut u8,
 ) -> INT;
-static WSA_SEND_TO_ORIGINAL: OnceLock<&WSASendToFn> = OnceLock::new();
+static WSA_SEND_TO_ORIGINAL: OnceLock<&WSASendToType> = OnceLock::new();
 
-type WSARecvFromFn = unsafe extern "system" fn(
+type WSARecvFromType = unsafe extern "system" fn(
     s: SOCKET,
     lpBuffers: *mut u8,
     dwBufferCount: u32,
@@ -266,16 +263,16 @@ type WSARecvFromFn = unsafe extern "system" fn(
     lpOverlapped: *mut u8,
     lpCompletionRoutine: *mut u8,
 ) -> INT;
-static WSA_RECV_FROM_ORIGINAL: OnceLock<&WSARecvFromFn> = OnceLock::new();
+static WSA_RECV_FROM_ORIGINAL: OnceLock<&WSARecvFromType> = OnceLock::new();
 
 // Data transfer function types
-type RecvFn = unsafe extern "system" fn(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT;
-static RECV_ORIGINAL: OnceLock<&RecvFn> = OnceLock::new();
+type RecvType = unsafe extern "system" fn(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT;
+static RECV_ORIGINAL: OnceLock<&RecvType> = OnceLock::new();
 
-type SendFn = unsafe extern "system" fn(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT;
-static SEND_ORIGINAL: OnceLock<&SendFn> = OnceLock::new();
+type SendType = unsafe extern "system" fn(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT;
+static SEND_ORIGINAL: OnceLock<&SendType> = OnceLock::new();
 
-type RecvfromFn = unsafe extern "system" fn(
+type RecvFromType = unsafe extern "system" fn(
     s: SOCKET,
     buf: *mut i8,
     len: INT,
@@ -283,9 +280,9 @@ type RecvfromFn = unsafe extern "system" fn(
     from: *mut SOCKADDR,
     fromlen: *mut INT,
 ) -> INT;
-static RECVFROM_ORIGINAL: OnceLock<&RecvfromFn> = OnceLock::new();
+static RECV_FROM_ORIGINAL: OnceLock<&RecvFromType> = OnceLock::new();
 
-type SendtoFn = unsafe extern "system" fn(
+type SendToType = unsafe extern "system" fn(
     s: SOCKET,
     buf: *const i8,
     len: INT,
@@ -293,33 +290,33 @@ type SendtoFn = unsafe extern "system" fn(
     to: *const SOCKADDR,
     tolen: INT,
 ) -> INT;
-static SENDTO_ORIGINAL: OnceLock<&SendtoFn> = OnceLock::new();
+static SEND_TO_ORIGINAL: OnceLock<&SendToType> = OnceLock::new();
 
 // Socket management function types
-type ClosesocketFn = unsafe extern "system" fn(s: SOCKET) -> INT;
-static CLOSESOCKET_ORIGINAL: OnceLock<&ClosesocketFn> = OnceLock::new();
+type CloseSocketType = unsafe extern "system" fn(s: SOCKET) -> INT;
+static CLOSE_SOCKET_ORIGINAL: OnceLock<&CloseSocketType> = OnceLock::new();
 
-type ShutdownFn = unsafe extern "system" fn(s: SOCKET, how: INT) -> INT;
-static SHUTDOWN_ORIGINAL: OnceLock<&ShutdownFn> = OnceLock::new();
+type ShutdownType = unsafe extern "system" fn(s: SOCKET, how: INT) -> INT;
+static SHUTDOWN_ORIGINAL: OnceLock<&ShutdownType> = OnceLock::new();
 
 // Socket option function types
-type SetsockoptFn = unsafe extern "system" fn(
+type SetSockOptType = unsafe extern "system" fn(
     s: SOCKET,
     level: INT,
     optname: INT,
     optval: *const i8,
     optlen: INT,
 ) -> INT;
-static SETSOCKOPT_ORIGINAL: OnceLock<&SetsockoptFn> = OnceLock::new();
+static SET_SOCK_OPT_ORIGINAL: OnceLock<&SetSockOptType> = OnceLock::new();
 
-type GetsockoptFn = unsafe extern "system" fn(
+type GetSockOptType = unsafe extern "system" fn(
     s: SOCKET,
     level: INT,
     optname: INT,
     optval: *mut i8,
     optlen: *mut INT,
 ) -> INT;
-static GETSOCKOPT_ORIGINAL: OnceLock<&GetsockoptFn> = OnceLock::new();
+static GET_SOCK_OPT_ORIGINAL: OnceLock<&GetSockOptType> = OnceLock::new();
 
 /// Windows socket hook for socket creation
 unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> SOCKET {
@@ -396,8 +393,8 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 
     // Fall back to original function for non-managed sockets or errors
     let original = BIND_ORIGINAL.get().unwrap();
-    let result = unsafe { original(s, name, namelen) };
-    result
+
+    unsafe { original(s, name, namelen) }
 }
 
 /// Windows socket hook for listen
@@ -446,13 +443,13 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
         // Fallback - call original listen even if setup failed
         let original = LISTEN_ORIGINAL.get().unwrap();
-        let result = unsafe { original(s, backlog) };
-        result
+
+        unsafe { original(s, backlog) }
     } else {
         // Fall back to original function for non-managed sockets
         let original = LISTEN_ORIGINAL.get().unwrap();
-        let result = unsafe { original(s, backlog) };
-        result
+
+        unsafe { original(s, backlog) }
     }
 }
 
@@ -601,9 +598,9 @@ unsafe extern "system" fn getsockname_detour(
     }
 
     // Fall back to original function for non-managed sockets or errors
-    let original = GETSOCKNAME_ORIGINAL.get().unwrap();
-    let result = unsafe { original(s, name, namelen) };
-    result
+    let original = GET_SOCK_NAME_ORIGINAL.get().unwrap();
+
+    unsafe { original(s, name, namelen) }
 }
 
 /// Windows socket hook for getpeername
@@ -637,7 +634,7 @@ unsafe extern "system" fn getpeername_detour(
     }
 
     // Fall back to original function for non-managed sockets or errors
-    let original = GETPEERNAME_ORIGINAL.get().unwrap();
+    let original = GET_PEER_NAME_ORIGINAL.get().unwrap();
     unsafe { original(s, name, namelen) }
 }
 
@@ -665,7 +662,7 @@ unsafe extern "system" fn wsa_cleanup_detour() -> i32 {
 /// Socket management detour for ioctlsocket() - controls I/O mode of socket
 unsafe extern "system" fn ioctlsocket_detour(s: SOCKET, cmd: i32, argp: *mut u32) -> i32 {
     // Pass through to original - interceptor handles I/O control for managed sockets
-    let original = IOCTLSOCKET_ORIGINAL.get().unwrap();
+    let original = IOCTL_SOCKET_ORIGINAL.get().unwrap();
     unsafe { original(s, cmd, argp) }
 }
 
@@ -1057,7 +1054,7 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
     tracing::debug!(
         "gethostname: hostname feature disabled or no remote hostname available, calling original"
     );
-    let original = GETHOSTNAME_ORIGINAL.get().unwrap();
+    let original = GET_HOST_NAME_ORIGINAL.get().unwrap();
     unsafe { original(name, namelen) }
 }
 
@@ -1351,14 +1348,14 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
     unsafe {
         SetLastError(ERROR_INVALID_PARAMETER);
     }
-    return 0; // FALSE
+    0 // FALSE
 }
 
 /// Hook for gethostbyname to handle DNS resolution of our modified hostname
 unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT {
     if name.is_null() {
         tracing::debug!("gethostbyname: name is null, calling original");
-        return unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) };
+        return unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) };
     }
 
     // SAFETY: Validate the string pointer before dereferencing
@@ -1366,7 +1363,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         Ok(s) => s,
         Err(_) => {
             tracing::debug!("gethostbyname: invalid UTF-8 in hostname, calling original");
-            return unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) };
+            return unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) };
         }
     };
 
@@ -1396,7 +1393,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
                         if target_ip.parse::<std::net::IpAddr>().is_ok() || target_ip == "localhost"
                         {
                             let result = unsafe {
-                                GETHOSTBYNAME_ORIGINAL.get().unwrap()(target_cstr.as_ptr())
+                                GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(target_cstr.as_ptr())
                             };
                             if !result.is_null() {
                                 tracing::debug!(
@@ -1422,7 +1419,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         // Try to resolve with fallback logic
         if let Some(fallback_hostname) = resolve_hostname_with_fallback(hostname_cstr) {
             let result =
-                unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(fallback_hostname.as_ptr()) };
+                unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(fallback_hostname.as_ptr()) };
             if !result.is_null() {
                 tracing::debug!("gethostbyname: successfully resolved with fallback");
 
@@ -1457,7 +1454,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         "gethostbyname: calling original function for hostname: {}",
         hostname_cstr
     );
-    unsafe { GETHOSTBYNAME_ORIGINAL.get().unwrap()(name) }
+    unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) }
 }
 
 /// Hook for getaddrinfo to handle DNS resolution with full mirrord functionality
@@ -1504,11 +1501,17 @@ unsafe extern "system" fn getaddrinfo_detour(
             Err(_) => {
                 // Fall back to original Windows getaddrinfo
                 tracing::debug!("getaddrinfo: falling back to original Windows function");
-                GETADDRINFO_ORIGINAL.get().unwrap()(raw_node, raw_service, raw_hints, out_addr_info)
+                GET_ADDR_INFO_ORIGINAL.get().unwrap()(
+                    raw_node,
+                    raw_service,
+                    raw_hints,
+                    out_addr_info,
+                )
             }
         }
     }
 }
+
 /// Hook for GetAddrInfoW (Unicode version) to handle DNS resolution
 unsafe extern "system" fn getaddrinfow_detour(
     node_name: PCWSTR,
@@ -1559,7 +1562,7 @@ unsafe extern "system" fn getaddrinfow_detour(
         "GetAddrInfoW: calling original function for hostname: {:?}",
         node_opt
     );
-    unsafe { GETADDRINFOW_ORIGINAL.get().unwrap()(node_name, service_name, hints, result) }
+    unsafe { GET_ADDR_INFO_W_ORIGINAL.get().unwrap()(node_name, service_name, hints, result) }
 }
 
 /// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
@@ -1570,7 +1573,7 @@ unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
     unsafe {
         if !free_managed_addrinfo(addrinfo) {
             // Not one of ours - call original freeaddrinfo
-            FREEADDRINFO_ORIGINAL.get().unwrap()(addrinfo);
+            FREE_ADDR_INFO_ORIGINAL.get().unwrap()(addrinfo);
         }
     }
 }
@@ -1612,7 +1615,7 @@ unsafe extern "system" fn recvfrom_detour(
     fromlen: *mut INT,
 ) -> INT {
     // Pass through to original
-    let original = RECVFROM_ORIGINAL.get().unwrap();
+    let original = RECV_FROM_ORIGINAL.get().unwrap();
     unsafe { original(s, buf, len, flags, from, fromlen) }
 }
 
@@ -1629,7 +1632,7 @@ unsafe extern "system" fn sendto_detour(
     tolen: INT,
 ) -> INT {
     // Pass through to original
-    let original = SENDTO_ORIGINAL.get().unwrap();
+    let original = SEND_TO_ORIGINAL.get().unwrap();
     unsafe { original(s, buf, len, flags, to, tolen) }
 }
 
@@ -1639,7 +1642,7 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     SOCKET_MANAGER.remove_socket(s);
 
     // Call the original function
-    let original = CLOSESOCKET_ORIGINAL.get().unwrap();
+    let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     unsafe { original(s) }
 }
 
@@ -1659,7 +1662,7 @@ unsafe extern "system" fn setsockopt_detour(
     optlen: INT,
 ) -> INT {
     // Pass through to original - interceptor handles socket option management for managed sockets
-    let original = SETSOCKOPT_ORIGINAL.get().unwrap();
+    let original = SET_SOCK_OPT_ORIGINAL.get().unwrap();
     unsafe { original(s, level, optname, optval, optlen) }
 }
 
@@ -1672,7 +1675,7 @@ unsafe extern "system" fn getsockopt_detour(
     optlen: *mut INT,
 ) -> INT {
     // Pass through to original - interceptor handles socket option queries for managed sockets
-    let original = GETSOCKOPT_ORIGINAL.get().unwrap();
+    let original = GET_SOCK_OPT_ORIGINAL.get().unwrap();
     unsafe { original(s, level, optname, optval, optlen) }
 }
 
@@ -1687,18 +1690,25 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "socket",
         socket_detour,
-        SocketFn,
+        SocketType,
         SOCKET_ORIGINAL
     )?;
 
-    apply_hook!(guard, "ws2_32", "bind", bind_detour, BindFn, BIND_ORIGINAL)?;
+    apply_hook!(
+        guard,
+        "ws2_32",
+        "bind",
+        bind_detour,
+        BindType,
+        BIND_ORIGINAL
+    )?;
 
     apply_hook!(
         guard,
         "ws2_32",
         "listen",
         listen_detour,
-        ListenFn,
+        ListenType,
         LISTEN_ORIGINAL
     )?;
 
@@ -1707,7 +1717,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "connect",
         connect_detour,
-        ConnectFn,
+        ConnectType,
         CONNECT_ORIGINAL
     )?;
 
@@ -1716,7 +1726,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "accept",
         accept_detour,
-        AcceptFn,
+        AcceptType,
         ACCEPT_ORIGINAL
     )?;
 
@@ -1725,8 +1735,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "getsockname",
         getsockname_detour,
-        GetsocknameFn,
-        GETSOCKNAME_ORIGINAL
+        GetSockNameType,
+        GET_SOCK_NAME_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1734,8 +1744,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "getpeername",
         getpeername_detour,
-        GetpeernameFn,
-        GETPEERNAME_ORIGINAL
+        GetPeerNameType,
+        GET_PEER_NAME_ORIGINAL
     )?;
 
     // Register GetComputerNameExW hook - this is what Python's socket.gethostname() actually uses
@@ -1744,7 +1754,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "kernel32",
         "GetComputerNameExW",
         get_computer_name_ex_w_detour,
-        GetComputerNameExWFn,
+        GetComputerNameExWType,
         GET_COMPUTER_NAME_EX_W_ORIGINAL
     )?;
 
@@ -1753,7 +1763,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "kernel32",
         "GetComputerNameExA",
         get_computer_name_ex_a_detour,
-        GetComputerNameExAFn,
+        GetComputerNameExAType,
         GET_COMPUTER_NAME_EX_A_ORIGINAL
     )?;
 
@@ -1762,7 +1772,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "kernel32",
         "GetComputerNameA",
         get_computer_name_a_detour,
-        GetComputerNameAFn,
+        GetComputerNameAType,
         GET_COMPUTER_NAME_A_ORIGINAL
     )?;
 
@@ -1771,7 +1781,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "kernel32",
         "GetComputerNameW",
         get_computer_name_w_detour,
-        GetComputerNameWFn,
+        GetComputerNameWType,
         GET_COMPUTER_NAME_W_ORIGINAL
     )?;
 
@@ -1781,7 +1791,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSAStartup",
         wsa_startup_detour,
-        WSAStartupFn,
+        WSAStartupType,
         WSA_STARTUP_ORIGINAL
     )?;
 
@@ -1791,7 +1801,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSACleanup",
         wsa_cleanup_detour,
-        WSACleanupFn,
+        WSACleanupType,
         WSA_CLEANUP_ORIGINAL
     )?;
 
@@ -1802,8 +1812,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "gethostbyname",
         gethostbyname_detour,
-        GethostbynameFn,
-        GETHOSTBYNAME_ORIGINAL
+        GetHostByNameType,
+        GET_HOST_BY_NAME_ORIGINAL
     )?;
 
     tracing::warn!("Installing gethostname hook");
@@ -1812,8 +1822,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "gethostname",
         gethostname_detour,
-        GethostnameFn,
-        GETHOSTNAME_ORIGINAL
+        GetHostNameType,
+        GET_HOST_NAME_ORIGINAL
     )?;
 
     tracing::warn!("Installing getaddrinfo hook");
@@ -1822,8 +1832,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "getaddrinfo",
         getaddrinfo_detour,
-        GetaddrinfoFn,
-        GETADDRINFO_ORIGINAL
+        GetAddrInfoType,
+        GET_ADDR_INFO_ORIGINAL
     )?;
 
     tracing::warn!("Installing GetAddrInfoW hook");
@@ -1832,8 +1842,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "GetAddrInfoW",
         getaddrinfow_detour,
-        GetAddrInfoWFn,
-        GETADDRINFOW_ORIGINAL
+        GetAddrInfoWType,
+        GET_ADDR_INFO_W_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1841,22 +1851,36 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "freeaddrinfo",
         freeaddrinfo_detour,
-        FreeaddrinfoFn,
-        FREEADDRINFO_ORIGINAL
+        FreeAddrInfoType,
+        FREE_ADDR_INFO_ORIGINAL
     )?;
 
     // Register data transfer hooks
-    apply_hook!(guard, "ws2_32", "recv", recv_detour, RecvFn, RECV_ORIGINAL)?;
+    apply_hook!(
+        guard,
+        "ws2_32",
+        "recv",
+        recv_detour,
+        RecvType,
+        RECV_ORIGINAL
+    )?;
 
-    apply_hook!(guard, "ws2_32", "send", send_detour, SendFn, SEND_ORIGINAL)?;
+    apply_hook!(
+        guard,
+        "ws2_32",
+        "send",
+        send_detour,
+        SendType,
+        SEND_ORIGINAL
+    )?;
 
     apply_hook!(
         guard,
         "ws2_32",
         "recvfrom",
         recvfrom_detour,
-        RecvfromFn,
-        RECVFROM_ORIGINAL
+        RecvFromType,
+        RECV_FROM_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1864,8 +1888,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "sendto",
         sendto_detour,
-        SendtoFn,
-        SENDTO_ORIGINAL
+        SendToType,
+        SEND_TO_ORIGINAL
     )?;
 
     // Register socket management hooks
@@ -1874,8 +1898,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "closesocket",
         closesocket_detour,
-        ClosesocketFn,
-        CLOSESOCKET_ORIGINAL
+        CloseSocketType,
+        CLOSE_SOCKET_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1883,7 +1907,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "shutdown",
         shutdown_detour,
-        ShutdownFn,
+        ShutdownType,
         SHUTDOWN_ORIGINAL
     )?;
 
@@ -1893,8 +1917,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "setsockopt",
         setsockopt_detour,
-        SetsockoptFn,
-        SETSOCKOPT_ORIGINAL
+        SetSockOptType,
+        SET_SOCK_OPT_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1902,8 +1926,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "getsockopt",
         getsockopt_detour,
-        GetsockoptFn,
-        GETSOCKOPT_ORIGINAL
+        GetSockOptType,
+        GET_SOCK_OPT_ORIGINAL
     )?;
 
     // Register additional I/O control and monitoring hooks
@@ -1912,8 +1936,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "ioctlsocket",
         ioctlsocket_detour,
-        IoctlsocketFn,
-        IOCTLSOCKET_ORIGINAL
+        IoCtlSocketType,
+        IOCTL_SOCKET_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1921,7 +1945,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "select",
         select_detour,
-        SelectFn,
+        SelectType,
         SELECT_ORIGINAL
     )?;
 
@@ -1931,7 +1955,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSAGetLastError",
         wsa_get_last_error_detour,
-        WSAGetLastErrorFn,
+        WSAGetLastErrorType,
         WSA_GET_LAST_ERROR_ORIGINAL
     )?;
 
@@ -1941,7 +1965,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSASocketA",
         wsa_socket_detour,
-        WSASocketFn,
+        WSASocketType,
         WSA_SOCKET_ORIGINAL
     )?;
 
@@ -1951,7 +1975,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSAConnect",
         wsa_connect_detour,
-        WSAConnectFn,
+        WSAConnectType,
         WSA_CONNECT_ORIGINAL
     )?;
 
@@ -1960,7 +1984,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSAAccept",
         wsa_accept_detour,
-        WSAAcceptFn,
+        WSAAcceptType,
         WSA_ACCEPT_ORIGINAL
     )?;
 
@@ -1969,7 +1993,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSASend",
         wsa_send_detour,
-        WSASendFn,
+        WSASendType,
         WSA_SEND_ORIGINAL
     )?;
 
@@ -1978,7 +2002,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSARecv",
         wsa_recv_detour,
-        WSARecvFn,
+        WSARecvType,
         WSA_RECV_ORIGINAL
     )?;
 
@@ -1987,7 +2011,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSASendTo",
         wsa_send_to_detour,
-        WSASendToFn,
+        WSASendToType,
         WSA_SEND_TO_ORIGINAL
     )?;
 
@@ -1996,7 +2020,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         "ws2_32",
         "WSARecvFrom",
         wsa_recv_from_detour,
-        WSARecvFromFn,
+        WSARecvFromType,
         WSA_RECV_FROM_ORIGINAL
     )?;
 

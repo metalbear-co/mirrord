@@ -14,7 +14,6 @@ use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        consoleapi::AllocConsole,
         debugapi::DebugBreak,
         processthreadsapi::GetCurrentProcessId,
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
@@ -23,7 +22,8 @@ use winapi::{
 
 use crate::{hooks::initialize_hooks, setup::LayerSetup};
 
-mod error;
+mod console;
+pub mod error;
 mod hooks;
 mod macros;
 pub mod process;
@@ -160,11 +160,11 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Wait for initialization thread to complete (without spawning new threads)
-    if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock() {
-        if let Some(handle) = thread_handle.take() {
-            // This may block but it's safer than spawning threads during detach
-            let _ = handle.join();
-        }
+    if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock()
+        && let Some(handle) = thread_handle.take()
+    {
+        // This may block but it's safer than spawning threads during detach
+        let _ = handle.join();
     }
 
     // Release detour guard - use unwrap_or to avoid panicking during detach
@@ -202,10 +202,9 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    // TODO: turn into more structured module that handles console
-    unsafe {
-        AllocConsole();
-    }
+    // Create Windows console, and redirects std handles.
+    console::create()?;
+    println!("Console initialized");
 
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");
