@@ -285,7 +285,7 @@ pub struct LockedPort {
 ///
 /// This enum provides backward/forward compatibility by accepting both:
 /// - Modern: The new LockedPort struct format (for OpenAPI v2 compatibility)
-/// - Legacy: The old tuple format (u16, String, Option<String>)
+/// - Legacy: The old tuple format (u16, String, `Option<String>`)
 ///
 /// The JsonSchema implementation only exposes the modern format to ensure clean OpenAPI schemas,
 /// while serde can still deserialize both formats from existing data.
