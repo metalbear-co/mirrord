@@ -188,7 +188,8 @@ Operator License
                     "Scale Down?"
                 ]);
 
-                for copy_target_entry in copy_targets {
+                for copy_target_entry_compat in copy_targets {
+                    let copy_target_entry = copy_target_entry_compat.to_copy_target_entry();
                     copy_targets_table.add_row(row![
                         copy_target_entry.copy_target.spec.target.to_string(),
                         copy_target_entry
@@ -236,7 +237,8 @@ Operator License
                 .map(|ports| {
                     ports
                         .iter()
-                        .map(|locked_port| {
+                        .map(|locked_port_compat| {
+                            let locked_port = locked_port_compat.to_locked_port();
                             format!(
                                 "Port: {}, Type: {}{}",
                                 locked_port.port,
