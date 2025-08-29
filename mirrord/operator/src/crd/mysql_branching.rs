@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Formatter};
 
-use chrono::{DateTime, Utc};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::target::Target;
 use schemars::JsonSchema;
@@ -54,7 +54,7 @@ pub enum ConnectionSourceKind {
 pub struct MysqlBranchDatabaseStatus {
     pub phase: BranchDatabasePhase,
     /// Time when the branch database should be deleted.
-    pub expire_time: DateTime<Utc>,
+    pub expire_time: MicroTime,
     /// Information of sessions that are using this branch database.
     #[serde(default)]
     pub session_info: HashMap<String, SessionInfo>,
