@@ -5,7 +5,7 @@ use std::{
 };
 
 use windows::Win32::{
-    Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0},
+    Foundation::{HANDLE, INVALID_HANDLE_VALUE},
     System::Threading::{self as Win32Threading, WaitForSingleObject},
 };
 
@@ -24,6 +24,7 @@ impl From<HandleWrapper> for File {
 #[derive(Debug)]
 pub struct WindowsProcess {
     pub process_info: Win32Threading::PROCESS_INFORMATION,
+    #[allow(dead_code)]
     pub stdin: File,
     pub stdout: File,
     pub stderr: File,

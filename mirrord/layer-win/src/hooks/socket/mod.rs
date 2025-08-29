@@ -1,5 +1,9 @@
 //! Module responsible for registering hooks targeting socket operation syscalls.
 
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(clippy::too_many_arguments)]
+
 mod hostname;
 mod state;
 mod utils;
@@ -34,16 +38,16 @@ use self::{
         windows_getaddrinfo,
     },
     state::{
-        ProxyConnectResult, SOCKET_MANAGER, WindowsSocketBound, WindowsSocketKind,
-        WindowsSocketState, connect_through_proxy, proxy_bind, register_accepted_socket,
-        setup_listening, socketaddr_to_windows_sockaddr,
+        SOCKET_MANAGER, WindowsSocketBound, WindowsSocketKind, WindowsSocketState,
+        log_connection_result, proxy_bind, register_accepted_socket, setup_listening,
+        socketaddr_to_windows_sockaddr,
     },
     utils::{
         evict_old_cache_entries, extract_ip_from_hostent, sockaddr_to_socket_addr,
         socket_address_to_sockaddr,
     },
 };
-use crate::apply_hook;
+use crate::{apply_hook, layer_config};
 
 // Function type definitions for original Windows socket functions
 type SocketFn = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
@@ -299,11 +303,17 @@ unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> 
         };
         if af == AF_INET || af == AF_INET6 {
             SOCKET_MANAGER.register_socket(socket, af, socket_kind.clone());
-            tracing::trace!(
+            tracing::info!(
                 "socket_detour -> registered socket {} with mirrord (af: {}, kind: {:?})",
                 socket,
                 af,
                 socket_kind
+            );
+        } else {
+            tracing::debug!(
+                "socket_detour -> skipping socket {} registration (unsupported af: {})",
+                socket,
+                af
             );
         }
     }
@@ -417,85 +427,22 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
 
-    // Check if this socket is managed by mirrord
-    let managed_socket = SOCKET_MANAGER.get_socket(s);
-
-    if let Some(user_socket) = managed_socket {
-        // Convert Windows sockaddr to Rust SocketAddr
-        if let Some(remote_addr) = unsafe { sockaddr_to_socket_addr(name, namelen) } {
-            tracing::debug!(
-                "connect_detour -> connecting to remote address: {:?}",
-                remote_addr
-            );
-            // Try to connect through the mirrord proxy
-            match connect_through_proxy(s, &user_socket, remote_addr) {
-                ProxyConnectResult::Success(connected, connection_id) => {
-                    // Convert the layer address to SOCKADDR and connect
-                    match unsafe {
-                        socket_address_to_sockaddr(&connected.layer_address.as_ref().unwrap())
-                    } {
-                        Ok((sockaddr, sockaddr_len)) => {
-                            // Connect to the proxy layer address
-                            let original = CONNECT_ORIGINAL.get().unwrap();
-                            let result =
-                                unsafe { original(s, &sockaddr as *const SOCKADDR, sockaddr_len) };
-
-                            if result == 0 {
-                                // Connection successful, update socket state and store connection
-                                // info
-                                tracing::info!(
-                                    "connect_detour -> successfully connected to layer address"
-                                );
-
-                                SOCKET_MANAGER
-                                    .set_socket_state(s, WindowsSocketState::Connected(connected));
-
-                                // Store connection ID if available
-                                if let Some(conn_id) = connection_id {
-                                    SOCKET_MANAGER.set_connection_id(s, conn_id);
-                                    tracing::debug!(
-                                        "connect_detour -> stored connection ID {} for socket {}",
-                                        conn_id,
-                                        s
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "connect_detour -> no connection ID provided in proxy response"
-                                    );
-                                }
-                                tracing::debug!(
-                                    "connect_detour -> updated socket state to Connected"
-                                );
-                            } else {
-                                tracing::error!(
-                                    "connect_detour -> failed to connect to layer address: {}",
-                                    result
-                                );
-                            }
-
-                            return result;
-                        }
-                        Err(e) => {
-                            tracing::error!("connect_detour -> {}", e);
-                            // Fall back to original function
-                            let original = CONNECT_ORIGINAL.get().unwrap();
-                            return unsafe { original(s, name, namelen) };
-                        }
-                    }
-                }
-                ProxyConnectResult::Fallback => {
-                    // Fall back to original connect
-                    let original = CONNECT_ORIGINAL.get().unwrap();
-                    return unsafe { original(s, name, namelen) };
-                }
-            }
+    match state::attempt_proxy_connection(s, name, namelen, "connect_detour") {
+        state::ProxyConnectionResult::Success((sockaddr, sockaddr_len)) => {
+            // Call the original function with the prepared sockaddr
+            let original = CONNECT_ORIGINAL.get().unwrap();
+            let result = unsafe { original(s, &sockaddr as *const SOCKADDR, sockaddr_len) };
+            return log_connection_result(result, "connect_detour");
+        }
+        state::ProxyConnectionResult::Fallback => {
+            // Fallback to original function
         }
     }
 
-    // Fallback to original function for all error cases and non-managed sockets
+    // fallback to original
     let original = CONNECT_ORIGINAL.get().unwrap();
     let result = unsafe { original(s, name, namelen) };
-    result
+    log_connection_result(result, "connect_detour")
 }
 
 /// Windows socket hook for accept
@@ -794,10 +741,33 @@ unsafe extern "system" fn wsa_connect_detour(
 ) -> INT {
     tracing::trace!("wsa_connect_detour -> socket: {}, namelen: {}", s, namelen);
 
-    // For now, pass through to original - the interceptor approach handles the data routing
-    // In the future, could add similar logic to connect_detour for managed sockets
+    // Attempt complete proxy connection flow
+    match state::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour") {
+        state::ProxyConnectionResult::Success((sockaddr, sockaddr_len)) => {
+            // Call the original function with the prepared sockaddr
+            let original = WSA_CONNECT_ORIGINAL.get().unwrap();
+            let result = unsafe {
+                original(
+                    s,
+                    &sockaddr as *const SOCKADDR,
+                    sockaddr_len,
+                    lpCallerData,
+                    lpCalleeData,
+                    lpSQOS,
+                    lpGQOS,
+                )
+            };
+            return log_connection_result(result, "wsa_connect_detour");
+        }
+        state::ProxyConnectionResult::Fallback => {
+            // Fallback to original function
+        }
+    }
+
+    // Fallback to original function
     let original = WSA_CONNECT_ORIGINAL.get().unwrap();
-    unsafe { original(s, name, namelen, lpCallerData, lpCalleeData, lpSQOS, lpGQOS) }
+    let result = unsafe { original(s, name, namelen, lpCallerData, lpCalleeData, lpSQOS, lpGQOS) };
+    log_connection_result(result, "wsa_connect_detour")
 }
 
 /// Windows socket hook for WSAAccept (asynchronous accept)
@@ -832,6 +802,42 @@ unsafe extern "system" fn wsa_send_detour(
         s,
         dwBufferCount
     );
+
+    // Check if this socket is managed by mirrord
+    let managed_socket = SOCKET_MANAGER.get_socket(s);
+
+    if let Some(user_socket) = managed_socket {
+        tracing::debug!(
+            "wsa_send_detour -> socket {} is managed, kind: {:?}",
+            s,
+            user_socket.kind
+        );
+
+        // Check if outgoing traffic is enabled for this socket type
+        let should_intercept = match user_socket.kind {
+            WindowsSocketKind::Tcp => {
+                let tcp_outgoing = crate::layer_config().feature.network.outgoing.tcp;
+                tracing::info!("wsa_send_detour -> TCP outgoing enabled: {}", tcp_outgoing);
+                tcp_outgoing
+            }
+            WindowsSocketKind::Udp => {
+                let udp_outgoing = crate::layer_config().feature.network.outgoing.udp;
+                tracing::info!("wsa_send_detour -> UDP outgoing enabled: {}", udp_outgoing);
+                udp_outgoing
+            }
+        };
+
+        if !should_intercept {
+            tracing::info!(
+                "wsa_send_detour -> outgoing traffic disabled for {:?}, passing through to original (disabled mode)",
+                user_socket.kind
+            );
+            // Pass through to original but mark that it should be blocked
+            // The application will handle the response/lack thereof
+        } else {
+            tracing::debug!("wsa_send_detour -> intercepting enabled, allowing send operation");
+        }
+    }
 
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = WSA_SEND_ORIGINAL.get().unwrap();
@@ -900,6 +906,48 @@ unsafe extern "system" fn wsa_send_to_detour(
         iTolen
     );
 
+    // Check if this socket is managed by mirrord
+    let managed_socket = SOCKET_MANAGER.get_socket(s);
+
+    if let Some(user_socket) = managed_socket {
+        tracing::debug!(
+            "wsa_send_to_detour -> socket {} is managed, kind: {:?}",
+            s,
+            user_socket.kind
+        );
+
+        // Check if outgoing traffic is enabled for this socket type
+        let should_intercept = match user_socket.kind {
+            WindowsSocketKind::Tcp => {
+                let tcp_outgoing = crate::layer_config().feature.network.outgoing.tcp;
+                tracing::info!(
+                    "wsa_send_to_detour -> TCP outgoing enabled: {}",
+                    tcp_outgoing
+                );
+                tcp_outgoing
+            }
+            WindowsSocketKind::Udp => {
+                let udp_outgoing = crate::layer_config().feature.network.outgoing.udp;
+                tracing::info!(
+                    "wsa_send_to_detour -> UDP outgoing enabled: {}",
+                    udp_outgoing
+                );
+                udp_outgoing
+            }
+        };
+
+        if !should_intercept {
+            tracing::info!(
+                "wsa_send_to_detour -> outgoing traffic disabled for {:?}, passing through to original (disabled mode)",
+                user_socket.kind
+            );
+            // Pass through to original but mark that it should be blocked
+            // The application will handle the response/lack thereof
+        } else {
+            tracing::debug!("wsa_send_to_detour -> intercepting enabled, allowing send operation");
+        }
+    }
+
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
     unsafe {
@@ -963,43 +1011,60 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
         return SOCKET_ERROR;
     }
 
-    // Try to get the remote hostname first
-    if let Some(remote_hostname) = hostname::get_hostname_with_fallback() {
-        tracing::debug!("gethostname: got remote hostname: '{}'", remote_hostname);
+    // Check if hostname feature is enabled
+    let hostname_enabled = crate::layer_config().feature.hostname;
+    tracing::debug!(
+        "gethostname: hostname feature enabled: {}",
+        hostname_enabled
+    );
 
-        let hostname_bytes = remote_hostname.as_bytes();
-        let required_len = hostname_bytes.len() + 1; // +1 for null terminator
+    // Try to get the remote hostname first only if hostname feature is enabled
+    if hostname_enabled {
+        match hostname::get_hostname_with_fallback() {
+            Some(remote_hostname) => {
+                tracing::debug!("gethostname: got remote hostname: '{}'", remote_hostname);
 
-        // Check if buffer is large enough
-        if (namelen as usize) < required_len {
-            tracing::debug!(
-                "gethostname: buffer too small, need {} bytes, have {}",
-                required_len,
-                namelen
-            );
-            return SOCKET_ERROR;
-        }
+                let hostname_bytes = remote_hostname.as_bytes();
+                let required_len = hostname_bytes.len();
 
-        // Copy hostname to buffer
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                hostname_bytes.as_ptr(),
-                name as *mut u8,
-                hostname_bytes.len(),
-            );
-            // Add null terminator
-            *(name.add(hostname_bytes.len())) = 0;
-        }
+                // Check if buffer is large enough
+                if (namelen as usize) < required_len {
+                    tracing::debug!(
+                        "gethostname: buffer too small, need {} bytes, have {}",
+                        required_len,
+                        namelen
+                    );
+                    return SOCKET_ERROR;
+                }
 
-        tracing::debug!(
-            "gethostname: returning remote hostname: '{}'",
-            remote_hostname
-        );
-        return 0; // Success
+                // Copy hostname to buffer
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        hostname_bytes.as_ptr(),
+                        name as *mut u8,
+                        hostname_bytes.len(),
+                    );
+                    *(name.add(hostname_bytes.len())) = 0;
+                }
+
+                tracing::debug!(
+                    "gethostname: returning remote hostname: '{}'",
+                    remote_hostname
+                );
+                return 0; // Success
+            }
+            None => {
+                tracing::error!("gethostname: no remote hostname available");
+                return SOCKET_ERROR;
+            }
+        };
     }
 
-    // Fall back to original function if no remote hostname available
-    tracing::debug!("gethostname: no remote hostname available, calling original");
+    // Fall back to original function if hostname feature is disabled or no remote hostname
+    // available
+    tracing::debug!(
+        "gethostname: hostname feature disabled or no remote hostname available, calling original"
+    );
     let original = GETHOSTNAME_ORIGINAL.get().unwrap();
     unsafe { original(name, namelen) }
 }
@@ -1072,83 +1137,100 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
     };
 
     if should_intercept {
-        if let Some(dns_name) = hostname::get_hostname_with_fallback() {
-            tracing::debug!("GetComputerNameExA: got remote hostname: '{}'", dns_name);
+        // Check if hostname feature is enabled
+        let hostname_enabled = layer_config().feature.hostname;
+        tracing::debug!(
+            "GetComputerNameExA: hostname feature enabled: {}",
+            hostname_enabled
+        );
 
-            // Determine what form of the hostname to return based on name_type
-            let hostname_to_return = match name_type {
-                ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => {
-                    // Return uppercase version for NetBIOS types
-                    dns_name.to_uppercase()
-                }
-                _ => {
-                    // Return as-is for DNS types
-                    dns_name
-                }
-            };
+        if hostname_enabled {
+            match hostname::get_hostname_with_fallback() {
+                Some(dns_name) => {
+                    tracing::debug!("GetComputerNameExA: got remote hostname: '{}'", dns_name);
 
-            let dns_bytes = hostname_to_return.as_bytes();
-            let required_size = dns_bytes.len(); // Size without null terminator
-            let current_buffer_size = unsafe { *nSize } as usize;
+                    // Determine what form of the hostname to return based on name_type
+                    let hostname_to_return = match name_type {
+                        ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => {
+                            // Return uppercase version for NetBIOS types
+                            dns_name.to_uppercase()
+                        }
+                        _ => {
+                            // Return as-is for DNS types
+                            dns_name
+                        }
+                    };
 
-            tracing::debug!(
-                "GetComputerNameExA: hostname_to_return='{}', len={}, buffer_size={}",
-                hostname_to_return,
-                required_size,
-                current_buffer_size
-            );
+                    let dns_bytes = hostname_to_return.as_bytes();
+                    let required_size = dns_bytes.len(); // Size without null terminator
+                    let current_buffer_size = unsafe { *nSize } as usize;
 
-            // Check if buffer is large enough (needs space for characters + null terminator)
-            if current_buffer_size < required_size + 1 {
-                // Buffer too small - set required size and return ERROR_MORE_DATA
-                unsafe {
-                    *nSize = (required_size + 1) as u32; // Include null terminator in required size
-                }
-                unsafe {
-                    SetLastError(ERROR_MORE_DATA);
-                }
-                tracing::debug!(
-                    "GetComputerNameExA: buffer too small for name_type {}, need {} chars, have {}",
-                    name_type,
-                    required_size + 1,
-                    current_buffer_size
-                );
-                return 0; // FALSE
-            }
-
-            // Buffer is large enough - copy the hostname
-            if !lpBuffer.is_null() && current_buffer_size > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        dns_bytes.as_ptr(),
-                        lpBuffer as *mut u8,
-                        dns_bytes.len(),
+                    tracing::debug!(
+                        "GetComputerNameExA: hostname_to_return='{}', len={}, buffer_size={}",
+                        hostname_to_return,
+                        required_size,
+                        current_buffer_size
                     );
-                    // Add null terminator
-                    *(lpBuffer.add(dns_bytes.len())) = 0;
-                    *nSize = required_size as u32; // Set actual length (excluding null terminator)
+
+                    // Check if buffer is large enough (needs space for characters + null
+                    // terminator)
+                    if current_buffer_size < required_size + 1 {
+                        // Buffer too small - set required size and return ERROR_MORE_DATA
+                        unsafe {
+                            *nSize = (required_size + 1) as u32; // Include null terminator in required size
+                        }
+                        unsafe {
+                            SetLastError(ERROR_MORE_DATA);
+                        }
+                        tracing::debug!(
+                            "GetComputerNameExA: buffer too small for name_type {}, need {} chars, have {}",
+                            name_type,
+                            required_size + 1,
+                            current_buffer_size
+                        );
+                        return 0; // FALSE
+                    }
+
+                    // Buffer is large enough - copy the hostname
+                    if !lpBuffer.is_null() && current_buffer_size > 0 {
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                dns_bytes.as_ptr(),
+                                lpBuffer as *mut u8,
+                                dns_bytes.len(),
+                            );
+                            // Add null terminator
+                            *(lpBuffer.add(dns_bytes.len())) = 0;
+                            *nSize = required_size as u32; // Set actual length (excluding null terminator)
+                        }
+                        tracing::debug!(
+                            "GetComputerNameExA: returning remote hostname for name_type {}: '{}' ({} chars)",
+                            name_type,
+                            hostname_to_return,
+                            required_size
+                        );
+                        return 1; // TRUE - Success
+                    } else {
+                        // Invalid buffer pointer
+                        unsafe {
+                            SetLastError(ERROR_INVALID_PARAMETER);
+                        }
+                        return 0; // FALSE
+                    }
                 }
-                tracing::debug!(
-                    "GetComputerNameExA: returning remote hostname for name_type {}: '{}' ({} chars)",
-                    name_type,
-                    hostname_to_return,
-                    required_size
-                );
-                return 1; // TRUE - Success
-            } else {
-                // Invalid buffer pointer
-                unsafe {
-                    SetLastError(ERROR_INVALID_PARAMETER);
+                None => {
+                    tracing::error!("GetComputerNameExA: no remote hostname available");
+                    // fall back to original
                 }
-                return 0; // FALSE
             }
         }
 
-        // If we can't get remote hostname, fall back to original
+        // If hostname feature is disabled or we can't get remote hostname, fall back to original
         tracing::debug!(
-            "GetComputerNameExA: no remote hostname available for name_type {}, falling back to original",
+            "GetComputerNameExA: hostname feature disabled or no remote hostname available for name_type {}, falling back to original",
             name_type
         );
+        // fall back to original
     }
 
     // For domain types, NetBIOS types when we don't have a hostname, or other name types, call
@@ -1181,71 +1263,93 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
 
     // Handle valid name types (0-7)
     if name_type < ComputerNameMax {
-        // Try to get the remote hostname for supported types
-        if let Some(hostname) = hostname::get_hostname_with_fallback() {
-            // Transform hostname based on name_type
-            let result_name = match name_type {
-                ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => hostname.to_uppercase(), /* NetBIOS variants - uppercase */
-                ComputerNameDnsHostname
-                | ComputerNameDnsFullyQualified
-                | ComputerNamePhysicalDnsHostname
-                | ComputerNamePhysicalDnsFullyQualified => hostname, /* DNS variants - as-is */
-                ComputerNameDnsDomain | ComputerNamePhysicalDnsDomain => String::new(), /* Domain variants - empty (no domain info available) */
-                _ => unreachable!(),
-            };
+        // Check if hostname feature is enabled
+        let hostname_enabled = layer_config().feature.hostname;
+        tracing::debug!(
+            "GetComputerNameExW: hostname feature enabled: {}",
+            hostname_enabled
+        );
 
-            // Convert to UTF-16
-            let name_utf16: Vec<u16> = result_name.encode_utf16().collect();
-            let required_size = name_utf16.len();
+        if hostname_enabled {
+            // Try to get the remote hostname for supported types
+            match hostname::get_hostname_with_fallback() {
+                Some(hostname) => {
+                    // Transform hostname based on name_type
+                    let result_name = match name_type {
+                        ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => {
+                            hostname.to_uppercase()
+                        } /* NetBIOS variants - uppercase */
+                        ComputerNameDnsHostname
+                        | ComputerNameDnsFullyQualified
+                        | ComputerNamePhysicalDnsHostname
+                        | ComputerNamePhysicalDnsFullyQualified => hostname, /* DNS variants - */
+                        // as-is
+                        ComputerNameDnsDomain | ComputerNamePhysicalDnsDomain => String::new(), /* Domain variants - empty (no domain info available) */
+                        _ => unreachable!(),
+                    };
 
-            let current_buffer_size = unsafe { *nSize } as usize;
+                    // Convert to UTF-16
+                    let name_utf16: Vec<u16> = result_name.encode_utf16().collect();
+                    let required_size = name_utf16.len();
 
-            // Check if buffer is large enough (needs space for characters + null terminator)
-            if current_buffer_size < name_utf16.len() {
-                // Buffer too small - set required size and return ERROR_MORE_DATA
-                unsafe {
-                    *nSize = required_size as u32;
-                }
-                unsafe {
-                    SetLastError(ERROR_MORE_DATA);
-                }
-                tracing::debug!(
-                    "GetComputerNameExW: buffer too small, need {} chars, have {}",
-                    required_size,
-                    current_buffer_size
-                );
-                return 0; // FALSE
-            }
+                    let current_buffer_size = unsafe { *nSize } as usize;
 
-            // Buffer is large enough - copy the hostname
-            if !lpBuffer.is_null() && current_buffer_size > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(name_utf16.as_ptr(), lpBuffer, name_utf16.len());
-                    *nSize = required_size as u32; // Set actual length (excluding null terminator)
+                    // Check if buffer is large enough (needs space for characters + null
+                    // terminator)
+                    if current_buffer_size < name_utf16.len() {
+                        // Buffer too small - set required size and return ERROR_MORE_DATA
+                        unsafe {
+                            *nSize = required_size as u32;
+                        }
+                        unsafe {
+                            SetLastError(ERROR_MORE_DATA);
+                        }
+                        tracing::debug!(
+                            "GetComputerNameExW: buffer too small, need {} chars, have {}",
+                            required_size,
+                            current_buffer_size
+                        );
+                        return 0; // FALSE
+                    }
+
+                    // Buffer is large enough - copy the hostname
+                    if !lpBuffer.is_null() && current_buffer_size > 0 {
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                name_utf16.as_ptr(),
+                                lpBuffer,
+                                name_utf16.len(),
+                            );
+                            *nSize = required_size as u32; // Set actual length (excluding null terminator)
+                        }
+                        tracing::debug!(
+                            "GetComputerNameExW: returning remote hostname for type {}: '{}' ({} chars)",
+                            name_type,
+                            result_name,
+                            required_size
+                        );
+                        tracing::error!("GetComputerNameExW: WSAGetLastError: {}", unsafe {
+                            WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap()()
+                        });
+                        return 1; // TRUE - Success
+                    } else {
+                        // Invalid buffer pointer
+                        unsafe {
+                            SetLastError(ERROR_INVALID_PARAMETER);
+                        }
+                        return 0; // FALSE
+                    }
                 }
-                tracing::debug!(
-                    "GetComputerNameExW: returning remote hostname for type {}: '{}' ({} chars)",
-                    name_type,
-                    result_name,
-                    required_size
-                );
-                tracing::error!("GetComputerNameExW: WSAGetLastError: {}", unsafe {
-                    WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap()()
-                });
-                return 1; // TRUE - Success
-            } else {
-                // Invalid buffer pointer
-                unsafe {
-                    SetLastError(ERROR_INVALID_PARAMETER);
+                None => {
+                    tracing::error!("GetComputerNameExW: no remote hostname available");
+                    // fall back to original
                 }
-                return 0; // FALSE
             }
         }
 
-        // If we can't get remote hostname, fall back to original
-        println!("GetComputerNameExW: no remote hostname available, falling back to original");
+        // If hostname feature is disabled or we can't get remote hostname, fall back to original
         tracing::debug!(
-            "GetComputerNameExW: no remote hostname available, falling back to original"
+            "GetComputerNameExW: hostname feature disabled or no remote hostname available, falling back to original"
         );
         let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
         return unsafe { original(name_type, lpBuffer, nSize) };
@@ -1587,7 +1691,6 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     // Clean up mirrord state for managed sockets
-    SOCKET_MANAGER.remove_connection_id(s);
     SOCKET_MANAGER.remove_socket(s);
 
     // Call the original function

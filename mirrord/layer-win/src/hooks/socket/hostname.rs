@@ -3,6 +3,9 @@
 //! This module contains all the hostname manipulation, DNS resolution, and caching
 //! logic used by the Windows socket hooks, separated from the actual hook implementations.
 
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+
 use std::{
     alloc::{Layout, alloc, dealloc},
     collections::HashMap,
@@ -212,34 +215,49 @@ where
 {
     tracing::debug!("{} hook called", function_name);
 
-    if let Some(buffer_size) =
-        validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
-    {
-        if let Some(dns_name) = get_hostname_with_fallback() {
-            let hostname_bytes = dns_name.as_bytes();
-            let hostname_with_null: Vec<u8> = hostname_bytes.iter().cloned().collect();
+    // Check if hostname feature is enabled
+    let hostname_enabled = crate::layer_config().feature.hostname;
+    tracing::debug!(
+        "{}: hostname feature enabled: {}",
+        function_name,
+        hostname_enabled
+    );
 
-            if hostname_with_null.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        hostname_with_null.as_ptr() as *const i8,
-                        lpBuffer,
-                        hostname_with_null.len(),
-                    );
-                    *nSize = (hostname_with_null.len() - 1) as u32;
+    if hostname_enabled {
+        if let Some(buffer_size) =
+            validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
+        {
+            if let Some(dns_name) = get_hostname_with_fallback() {
+                let hostname_bytes = dns_name.as_bytes();
+                let hostname_with_null: Vec<u8> = hostname_bytes.iter().cloned().collect();
+
+                if hostname_with_null.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0
+                {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            hostname_with_null.as_ptr() as *const i8,
+                            lpBuffer,
+                            hostname_with_null.len(),
+                        );
+                        *nSize = (hostname_with_null.len() - 1) as u32;
+                    }
+                    tracing::debug!("{} returning DNS hostname: {}", function_name, dns_name);
+                    return 1; // TRUE - Success
+                } else if hostname_with_null.len() <= u32::MAX as usize {
+                    unsafe {
+                        *nSize = (hostname_with_null.len() - 1) as u32;
+                    }
+                    return 0; // FALSE - Buffer too small
                 }
-                tracing::debug!("{} returning DNS hostname: {}", function_name, dns_name);
-                return 1; // TRUE - Success
-            } else if hostname_with_null.len() <= u32::MAX as usize {
-                unsafe {
-                    *nSize = (hostname_with_null.len() - 1) as u32;
-                }
-                return 0; // FALSE - Buffer too small
             }
         }
     }
 
-    // Fall back to original function
+    // Fall back to original function (hostname feature disabled or no remote hostname)
+    tracing::debug!(
+        "{}: using original function (hostname feature disabled or no remote hostname)",
+        function_name
+    );
     original_fn(lpBuffer, nSize)
 }
 
@@ -255,29 +273,47 @@ where
 {
     tracing::debug!("{} hook called", function_name);
 
-    if let Some(buffer_size) =
-        validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
-    {
-        if let Some(dns_name) = get_hostname_with_fallback() {
-            let dns_utf16: Vec<u16> = dns_name.encode_utf16().collect();
+    // Check if hostname feature is enabled
+    let hostname_enabled = crate::layer_config().feature.hostname;
+    tracing::debug!(
+        "{}: hostname feature enabled: {}",
+        function_name,
+        hostname_enabled
+    );
 
-            if dns_utf16.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(dns_utf16.as_ptr(), lpBuffer, dns_utf16.len());
-                    *nSize = (dns_utf16.len() - 1) as u32;
+    if hostname_enabled {
+        if let Some(buffer_size) =
+            validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
+        {
+            if let Some(dns_name) = get_hostname_with_fallback() {
+                let dns_utf16: Vec<u16> = dns_name.encode_utf16().collect();
+
+                if dns_utf16.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0 {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            dns_utf16.as_ptr(),
+                            lpBuffer,
+                            dns_utf16.len(),
+                        );
+                        *nSize = (dns_utf16.len() - 1) as u32;
+                    }
+                    tracing::debug!("{} returning DNS hostname: {}", function_name, dns_name);
+                    return 1; // TRUE - Success
+                } else if dns_utf16.len() <= u32::MAX as usize {
+                    unsafe {
+                        *nSize = (dns_utf16.len() - 1) as u32;
+                    }
+                    return 0; // FALSE - Buffer too small
                 }
-                tracing::debug!("{} returning DNS hostname: {}", function_name, dns_name);
-                return 1; // TRUE - Success
-            } else if dns_utf16.len() <= u32::MAX as usize {
-                unsafe {
-                    *nSize = (dns_utf16.len() - 1) as u32;
-                }
-                return 0; // FALSE - Buffer too small
             }
         }
     }
 
-    // Fall back to original function
+    // If hostname feature is disabled or remote resolution failed, use original function
+    tracing::debug!(
+        "{}: Using original function (hostname feature disabled or remote resolution failed)",
+        function_name
+    );
     original_fn(lpBuffer, nSize)
 }
 
@@ -530,10 +566,15 @@ pub fn convert_dns_response_to_addrinfo(
         }
 
         // Track this allocation for cleanup
-        MANAGED_ADDRINFO
-            .lock()
-            .expect("MANAGED_ADDRINFO lock failed")
-            .insert(addrinfo_ptr as usize);
+        match MANAGED_ADDRINFO.lock() {
+            Ok(mut guard) => {
+                guard.insert(addrinfo_ptr as usize);
+            }
+            Err(poisoned) => {
+                tracing::warn!("MANAGED_ADDRINFO mutex was poisoned during allocation tracking");
+                poisoned.into_inner().insert(addrinfo_ptr as usize);
+            }
+        }
     }
 
     Ok(first_addrinfo)
@@ -546,9 +587,13 @@ pub fn convert_dns_response_to_addrinfo(
 pub unsafe fn free_managed_addrinfo(addrinfo: *mut ADDRINFOA) -> bool {
     use std::ffi::CString;
 
-    let mut managed_addr_info = MANAGED_ADDRINFO
-        .lock()
-        .expect("MANAGED_ADDRINFO lock failed");
+    let mut managed_addr_info = match MANAGED_ADDRINFO.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("MANAGED_ADDRINFO mutex was poisoned, attempting recovery");
+            poisoned.into_inner()
+        }
+    };
 
     if managed_addr_info.remove(&(addrinfo as usize)) {
         // This is one of our allocated structures - clean it up properly

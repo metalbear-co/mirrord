@@ -436,6 +436,9 @@ mod traffic_tests {
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
         let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = vec![
@@ -454,10 +457,12 @@ mod traffic_tests {
         .await;
 
         // Listen for UDP message directly from application.
-        let mut buf = [0; 27];
-        let amt = socket.recv(&mut buf).unwrap();
-        assert_eq!(amt, 27);
-        assert_eq!(buf, "Can I pass the test please?".as_ref()); // Sure you can.
+        let mut buf = [0; 28];
+        let amt = socket
+            .recv(&mut buf)
+            .expect("Failed to receive UDP message within timeout");
+        assert_eq!(amt, 28);
+        assert_eq!(&buf[..amt], "Can I pass the test please?".as_bytes()); // Sure you can.
 
         let res = process.wait().await;
         assert!(res.success());
