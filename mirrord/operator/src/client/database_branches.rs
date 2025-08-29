@@ -174,7 +174,7 @@ pub(crate) struct DatabaseBranchParams {
 impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
-    /// We derive branch database ID from inputs unless the user explicitly specifies it.
+    /// We generate unique database IDs unless the user explicitly specifies them.
     pub(crate) fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
         let mut mysql = HashMap::new();
         for branch_db_config in config.0.iter() {
@@ -194,10 +194,9 @@ impl DatabaseBranchParams {
     }
 }
 
-/// Branch database ID derived from user's certificate, target, namespace, and database name
-/// in this particular order.
+/// Branch database IDs are either generated unique IDs or given directly by the user.
 ///
-/// This Id is used for selecting reusable branch database and should not be confused with
+/// This ID is used for selecting reusable branch database and should not be confused with
 /// Kubernetes resource uid.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum BranchDatabaseId {

@@ -30,7 +30,7 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_name: Option<String>,
 
-    /// IDs of the database branches to use for the connection.
+    /// Resource names of the database branches to use for the connection.
     #[serde(with = "mysql_branches_serde")]
     pub mysql_branch_names: Vec<String>,
 }

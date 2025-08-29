@@ -1148,7 +1148,7 @@ impl OperatorApi<PreparedClientCert> {
         ))
     }
 
-    /// Prepare branch databases, and return database IDs.
+    /// Prepare branch databases, and return database resource names.
     ///
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
