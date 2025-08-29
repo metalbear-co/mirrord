@@ -193,7 +193,7 @@ impl SocketManager {
 }
 
 /// Global socket manager instance
-pub static SOCKET_MANAGER: LazyLock<SocketManager> = LazyLock::new(|| SocketManager::new());
+pub static SOCKET_MANAGER: LazyLock<SocketManager> = LazyLock::new(SocketManager::new);
 
 /// Result of attempting to establish a proxy connection
 #[derive(Debug)]
@@ -442,7 +442,7 @@ pub fn handle_connection_success(
 
     // Convert the layer address to SOCKADDR and connect
     let (sockaddr, sockaddr_len) =
-        unsafe { socket_address_to_sockaddr(&connected.layer_address.as_ref().unwrap())? };
+        unsafe { socket_address_to_sockaddr(connected.layer_address.as_ref().unwrap())? };
 
     // Update socket state first
     SOCKET_MANAGER.set_socket_state(socket, WindowsSocketState::Connected(connected));
@@ -582,7 +582,7 @@ pub fn attempt_proxy_connection(
             };
 
             // Try to connect through the mirrord proxy
-            match connect_through_proxy(socket, &*user_socket, remote_addr) {
+            match connect_through_proxy(socket, &user_socket, remote_addr) {
                 ProxyConnectResult::Success(connected, _connection_id) => {
                     // Handle connection success and prepare sockaddr
                     match handle_connection_success(socket, connected, function_name) {

@@ -101,12 +101,11 @@ pub fn intelligent_truncate(text: &str, max_len: usize) -> String {
 
     // No important patterns found, use simple truncation
     // Try to break at word boundaries if possible
-    if let Some(dash_pos) = text[..max_len].rfind('-') {
-        if dash_pos > max_len / 2 {
+    if let Some(dash_pos) = text[..max_len].rfind('-')
+        && dash_pos > max_len / 2 {
             // Only use if it's not too short
             return text[..dash_pos].to_string();
         }
-    }
 
     // Fallback to simple truncation
     text[..max_len].to_string()
@@ -144,7 +143,7 @@ pub unsafe fn extract_ip_from_hostent(hostent: *mut HOSTENT) -> Option<String> {
     }
 
     // SAFETY: Validate pointer alignment and basic sanity checks
-    if (first_addr_ptr as usize) % std::mem::align_of::<u8>() != 0 {
+    if !(first_addr_ptr as usize).is_multiple_of(std::mem::align_of::<u8>()) {
         tracing::warn!("extract_ip_from_hostent: misaligned address pointer");
         return None;
     }

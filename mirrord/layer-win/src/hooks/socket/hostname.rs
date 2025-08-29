@@ -95,11 +95,10 @@ fn remote_dns_resolve(hostname: &str) -> Result<Vec<(String, IpAddr)>, Box<dyn s
 /// Truncates hostname to fit within MAX_COMPUTERNAME_LENGTH, preserving important parts
 fn truncate_to_computer_name_length(hostname: &str) -> String {
     // Extract the first component if it's a FQDN
-    if let Some(first_part) = hostname.split('.').next() {
-        if first_part.len() <= MAX_COMPUTERNAME_LENGTH && !first_part.is_empty() {
+    if let Some(first_part) = hostname.split('.').next()
+        && first_part.len() <= MAX_COMPUTERNAME_LENGTH && !first_part.is_empty() {
             return first_part.to_string();
         }
-    }
 
     // If hostname is too long, use intelligent truncation
     if hostname.len() > MAX_COMPUTERNAME_LENGTH {
@@ -195,9 +194,9 @@ pub fn get_hostname_with_fallback() -> Option<String> {
             let hostname_str = hostname.to_string_lossy();
 
             // Use the new resolver-based DNS hostname function
-            let result = get_dns_hostname_with_resolver(&hostname_str)
-                .or_else(|| Some(intelligent_truncate(&hostname_str, MAX_COMPUTERNAME_LENGTH)));
-            result
+            
+            get_dns_hostname_with_resolver(&hostname_str)
+                .or_else(|| Some(intelligent_truncate(&hostname_str, MAX_COMPUTERNAME_LENGTH)))
         }
         HostnameResult::UseLocal | HostnameResult::Error(_) => None,
     }
@@ -223,13 +222,12 @@ where
         hostname_enabled
     );
 
-    if hostname_enabled {
-        if let Some(buffer_size) =
+    if hostname_enabled
+        && let Some(buffer_size) =
             validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
-        {
-            if let Some(dns_name) = get_hostname_with_fallback() {
+            && let Some(dns_name) = get_hostname_with_fallback() {
                 let hostname_bytes = dns_name.as_bytes();
-                let hostname_with_null: Vec<u8> = hostname_bytes.iter().cloned().collect();
+                let hostname_with_null: Vec<u8> = hostname_bytes.to_vec();
 
                 if hostname_with_null.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0
                 {
@@ -250,8 +248,6 @@ where
                     return 0; // FALSE - Buffer too small
                 }
             }
-        }
-    }
 
     // Fall back to original function (hostname feature disabled or no remote hostname)
     tracing::debug!(
@@ -281,11 +277,10 @@ where
         hostname_enabled
     );
 
-    if hostname_enabled {
-        if let Some(buffer_size) =
+    if hostname_enabled
+        && let Some(buffer_size) =
             validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
-        {
-            if let Some(dns_name) = get_hostname_with_fallback() {
+            && let Some(dns_name) = get_hostname_with_fallback() {
                 let dns_utf16: Vec<u16> = dns_name.encode_utf16().collect();
 
                 if dns_utf16.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0 {
@@ -306,8 +301,6 @@ where
                     return 0; // FALSE - Buffer too small
                 }
             }
-        }
-    }
 
     // If hostname feature is disabled or remote resolution failed, use original function
     tracing::debug!(
@@ -361,14 +354,13 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
     }
 
     // If remote resolution fails, check if we have the hostname cached locally
-    if let Ok(cache) = REMOTE_DNS_REVERSE_MAPPING.lock() {
-        if let Some(cached_ip) = cache.get(hostname) {
+    if let Ok(cache) = REMOTE_DNS_REVERSE_MAPPING.lock()
+        && let Some(cached_ip) = cache.get(hostname) {
             tracing::debug!("Found cached IP for {}: {}", hostname, cached_ip);
             if let Ok(ip_cstring) = CString::new(cached_ip.as_str()) {
                 return Some(ip_cstring);
             }
         }
-    }
 
     // As a last resort fallback, try localhost (this may work for some cases)
     tracing::warn!(

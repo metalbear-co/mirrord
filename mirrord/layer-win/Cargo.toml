@@ -20,7 +20,7 @@ crate-type = ["cdylib"]
 mirrord-layer-lib = { path = "../layer-lib" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
-winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi"] }
+winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv"] }
 
 # Used for internal error type set-up
 thiserror = "2.0.12" 
@@ -36,6 +36,7 @@ str-win = { path = "../str-win" }
 mirrord-config = { path = "../config" }
 
 minhook-detours-rs = "0.2.0"
+libc = "0.2.175"
 
 # Additional dependencies for proxy connection
 tokio = { version = "1", features = ["sync", "time"] }
