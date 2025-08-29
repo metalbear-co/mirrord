@@ -102,10 +102,11 @@ pub fn intelligent_truncate(text: &str, max_len: usize) -> String {
     // No important patterns found, use simple truncation
     // Try to break at word boundaries if possible
     if let Some(dash_pos) = text[..max_len].rfind('-')
-        && dash_pos > max_len / 2 {
-            // Only use if it's not too short
-            return text[..dash_pos].to_string();
-        }
+        && dash_pos > max_len / 2
+    {
+        // Only use if it's not too short
+        return text[..dash_pos].to_string();
+    }
 
     // Fallback to simple truncation
     text[..max_len].to_string()

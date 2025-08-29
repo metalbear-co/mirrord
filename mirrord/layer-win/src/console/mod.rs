@@ -1,7 +1,17 @@
 //! Module responsible for handling the Windows console for debugging.
 
-use winapi::um::{consoleapi::AllocConsole, errhandlingapi::GetLastError, fileapi::{CreateFileA, OPEN_EXISTING}, handleapi::INVALID_HANDLE_VALUE, processenv::SetStdHandle, winbase::{STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE}, winnt::{FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE}};
-use crate::error::{windows::WindowsError, Error, Result};
+use winapi::um::{
+    consoleapi::AllocConsole,
+    fileapi::{CreateFileA, OPEN_EXISTING},
+    handleapi::INVALID_HANDLE_VALUE,
+    processenv::SetStdHandle,
+    winbase::{STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE},
+    winnt::{
+        FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
+    },
+};
+
+use crate::error::{Error, Result, windows::WindowsError};
 
 /// Creates a new Windows console, for debugging purposes. Also responsible
 /// for redirecting `stdin`, `stdout` and `stderr`, to `CONIN$` and `CONOUT$`.
@@ -33,7 +43,9 @@ fn redirect_std_handles() -> Result<()> {
             SetStdHandle(STD_OUTPUT_HANDLE, out_handle);
             SetStdHandle(STD_ERROR_HANDLE, out_handle);
         } else {
-            return Err(Error::FailedRedirectingStdHandles(WindowsError::last_error()));
+            return Err(Error::FailedRedirectingStdHandles(
+                WindowsError::last_error(),
+            ));
         }
 
         // Open CONIN$ (console input)
@@ -50,7 +62,9 @@ fn redirect_std_handles() -> Result<()> {
         if in_handle != INVALID_HANDLE_VALUE {
             SetStdHandle(STD_INPUT_HANDLE, in_handle);
         } else {
-            return Err(Error::FailedRedirectingStdHandles(WindowsError::last_error()));
+            return Err(Error::FailedRedirectingStdHandles(
+                WindowsError::last_error(),
+            ));
         }
     }
 

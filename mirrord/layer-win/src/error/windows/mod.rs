@@ -4,11 +4,11 @@ use std::fmt::{Debug, Display};
 
 use str_win::u16_buffer_to_string;
 use winapi::{
-    shared::{ntdef::{MAKELANGID, SUBLANG_ENGLISH_US}, winerror::ERROR_SUCCESS},
+    shared::ntdef::{MAKELANGID, SUBLANG_ENGLISH_US},
     um::{
-        errhandlingapi::GetLastError, winbase::{
-            FormatMessageW, FORMAT_MESSAGE_FROM_SYSTEM
-        }, winnt::LANG_ENGLISH
+        errhandlingapi::GetLastError,
+        winbase::{FORMAT_MESSAGE_FROM_SYSTEM, FormatMessageW},
+        winnt::LANG_ENGLISH,
     },
 };
 
@@ -30,9 +30,7 @@ impl WindowsError {
     /// Generate a new [`WindowsError`] from [`GetLastError`].
     pub fn last_error() -> Self {
         let error = unsafe { GetLastError() };
-        Self {
-            error
-        }
+        Self { error }
     }
 
     /// Get raw Windows system error code.
@@ -82,9 +80,9 @@ impl WindowsError {
     }
 }
 
-impl Into<WindowsError> for u32 {
-    fn into(self) -> WindowsError {
-        WindowsError::new(self)
+impl From<u32> for WindowsError {
+    fn from(val: u32) -> Self {
+        WindowsError::new(val)
     }
 }
 

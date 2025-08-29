@@ -14,17 +14,9 @@ use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        consoleapi::AllocConsole,
         debugapi::DebugBreak,
-        fileapi::{CreateFileA, OPEN_EXISTING},
-        handleapi::INVALID_HANDLE_VALUE,
-        processenv::SetStdHandle,
         processthreadsapi::GetCurrentProcessId,
-        winbase::{STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE},
-        winnt::{
-            DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH,
-            FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
-        },
+        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
 
@@ -147,10 +139,11 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Wait for initialization thread to complete (without spawning new threads)
     if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock()
-        && let Some(handle) = thread_handle.take() {
-            // This may block but it's safer than spawning threads during detach
-            let _ = handle.join();
-        }
+        && let Some(handle) = thread_handle.take()
+    {
+        // This may block but it's safer than spawning threads during detach
+        let _ = handle.join();
+    }
 
     // Release detour guard - use unwrap_or to avoid panicking during detach
     if let Err(e) = release_detour_guard() {

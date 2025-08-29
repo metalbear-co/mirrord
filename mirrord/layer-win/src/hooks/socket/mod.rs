@@ -361,7 +361,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 
     // Fall back to original function for non-managed sockets or errors
     let original = BIND_ORIGINAL.get().unwrap();
-    
+
     unsafe { original(s, name, namelen) }
 }
 
@@ -413,12 +413,12 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
         // Fallback - call original listen even if setup failed
         let original = LISTEN_ORIGINAL.get().unwrap();
-        
+
         unsafe { original(s, backlog) }
     } else {
         // Fall back to original function for non-managed sockets
         let original = LISTEN_ORIGINAL.get().unwrap();
-        
+
         unsafe { original(s, backlog) }
     }
 }
@@ -580,7 +580,7 @@ unsafe extern "system" fn getsockname_detour(
 
     // Fall back to original function for non-managed sockets or errors
     let original = GETSOCKNAME_ORIGINAL.get().unwrap();
-    
+
     unsafe { original(s, name, namelen) }
 }
 
@@ -1359,7 +1359,7 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
     unsafe {
         SetLastError(ERROR_INVALID_PARAMETER);
     }
-    0// FALSE
+    0 // FALSE
 }
 
 /// Hook for gethostbyname to handle DNS resolution of our modified hostname
