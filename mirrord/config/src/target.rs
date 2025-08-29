@@ -273,9 +273,7 @@ mirrord-layer failed to parse the provided target!
 ///
 /// Used to derive `TargetType` via the strum crate
 #[warn(clippy::wildcard_enum_match_arm)]
-#[derive(
-    Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants,
-)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, EnumDiscriminants)]
 #[serde(untagged, deny_unknown_fields)]
 #[strum_discriminants(derive(EnumString, Serialize, Deserialize))]
 #[strum_discriminants(name(TargetType))]
@@ -320,8 +318,37 @@ pub enum Target {
 
     /// <!--${internal}-->
     /// Spawn a new pod.
-    #[schemars(skip)]
     Targetless,
+}
+
+impl JsonSchema for Target {
+    fn schema_name() -> String {
+        "Target".to_owned()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject::default();
+
+        schema.subschemas().one_of = Some(vec![
+            schema_gen.subschema_for::<deployment::DeploymentTarget>(),
+            schema_gen.subschema_for::<pod::PodTarget>(),
+            schema_gen.subschema_for::<rollout::RolloutTarget>(),
+            schema_gen.subschema_for::<job::JobTarget>(),
+            schema_gen.subschema_for::<cron_job::CronJobTarget>(),
+            schema_gen.subschema_for::<stateful_set::StatefulSetTarget>(),
+            schema_gen.subschema_for::<service::ServiceTarget>(),
+            schema_gen.subschema_for::<replica_set::ReplicaSetTarget>(),
+            schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
+                    schemars::schema::InstanceType::String,
+                ))),
+                enum_values: Some(vec![serde_json::Value::String("targetless".to_string())]),
+                ..Default::default()
+            }),
+        ]);
+
+        schema.into()
+    }
 }
 
 impl FromStr for Target {

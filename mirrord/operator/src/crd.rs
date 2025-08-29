@@ -210,14 +210,19 @@ impl MirrordOperatorSpec {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CopyTargetEntry {
+    pub pod_name: String,
+    pub copy_target: CopyTargetCrd,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 
     /// Option because added later.
-    /// (copy-target pod name, copy-target resource)
-    pub copy_targets: Option<Vec<(String, CopyTargetCrd)>>,
+    pub copy_targets: Option<Vec<CopyTargetEntry>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -227,13 +232,20 @@ pub struct MirrordOperatorStatusStatistics {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LockedPort {
+    pub port: u16,
+    pub kind: String,
+    pub filter: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
     pub id: Option<String>,
     pub duration_secs: u64,
     pub user: String,
     pub target: String,
     pub namespace: Option<String>,
-    pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
+    pub locked_ports: Option<Vec<LockedPort>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
 }
