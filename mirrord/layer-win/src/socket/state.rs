@@ -1,4 +1,5 @@
 // Dedicated module for Windows socket state management
+use crate::socket::WindowsDnsResolver;
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -8,54 +9,33 @@ use std::{
 use mirrord_intproxy_protocol::{
     NetProtocol, OutgoingConnectRequest, PortSubscribe, PortSubscription,
 };
+// Re-export shared types from layer-lib
+pub use mirrord_layer_lib::socket::{Bound, Connected, SocketKind, SocketState, UserSocket};
 use mirrord_protocol::{ConnectionId, outgoing::SocketAddress, tcp::StealType};
 use winapi::{
-    shared::{
-        minwindef::INT,
-        ws2def::{AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
-        ws2ipdef::SOCKADDR_IN6,
-    },
+    shared::{minwindef::INT, ws2def::SOCKADDR},
     um::winsock2::SOCKET,
 };
 
-use crate::hooks::socket::hostname::make_windows_proxy_request_with_response;
+use super::{hostname::make_windows_proxy_request_with_response, utils::SocketAddrExtWin};
 
-#[derive(Debug, Clone)]
-pub enum WindowsSocketState {
-    Initialized,
-    Bound(WindowsSocketBound),
-    Listening(WindowsSocketBound),
-    Connected(WindowsSocketConnected),
-}
+// Helper function to convert Windows socket types to SocketKind
+fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
+    #[cfg(target_os = "windows")]
+    use winapi::um::winsock2::{SOCK_DGRAM, SOCK_STREAM};
 
-#[derive(Debug, Clone)]
-pub struct WindowsSocketBound {
-    pub address: SocketAddr,
-}
-
-#[derive(Debug, Clone)]
-pub struct WindowsSocketConnected {
-    pub remote_address: mirrord_protocol::outgoing::SocketAddress,
-    pub local_address: mirrord_protocol::outgoing::SocketAddress,
-    pub layer_address: Option<mirrord_protocol::outgoing::SocketAddress>,
-}
-
-#[derive(Debug, Clone)]
-pub enum WindowsSocketKind {
-    Tcp,
-    Udp,
-}
-
-#[derive(Debug, Clone)]
-pub struct WindowsUserSocket {
-    pub domain: i32,
-    pub kind: WindowsSocketKind,
-    pub state: WindowsSocketState,
+    if socket_type == SOCK_STREAM {
+        Ok(SocketKind::Tcp(socket_type))
+    } else if socket_type == SOCK_DGRAM {
+        Ok(SocketKind::Udp(socket_type))
+    } else {
+        Err(format!("Unsupported socket type: {}", socket_type))
+    }
 }
 
 /// Managed socket collection that encapsulates all socket operations
 pub struct SocketManager {
-    sockets: Mutex<HashMap<SOCKET, Arc<WindowsUserSocket>>>,
+    sockets: Mutex<HashMap<SOCKET, Arc<UserSocket>>>,
 }
 
 impl SocketManager {
@@ -66,12 +46,22 @@ impl SocketManager {
     }
 
     /// Register a new socket with the manager
-    pub fn register_socket(&self, socket: SOCKET, domain: i32, kind: WindowsSocketKind) {
-        let user_socket = Arc::new(WindowsUserSocket {
+    pub fn register_socket(&self, socket: SOCKET, domain: i32, socket_type: i32, protocol: i32) {
+        let kind = match socket_kind_from_type(socket_type) {
+            Ok(kind) => kind,
+            Err(e) => {
+                tracing::warn!("Failed to create socket kind: {}", e);
+                return;
+            }
+        };
+
+        let user_socket = Arc::new(UserSocket::new(
             domain,
+            socket_type,
+            protocol,
+            SocketState::Initialized,
             kind,
-            state: WindowsSocketState::Initialized,
-        });
+        ));
 
         let mut sockets = match self.sockets.lock() {
             Ok(sockets) => sockets,
@@ -88,7 +78,7 @@ impl SocketManager {
     }
 
     /// Update the state of a managed socket
-    pub fn set_socket_state(&self, socket: SOCKET, new_state: WindowsSocketState) {
+    pub fn set_socket_state(&self, socket: SOCKET, new_state: SocketState) {
         let mut sockets = match self.sockets.lock() {
             Ok(sockets) => sockets,
             Err(poisoned) => {
@@ -133,7 +123,7 @@ impl SocketManager {
     }
 
     /// Get socket info
-    pub fn get_socket(&self, socket: SOCKET) -> Option<Arc<WindowsUserSocket>> {
+    pub fn get_socket(&self, socket: SOCKET) -> Option<Arc<UserSocket>> {
         self.sockets
             .lock()
             .ok()
@@ -149,7 +139,7 @@ impl SocketManager {
     }
 
     /// Get socket state for a specific socket
-    pub fn get_socket_state(&self, socket: SOCKET) -> Option<WindowsSocketState> {
+    pub fn get_socket_state(&self, socket: SOCKET) -> Option<SocketState> {
         self.sockets
             .lock()
             .ok()
@@ -160,7 +150,7 @@ impl SocketManager {
     pub fn is_socket_in_state(
         &self,
         socket: SOCKET,
-        state_check: impl Fn(&WindowsSocketState) -> bool,
+        state_check: impl Fn(&SocketState) -> bool,
     ) -> bool {
         self.get_socket_state(socket)
             .map(|state| state_check(&state))
@@ -170,8 +160,8 @@ impl SocketManager {
     /// Get bound address for a socket if it's in bound state
     pub fn get_bound_address(&self, socket: SOCKET) -> Option<SocketAddr> {
         self.get_socket_state(socket).and_then(|state| match state {
-            WindowsSocketState::Bound(bound) => Some(bound.address),
-            WindowsSocketState::Listening(bound) => Some(bound.address),
+            SocketState::Bound(bound) => Some(bound.requested_address),
+            SocketState::Listening(bound) => Some(bound.requested_address),
             _ => None,
         })
     }
@@ -182,7 +172,7 @@ impl SocketManager {
         socket: SOCKET,
     ) -> Option<(SocketAddress, SocketAddress, Option<SocketAddress>)> {
         self.get_socket_state(socket).and_then(|state| match state {
-            WindowsSocketState::Connected(connected) => Some((
+            SocketState::Connected(connected) => Some((
                 connected.remote_address,
                 connected.local_address,
                 connected.layer_address,
@@ -198,76 +188,8 @@ pub static SOCKET_MANAGER: LazyLock<SocketManager> = LazyLock::new(|| SocketMana
 /// Result of attempting to establish a proxy connection
 #[derive(Debug)]
 pub enum ProxyConnectResult {
-    Success(WindowsSocketConnected, Option<ConnectionId>),
+    Success(Connected, Option<ConnectionId>),
     Fallback,
-}
-
-/// Convert SocketAddr to Windows SOCKADDR for address return functions
-pub unsafe fn socketaddr_to_windows_sockaddr(
-    addr: &SocketAddr,
-    name: *mut SOCKADDR,
-    namelen: *mut INT,
-) -> Result<(), i32> {
-    if name.is_null() || namelen.is_null() {
-        return Err(10014); // WSAEFAULT
-    }
-
-    match addr {
-        SocketAddr::V4(addr_v4) => {
-            let size = std::mem::size_of::<SOCKADDR_IN>() as INT;
-            if unsafe { *namelen } < size {
-                return Err(10014); // WSAEFAULT - buffer too small
-            }
-
-            let mut sockaddr_in: SOCKADDR_IN = unsafe { std::mem::zeroed() };
-            sockaddr_in.sin_family = AF_INET as u16;
-            sockaddr_in.sin_port = addr_v4.port().to_be();
-            unsafe {
-                *sockaddr_in.sin_addr.S_un.S_addr_mut() = u32::from(*addr_v4.ip()).to_be();
-            }
-
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &sockaddr_in as *const _ as *const u8,
-                    name as *mut u8,
-                    size as usize,
-                );
-                *namelen = size;
-            }
-
-            Ok(())
-        }
-        SocketAddr::V6(addr_v6) => {
-            let size = std::mem::size_of::<SOCKADDR_IN6>() as INT;
-            if unsafe { *namelen } < size {
-                return Err(10014); // WSAEFAULT - buffer too small
-            }
-
-            let mut sockaddr_in6: SOCKADDR_IN6 = unsafe { std::mem::zeroed() };
-            sockaddr_in6.sin6_family = AF_INET6 as u16;
-            sockaddr_in6.sin6_port = addr_v6.port().to_be();
-            sockaddr_in6.sin6_flowinfo = addr_v6.flowinfo();
-            // Note: scope_id is not available in SOCKADDR_IN6_LH
-
-            // Copy the IPv6 address bytes
-            let ip_bytes = addr_v6.ip().octets();
-            unsafe {
-                let bytes_ptr = sockaddr_in6.sin6_addr.u.Byte().as_ptr() as *mut u8;
-                std::ptr::copy_nonoverlapping(ip_bytes.as_ptr(), bytes_ptr, 16);
-            }
-
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &sockaddr_in6 as *const _ as *const u8,
-                    name as *mut u8,
-                    size as usize,
-                );
-                *namelen = size;
-            }
-
-            Ok(())
-        }
-    }
 }
 
 /// Perform a proxy bind operation and return the bound address
@@ -288,12 +210,13 @@ pub fn proxy_bind(
     let bound_addr = requested_addr; // In the future, this could be modified by proxy config
 
     // Create the bound state
-    let bound = WindowsSocketBound {
-        address: bound_addr,
+    let bound = Bound {
+        requested_address: bound_addr,
+        address: bound_addr, // For now, use the same address
     };
 
     // Update socket state to bound using the socket manager
-    SOCKET_MANAGER.set_socket_state(socket, WindowsSocketState::Bound(bound.clone()));
+    SOCKET_MANAGER.set_socket_state(socket, SocketState::Bound(bound.clone()));
 
     tracing::info!(
         "proxy_bind -> socket {} successfully bound to {}",
@@ -343,22 +266,20 @@ pub fn setup_listening(
 pub fn register_accepted_socket(
     socket: winapi::um::winsock2::SOCKET,
     domain: i32,
-    kind: WindowsSocketKind,
+    socket_type: i32,
     peer_address: SocketAddr,
     local_address: SocketAddr,
 ) -> Result<(), String> {
     // Create a connected socket state
-    let connected = WindowsSocketConnected {
-        remote_address: SocketAddress::try_from(peer_address)
-            .map_err(|e| format!("Failed to convert peer address: {}", e))?,
-        local_address: SocketAddress::try_from(local_address)
-            .map_err(|e| format!("Failed to convert local address: {}", e))?,
+    let connected = Connected {
+        remote_address: SocketAddress::Ip(peer_address),
+        local_address: SocketAddress::Ip(local_address),
         layer_address: None,
     };
 
     // Register the accepted socket using the socket manager
-    SOCKET_MANAGER.register_socket(socket, domain, kind);
-    SOCKET_MANAGER.set_socket_state(socket, WindowsSocketState::Connected(connected));
+    SOCKET_MANAGER.register_socket(socket, domain, socket_type, 0);
+    SOCKET_MANAGER.set_socket_state(socket, SocketState::Connected(connected));
 
     tracing::info!(
         "register_accepted_socket -> registered socket {} with peer {} and local {}",
@@ -372,7 +293,7 @@ pub fn register_accepted_socket(
 /// Attempt to establish a connection through the mirrord proxy
 pub fn connect_through_proxy(
     _socket: SOCKET,
-    user_socket: &WindowsUserSocket,
+    user_socket: &UserSocket,
     remote_addr: SocketAddr,
 ) -> ProxyConnectResult {
     tracing::info!(
@@ -382,8 +303,8 @@ pub fn connect_through_proxy(
 
     // Create the proxy request
     let protocol = match user_socket.kind {
-        WindowsSocketKind::Tcp => NetProtocol::Stream,
-        WindowsSocketKind::Udp => NetProtocol::Datagrams,
+        SocketKind::Tcp(_) => NetProtocol::Stream,
+        SocketKind::Udp(_) => NetProtocol::Datagrams,
     };
 
     let remote_address = match SocketAddress::try_from(remote_addr) {
@@ -412,8 +333,8 @@ pub fn connect_through_proxy(
                 response.connection_id
             );
 
-            let connected = WindowsSocketConnected {
-                remote_address: response.in_cluster_address.clone(),
+            let connected = Connected {
+                remote_address: response.in_cluster_address,
                 local_address: response.layer_address.clone(),
                 layer_address: Some(response.layer_address),
             };
@@ -435,17 +356,34 @@ pub fn connect_through_proxy(
 /// Handle successful proxy connection result, updating socket state
 pub fn handle_connection_success(
     socket: SOCKET,
-    connected: WindowsSocketConnected,
+    connected: Connected,
     function_name: &str,
 ) -> Result<(SOCKADDR, INT), Box<dyn std::error::Error>> {
-    use crate::hooks::socket::utils::socket_address_to_sockaddr;
-
     // Convert the layer address to SOCKADDR and connect
-    let (sockaddr, sockaddr_len) =
-        unsafe { socket_address_to_sockaddr(&connected.layer_address.as_ref().unwrap())? };
+    let layer_addr = connected.layer_address.as_ref().unwrap();
+
+    // Convert SocketAddress to SocketAddr
+    let socket_addr = match layer_addr {
+        SocketAddress::Ip(addr) => *addr,
+        _ => return Err("Unix sockets not supported on Windows".into()),
+    };
+
+    // Create a buffer for the sockaddr
+    let mut sockaddr_buffer: [u8; 128] = [0; 128];
+    let mut sockaddr_len = sockaddr_buffer.len() as INT;
+
+    // Use the SocketAddrExtWin trait method
+    unsafe {
+        socket_addr.to_windows_sockaddr_checked(
+            sockaddr_buffer.as_mut_ptr() as *mut SOCKADDR,
+            &mut sockaddr_len,
+        )?;
+    }
+
+    let sockaddr = unsafe { std::ptr::read(sockaddr_buffer.as_ptr() as *const SOCKADDR) };
 
     // Update socket state first
-    SOCKET_MANAGER.set_socket_state(socket, WindowsSocketState::Connected(connected));
+    SOCKET_MANAGER.set_socket_state(socket, SocketState::Connected(connected));
 
     tracing::debug!("{} -> updated socket state to Connected", function_name);
 
@@ -495,7 +433,7 @@ pub fn validate_socket_for_outgoing(socket: SOCKET, function_name: &str) -> Sock
 
     // Check if outgoing traffic is enabled for this socket type
     let should_intercept = match user_socket.kind {
-        WindowsSocketKind::Tcp => {
+        SocketKind::Tcp(_) => {
             let tcp_outgoing = crate::layer_config().feature.network.outgoing.tcp;
             tracing::info!(
                 "{} -> TCP outgoing enabled: {}",
@@ -504,7 +442,7 @@ pub fn validate_socket_for_outgoing(socket: SOCKET, function_name: &str) -> Sock
             );
             tcp_outgoing
         }
-        WindowsSocketKind::Udp => {
+        SocketKind::Udp(_) => {
             let udp_outgoing = crate::layer_config().feature.network.outgoing.udp;
             tracing::info!(
                 "{} -> UDP outgoing enabled: {}",
@@ -551,7 +489,7 @@ pub fn attempt_proxy_connection(
     namelen: INT,
     function_name: &str,
 ) -> ProxyConnectionResult {
-    use crate::hooks::socket::utils::sockaddr_to_socket_addr;
+    use super::utils::SocketAddrExtWin;
 
     // Validate socket and check configuration
     match validate_socket_for_outgoing(socket, function_name) {
@@ -570,7 +508,7 @@ pub fn attempt_proxy_connection(
             };
 
             // Convert Windows sockaddr to Rust SocketAddr
-            let remote_addr = match unsafe { sockaddr_to_socket_addr(name, namelen) } {
+            let remote_addr = match SocketAddr::try_from_raw(name, namelen) {
                 Some(addr) => addr,
                 None => {
                     tracing::warn!(
@@ -580,6 +518,45 @@ pub fn attempt_proxy_connection(
                     return ProxyConnectionResult::Fallback;
                 }
             };
+
+            // Determine the protocol based on the socket type
+            let protocol = match user_socket.kind {
+                SocketKind::Tcp(_) => NetProtocol::Stream,
+                SocketKind::Udp(_) => NetProtocol::Datagrams,
+            };
+
+            // Check the outgoing selector to determine routing
+            let resolver = WindowsDnsResolver;
+            match crate::layer_setup()
+                .outgoing_selector
+                .get_connection_through_with_resolver(remote_addr, protocol, &resolver)
+            {
+                Ok(crate::setup::ConnectionThrough::Remote(filtered_addr)) => {
+                    tracing::debug!(
+                        "{} -> outgoing filter indicates remote connection for {:?} -> {:?}",
+                        function_name,
+                        remote_addr,
+                        filtered_addr
+                    );
+                    // Continue with proxy connection using the filtered address
+                }
+                Ok(crate::setup::ConnectionThrough::Local(_)) => {
+                    tracing::debug!(
+                        "{} -> outgoing filter indicates local connection for {:?}, falling back to original",
+                        function_name,
+                        remote_addr
+                    );
+                    return ProxyConnectionResult::Fallback;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "{} -> outgoing filter check failed: {}, falling back to original",
+                        function_name,
+                        e
+                    );
+                    return ProxyConnectionResult::Fallback;
+                }
+            }
 
             // Try to connect through the mirrord proxy
             match connect_through_proxy(socket, &*user_socket, remote_addr) {
