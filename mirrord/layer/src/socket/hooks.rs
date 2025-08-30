@@ -595,6 +595,11 @@ pub(crate) unsafe fn enable_socket_hooks(
             FnConnect,
             FN_CONNECT
         );
+
+        if experimental.force_hook_connect {
+            hook_manager.hook_in_libc("connect", connect_detour as *mut libc::c_void)
+        }
+
         replace!(
             hook_manager,
             "_connect$NOCANCEL",

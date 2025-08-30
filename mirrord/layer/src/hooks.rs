@@ -11,6 +11,8 @@ static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 pub(crate) struct HookManager<'a> {
     interceptor: Interceptor,
     modules: Vec<Module>,
+    // process is need for Linux build and having different struct between OS feels over kill
+    #[allow(dead_code)]
     process: Process<'a>,
 }
 
@@ -44,6 +46,28 @@ impl<'a> HookManager<'a> {
         Err(LayerError::NoExportName(symbol.to_string()))
     }
 
+    pub(crate) fn hook_in_libc(&mut self, symbol: &str, detour: *mut libc::c_void) {
+        for module in &self.modules {
+            let module_name = module.name();
+            if module_name.starts_with("libc") {
+                if let Some(function) = module.find_export_by_name(symbol) {
+                    trace!("found {symbol:?} in {module_name:?}, hooking");
+                    match self.interceptor.replace(
+                        function,
+                        NativePointer(detour),
+                        NativePointer(null_mut()),
+                    ) {
+                        Ok(original) => {
+                            debug!("hooked {symbol:?} in {module_name:?}, original {original:?}");
+                        }
+                        Err(err) => {
+                            debug!("hook {symbol:?} in {module_name:?} failed with err {err:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
     /// Hook an exported symbol, suitable for most libc use cases.
     /// If it fails to hook the first one found, it will try to hook each matching export
     /// until it succeeds.

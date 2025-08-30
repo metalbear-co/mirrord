@@ -127,6 +127,14 @@ pub struct ExperimentalConfig {
     /// Defaults to `false` in mfT.
     #[config(default = None)]
     pub dns_permission_error_fatal: Option<bool>,
+
+    /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
+    ///
+    /// Forces hooking all instances of the connect function.
+    /// In very niche cases the connect function has multiple exports and this flag
+    /// makes us hook all of the instances.
+    #[config(default = false)]
+    pub force_hook_connect: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
