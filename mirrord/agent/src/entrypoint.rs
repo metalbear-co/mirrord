@@ -64,6 +64,12 @@ pub(crate) const IPTABLES_DIRTY_EXIT_CODE: u8 = 99;
 /// agent. The child agent performs normal agent behaviour.
 const CHILD_PROCESS_ENV: &str = "MIRRORD_AGENT_CHILD_PROCESS";
 
+/// Error message to display when dirty IP tables are detected (OSS only).
+const DIRTY_IPTABLES_ERROR_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
+or the previous agent failed to clean up before exit. \
+If no other mirrord agent is targeting this pod, please delete the pod. \
+To allow concurrent sessions, consider using the operator available in mirrord for Teams.";
+
 /// Keeps track of next client id.
 /// Stores common data used when serving client connections.
 /// Can be cheaply cloned and passed to per-client background tasks.
@@ -601,10 +607,7 @@ pub async fn notify_client_about_dirty_iptables(
             let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
             connection
                 .send(DaemonMessage::Close(
-                    "Detected dirty iptables. Either some other mirrord agent is running \
-            or the previous agent failed to clean up before exit. \
-            If no other mirrord agent is targeting this pod, please delete the pod."
-                        .to_string(),
+                    DIRTY_IPTABLES_ERROR_MESSAGE.to_string(),
                 ))
                 .await?;
         }
@@ -696,10 +699,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         if !leftover_rules.is_empty() {
             error!(
                 leftover_rules = ?leftover_rules,
-                "Detected dirty iptables. Either some other mirrord agent is running \
-                or the previous agent failed to clean up before exit. \
-                If no other mirrord agent is targeting this pod, please delete the pod. \
-                If you'd like to have concurrent work consider using the operator available in mirrord for Teams."
+                DIRTY_IPTABLES_ERROR_MESSAGE
             );
             let _ = notify_client_about_dirty_iptables(
                 listener,
