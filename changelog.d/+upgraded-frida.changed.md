@@ -1,0 +1,1 @@
+Upgraded Frida dependency

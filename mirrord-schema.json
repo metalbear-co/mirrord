@@ -932,6 +932,14 @@
             "null"
           ]
         },
+        "force_hook_connect": {
+          "title": "_experimental_ force_hook_connect {#experimental-force_hook_connect}",
+          "description": "Forces hooking all instances of the connect function. In very niche cases the connect function has multiple exports and this flag makes us hook all of the instances.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
