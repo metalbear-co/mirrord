@@ -132,7 +132,7 @@ pub struct ExperimentalConfig {
     ///
     /// Forces hooking all instances of the connect function.
     /// In very niche cases the connect function has multiple exports and this flag
-    /// makes us hook all of the instances.
+    /// makes us hook all of the instances. https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl
     #[config(default = false)]
     pub force_hook_connect: bool,
 }
@@ -154,5 +154,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         if let Some(dns_permission_error_fatal) = self.dns_permission_error_fatal {
             analytics.add("dns_permission_error_fatal", dns_permission_error_fatal);
         }
+        analytics.add("force_hook_connect", self.force_hook_connect);
     }
 }
