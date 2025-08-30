@@ -58,10 +58,10 @@ impl<'a> HookManager<'a> {
                         NativePointer(null_mut()),
                     ) {
                         Ok(original) => {
-                            debug!("hooked {symbol:?} in {module_name:?}, original {original:?}");
+                            trace!("hooked {symbol:?} in {module_name:?}, original {original:?}");
                         }
                         Err(err) => {
-                            debug!("hook {symbol:?} in {module_name:?} failed with err {err:?}");
+                            trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}");
                         }
                     }
                 }
