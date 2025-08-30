@@ -69,25 +69,6 @@ impl<'a> HookManager<'a> {
     }
 
     #[cfg(target_os = "linux")]
-    /// Hook a symbol that isn't exported.
-    /// It is valuable when hooking internal stuff. (Go)
-    fn hook_symbol(
-        &mut self,
-        module: &Module,
-        symbol: &str,
-        detour: *mut libc::c_void,
-    ) -> Result<NativePointer> {
-        let function = module
-            .find_symbol_by_name(symbol)
-            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
-
-        // on Go we use `replace_fast` since we don't use the original function.
-        self.interceptor
-            .replace_fast(function, NativePointer(detour))
-            .map_err(Into::into)
-    }
-
-    #[cfg(target_os = "linux")]
     /// Hook a symbol in the first module (main module, binary)
     pub(crate) fn hook_symbol_main_module(
         &mut self,
