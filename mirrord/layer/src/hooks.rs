@@ -14,13 +14,6 @@ pub(crate) struct HookManager<'a> {
     process: Process<'a>,
 }
 
-/// Wrapper function that maps it to our error for convinence.
-fn get_export_by_name(module: &Module, symbol: &str) -> Result<NativePointer> {
-    module
-        .find_export_by_name(symbol)
-        .ok_or_else(|| LayerError::NoExportName(symbol.to_string()))
-}
-
 impl<'a> HookManager<'a> {
     /// Hook the first function exported from a lib that is in modules and is hooked succesfully
     fn hook_any_lib_export(
@@ -34,7 +27,7 @@ impl<'a> HookManager<'a> {
             if !module_name.starts_with("lib") {
                 continue;
             }
-            if let Ok(function) = get_export_by_name(module, symbol) {
+            if let Some(function) = module.find_export_by_name(symbol) {
                 trace!("found {symbol:?} in {module_name:?}, hooking");
                 match self.interceptor.replace(
                     function,
@@ -61,11 +54,14 @@ impl<'a> HookManager<'a> {
     ) -> Result<NativePointer> {
         // First try to hook the default exported one, if it fails, fallback to first lib that
         // provides it.
-        let function = get_export_by_name(&self.process.main_module, symbol)?;
-
-        self.interceptor
-            .replace(function, NativePointer(detour), NativePointer(null_mut()))
-            .or_else(|_| self.hook_any_lib_export(symbol, detour))
+        let function = Module::find_global_export_by_name(symbol);
+        match function {
+            Some(func) => self
+                .interceptor
+                .replace(func, NativePointer(detour), NativePointer(null_mut()))
+                .or_else(|_| self.hook_any_lib_export(symbol, detour)),
+            None => self.hook_any_lib_export(symbol, detour),
+        }
     }
 
     #[cfg(target_os = "linux")]
