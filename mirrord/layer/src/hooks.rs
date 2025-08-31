@@ -27,14 +27,10 @@ impl<'a> HookManager<'a> {
         for module in &self.modules {
             // In this case we only want libs, no "main binaries"
             let module_name = module.name();
-            if !module_name.starts_with("lib") {
+            if !module_name.starts_with(filter.unwrap_or("lib")) {
                 continue;
             }
-            if let Some(filter) = filter {
-                if !module_name.starts_with(filter) {
-                    continue;
-                }
-            }
+
             if let Some(function) = module.find_export_by_name(symbol) {
                 trace!("found {symbol:?} in {module_name:?}, hooking");
                 match self.interceptor.replace(
