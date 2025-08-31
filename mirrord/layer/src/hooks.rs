@@ -18,16 +18,22 @@ pub(crate) struct HookManager<'a> {
 
 impl<'a> HookManager<'a> {
     /// Hook the first function exported from a lib that is in modules and is hooked succesfully
-    fn hook_any_lib_export(
+    pub(crate) fn hook_any_lib_export(
         &mut self,
         symbol: &str,
         detour: *mut libc::c_void,
+        filter: Option<&str>,
     ) -> Result<NativePointer> {
         for module in &self.modules {
             // In this case we only want libs, no "main binaries"
             let module_name = module.name();
             if !module_name.starts_with("lib") {
                 continue;
+            }
+            if let Some(filter) = filter {
+                if !module_name.starts_with(filter) {
+                    continue;
+                }
             }
             if let Some(function) = module.find_export_by_name(symbol) {
                 trace!("found {symbol:?} in {module_name:?}, hooking");
@@ -46,28 +52,6 @@ impl<'a> HookManager<'a> {
         Err(LayerError::NoExportName(symbol.to_string()))
     }
 
-    pub(crate) fn hook_in_libc(&mut self, symbol: &str, detour: *mut libc::c_void) {
-        for module in &self.modules {
-            let module_name = module.name();
-            if module_name.starts_with("libc")
-                && let Some(function) = module.find_export_by_name(symbol)
-            {
-                trace!("found {symbol:?} in {module_name:?}, hooking");
-                match self.interceptor.replace(
-                    function,
-                    NativePointer(detour),
-                    NativePointer(null_mut()),
-                ) {
-                    Ok(original) => {
-                        trace!("hooked {symbol:?} in {module_name:?}, original {original:?}");
-                    }
-                    Err(err) => {
-                        trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}");
-                    }
-                }
-            }
-        }
-    }
     /// Hook an exported symbol, suitable for most libc use cases.
     /// If it fails to hook the first one found, it will try to hook each matching export
     /// until it succeeds.
@@ -83,8 +67,8 @@ impl<'a> HookManager<'a> {
             Some(func) => self
                 .interceptor
                 .replace(func, NativePointer(detour), NativePointer(null_mut()))
-                .or_else(|_| self.hook_any_lib_export(symbol, detour)),
-            None => self.hook_any_lib_export(symbol, detour),
+                .or_else(|_| self.hook_any_lib_export(symbol, detour, None)),
+            None => self.hook_any_lib_export(symbol, detour, None),
         }
     }
 

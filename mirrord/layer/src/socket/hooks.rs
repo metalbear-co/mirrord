@@ -597,7 +597,11 @@ pub(crate) unsafe fn enable_socket_hooks(
         );
 
         if experimental.force_hook_connect {
-            hook_manager.hook_in_libc("connect", connect_detour as *mut libc::c_void)
+            let _ = hook_manager.hook_any_lib_export(
+                "connect",
+                connect_detour as *mut libc::c_void,
+                Some("libc"),
+            );
         }
 
         replace!(
