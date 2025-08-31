@@ -49,20 +49,20 @@ impl<'a> HookManager<'a> {
     pub(crate) fn hook_in_libc(&mut self, symbol: &str, detour: *mut libc::c_void) {
         for module in &self.modules {
             let module_name = module.name();
-            if module_name.starts_with("libc") {
-                if let Some(function) = module.find_export_by_name(symbol) {
-                    trace!("found {symbol:?} in {module_name:?}, hooking");
-                    match self.interceptor.replace(
-                        function,
-                        NativePointer(detour),
-                        NativePointer(null_mut()),
-                    ) {
-                        Ok(original) => {
-                            trace!("hooked {symbol:?} in {module_name:?}, original {original:?}");
-                        }
-                        Err(err) => {
-                            trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}");
-                        }
+            if module_name.starts_with("libc")
+                && let Some(function) = module.find_export_by_name(symbol)
+            {
+                trace!("found {symbol:?} in {module_name:?}, hooking");
+                match self.interceptor.replace(
+                    function,
+                    NativePointer(detour),
+                    NativePointer(null_mut()),
+                ) {
+                    Ok(original) => {
+                        trace!("hooked {symbol:?} in {module_name:?}, original {original:?}");
+                    }
+                    Err(err) => {
+                        trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}");
                     }
                 }
             }
