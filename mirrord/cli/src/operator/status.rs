@@ -188,16 +188,18 @@ Operator License
                     "Scale Down?"
                 ]);
 
-                for (pod_name, copy_target_resource) in copy_targets {
+                for copy_target_entry_compat in copy_targets {
+                    let copy_target_entry = copy_target_entry_compat.to_copy_target_entry();
                     copy_targets_table.add_row(row![
-                        copy_target_resource.spec.target.to_string(),
-                        copy_target_resource
+                        copy_target_entry.copy_target.spec.target.to_string(),
+                        copy_target_entry
+                            .copy_target
                             .metadata
                             .namespace
                             .as_deref()
                             .unwrap_or_default(),
-                        pod_name,
-                        if copy_target_resource.spec.scale_down {
+                        copy_target_entry.pod_name,
+                        if copy_target_entry.copy_target.spec.scale_down {
                             "*"
                         } else {
                             ""
@@ -235,10 +237,14 @@ Operator License
                 .map(|ports| {
                     ports
                         .iter()
-                        .map(|(port, type_, filter)| {
+                        .map(|locked_port_compat| {
+                            let locked_port = locked_port_compat.to_locked_port();
                             format!(
-                                "Port: {port}, Type: {type_}{}",
-                                filter
+                                "Port: {}, Type: {}{}",
+                                locked_port.port,
+                                locked_port.kind,
+                                locked_port
+                                    .filter
                                     .as_ref()
                                     .map(|f| format!(", Filter: {}", f))
                                     .unwrap_or_default()

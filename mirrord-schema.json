@@ -932,6 +932,14 @@
             "null"
           ]
         },
+        "force_hook_connect": {
+          "title": "_experimental_ force_hook_connect {#experimental-force_hook_connect}",
+          "description": "Forces hooking all instances of the connect function. In very niche cases the connect function has multiple exports and this flag makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
@@ -1983,70 +1991,35 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;\n\nUsed to derive `TargetType` via the strum crate",
-      "anyOf": [
+      "oneOf": [
         {
-          "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/DeploymentTarget"
-            }
-          ]
+          "$ref": "#/definitions/DeploymentTarget"
         },
         {
-          "description": "<!--${internal}--> [Pod](https://kubernetes.io/docs/concepts/workloads/pods/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/PodTarget"
-            }
-          ]
+          "$ref": "#/definitions/PodTarget"
         },
         {
-          "description": "<!--${internal}--> [Argo Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/RolloutTarget"
-            }
-          ]
+          "$ref": "#/definitions/RolloutTarget"
         },
         {
-          "description": "<!--${internal}--> [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/).\n\nOnly supported when `copy_target` is enabled.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/JobTarget"
-            }
-          ]
+          "$ref": "#/definitions/JobTarget"
         },
         {
-          "description": "<!--${internal}--> [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).\n\nOnly supported when `copy_target` is enabled.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/CronJobTarget"
-            }
-          ]
+          "$ref": "#/definitions/CronJobTarget"
         },
         {
-          "description": "<!--${internal}--> [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/StatefulSetTarget"
-            }
-          ]
+          "$ref": "#/definitions/StatefulSetTarget"
         },
         {
-          "description": "<!--${internal}--> [Service](https://kubernetes.io/docs/concepts/services-networking/service/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ServiceTarget"
-            }
-          ]
+          "$ref": "#/definitions/ServiceTarget"
         },
         {
-          "description": "<!--${internal}--> [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ReplicaSetTarget"
-            }
+          "$ref": "#/definitions/ReplicaSetTarget"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "targetless"
           ]
         }
       ]
