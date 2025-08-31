@@ -14,10 +14,16 @@ jobs:
         shell: pwsh
 
     steps:
-      - name: Checkout branch mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
+      - name: Checkout PR 3536 (merge ref)
         uses: actions/checkout@v4
         with:
-          ref: mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
+          ref: refs/pull/3536/merge
+          fetch-depth: 1
+
+      # - name: Checkout branch mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
+      #   uses: actions/checkout@v4
+      #   with:
+      #     ref: mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
 
       - name: Add Rust MSVC target
         run: |
