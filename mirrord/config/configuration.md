@@ -507,8 +507,6 @@ Defaults to `"ghcr.io/metalbear-co/mirrord-cli:<cli version>"`.
 
 Path of the mirrord-layer lib inside the specified mirrord-cli image.
 
-Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
-
 ### container.cli_prevent_cleanup {#container-cli_extra_args}
 
 Don't add `--rm` to sidecar command to prevent cleanup.
@@ -535,6 +533,22 @@ one bound as host.
   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
 
+### container.platform {#container-platform}
+
+Platform specification for the target container (e.g., "linux/amd64", "linux/arm64").
+
+When specified, the target container will run with this platform, while the internal proxy
+container will still run on the native platform and contain both architectures (x64/arm64).
+The LD_PRELOAD will automatically use the correct architecture.
+
+```json
+{
+  "container": {
+    "platform": "linux/amd64"
+  }
+}
+```
+
 ## experimental {#root-experimental}
 
 mirrord Experimental features.
@@ -553,6 +567,16 @@ On macOS the application can use the same address many times but then we don't s
 correctly. This probably should be on by default but we want to gradually roll it out.
 <https://github.com/metalbear-co/mirrord/issues/2819>
 This option applies only on macOS.
+
+### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
+
+Whether to terminate the session when a permission denied error
+occurs during DNS resolution. This error often means that the Kubernetes cluster is
+hardened, and the mirrord-agent is not fully functional without `agent.privileged`
+enabled.
+
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
@@ -761,28 +785,7 @@ Creates a new copy of the target. mirrord will use this copy instead of the orig
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
 
-Allows the user to target a pod created dynamically from the original [`target`](#target).
-The new pod inherits most of the original target's specification, e.g. labels.
-
-```json
-{
-  "feature": {
-    "copy_target": {
-      "scale_down": true,
-      "exclude_containers": ["my-container"],
-      "exclude_init_containers": ["my-init-container"]
-    }
-  }
-}
-```
-
-```json
-{
-  "feature": {
-    "copy_target": true
-  }
-}
-```
+Generated configuration for copy target feature.
 
 ### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
 

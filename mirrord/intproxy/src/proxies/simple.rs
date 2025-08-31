@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, RemoteResult,
+    ClientMessage, DaemonMessage, DnsLookupError, GetEnvVarsRequest, RemoteResult,
+    ResolveErrorKindInternal, ResponseError,
     dns::{ADDRINFO_V2_VERSION, AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
 use semver::Version;
@@ -32,8 +33,18 @@ pub enum SimpleProxyMessage {
 }
 
 #[derive(Error, Debug)]
-#[error(transparent)]
-pub struct SimpleProxyError(#[from] UnexpectedAgentMessage);
+pub enum SimpleProxyError {
+    #[error(transparent)]
+    UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
+
+    #[error(
+        "mirrord-agent failed to perform DNS lookup, permission denied. \
+        This indicates that your Kubernetes cluster is hardened, \
+        and the agent might not be fully functional. \
+        You might need to enable the `agent.privileged` configuration option"
+    )]
+    DnsPermissionDenied,
+}
 
 pub enum AgentLostSimpleResponseKind {
     AddrInfo,
@@ -76,7 +87,6 @@ impl From<AgentLostSimpleResponse> for ToLayer {
 
 /// For passing messages between the layer and the agent without custom internal logic.
 /// Run as a [`BackgroundTask`].
-#[derive(Default)]
 pub struct SimpleProxy {
     /// For [`GetAddrInfoRequestV2`]s.
     addr_info_reqs: RequestQueue,
@@ -85,9 +95,20 @@ pub struct SimpleProxy {
     /// [`mirrord_protocol`] version negotiated with the agent.
     /// Determines whether we can use `GetAddrInfoRequestV2`.
     protocol_version: Option<Version>,
+    /// Whether to consider permission errors in DNS lookup to be fatal.
+    dns_permission_error_fatal: bool,
 }
 
 impl SimpleProxy {
+    pub fn new(dns_permission_error_fatal: bool) -> Self {
+        Self {
+            addr_info_reqs: Default::default(),
+            get_env_reqs: Default::default(),
+            protocol_version: Default::default(),
+            dns_permission_error_fatal,
+        }
+    }
+
     fn set_protocol_version(&mut self, version: Version) {
         self.protocol_version.replace(version);
     }
@@ -160,6 +181,13 @@ impl BackgroundTask for SimpleProxy {
                             .send(ClientMessage::GetAddrInfoRequest(req.into()))
                             .await;
                     }
+                }
+                SimpleProxyMessage::AddrInfoRes(GetAddrInfoResponse(Err(
+                    ResponseError::DnsLookup(DnsLookupError {
+                        kind: ResolveErrorKindInternal::PermissionDenied,
+                    }),
+                ))) if self.dns_permission_error_fatal => {
+                    return Err(SimpleProxyError::DnsPermissionDenied);
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
                     let (message_id, layer_id) =

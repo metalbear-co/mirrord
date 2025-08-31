@@ -916,6 +916,14 @@
             "null"
           ]
         },
+        "dns_permission_error_fatal": {
+          "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
+          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
@@ -1975,70 +1983,35 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;\n\nUsed to derive `TargetType` via the strum crate",
-      "anyOf": [
+      "oneOf": [
         {
-          "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/DeploymentTarget"
-            }
-          ]
+          "$ref": "#/definitions/DeploymentTarget"
         },
         {
-          "description": "<!--${internal}--> [Pod](https://kubernetes.io/docs/concepts/workloads/pods/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/PodTarget"
-            }
-          ]
+          "$ref": "#/definitions/PodTarget"
         },
         {
-          "description": "<!--${internal}--> [Argo Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/RolloutTarget"
-            }
-          ]
+          "$ref": "#/definitions/RolloutTarget"
         },
         {
-          "description": "<!--${internal}--> [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/).\n\nOnly supported when `copy_target` is enabled.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/JobTarget"
-            }
-          ]
+          "$ref": "#/definitions/JobTarget"
         },
         {
-          "description": "<!--${internal}--> [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).\n\nOnly supported when `copy_target` is enabled.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/CronJobTarget"
-            }
-          ]
+          "$ref": "#/definitions/CronJobTarget"
         },
         {
-          "description": "<!--${internal}--> [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/StatefulSetTarget"
-            }
-          ]
+          "$ref": "#/definitions/StatefulSetTarget"
         },
         {
-          "description": "<!--${internal}--> [Service](https://kubernetes.io/docs/concepts/services-networking/service/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ServiceTarget"
-            }
-          ]
+          "$ref": "#/definitions/ServiceTarget"
         },
         {
-          "description": "<!--${internal}--> [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ReplicaSetTarget"
-            }
+          "$ref": "#/definitions/ReplicaSetTarget"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "targetless"
           ]
         }
       ]
