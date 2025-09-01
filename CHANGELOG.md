@@ -23,16 +23,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Fixed
 
-- Fix compatability issue with openapiv2 for operator CRDs
+- Fixed a compatability issue with openapiv2 for operator CRDs
   [#3398](https://github.com/metalbear-co/mirrord/issues/3398)
 
 
 ### Internal
 
-- Add suggestion to use mfT when encountering `AgentError::IPTablesDirty` in
-  error message.
+- Added a suggestion to use mfT when encountering `AgentError::IPTablesDirty` in
+  error messages.
 - Added a github action to build windows builds.
-- Update all metalbear.co urls to metalbear.com.
+- Updated all metalbear.co urls to metalbear.com.
 - Upgraded Frida dependency.
 
 ## [3.159.1](https://github.com/metalbear-co/mirrord/tree/3.159.1) - 2025-08-27
