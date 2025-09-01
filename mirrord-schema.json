@@ -744,7 +744,6 @@
       "type": "object",
       "required": [
         "connection",
-        "name",
         "type"
       ],
       "properties": {
@@ -765,7 +764,10 @@
         },
         "name": {
           "description": "Name of the database",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "ttl_secs": {
           "description": "The time-to-live (TTL) for the branch database, in seconds.",

@@ -23,7 +23,7 @@ pub struct MysqlBranchDatabaseSpec {
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
     /// MySQL database name.
-    pub database_name: String,
+    pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
     pub target: Target,
     /// The duration in seconds this branch database will live idling.

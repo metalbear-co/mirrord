@@ -73,7 +73,7 @@ pub struct DatabaseBranchConfig {
     pub id: Option<String>,
 
     /// Name of the database
-    pub name: String,
+    pub name: Option<String>,
 
     /// The time-to-live (TTL) for the branch database, in seconds.
     #[serde(default = "default_ttl_secs")]
