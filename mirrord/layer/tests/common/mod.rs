@@ -442,6 +442,8 @@ impl TestIntProxy {
     }
 
     /// Handles an app trying to call `libc::rename` on a path.
+    ///
+    /// Both `old_path` and `new_path` go through the agent.
     pub async fn expect_file_rename(&mut self, old_path: &str, new_path: &str) {
         // Verify the app tries to rename the expected file.
         assert_eq!(

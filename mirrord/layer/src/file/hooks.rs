@@ -1171,11 +1171,25 @@ pub(crate) unsafe extern "C" fn rename_detour(
         .map(|()| 0)
         .unwrap_or_bypass_with(|bypass| {
             if let Bypass::IgnoredFiles(old, new) = bypass {
-                let old_bypass = Bypass::IgnoredFile(old);
-                let new_bypass = Bypass::IgnoredFile(new);
+                let (old_path, _old) = if let Some(old) = old {
+                    let old_bypass = Bypass::IgnoredFile(old);
+                    (
+                        update_ptr_from_bypass(old_path, &old_bypass),
+                        Some(old_bypass),
+                    )
+                } else {
+                    (old_path, None)
+                };
 
-                let old_path = update_ptr_from_bypass(old_path, &old_bypass);
-                let new_path = update_ptr_from_bypass(new_path, &new_bypass);
+                let (new_path, _new) = if let Some(new) = new {
+                    let new_bypass = Bypass::IgnoredFile(new);
+                    (
+                        update_ptr_from_bypass(new_path, &new_bypass),
+                        Some(new_bypass),
+                    )
+                } else {
+                    (new_path, None)
+                };
 
                 unsafe { FN_RENAME(old_path, new_path) }
             } else {

@@ -825,7 +825,13 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
         (
             Detour::Bypass(Bypass::IgnoredFile(old_path)),
             Detour::Bypass(Bypass::IgnoredFile(new_path)),
-        ) => Detour::Bypass(Bypass::IgnoredFiles(old_path, new_path)),
+        ) => Detour::Bypass(Bypass::IgnoredFiles(Some(old_path), Some(new_path))),
+        (Detour::Bypass(Bypass::IgnoredFile(old_path)), Detour::Success(..)) => {
+            Detour::Bypass(Bypass::IgnoredFiles(Some(old_path), None))
+        }
+        (Detour::Success(..), Detour::Bypass(Bypass::IgnoredFile(new_path))) => {
+            Detour::Bypass(Bypass::IgnoredFiles(None, Some(new_path)))
+        }
         (old, new) => Detour::Success((old?, new?)),
     }?;
 
