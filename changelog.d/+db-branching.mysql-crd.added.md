@@ -1,0 +1,1 @@
+Introduced `MysqlBranchDatabase` CRD.
