@@ -182,6 +182,7 @@ impl Operator {
             image,
             sqs_splitting,
             kafka_splitting,
+            mysql_branching,
             application_auto_pause,
         );
 
@@ -346,6 +347,7 @@ impl OperatorDeployment {
         image: String,
         sqs_splitting: bool,
         kafka_splitting: bool,
+        mysql_branching: bool,
         application_auto_pause: bool,
     ) -> Self {
         let mut envs = vec![
@@ -429,6 +431,14 @@ impl OperatorDeployment {
         if kafka_splitting {
             envs.push(EnvVar {
                 name: "OPERATOR_KAFKA_SPLITTING".into(),
+                value: Some("true".into()),
+                value_from: None,
+            });
+        }
+
+        if mysql_branching {
+            envs.push(EnvVar {
+                name: "OPERATOR_MYSQL_BRANCHING".into(),
                 value: Some("true".into()),
                 value_from: None,
             });
