@@ -447,6 +447,30 @@ impl TestIntProxy {
             .unwrap();
     }
 
+    /// Handles an app trying to call `libc::rename` on a path.
+    ///
+    /// Both `old_path` and `new_path` go through the agent.
+    pub async fn expect_file_rename(&mut self, old_path: &str, new_path: &str) {
+        // Verify the app tries to rename the expected file.
+        assert_eq!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::Rename(
+                mirrord_protocol::file::RenameRequest {
+                    old_path: old_path.to_string().into(),
+                    new_path: new_path.to_string().into(),
+                }
+            ))
+        );
+
+        // Answer rename.
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Rename(
+                Ok(()),
+            )))
+            .await
+            .unwrap();
+    }
+
     /// Like the other expect_file_open_... but where we don't compare to predefined open options.
     pub async fn expect_file_open_with_whatever_options(&mut self, file_name: &str, fd: u64) {
         // Verify the app tries to open the expected file.
@@ -875,6 +899,7 @@ pub enum Application {
     /// Go app that only checks whether Linux pidfd syscalls are supported.
     Go23Issue2988,
     NodeMakeConnections,
+    NodeIssue3456,
 }
 
 impl Application {
@@ -910,9 +935,10 @@ impl Application {
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
-            Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
-                String::from("node")
-            }
+            Application::NodeHTTP
+            | Application::NodeIssue2283
+            | Application::NodeIssue2807
+            | Application::NodeIssue3456 => String::from("node"),
             Application::JavaTemurinSip => format!(
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
                 std::env::var("HOME").unwrap(),
@@ -1108,6 +1134,10 @@ impl Application {
                 app_path.push("fileops.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeIssue3456 => {
+                app_path.push("issue3456.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::NodeSpawn => {
                 app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
@@ -1235,6 +1265,7 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeIssue2903
+            | Application::NodeIssue3456
             | Application::BashShebang
             | Application::Fork
             | Application::ReadLink

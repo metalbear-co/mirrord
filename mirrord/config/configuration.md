@@ -584,9 +584,22 @@ Enables exec hooks on Linux. Enable Linux hooks can fix issues when the applicat
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
 
+### _experimental_ force_hook_connect {#experimental-force_hook_connect}
+
+Forces hooking all instances of the connect function.
+In very niche cases the connect function has multiple exports and this flag
+makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
+
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
 Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
+
+### _experimental_ hook_rename {#experimental-hook_rename}
+
+Enables hooking the `rename` function.
+
+Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
+`twig`, to create and rename temporary files.
 
 ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
 
@@ -637,7 +650,7 @@ Uses /dev/null for creating local fake files (should be better than using /tmp)
 ### _experimental_ vfork_emulation {#experimental-vfork_emulation}
 
 Enables vfork emulation within the mirrord-layer.
-Might solve rare stack corruption issues.  
+Might solve rare stack corruption issues.
 
 Note that for Go applications on ARM64, this feature is not yet supported,
 and this setting is ignored.
@@ -727,7 +740,7 @@ on process execution, delaying the layer startup and connection to the external 
 Controls mirrord features.
 
 See the
-[technical reference, Technical Reference](https://metalbear.co/mirrord/docs/reference/)
+[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)
 to learn more about what each feature does.
 
 The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options
@@ -780,7 +793,7 @@ have support for a shortened version, that you can see [here](#root-shortened).
 ## feature.copy_target {#feature-copy_target}
 
 Creates a new copy of the target. mirrord will use this copy instead of the original target
-(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.co/mirrord/docs/overview/teams/?utm_source=copytarget).
+(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
 
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
@@ -821,7 +834,7 @@ Can be set to one of the options:
 Which environment variables to load from the remote pod are controlled by setting either
 [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 
-See the environment variables [reference](https://metalbear.co/mirrord/docs/reference/env/) for more details.
+See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
 
 ```json
 {
@@ -973,7 +986,7 @@ The logic for choosing the behavior is as follows:
 4. If none of the above match, use the default behavior (mode).
 
 For more information, check the file operations
-[technical reference](https://metalbear.co/mirrord/docs/reference/fileops/).
+[technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
 
 ```json
 {
@@ -1056,7 +1069,7 @@ Should mirrord return the hostname of the target pod when calling `gethostname`
 
 Controls mirrord network operations.
 
-See the network traffic [reference](https://metalbear.co/mirrord/docs/reference/traffic/)
+See the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic/)
 for more details.
 
 ```json
@@ -1168,7 +1181,7 @@ Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
 
 Controls the incoming TCP traffic feature.
 
-See the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more
+See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more
 details.
 
 Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
@@ -1648,7 +1661,7 @@ or connects to other services over IPv6.
 
 Tunnel outgoing network operations through mirrord.
 
-See the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more
+See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more
 details.
 
 You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.

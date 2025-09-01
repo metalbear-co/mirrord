@@ -46,15 +46,20 @@ use crate::{
     },
     hooks::HookManager,
     replace,
+    setup::LayerSetup,
 };
 
 #[cfg(target_os = "macos")]
 #[allow(non_camel_case_types)]
 type stat64 = stat;
 
-/// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
-/// a different one according to the bypass.
+/// Take the original raw c_char pointer and a resulting bypass, and return either the original
+/// pointer or a different one according to the bypass.
+///
 /// We pass reference to bypass to make sure the bypass lives with the pointer.
+///
+/// When we're dealing with [`Bypass::RelativePath`] or [`Bypass::IgnoredFile`], and `fs.mapping` is
+/// being used, this means that we return the remapped path.
 fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char {
     match bypass {
         // For some reason, the program is trying to carry out an operation on a path that is
@@ -1156,6 +1161,43 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
     }
 }
 
+/// Hook for [`rename`](https://www.gnu.org/software/libc/manual/html_node/Renaming-Files.html).
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn rename_detour(
+    old_path: *const c_char,
+    new_path: *const c_char,
+) -> c_int {
+    rename(old_path.checked_into(), new_path.checked_into())
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|bypass| {
+            if let Bypass::IgnoredFiles(old, new) = bypass {
+                let (old_path, _old) = if let Some(old) = old {
+                    let old_bypass = Bypass::IgnoredFile(old);
+                    (
+                        update_ptr_from_bypass(old_path, &old_bypass),
+                        Some(old_bypass),
+                    )
+                } else {
+                    (old_path, None)
+                };
+
+                let (new_path, _new) = if let Some(new) = new {
+                    let new_bypass = Bypass::IgnoredFile(new);
+                    (
+                        update_ptr_from_bypass(new_path, &new_bypass),
+                        Some(new_bypass),
+                    )
+                } else {
+                    (new_path, None)
+                };
+
+                unsafe { FN_RENAME(old_path, new_path) }
+            } else {
+                unsafe { FN_RENAME(old_path, new_path) }
+            }
+        })
+}
+
 fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
@@ -1332,7 +1374,7 @@ pub(crate) unsafe extern "C" fn unlinkat_detour(
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
+pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &LayerSetup) {
     unsafe {
         replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
         replace!(hook_manager, "open64", open64_detour, FnOpen64, FN_OPEN64);
@@ -1479,6 +1521,10 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnRealpath_darwin_extsn,
             FN_REALPATH_DARWIN_EXTSN
         );
+
+        if state.experimental().hook_rename {
+            replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
+        }
 
         #[cfg(target_os = "linux")]
         {
