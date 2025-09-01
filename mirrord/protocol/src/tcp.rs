@@ -578,7 +578,7 @@ impl<B: fmt::Debug> fmt::Debug for InternalHttpResponse<B> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone)]
 pub struct InternalHttpBody(pub VecDeque<InternalHttpBodyFrame>);
 
 impl InternalHttpBody {
@@ -610,6 +610,14 @@ impl Body for InternalHttpBody {
 
     fn is_end_stream(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl fmt::Debug for InternalHttpBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("InternalHttpBody")
+            .field(&format_args!("{} frames", self.0.len()))
+            .finish()
     }
 }
 

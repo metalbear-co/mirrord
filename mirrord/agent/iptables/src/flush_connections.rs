@@ -6,6 +6,8 @@
 //! Flush connections overcomes this by marking all existing connections of a specific port,
 //! and adding a rule that marked connections will be rejected.
 
+use std::ops::Not;
+
 use async_trait::async_trait;
 use tokio::process::Command;
 use tracing::{Level, warn};
@@ -32,6 +34,9 @@ where
     }
 }
 
+/// Contained in `conntract -D` command stderr when there is no entry to drop.
+const NO_ENTRIES_DELETED_MESSAGE: &[u8] = b"0 flow entries have been deleted";
+
 #[async_trait]
 impl<T> Redirect for FlushConnections<T>
 where
@@ -55,7 +60,7 @@ where
 
         // Update existing connections of specific port to be marked
         // so that they will be rejected by the rule we added in `create`
-        let conntrack = Command::new("conntrack")
+        let conntrack_output = Command::new("conntrack")
             .args([
                 "-D",
                 "-p",
@@ -68,20 +73,33 @@ where
             .output()
             .await?;
 
-        if !conntrack.status.success() && conntrack.status.code() != Some(256) {
-            warn!("`conntrack` output is {conntrack:#?}");
+        if conntrack_output.status.success().not()
+            && conntrack_output
+                .stderr
+                .windows(NO_ENTRIES_DELETED_MESSAGE.len())
+                .any(|window| window == NO_ENTRIES_DELETED_MESSAGE)
+                .not()
+        {
+            warn!(
+                ?conntrack_output,
+                redirected_port,
+                "Failed to flush existing connections with a `conntrack -D` command",
+            );
         }
 
         // ss is available from kernel 5.1 and should work way better than conntrack
         let formatted_port = format!(":{}", redirected_port);
 
-        let ss = Command::new("ss")
+        let ss_output = Command::new("ss")
             .args(["-K", "sport", "=", &formatted_port])
             .output()
             .await?;
 
-        if !ss.status.success() {
-            warn!("`ss` output is {ss:#?}");
+        if ss_output.status.success().not() {
+            warn!(
+                ?ss_output,
+                redirected_port, "Failed to flush existing connections with an `ss -K` command",
+            );
         }
 
         Ok(())

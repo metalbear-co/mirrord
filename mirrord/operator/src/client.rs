@@ -355,7 +355,7 @@ where
         let Some(days_until_expiration) =
             self.operator.spec.license.expire_at.days_until_expiration()
         else {
-            let no_license_message = "No valid license found for mirrord for Teams. Visit https://app.metalbear.co to purchase or renew your license";
+            let no_license_message = "No valid license found for mirrord for Teams. Visit https://app.metalbear.com to purchase or renew your license";
             progress.warning(no_license_message);
             tracing::warn!(no_license_message);
 
