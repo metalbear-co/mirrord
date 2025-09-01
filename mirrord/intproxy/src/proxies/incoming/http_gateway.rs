@@ -598,7 +598,7 @@ mod test {
                 port: 80,
                 internal_request: InternalHttpRequest {
                     method: Method::GET,
-                    uri: "dummyecho://metalbear.co/mirrord/".parse().unwrap(),
+                    uri: "dummyecho://metalbear.com/mirrord/".parse().unwrap(),
                     headers: [
                         (CONNECTION, HeaderValue::from_static("upgrade")),
                         (UPGRADE, HeaderValue::from_static(TEST_PROTO)),
