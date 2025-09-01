@@ -8,6 +8,7 @@ use rstest::rstest;
 mod common;
 
 pub use common::*;
+use tempfile::NamedTempFile;
 
 /// Verify that issue [#3456](https://github.com/metalbear-co/mirrord/issues/3456) properly hooks `rename`.
 #[rstest]
@@ -17,9 +18,9 @@ async fn test_issue3456(
     #[values(Application::NodeIssue3456)] application: Application,
     dylib_path: &Path,
 ) {
-    let dir = tempfile::tempdir().unwrap();
-    let file_id = rand::random::<u64>();
-    let config_path = dir.path().join(format!("{file_id:X}.json"));
+    use std::io::Write;
+
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
 
     let config = serde_json::json!({
         "experimental": {
@@ -32,13 +33,13 @@ async fn test_issue3456(
             }
         }
     });
-
-    tokio::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
-        .await
-        .expect("failed to saving layer config to tmp file");
+    config_file
+        .as_file_mut()
+        .write_all(config.to_string().as_bytes())
+        .unwrap();
 
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, Default::default(), Some(&config_path))
+        .start_process_with_layer(dylib_path, Default::default(), Some(config_file.path()))
         .await;
 
     intproxy
