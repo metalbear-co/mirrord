@@ -137,12 +137,12 @@ impl IntproxySidecar {
 
             sidecar_command.add_volume(
                 client_pem_path,
-                &config.container.container_tls_path.to_string_lossy(),
+                &config.container.cli_tls_path.to_string_lossy(),
                 true,
             );
             AgentConnectInfo::ExternalProxy {
                 proxy_addr: extproxy_addr,
-                tls_pem: Some(config.container.container_tls_path.clone()),
+                tls_pem: Some(config.container.cli_tls_path.clone()),
             }
         } else {
             AgentConnectInfo::ExternalProxy {
