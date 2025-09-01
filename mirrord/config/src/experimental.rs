@@ -113,8 +113,28 @@ pub struct ExperimentalConfig {
     ///
     /// Note that for Go applications on ARM64, this feature is not yet supported,
     /// and this setting is ignored.
-    #[config(default = false)]
+    #[config(default = true)]
     pub vfork_emulation: bool,
+
+    /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
+    ///
+    /// Whether to terminate the session when a permission denied error
+    /// occurs during DNS resolution. This error often means that the Kubernetes cluster is
+    /// hardened, and the mirrord-agent is not fully functional without `agent.privileged`
+    /// enabled.
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub dns_permission_error_fatal: Option<bool>,
+
+    /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
+    ///
+    /// Forces hooking all instances of the connect function.
+    /// In very niche cases the connect function has multiple exports and this flag
+    /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
+    #[config(default = false)]
+    pub force_hook_connect: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -131,5 +151,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
         analytics.add("vfork_emulation", self.vfork_emulation);
+        if let Some(dns_permission_error_fatal) = self.dns_permission_error_fatal {
+            analytics.add("dns_permission_error_fatal", dns_permission_error_fatal);
+        }
+        analytics.add("force_hook_connect", self.force_hook_connect);
     }
 }

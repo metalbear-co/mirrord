@@ -59,6 +59,38 @@ fn get_mirrord_console_addr() -> Option<String> {
     }
 }
 
+/// Resolves the architecture-specific library path based on the platform configuration.
+///
+/// When a platform is specified (e.g., "linux/amd64"), this function returns the
+/// architecture-specific path within the multi-architecture container.
+/// If no platform is specified, returns the default path.
+fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
+    if let Some(path) = &config.container.cli_image_lib_path {
+        return Ok(path.clone());
+    }
+
+    if let Some(platform) = &config.container.platform {
+        // Extract architecture from platform string (e.g., "linux/amd64" -> "amd64")
+        let arch = platform
+            .split('/')
+            .next_back()
+            .ok_or_else(|| ContainerError::UnsupportedPlatform(platform.clone()))?;
+        let arch_suffix = match arch {
+            "amd64" | "x86_64" => "x86_64",
+            "arm64" | "aarch64" => "aarch64",
+            _ => Err(ContainerError::UnsupportedPlatform(arch.to_string()))?,
+        };
+
+        // Return architecture-specific path
+        return Ok(format!(
+            "/opt/mirrord/lib/{}/libmirrord_layer.so",
+            arch_suffix
+        ));
+    }
+
+    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_string())
+}
+
 /// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.
 ///
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
@@ -143,11 +175,13 @@ async fn prepare_proxies<P: Progress>(
     // Add the layer file to the user application container.
     runtime_command.add_volumes_from(sidecar.container_id());
     // Inject the layer into the user application.
-    runtime_command.add_env(
-        LINUX_INJECTION_ENV_VAR,
-        &config.container.cli_image_lib_path,
-    );
+    runtime_command.add_env(LINUX_INJECTION_ENV_VAR, &resolve_library_path(config)?);
     runtime_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
+
+    // Add platform specification if configured
+    if let Some(platform) = &config.container.platform {
+        runtime_command.add_platform(platform);
+    }
 
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
     let intproxy_logs_pipe =

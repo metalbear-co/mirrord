@@ -73,7 +73,7 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 /// 4. If none of the above match, use the default behavior (mode).
 ///
 /// For more information, check the file operations
-/// [technical reference](https://metalbear.co/mirrord/docs/reference/fileops/).
+/// [technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
 ///
 /// ```json
 /// {

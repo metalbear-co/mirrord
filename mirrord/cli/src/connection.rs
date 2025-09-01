@@ -132,37 +132,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         ));
     }
 
-    if config.feature.copy_target.enabled {
-        return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
-    }
-
-    match (
-        // user in mutipod without operator
-        matches!(
-            config.target,
-            mirrord_config::target::TargetConfig {
-                path: Some(
-                    mirrord_config::target::Target::Deployment { .. }
-                        | mirrord_config::target::Target::Rollout(..)
-                ),
-                ..
-            }
-        ),
-        // user using http filter(s) without operator
-        config.feature.network.incoming.http_filter.is_filter_set(),
-    ) {
-        (true, true) => {
-            // only show user one of the two msgs - each user should always be shown same msg
-            if user_persistent_random_message_select() {
-                show_multipod_warning(progress)?
-            } else {
-                show_http_filter_warning(progress)?
-            }
-        }
-        (true, false) => show_multipod_warning(progress)?,
-        (false, true) => show_http_filter_warning(progress)?,
-        _ => (),
-    };
+    process_config_oss(config, progress)?;
 
     let k8s_api = KubernetesAPI::create(config, progress)
         .await
@@ -207,6 +177,49 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     ))
 }
 
+/// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
+/// operator.
+fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -> CliResult<()> {
+    if config.feature.copy_target.enabled {
+        return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
+    }
+
+    match (
+        // user in mutipod without operator
+        matches!(
+            config.target,
+            mirrord_config::target::TargetConfig {
+                path: Some(
+                    mirrord_config::target::Target::Deployment { .. }
+                        | mirrord_config::target::Target::Rollout(..)
+                ),
+                ..
+            }
+        ),
+        // user using http filter(s) without operator
+        config.feature.network.incoming.http_filter.is_filter_set(),
+    ) {
+        (true, true) => {
+            // only show user one of the two msgs - each user should always be shown same msg
+            if user_persistent_random_message_select() {
+                show_multipod_warning(progress)?
+            } else {
+                show_http_filter_warning(progress)?
+            }
+        }
+        (true, false) => show_multipod_warning(progress)?,
+        (false, true) => show_http_filter_warning(progress)?,
+        _ => (),
+    };
+
+    config.experimental.dns_permission_error_fatal = config
+        .experimental
+        .dns_permission_error_fatal
+        .or(Some(true));
+
+    Ok(())
+}
+
 fn user_persistent_random_message_select() -> bool {
     mid::get("mirrord")
         .inspect_err(|error| tracing::error!(%error, "failed to obtain machine ID"))
@@ -234,11 +247,11 @@ where
                 let mut actions = HashSet::new();
                 actions.insert(IdeAction::Link {
                     label: "Get started (read the docs)".to_string(),
-                    link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
+                    link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
                 });
                 actions.insert(IdeAction::Link {
                     label: "Try it now".to_string(),
-                    link: "https://app.metalbear.co/".to_string(),
+                    link: "https://app.metalbear.com/".to_string(),
                 });
 
                 actions
@@ -247,7 +260,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
@@ -264,11 +277,11 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Get started (read the docs)".to_string(),
-                link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
+                link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
             });
             actions.insert(IdeAction::Link {
                 label: "Try it now".to_string(),
-                link: "https://app.metalbear.co/".to_string(),
+                link: "https://app.metalbear.com/".to_string(),
             });
 
             actions
@@ -277,6 +290,6 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
 }

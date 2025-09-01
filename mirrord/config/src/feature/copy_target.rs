@@ -12,15 +12,54 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 
+/// ## feature.copy_target {#copy_target}
+///
+/// Allows the user to target a pod created dynamically from the original [`target`](#target).
+/// The new pod inherits most of the original target's specification, e.g. labels.
+///
+/// See the [copy target reference](https://metalbear.com/mirrord/docs/reference/copy-target/)
+/// for more details.
+///
+/// ### Minimal `copy_target` config {#copy_target-minimal}
+///
+/// ```json
+/// {
+///   "feature": {
+///     "copy_target": true
+///   }
+/// }
+/// ```
+///
+/// ### Advanced `copy_target` config {#copy_target-advanced}
+///
+/// ```json
+/// {
+///   "feature": {
+///     "copy_target": {
+///       "enabled": true,
+///       "scale_down": true,
+///       "exclude_containers": ["my-container"],
+///       "exclude_init_containers": ["my-init-container"]
+///     }
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged, deny_unknown_fields)]
 pub enum CopyTargetFileConfig {
+    /// Basic configuration that controls whether copy target is enabled (default false).
     Simple(bool),
+
+    /// Allows the user to specify both enabling copy target and additional configuration options.
     Advanced {
+        /// Whether copy target is enabled
         enabled: Option<bool>,
+        /// Scale down the target deployment to 0 for the time the copied pod is alive
         scale_down: Option<bool>,
+        /// List of containers to be ignored by copy_target
         exclude_containers: Option<Vec<String>>,
+        /// List of init containers to be ignored by copy_target
         exclude_init_containers: Option<Vec<String>>,
     },
 }
@@ -63,28 +102,7 @@ impl FromMirrordConfig for CopyTargetConfig {
     type Generator = CopyTargetFileConfig;
 }
 
-/// Allows the user to target a pod created dynamically from the original [`target`](#target).
-/// The new pod inherits most of the original target's specification, e.g. labels.
-///
-/// ```json
-/// {
-///   "feature": {
-///     "copy_target": {
-///       "scale_down": true,
-///       "exclude_containers": ["my-container"],
-///       "exclude_init_containers": ["my-init-container"]
-///     }
-///   }
-/// }
-/// ```
-///
-/// ```json
-/// {
-///   "feature": {
-///     "copy_target": true
-///   }
-/// }
-/// ```
+/// Generated configuration for copy target feature.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CopyTargetConfig {
     pub enabled: bool,

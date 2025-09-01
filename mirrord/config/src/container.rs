@@ -49,10 +49,7 @@ pub struct ContainerConfig {
     /// ### container.cli_image_lib_path {#container-cli_image}
     ///
     /// Path of the mirrord-layer lib inside the specified mirrord-cli image.
-    ///
-    /// Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
-    #[config(default = "/opt/mirrord/lib/libmirrord_layer.so")]
-    pub cli_image_lib_path: String,
+    pub cli_image_lib_path: Option<String>,
 
     /// ### container.override_host_ip {#container-override_host_ip}
     ///
@@ -79,10 +76,28 @@ pub struct ContainerConfig {
 
     /// ### container.cli_tls_path {#container-container_tls_path}
     ///
-    /// When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you can specify the
-    /// path where the certificate `.pem` file will be created, in the cli container.
+    /// When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you
+    /// can specify the path where the certificate `.pem` file will be created, in the cli
+    /// container.
     ///
     /// Defaults to `"/mirrord/mirrord-tls.pem"`.
     #[config(default = PathBuf::from(r"/opt/mirrord/tls/mirrord-tls.pem"))]
     pub cli_tls_path: PathBuf,
+
+    /// ### container.platform {#container-platform}
+    ///
+    /// Platform specification for the target container (e.g., "linux/amd64", "linux/arm64").
+    ///
+    /// When specified, the target container will run with this platform, while the internal proxy
+    /// container will still run on the native platform and contain both architectures (x64/arm64).
+    /// The LD_PRELOAD will automatically use the correct architecture.
+    ///
+    /// ```json
+    /// {
+    ///   "container": {
+    ///     "platform": "linux/amd64"
+    ///   }
+    /// }
+    /// ```
+    pub platform: Option<String>,
 }
