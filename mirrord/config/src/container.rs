@@ -77,12 +77,12 @@ pub struct ContainerConfig {
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
 
-    /// ### container.container_tls_path {#container-container_tls_path}
+    /// ### container.cli_tls_path {#container-container_tls_path}
     ///
-    /// When using TLS with `mirrord container` (TLS is enabled by default), you can specify the
-    /// path where the certificate `.pem` file will be created, in the container.
+    /// When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you can specify the
+    /// path where the certificate `.pem` file will be created, in the cli container.
     ///
     /// Defaults to `"/mirrord/mirrord-tls.pem"`.
-    #[config(default = PathBuf::from(r"/mirrord/mirrord-tls.pem"))]
-    pub container_tls_path: PathBuf,
+    #[config(default = PathBuf::from(r"/opt/mirrord/tls/mirrord-tls.pem"))]
+    pub cli_tls_path: PathBuf,
 }
