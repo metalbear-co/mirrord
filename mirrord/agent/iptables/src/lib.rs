@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    ops::Not,
     sync::{Arc, LazyLock, OnceLock},
 };
 
@@ -313,7 +314,11 @@ where
 ///
 /// If `nftables` is [`None`], this function will choose between legacy and nftables:
 /// 1. If mesh rules are found with `ip[6]tables-nft`, `ip[6]tables-nft` wrapper will be returned.
-/// 2. Otherwise, `ip[6]tables-legacy` wrapper will be returned.
+/// 2. Otherwise, if mesh rules are found with `ip[6]tables-legacy`, `ip[6]tables-legacy` wrapper
+///    will be returned.
+/// 3. Otherwise, `ip[6]tables-legacy` is able to add a dummy rule into "nat" table,
+///    `ip[6]tables-legacy` wrapper will be returned.
+/// 4. Otherwise, `ip[6]tables-nft` wrapper will be returned.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     /// Whether we should use ip6tables-nft when no backend is explicitly configured,
     ///
@@ -346,31 +351,72 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
             .into();
     }
 
-    let nft_wrapper = get_iptables(Some(true), ip6);
-    let nft_mesh = MeshVendor::detect(&nft_wrapper).inspect_err(|error| {
+    let legacy = get_iptables(Some(false), ip6);
+    let nft = get_iptables(Some(true), ip6);
+
+    let nft_mesh = MeshVendor::detect(&nft).inspect_err(|error| {
         tracing::warn!(
             %error,
-            command = nft_wrapper.tables.cmd,
-            "Failed to detect mesh rules with nftables, \
-            assuming no mesh rules and falling back to legacy iptables.",
+            command = nft.tables.cmd,
+            "Failed to detect mesh rules with iptables-nft, assuming no mesh rules.",
         );
     });
+    let nft_mesh_detected = nft_mesh.as_ref().is_ok_and(Option::is_some);
+    if nft_mesh_detected {
+        tracing::info!(
+            cmd = nft.tables.cmd,
+            detect_mesh_result = ?nft_mesh,
+            "Using iptables-nft backend picked based on mesh rules detection."
+        );
+        let _ = detected_nftables.set(true);
+        return nft;
+    }
 
-    let nft_rules_present = nft_mesh.as_ref().is_ok_and(Option::is_some);
-    let _ = detected_nftables.set(nft_rules_present);
-    let wrapper = if nft_rules_present {
-        nft_wrapper
+    let legacy_mesh = MeshVendor::detect(&legacy).inspect_err(|error| {
+        tracing::warn!(
+            %error,
+            command = nft.tables.cmd,
+            "Failed to detect mesh rules with iptables-legacy, assuming no mesh rules.",
+        );
+    });
+    let legacy_mesh_detected = legacy_mesh.as_ref().is_ok_and(Option::is_some);
+    if legacy_mesh_detected {
+        tracing::info!(
+            cmd = legacy.tables.cmd,
+            detect_mesh_result = ?legacy_mesh,
+            "Using iptables-legacy backend picked based on mesh rules detection."
+        );
+        let _ = detected_nftables.set(false);
+        return legacy;
+    }
+
+    let legacy_works = legacy
+        .tables
+        .append("nat", "INPUT", "-p 255 -j DROP")
+        .inspect_err(|error| {
+            tracing::debug!(
+                %error,
+                command = legacy.tables.cmd,
+                "Failed to add a dummy rule using iptables-legacy binary, \
+                assuming no kernel support for it.",
+            )
+        })
+        .is_ok();
+    let _ = detected_nftables.set(legacy_works.not());
+    if legacy_works {
+        let _ = legacy.tables.delete("nat", "INPUT", "-p 255 -j DROP")
+            .inspect_err(|error| {
+                tracing::error!(
+                    %error,
+                    command = legacy.tables.cmd,
+                    "Failed to delete a dummy rule added when checking kernel support for iptables-legacy. \
+                    The rule should not affect any traffic."
+                )
+            });
+        legacy
     } else {
-        get_iptables(Some(false), ip6)
-    };
-
-    tracing::info!(
-        cmd = wrapper.tables.cmd,
-        detect_mesh_in_nft_result = ?nft_mesh,
-        "Using iptables backend picked based on mesh rules detection."
-    );
-
-    wrapper
+        nft
+    }
 }
 
 #[cfg(test)]
