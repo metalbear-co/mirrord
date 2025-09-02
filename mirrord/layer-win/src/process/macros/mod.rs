@@ -8,7 +8,8 @@
 macro_rules! wait_for_debug {
     () => {{
         unsafe {
-            while winapi::um::debugapi::IsDebuggerPresent() == 0 {
+            use winapi::shared::ntdef::FALSE;
+            while winapi::um::debugapi::IsDebuggerPresent() == FALSE as i32 {
                 // must busy-wait for the debugger and not sleep
                 // winapi::um::synchapi::Sleep(0);
             }

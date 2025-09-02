@@ -8,7 +8,7 @@ use winapi::{
     um::winnt::{ACCESS_MASK, HANDLE},
 };
 
-use crate::{apply_hook, layer_config};
+use crate::apply_hook;
 
 // https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1890
 type NtCreateProcessType = unsafe extern "system" fn(
@@ -74,9 +74,9 @@ unsafe extern "system" fn nt_create_process_ex_hook(
     reserved: ULONG,
 ) -> NTSTATUS {
     // Configuration check for future use
-    let _env_enabled = &layer_config().feature.env;
-    let _fs_enabled = &layer_config().feature.fs;
-    let _network_enabled = &layer_config().feature.network;
+    let _env_enabled = &crate::layer_setup().layer_config().feature.env;
+    let _fs_enabled = &crate::layer_setup().layer_config().feature.fs;
+    let _network_enabled = &crate::layer_setup().layer_config().feature.network;
 
     // TODO: Implement process creation interception based on configuration
     // For now, call the original function

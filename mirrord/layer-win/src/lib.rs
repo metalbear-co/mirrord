@@ -9,7 +9,7 @@ use std::{
 };
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
+use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 use mirrord_layer_lib::ProxyConnection;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
@@ -19,6 +19,7 @@ use winapi::{
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{hooks::initialize_hooks, setup::LayerSetup};
 
@@ -33,16 +34,8 @@ mod socket;
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 static INIT_THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-/// Global configuration for the layer
-static CONFIG: OnceLock<LayerConfig> = OnceLock::new();
-
 /// Global setup for the layer (outgoing selector, DNS selector, etc.)
 static SETUP: OnceLock<LayerSetup> = OnceLock::new();
-
-/// Get access to the layer configuration
-pub fn layer_config() -> &'static LayerConfig {
-    CONFIG.get().expect("Layer configuration not initialized")
-}
 
 /// Get access to the layer setup
 pub fn layer_setup() -> &'static LayerSetup {
@@ -70,8 +63,32 @@ fn release_detour_guard() -> anyhow::Result<()> {
 
 pub(crate) static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
+/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
+/// mirrord-console or to stderr.
+fn init_tracing() {
+    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
+    } else {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                    .with_thread_ids(true)
+                    .with_writer(std::io::stderr)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .pretty(),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    };
+}
+
 fn initialize_proxy_connection() -> anyhow::Result<()> {
-    // Try to parse `SocketAddr` from [`MIMRRORD_LAYER_INTPROXY_ADDR`] environment variable.
+
+    init_tracing();
+
+    // Try to parse `SocketAddr` from [`MIRRORD_LAYER_INTPROXY_ADDR`] environment variable.
     let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
         .map_err(error::Error::MissingEnvIntProxyAddr)?
         .parse::<SocketAddr>()
@@ -81,12 +98,8 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
     let config = mirrord_config::util::read_resolved_config()
         .map_err(|e| anyhow::anyhow!("Failed to read mirrord configuration: {}", e))?;
 
-    CONFIG
-        .set(config.clone())
-        .map_err(|_| anyhow::anyhow!("Configuration already initialized"))?;
-
     // Initialize layer setup with the configuration
-    let setup = LayerSetup::new(&config);
+    let setup = LayerSetup::new(config);
     SETUP
         .set(setup)
         .map_err(|_| anyhow::anyhow!("Setup already initialized"))?;
@@ -159,14 +172,6 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    // Wait for initialization thread to complete (without spawning new threads)
-    if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock()
-        && let Some(handle) = thread_handle.take()
-    {
-        // This may block but it's safer than spawning threads during detach
-        let _ = handle.join();
-    }
-
     // Release detour guard - use unwrap_or to avoid panicking during detach
     if let Err(e) = release_detour_guard() {
         eprintln!(

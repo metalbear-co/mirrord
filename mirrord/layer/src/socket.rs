@@ -3,9 +3,7 @@
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::io::RawFd;
 use std::{
-    collections::HashMap,
     net::{SocketAddr, ToSocketAddrs},
-    sync::{Arc, LazyLock, Mutex},
 };
 
 use base64::prelude::*;
@@ -43,8 +41,6 @@ pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
-
 /// Stores the [`UserSocket`]s created by the user.
 ///
 /// **Warning**: Do not put logs in here! If you try logging stuff inside this initialization
@@ -61,42 +57,8 @@ pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 /// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
 ///   they're set with the cloexec flag, so that children processes don't end up using sockets that
 ///   are exclusive for their parents.
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = LazyLock::new(|| {
-    std::env::var(SHARED_SOCKETS_ENV_VAR)
-        .ok()
-        .and_then(|encoded| {
-            BASE64_URL_SAFE
-                .decode(encoded.into_bytes())
-                .inspect_err(|error| {
-                    tracing::warn!(
-                        ?error,
-                        "failed decoding base64 value from {SHARED_SOCKETS_ENV_VAR}"
-                    )
-                })
-                .ok()
-        })
-        .and_then(|decoded| {
-            bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
-                &decoded,
-                bincode::config::standard(),
-            )
-            .inspect_err(|error| tracing::warn!(?error, "failed parsing shared sockets env value"))
-            .ok()
-        })
-        .map(|(fds_and_sockets, _)| {
-            Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
-                |(fd, socket)| {
-                    // Do not inherit sockets that are `FD_CLOEXEC`.
-                    if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
-                        Some((fd, Arc::new(socket)))
-                    } else {
-                        None
-                    }
-                },
-            )))
-        })
-        .unwrap_or_default()
-});
+// Re-export the unified SOCKETS from layer-lib
+pub(crate) use mirrord_layer_lib::socket::{SOCKETS, SHARED_SOCKETS_ENV_VAR};
 
 // Unix-specific extensions for UserSocket
 impl UserSocket {

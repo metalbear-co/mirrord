@@ -215,7 +215,7 @@ where
     tracing::debug!("{} hook called", function_name);
 
     // Check if hostname feature is enabled
-    let hostname_enabled = crate::layer_config().feature.hostname;
+    let hostname_enabled = crate::layer_setup().layer_config().feature.hostname;
     tracing::debug!(
         "{}: hostname feature enabled: {}",
         function_name,
@@ -270,7 +270,7 @@ where
     tracing::debug!("{} hook called", function_name);
 
     // Check if hostname feature is enabled
-    let hostname_enabled = crate::layer_config().feature.hostname;
+    let hostname_enabled = crate::layer_setup().layer_config().feature.hostname;
     tracing::debug!(
         "{}: hostname feature enabled: {}",
         function_name,
@@ -328,7 +328,7 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
     // Check if we should resolve this hostname remotely using the DNS selector
     let should_resolve_remotely = {
         let result = crate::layer_setup()
-            .dns_selector
+            .dns_selector()
             .should_resolve_remotely(hostname, 0);
         tracing::debug!(
             "is_remote_hostname DNS selector check for '{}': {}",
@@ -432,7 +432,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
     // Check DNS selector to determine if this should be resolved remotely
     let should_resolve_remotely = {
         let result = crate::layer_setup()
-            .dns_selector
+            .dns_selector()
             .should_resolve_remotely(&node, port);
         tracing::debug!("DNS selector check for '{}': {}", node, result);
         result

@@ -1,3 +1,6 @@
+pub mod ops;
+pub mod sockets;
+
 use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use bincode::{Decode, Encode};
@@ -13,6 +16,17 @@ use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 #[cfg(windows)]
 use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+
+// Re-export sockets module items
+pub use sockets::{SOCKETS, SocketDescriptor, SHARED_SOCKETS_ENV_VAR};
+
+// Re-export ops module items
+pub use ops::{
+    ConnectError, ConnectFn, ConnectResult, connect_outgoing, connect_outgoing_udp,
+    connect_outgoing_with_call, create_outgoing_request, is_unix_address, prepare_outgoing_address,
+    update_socket_connected_state,
+};
+
 
 /// Contains the addresses of a mirrord connected socket.
 ///
