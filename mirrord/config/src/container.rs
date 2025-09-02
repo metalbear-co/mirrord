@@ -80,7 +80,7 @@ pub struct ContainerConfig {
     /// can specify the path where the certificate `.pem` file will be created, in the cli
     /// container.
     ///
-    /// Defaults to `"/mirrord/mirrord-tls.pem"`.
+    /// Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
     #[config(default = PathBuf::from(r"/opt/mirrord/tls/mirrord-tls.pem"))]
     pub cli_tls_path: PathBuf,
 
