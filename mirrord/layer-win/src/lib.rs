@@ -20,13 +20,15 @@ use winapi::{
     },
 };
 
-use crate::hooks::initialize_hooks;
+use crate::{hooks::initialize_hooks, setup::LayerSetup};
 
 mod console;
 pub mod error;
 mod hooks;
 mod macros;
 pub mod process;
+mod setup;
+mod socket;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 static INIT_THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -34,9 +36,17 @@ static INIT_THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 /// Global configuration for the layer
 static CONFIG: OnceLock<LayerConfig> = OnceLock::new();
 
+/// Global setup for the layer (outgoing selector, DNS selector, etc.)
+static SETUP: OnceLock<LayerSetup> = OnceLock::new();
+
 /// Get access to the layer configuration
 pub fn layer_config() -> &'static LayerConfig {
     CONFIG.get().expect("Layer configuration not initialized")
+}
+
+/// Get access to the layer setup
+pub fn layer_setup() -> &'static LayerSetup {
+    SETUP.get().expect("Layer setup not initialized")
 }
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
@@ -72,8 +82,14 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to read mirrord configuration: {}", e))?;
 
     CONFIG
-        .set(config)
+        .set(config.clone())
         .map_err(|_| anyhow::anyhow!("Configuration already initialized"))?;
+
+    // Initialize layer setup with the configuration
+    let setup = LayerSetup::new(&config);
+    SETUP
+        .set(setup)
+        .map_err(|_| anyhow::anyhow!("Setup already initialized"))?;
 
     // Create session request with Windows-specific process info
     let process_info = mirrord_intproxy_protocol::ProcessInfo {
@@ -116,6 +132,12 @@ fn initialize_proxy_connection() -> anyhow::Result<()> {
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
+        println!("Checking for debugger...");
+        wait_for_debug!();
+        unsafe { DebugBreak() };
+    }
+
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let handle = thread::spawn(|| {
         mirrord_start().expect("Failed call to mirrord_start");
@@ -153,6 +175,9 @@ fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
         );
     }
 
+    // Note: PROXY_CONNECTION is OnceLock and will be cleaned up automatically
+    // when the process exits. The underlying TcpStream will close properly.
+
     TRUE
 }
 
@@ -183,12 +208,6 @@ fn mirrord_start() -> anyhow::Result<()> {
     }
 
     println!("Console initialized");
-
-    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
-        println!("Checking for debugger...");
-        wait_for_debug!();
-        unsafe { DebugBreak() };
-    }
 
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");

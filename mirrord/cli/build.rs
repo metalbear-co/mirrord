@@ -1,10 +1,9 @@
-use std::process::exit;
 #[cfg(target_os = "windows")]
 use std::path::Path;
+use std::process::exit;
 
 #[cfg(target_os = "macos")]
-fn recheck_and_setup_layer_file()
-{
+fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
         println!(
@@ -15,13 +14,16 @@ fn recheck_and_setup_layer_file()
 }
 
 #[cfg(target_os = "windows")]
-fn recheck_and_setup_layer_file()
-{
+fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE");
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        let out_dir_env = std::env::var("OUT_DIR").expect("Failed getting OUT_DIR from environment");
+        let out_dir_env =
+            std::env::var("OUT_DIR").expect("Failed getting OUT_DIR from environment");
         let out_dir = Path::new(&out_dir_env);
-        let build_dir = out_dir.ancestors().nth(3).expect("Failed extracting build directory from OUT_DIR");
+        let build_dir = out_dir
+            .ancestors()
+            .nth(3)
+            .expect("Failed extracting build directory from OUT_DIR");
         let layer = build_dir.join("layer_win.dll");
 
         println!(

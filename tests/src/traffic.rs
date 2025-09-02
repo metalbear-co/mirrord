@@ -91,7 +91,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -462,7 +461,7 @@ mod traffic_tests {
             .recv(&mut buf)
             .expect("Failed to receive UDP message within timeout");
         assert_eq!(amt, 28);
-        assert_eq!(&buf[..amt], "Can I pass the test please?".as_bytes()); // Sure you can.
+        assert_eq!(&buf[..amt], "Can I pass the test please?\n".as_bytes()); // Sure you can.
 
         let res = process.wait().await;
         assert!(res.success());
@@ -476,7 +475,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
