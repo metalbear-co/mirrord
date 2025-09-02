@@ -355,6 +355,7 @@ pub async fn create_queue_registry_resource(
                 container: None,
                 workload_type,
             },
+            workload_restart_timeout: None,
         },
     );
     qr_api
