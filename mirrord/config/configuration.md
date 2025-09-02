@@ -511,6 +511,14 @@ Path of the mirrord-layer lib inside the specified mirrord-cli image.
 
 Don't add `--rm` to sidecar command to prevent cleanup.
 
+### container.cli_tls_path {#container-cli_tls_path}
+
+When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you
+can specify the path where the certificate `.pem` file will be created, in the cli
+container.
+
+Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
+
 ### container.override_host_ip {#container-override_host_ip}
 
 Allows to override the IP address for the internal proxy to use

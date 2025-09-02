@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::{net::IpAddr, path::PathBuf};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -73,6 +73,16 @@ pub struct ContainerConfig {
     ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
+
+    /// ### container.cli_tls_path {#container-cli_tls_path}
+    ///
+    /// When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you
+    /// can specify the path where the certificate `.pem` file will be created, in the cli
+    /// container.
+    ///
+    /// Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
+    #[config(default = PathBuf::from(r"/opt/mirrord/tls/mirrord-tls.pem"))]
+    pub cli_tls_path: PathBuf,
 
     /// ### container.platform {#container-platform}
     ///
