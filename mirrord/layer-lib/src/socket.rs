@@ -1,9 +1,15 @@
+pub mod dns;
 pub mod ops;
 pub mod sockets;
 
 use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use bincode::{Decode, Encode};
+// Re-export dns module items
+pub use dns::{
+    REMOTE_DNS_REVERSE_MAPPING, clear_dns_reverse_mapping, dns_reverse_mapping_size,
+    get_hostname_for_ip, update_dns_reverse_mapping,
+};
 // Cross-platform socket constants
 #[cfg(unix)]
 use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
@@ -13,20 +19,17 @@ use mirrord_config::feature::network::{
 };
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::outgoing::SocketAddress;
-use socket2::SockAddr;
-#[cfg(windows)]
-use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
-
-// Re-export sockets module items
-pub use sockets::{SOCKETS, SocketDescriptor, SHARED_SOCKETS_ENV_VAR};
-
 // Re-export ops module items
 pub use ops::{
     ConnectError, ConnectFn, ConnectResult, connect_outgoing, connect_outgoing_udp,
     connect_outgoing_with_call, create_outgoing_request, is_unix_address, prepare_outgoing_address,
     update_socket_connected_state,
 };
-
+use socket2::SockAddr;
+// Re-export sockets module items
+pub use sockets::{SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor};
+#[cfg(windows)]
+use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 
 /// Contains the addresses of a mirrord connected socket.
 ///

@@ -10,7 +10,8 @@ use std::{
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
-use mirrord_layer_lib::ProxyConnection;
+use mirrord_layer_lib::{LayerSetup, ProxyConnection};
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
@@ -19,16 +20,14 @@ use winapi::{
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{hooks::initialize_hooks, setup::LayerSetup};
+use crate::hooks::initialize_hooks;
 
 mod console;
 pub mod error;
 mod hooks;
 mod macros;
 pub mod process;
-mod setup;
 mod socket;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
@@ -85,7 +84,6 @@ fn init_tracing() {
 }
 
 fn initialize_proxy_connection() -> anyhow::Result<()> {
-
     init_tracing();
 
     // Try to parse `SocketAddr` from [`MIRRORD_LAYER_INTPROXY_ADDR`] environment variable.
@@ -172,6 +170,19 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    // // Wait for initialization thread to complete before detaching
+    // if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock() {
+    //     if let Some(handle) = thread_handle.take() {
+    //         // This may block but it's necessary to prevent process hanging
+    //         if let Err(e) = handle.join() {
+    //             eprintln!(
+    //                 "Warning: Failed to join initialization thread during DLL detach: {:?}",
+    //                 e
+    //             );
+    //         }
+    //     }
+    // }
+
     // Release detour guard - use unwrap_or to avoid panicking during detach
     if let Err(e) = release_detour_guard() {
         eprintln!(

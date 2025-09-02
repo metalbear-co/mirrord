@@ -7,13 +7,15 @@
 #![allow(non_upper_case_globals)]
 
 use std::{
-    collections::HashMap,
     ffi::CString,
     net::IpAddr,
     sync::{LazyLock, Mutex},
 };
 
-use mirrord_layer_lib::{HostnameResult, get_hostname, unix::UnixHostnameResolver};
+use mirrord_layer_lib::{
+    HostnameResult, get_hostname, socket::dns::update_dns_reverse_mapping,
+    unix::UnixHostnameResolver,
+};
 use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
 use winapi::{
     shared::ws2def::{AF_INET, AF_INET6},
@@ -22,23 +24,14 @@ use winapi::{
 
 use super::utils::{
     GetAddrInfoResponseExtWin, ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo,
-    evict_old_cache_entries, intelligent_truncate, validate_buffer_params,
+    intelligent_truncate, validate_buffer_params,
 };
 use crate::PROXY_CONNECTION;
-
-/// Holds the pair of IP addresses with their hostnames, resolved remotely.
-/// This is the Windows equivalent of REMOTE_DNS_REVERSE_MAPPING.
-/// Uses a bounded collection to prevent memory exhaustion attacks.
-pub static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<String, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Keep track of managed address info structures for proper cleanup.
 /// Maps pointer addresses to the ManagedAddrInfo objects that own them.
 pub static MANAGED_ADDRINFO: LazyLock<Mutex<std::collections::HashMap<usize, ManagedAddrInfoAny>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-
-/// Maximum number of entries in the DNS cache to prevent memory exhaustion
-pub const MAX_DNS_CACHE_SIZE: usize = 1000;
 
 /// Maximum computer name length on Windows (GetComputerName API limit)
 pub const MAX_COMPUTERNAME_LENGTH: usize = 15;
@@ -76,12 +69,9 @@ pub fn remote_dns_resolve(
         .0
         .map_err(|e| format!("Remote DNS resolution failed: {:?}", e))?;
 
-    // Update reverse mapping cache
-    if let Ok(mut cache) = REMOTE_DNS_REVERSE_MAPPING.lock() {
-        evict_old_cache_entries(&mut cache, MAX_DNS_CACHE_SIZE);
-        for lookup in addr_info_list.iter() {
-            cache.insert(lookup.ip.to_string(), lookup.name.clone());
-        }
+    // Update reverse mapping cache using the unified implementation
+    for lookup in addr_info_list.iter() {
+        update_dns_reverse_mapping(lookup.ip, lookup.name.clone());
     }
 
     Ok(addr_info_list
@@ -369,15 +359,11 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
             }
         }
 
-        // If remote resolution fails, check if we have the hostname cached locally
-        if let Ok(cache) = REMOTE_DNS_REVERSE_MAPPING.lock()
-            && let Some(cached_ip) = cache.get(hostname)
-        {
-            tracing::debug!("Found cached IP for {}: {}", hostname, cached_ip);
-            if let Ok(ip_cstring) = CString::new(cached_ip.as_str()) {
-                return Some(ip_cstring);
-            }
-        }
+        // Remote resolution failed, use fallback logic
+        tracing::debug!(
+            "Remote DNS resolution failed for {}, trying fallback",
+            hostname
+        );
     }
 
     // As a last resort fallback, try localhost (this may work for some cases)

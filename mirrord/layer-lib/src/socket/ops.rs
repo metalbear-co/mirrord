@@ -3,7 +3,6 @@ use std::{net::SocketAddr, sync::Arc};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;

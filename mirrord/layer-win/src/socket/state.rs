@@ -1,18 +1,15 @@
 // Dedicated module for Windows socket state management
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
 
 use mirrord_intproxy_protocol::{
     NetProtocol, OutgoingConnectRequest, PortSubscribe, PortSubscription,
 };
 // Import the new connect_outgoing function from layer-lib
-use mirrord_layer_lib::socket::ops::{
-    connect_outgoing, ConnectError, ConnectResult,
-};
+use mirrord_layer_lib::socket::ops::{ConnectError, ConnectResult, connect_outgoing};
 // Re-export shared types from layer-lib and use unified SOCKETS
-pub use mirrord_layer_lib::socket::{Bound, Connected, SocketKind, SocketState, UserSocket, SOCKETS};
+pub use mirrord_layer_lib::socket::{
+    Bound, Connected, ConnectionThrough, SOCKETS, SocketKind, SocketState, UserSocket,
+};
 use mirrord_protocol::{ConnectionId, outgoing::SocketAddress, tcp::StealType};
 use socket2::SockAddr;
 use winapi::{
@@ -20,10 +17,7 @@ use winapi::{
     um::winsock2::SOCKET,
 };
 
-use super::{
-    hostname::make_windows_proxy_request_with_response,
-    utils::SocketAddrExtWin,
-};
+use super::{hostname::make_windows_proxy_request_with_response, utils::SocketAddrExtWin};
 use crate::socket::WindowsDnsResolver;
 
 // Helper function to convert Windows socket types to SocketKind
@@ -88,10 +82,7 @@ pub fn set_socket_state(socket: SOCKET, new_state: SocketState) {
         if let Some(socket_mut) = Arc::get_mut(socket_ref) {
             // Exclusive access - can modify in place
             socket_mut.state = new_state;
-            tracing::debug!(
-                "SocketManager: Updated socket {} state in-place",
-                socket
-            );
+            tracing::debug!("SocketManager: Updated socket {} state in-place", socket);
         } else {
             // Arc is shared - must clone and replace
             let mut new_socket = (**socket_ref).clone();
@@ -157,10 +148,7 @@ pub fn get_socket_state(socket: SOCKET) -> Option<SocketState> {
 }
 
 /// Check if socket is in a specific state
-pub fn is_socket_in_state(
-    socket: SOCKET,
-    state_check: impl Fn(&SocketState) -> bool,
-) -> bool {
+pub fn is_socket_in_state(socket: SOCKET, state_check: impl Fn(&SocketState) -> bool) -> bool {
     get_socket_state(socket)
         .map(|state| state_check(&state))
         .unwrap_or(false)
@@ -300,7 +288,7 @@ pub fn connect_through_proxy_with_layer_lib<F>(
     socket: SOCKET,
     user_socket: Arc<UserSocket>,
     remote_addr: SocketAddr,
-    connect_fn: F
+    connect_fn: F,
 ) -> Result<ConnectResult, ConnectError>
 where
     F: FnOnce(SOCKET, SockAddr) -> ConnectResult,
@@ -532,7 +520,7 @@ where
         .outgoing_selector()
         .get_connection_through_with_resolver(remote_addr, protocol, &resolver)
     {
-        Ok(crate::setup::ConnectionThrough::Remote(filtered_addr)) => {
+        Ok(ConnectionThrough::Remote(filtered_addr)) => {
             tracing::debug!(
                 "{} -> outgoing filter indicates remote connection for {:?} -> {:?}",
                 function_name,
@@ -541,7 +529,7 @@ where
             );
             // Continue with proxy connection using the filtered address
         }
-        Ok(crate::setup::ConnectionThrough::Local(_)) => {
+        Ok(ConnectionThrough::Local(_)) => {
             tracing::debug!(
                 "{} -> outgoing filter indicates local connection for {:?}, falling back to original",
                 function_name,

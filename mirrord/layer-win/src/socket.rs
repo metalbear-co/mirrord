@@ -14,7 +14,9 @@ use std::{
 };
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::socket::{Bound, DnsResolver, SocketKind, SocketState, ConnectResult};
+use mirrord_layer_lib::socket::{
+    Bound, ConnectResult, DnsResolver, SocketKind, SocketState, dns::update_dns_reverse_mapping,
+};
 use socket2::SockAddr;
 use winapi::{
     shared::{
@@ -36,19 +38,16 @@ use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
     hostname::{
-        MANAGED_ADDRINFO, REMOTE_DNS_REVERSE_MAPPING, free_managed_addrinfo, handle_hostname_ansi,
-        handle_hostname_unicode, is_remote_hostname, resolve_hostname_with_fallback,
-        windows_getaddrinfo,
+        MANAGED_ADDRINFO, free_managed_addrinfo, handle_hostname_ansi, handle_hostname_unicode,
+        is_remote_hostname, resolve_hostname_with_fallback, windows_getaddrinfo,
     },
     state::{
-        log_connection_result, proxy_bind, register_accepted_socket, setup_listening,
-        register_socket, set_socket_state, remove_socket, get_socket, is_socket_managed,
-        get_socket_state, is_socket_in_state, get_bound_address, get_connected_addresses,
+        get_bound_address, get_connected_addresses, get_socket, get_socket_state,
+        is_socket_in_state, is_socket_managed, log_connection_result, proxy_bind,
+        register_accepted_socket, register_socket, remove_socket, set_socket_state,
+        setup_listening,
     },
-    utils::{
-        ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, evict_old_cache_entries,
-        extract_ip_from_hostent,
-    },
+    utils::{ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, extract_ip_from_hostent},
 };
 use crate::apply_hook;
 
@@ -146,7 +145,6 @@ static GET_ADDR_INFO_W_ORIGINAL: OnceLock<&GetAddrInfoWType> = OnceLock::new();
 type FreeAddrInfoWType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
 static FREE_ADDR_INFO_W_ORIGINAL: OnceLock<&FreeAddrInfoWType> = OnceLock::new();
 
-
 // Kernel32 hostname functions that Python might use
 type GetComputerNameAType = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
 static GET_COMPUTER_NAME_A_ORIGINAL: OnceLock<&GetComputerNameAType> = OnceLock::new();
@@ -203,7 +201,7 @@ type WSASocketWType = unsafe extern "system" fn(
     af: i32,
     socket_type: i32,
     protocol: i32,
-    lpProtocolInfo: *mut u16,  // LPWSAPROTOCOL_INFOW
+    lpProtocolInfo: *mut u16, // LPWSAPROTOCOL_INFOW
     g: u32,
     dwFlags: u32,
 ) -> SOCKET;
@@ -434,11 +432,9 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
                 if result == 0 {
                     // Success - update socket state to listening using SocketManager
-                    if is_socket_in_state(s, |state| matches!(state, SocketState::Bound(_)))
-                    {
+                    if is_socket_in_state(s, |state| matches!(state, SocketState::Bound(_))) {
                         // Get the bound state and transition to listening
-                        if let Some(SocketState::Bound(bound)) = get_socket_state(s)
-                        {
+                        if let Some(SocketState::Bound(bound)) = get_socket_state(s) {
                             set_socket_state(s, SocketState::Listening(bound));
                             tracing::info!(
                                 "listen_detour -> socket {} now listening through mirrord",
@@ -487,7 +483,9 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         ConnectResult::from(log_connection_result(result, "connect_detour"))
     };
 
-    if let Ok(connect_result) = state::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
+    if let Ok(connect_result) =
+        state::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn)
+    {
         return connect_result.result();
     }
 
@@ -514,8 +512,7 @@ unsafe extern "system" fn accept_detour(
         // Check if the listening socket is managed and get its bound address
         if let Some(bound_addr) = get_bound_address(s) {
             // Check if listening socket is in listening state
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Listening(_)))
-            {
+            if is_socket_in_state(s, |state| matches!(state, SocketState::Listening(_))) {
                 tracing::info!(
                     "accept_detour -> accepted socket {} from mirrord-managed listener",
                     accepted_socket
@@ -807,7 +804,9 @@ unsafe extern "system" fn wsa_connect_detour(
     };
 
     // Attempt complete proxy connection flow
-    if let Ok(connect_result) = state::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
+    if let Ok(connect_result) =
+        state::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn)
+    {
         return connect_result.result();
     }
 
@@ -878,8 +877,7 @@ unsafe extern "system" fn wsa_send_detour(
 
         if should_intercept {
             // Check if this socket is in connected state (proxy connection established)
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_)))
-            {
+            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
                 tracing::debug!(
                     "wsa_send_detour -> socket {} is connected via proxy, data will be routed through proxy",
                     s
@@ -1457,46 +1455,6 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
             hostname_cstr
         );
 
-        // Check if we have a cached mapping for this hostname
-        match REMOTE_DNS_REVERSE_MAPPING.lock() {
-            Ok(mapping) => {
-                if let Some(target_ip) = mapping.get(hostname_cstr) {
-                    tracing::debug!(
-                        "gethostbyname: found cached IP mapping {} -> {}",
-                        hostname_cstr,
-                        target_ip
-                    );
-
-                    // Try to resolve the target IP address using original function
-                    if let Ok(target_cstr) = std::ffi::CString::new(target_ip.as_str()) {
-                        // SECURITY: Validate the cached IP is actually an IP address, not a
-                        // hostname
-                        if target_ip.parse::<std::net::IpAddr>().is_ok() || target_ip == "localhost"
-                        {
-                            let result = unsafe {
-                                GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(target_cstr.as_ptr())
-                            };
-                            if !result.is_null() {
-                                tracing::debug!(
-                                    "gethostbyname: successfully resolved cached mapping"
-                                );
-                                return result;
-                            }
-                        } else {
-                            tracing::error!(
-                                "gethostbyname: cached entry '{}' is not a valid IP address, removing",
-                                target_ip
-                            );
-                            // Note: We can't modify the mapping here since we only have a read lock
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("gethostbyname: failed to acquire cache lock: {}", e);
-            }
-        }
-
         // Try to resolve with fallback logic
         if let Some(fallback_hostname) = resolve_hostname_with_fallback(hostname_cstr) {
             let result =
@@ -1504,24 +1462,14 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
             if !result.is_null() {
                 tracing::debug!("gethostbyname: successfully resolved with fallback");
 
-                // Cache this mapping for future use
-                match REMOTE_DNS_REVERSE_MAPPING.lock() {
-                    Ok(mut mapping) => {
-                        // Extract IP from HOSTENT for caching
-                        if let Some(ip_str) = unsafe { extract_ip_from_hostent(result) } {
-                            // Check cache size limit and evict if necessary
-                            evict_old_cache_entries(&mut mapping, 1000);
-                            mapping.insert(hostname_cstr.to_string(), ip_str);
-                            tracing::debug!(
-                                "gethostbyname: cached mapping {} -> IP",
-                                hostname_cstr
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "gethostbyname: failed to acquire cache lock for storing: {}",
-                            e
+                // Cache this mapping for future use with the unified cache (IP -> hostname)
+                if let Some(ip_str) = unsafe { extract_ip_from_hostent(result) } {
+                    if let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>() {
+                        update_dns_reverse_mapping(ip_addr, hostname_cstr.to_string());
+                        tracing::debug!(
+                            "gethostbyname: cached mapping {} -> {}",
+                            ip_addr,
+                            hostname_cstr
                         );
                     }
                 }
@@ -1710,8 +1658,7 @@ unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags
 
         if should_intercept {
             // Check if this socket is in connected state (proxy connection established)
-            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_)))
-            {
+            if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
                 tracing::debug!(
                     "send_detour -> socket {} is connected via proxy, data will be routed through proxy",
                     s
@@ -1957,7 +1904,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
             GetHostByNameType,
             GET_HOST_BY_NAME_ORIGINAL
         )?;
-        
+
         apply_hook!(
             guard,
             "ws2_32",
