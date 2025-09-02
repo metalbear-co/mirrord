@@ -652,7 +652,7 @@
         },
         "cli_tls_path": {
           "title": "container.cli_tls_path {#container-cli_tls_path}",
-          "description": "When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you can specify the path where the certificate `.pem` file will be created, in the cli container.\n\nDefaults to `\"/mirrord/mirrord-tls.pem\"`.",
+          "description": "When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you can specify the path where the certificate `.pem` file will be created, in the cli container.\n\nDefaults to `\"/opt/mirrord/tls/mirrord-tls.pem\"`.",
           "type": [
             "string",
             "null"
