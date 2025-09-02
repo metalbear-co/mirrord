@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{ffi::OsStr, path::Path};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 use rand::RngCore;
@@ -15,7 +15,11 @@ fn generate_hex_string() -> String {
     hex::encode(bytes)
 }
 
-pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>>(input: PI, output: PO) -> Result<()> {
+pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
+    input: PI,
+    output: PO,
+    original: PN,
+) -> Result<()> {
     // in the past, we used the codesign binary
     // but we had an issue where it received EBADF (bad file descriptor)
     // probably since in some flows, like Go,
@@ -34,7 +38,15 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>>(input: PI, output: PO) -> R
     // > It is a **very bad idea** to sign different programs with the same identifier.
     settings.set_binary_identifier(
         SettingsScope::Main,
-        format!("mirrord-patched-bin-{}", generate_hex_string()),
+        format!(
+            "{}-{}",
+            original
+                .as_ref()
+                .file_name()
+                .map(OsStr::to_string_lossy)
+                .unwrap_or_else(|| "mirrord-patched-bin".into()),
+            generate_hex_string()
+        ),
     );
 
     // Set an empty entitlements XML, as the default settings leave the existing entitlements set.

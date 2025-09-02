@@ -4,9 +4,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
-use crate::{config::source::MirrordConfigSource, feature::split_queues::SplitQueuesConfig};
+use crate::{
+    config::source::MirrordConfigSource,
+    feature::{database_branches::DatabaseBranchesConfig, split_queues::SplitQueuesConfig},
+};
 
 pub mod copy_target;
+pub mod database_branches;
 pub mod env;
 pub mod fs;
 pub mod network;
@@ -15,7 +19,7 @@ pub mod split_queues;
 /// Controls mirrord features.
 ///
 /// See the
-/// [technical reference, Technical Reference](https://metalbear.co/mirrord/docs/reference/)
+/// [technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)
 /// to learn more about what each feature does.
 ///
 /// The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options
@@ -85,7 +89,7 @@ pub struct FeatureConfig {
     /// ## feature.copy_target {#feature-copy_target}
     ///
     /// Creates a new copy of the target. mirrord will use this copy instead of the original target
-    /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.co/mirrord/docs/overview/teams/?utm_source=copytarget).
+    /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
     ///
     /// This feature is not compatible with rollout targets and running without a target
     /// (`targetless` mode).
@@ -107,6 +111,12 @@ pub struct FeatureConfig {
     /// will be used, and your local application will not receive any messages from that queue.
     #[config(nested, default, unstable)]
     pub split_queues: SplitQueuesConfig,
+
+    /// # feature.db_branches {#feature-db_branches}
+    ///
+    /// Configuration for the database branching feature.
+    #[config(nested, default, unstable)]
+    pub db_branches: DatabaseBranchesConfig,
 }
 
 impl CollectAnalytics for &FeatureConfig {
@@ -117,5 +127,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("copy_target", &self.copy_target);
         analytics.add("hostname", self.hostname);
         analytics.add("split_queues", &self.split_queues);
+        analytics.add("db_branches", &self.db_branches);
     }
 }

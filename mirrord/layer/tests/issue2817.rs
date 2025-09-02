@@ -1,11 +1,11 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::{path::Path, str::FromStr, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage,
-    tcp::{Filter, HttpFilter, LayerTcpSteal, StealType},
+    tcp::{Filter, HttpFilter, HttpMethodFilter, LayerTcpSteal, StealType},
 };
 use rstest::rstest;
 
@@ -20,6 +20,7 @@ enum TestedStealVariant {
     Path,
     AllOf,
     AnyOf,
+    Method,
 }
 
 impl TestedStealVariant {
@@ -27,6 +28,7 @@ impl TestedStealVariant {
         serde_json::json!({
             "path_filter": matches!(self, Self::Path).then(|| "/some/path"),
             "header_filter": matches!(self, Self::Header).then(|| "some: header"),
+            "method_filter": matches!(self, Self::Method).then(|| "GET"),
             "all_of": matches!(self, Self::AllOf).then(|| serde_json::json!([
                 { "path": "/some/path" },
                 { "header": "some: header" },
@@ -77,12 +79,18 @@ impl TestedStealVariant {
                     ],
                 )
             }
+            (
+                TestedStealVariant::Method,
+                StealType::FilteredHttpEx(80, HttpFilter::Method(filter)),
+            ) => assert_eq!(filter, HttpMethodFilter::from_str("get").unwrap()),
             (.., steal_type) => panic!("received unexpected steal type: {steal_type:?}"),
         }
     }
 }
 
 /// Verify that the layer requests correct subscription type based on HTTP filter config.
+///
+/// - If you add a new variant to `config_variant`, remember to update `assert_matches`.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
@@ -93,6 +101,7 @@ async fn test_issue2817(
         TestedStealVariant::Unfiltered,
         TestedStealVariant::Header,
         TestedStealVariant::Path,
+        TestedStealVariant::Method,
         TestedStealVariant::AllOf,
         TestedStealVariant::AnyOf
     )]

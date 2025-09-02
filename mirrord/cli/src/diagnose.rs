@@ -29,6 +29,10 @@ async fn ping(
     loop {
         let result = match receiver.recv().await {
             Some(DaemonMessage::Pong) => Ok(()),
+            Some(DaemonMessage::OperatorPing(id)) => {
+                sender.send(ClientMessage::OperatorPong(id)).await.ok();
+                Ok(())
+            }
             Some(DaemonMessage::LogMessage(..)) => continue,
             Some(DaemonMessage::Close(message)) => Err(CliError::PingPongFailed(format!(
                 "agent closed connection with message: {message}"

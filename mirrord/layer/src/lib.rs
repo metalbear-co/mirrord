@@ -16,7 +16,7 @@
 //! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
 //! remote context.
 //!
-//! Check out the [Introduction](https://metalbear.co/mirrord/docs/overview/introduction/) guide to learn
+//! Check out the [Introduction](https://metalbear.com/mirrord/docs/overview/introduction/) guide to learn
 //! more about mirrord.
 //!
 //! ## How it works
@@ -61,7 +61,7 @@
 //!
 //! The functions we intercept are controlled via the `mirrord-config` crate, check its
 //! documentation for more details, or
-//! [Configuration](https://metalbear.co/mirrord/docs/reference/configuration/) for usage information.
+//! [Configuration](https://metalbear.com/mirrord/docs/reference/configuration/) for usage information.
 
 extern crate alloc;
 extern crate core;
@@ -275,12 +275,13 @@ fn load_only_layer_start(config: &LayerConfig) {
 
     let new_connection = ProxyConnection::new(
         address,
-        NewSessionRequest::New(
-            EXECUTABLE_ARGS
+        NewSessionRequest {
+            process_info: EXECUTABLE_ARGS
                 .get()
                 .expect("EXECUTABLE_ARGS MUST BE SET")
                 .to_process_info(config),
-        ),
+            parent_layer: None,
+        },
         *PROXY_CONNECTION_TIMEOUT
             .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout)),
     )
@@ -422,7 +423,10 @@ fn layer_start(mut config: LayerConfig) {
         let address = setup().proxy_address();
         let new_connection = ProxyConnection::new(
             address,
-            NewSessionRequest::New(process_info),
+            NewSessionRequest {
+                process_info,
+                parent_layer: None,
+            },
             proxy_connection_timeout,
         )
         .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
@@ -551,11 +555,11 @@ fn sip_only_layer_start(
         readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
     };
     let debugger_ports = DebuggerPorts::from_env();
-    let setup = LayerSetup::new(config, debugger_ports, true);
+    let layer_setup = LayerSetup::new(config, debugger_ports, true);
 
-    SETUP.set(setup).expect("SETUP set failed");
+    SETUP.set(layer_setup).expect("SETUP set failed");
 
-    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -646,7 +650,7 @@ fn enable_hooks(state: &LayerSetup) {
     }
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, state) };
     }
 
     #[cfg(all(
@@ -729,7 +733,13 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 
                 let new_connection = ProxyConnection::new(
                     parent_connection.proxy_addr(),
-                    NewSessionRequest::Forked(parent_connection.layer_id()),
+                    NewSessionRequest {
+                        parent_layer: Some(parent_connection.layer_id()),
+                        process_info: EXECUTABLE_ARGS
+                            .get()
+                            .expect("should always be set in layer constructor")
+                            .to_process_info(setup().layer_config()),
+                    },
                     PROXY_CONNECTION_TIMEOUT
                         .get()
                         .copied()

@@ -8,6 +8,100 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.159.2](https://github.com/metalbear-co/mirrord/tree/3.159.2) - 2025-09-01
+
+
+### Changed
+
+- A mirrord session can now be terminated early if a remote DNS lookup fails
+  with `permission denied` error.
+  This error indicates that the Kubernetes cluster is hardened and the
+  mirrord-agent might not be fully functional.
+  The behavior is controlled with the `experimental.dns_permission_error_fatal`
+  setting, and enabled by default in OSS.
+
+
+### Fixed
+
+- Fixed a compatability issue with openapiv2 for operator CRDs
+  [#3398](https://github.com/metalbear-co/mirrord/issues/3398)
+
+
+### Internal
+
+- Added a suggestion to use mfT when encountering `AgentError::IPTablesDirty` in
+  error messages.
+- Added a github action to build windows builds.
+- Updated all metalbear.co urls to metalbear.com.
+- Upgraded Frida dependency.
+
+## [3.159.1](https://github.com/metalbear-co/mirrord/tree/3.159.1) - 2025-08-27
+
+### Changed
+
+- Default "/run/" and "/selinux" to local.
+- SimpleProgress implementation now handles prints nicely instead of debug
+  print.
+- Changed some Debug implementations to not print HTTP body.
+
+### Fixed
+
+- Removed conntrack-related bogus warnings from mirrord-agent logs.
+
+## [3.159.0](https://github.com/metalbear-co/mirrord/tree/3.159.0) - 2025-08-24
+
+
+### Added
+
+- Add method filter to HTTP filters.
+
+
+### Changed
+
+- Proper error message when the operator cannot be retrieved, and it's
+  required. [#3476](https://github.com/metalbear-co/mirrord/issues/3476)
+- Improve copy target schema docs
+- In SIP-patched binaries, set the identifier to start with the original
+  filename, like the codesign binary does.
+- `agent.passthrough_mirroring` now defaults to `true` in both OSS and mfT.
+- change vfork emulation to be enabled by default, fixes different issues
+  around the use of it
+- mirrord container: change to always use native arch for intproxy, improving
+  performance signficantly
+
+## [3.158.0](https://github.com/metalbear-co/mirrord/tree/3.158.0) - 2025-08-20
+
+
+### Added
+
+- Added rtt metrics (prometheus) for checking mirrord and operator latency.
+
+
+### Changed
+
+- mirrord-agent and mirrord-intproxy now include the crate version in the
+  produced HTTP 502 responses.
+
+
+### Fixed
+
+- Fixed a bug in automatic iptables backend detection in the mirrord agent.
+
+
+### Internal
+
+- Added logic for adding debug args to `mirrord intproxy` and `mirrord
+  extproxy`.
+- Improved internal proxy debug logs.
+
+## [3.157.2](https://github.com/metalbear-co/mirrord/tree/3.157.2) - 2025-08-14
+
+### Added
+
+- Added periodic dump of connected processes for diagnostic purposes.
+- Added the logfile location to the `intproxy` command-line so it can be seen in
+  the process output.
+
 ## [3.157.1](https://github.com/metalbear-co/mirrord/tree/3.157.1) - 2025-08-13
 
 

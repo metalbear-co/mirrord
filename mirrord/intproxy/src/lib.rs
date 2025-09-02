@@ -6,6 +6,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    ops::ControlFlow,
     time::Duration,
 };
 
@@ -14,9 +15,11 @@ use error::UnexpectedAgentMessage;
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
-use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
+use mirrord_config::{
+    experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
+};
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -38,7 +41,7 @@ use tokio::{
 use crate::{
     agent_conn::{AgentConnection, AgentConnectionMessage},
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
-    error::{InternalProxyError, ProxyRuntimeError, ProxyStartupError},
+    error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
 };
@@ -54,21 +57,6 @@ mod ping_pong;
 pub mod proxies;
 mod remote_resources;
 mod request_queue;
-
-/// Convenience type that defines the type of failure the proxy can encounter. In the case of
-/// [`ProxyFailure::Startup`] the proxy immediately shut down, returning the encountered error.
-/// In the case of [`ProxyFailure::Runtime`] a [`FailoverStrategy`] is instantiated to replace the
-/// normal Proxy workflow.
-enum ProxyFailure {
-    Startup(ProxyStartupError),
-    Runtime(FailoverStrategy),
-}
-
-impl From<ProxyStartupError> for ProxyFailure {
-    fn from(error: ProxyStartupError) -> Self {
-        Self::Startup(error)
-    }
-}
 
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
 struct TaskTxs {
@@ -106,6 +94,12 @@ pub struct IntProxy {
     // most every 10/th of `PING_INTERVAL`
     ping_pong_update_debounce: Interval,
     ping_pong_update_allowed: bool,
+
+    /// Connected layer process information for periodic logging
+    connected_layers: HashMap<LayerId, ProcessInfo>,
+
+    /// Interval for logging connected process information
+    process_logging_interval: Interval,
 }
 
 impl IntProxy {
@@ -123,8 +117,9 @@ impl IntProxy {
         agent_conn: AgentConnection,
         listener: TcpListener,
         file_buffer_size: u64,
-        idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
+        process_logging_interval: Duration,
+        experimental: &ExperimentalConfig,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
@@ -151,7 +146,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::default(),
+            SimpleProxy::new(experimental.dns_permission_error_fatal.unwrap_or_default()),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
@@ -161,7 +156,10 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let incoming = background_tasks.register(
-            IncomingProxy::new(idle_local_http_connection_timeout, https_delivery),
+            IncomingProxy::new(
+                Duration::from_millis(experimental.idle_local_http_connection_timeout),
+                https_delivery,
+            ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
         );
@@ -173,6 +171,9 @@ impl IntProxy {
 
         let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        let mut process_logging_interval = time::interval(process_logging_interval);
+        process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         Self {
             any_connection_accepted: false,
@@ -192,6 +193,8 @@ impl IntProxy {
             reconnect_task_queue: Default::default(),
             ping_pong_update_debounce,
             ping_pong_update_allowed: false,
+            connected_layers: HashMap::new(),
+            process_logging_interval,
         }
     }
 
@@ -211,26 +214,29 @@ impl IntProxy {
         idle_timeout: Duration,
     ) -> Result<(), ProxyStartupError> {
         match self.run_inner(first_timeout, idle_timeout).await {
-            Ok(()) => Ok(()),
-            Err(ProxyFailure::Startup(error)) => Err(error),
-            Err(ProxyFailure::Runtime(failover_strategy)) => {
-                tracing::warn!(
-                    "Managed exception {}, proxy is entering in failover state...",
-                    failover_strategy.fail_cause()
-                );
+            ControlFlow::Break(result) => result,
+            ControlFlow::Continue(failover_strategy) => {
                 failover_strategy.run(idle_timeout, idle_timeout).await
             }
         }
     }
 
-    /// Runs main event loop of this proxy.
-    /// Expects to accept the first layer connection within the given `first_timeout`.
+    /// Runs the main event loop of this proxy.
+    ///
+    /// Fails if the first layer connection is not accepted within the given `first_timeout`.
     /// Exits after `idle_timeout` when there are no more layer connections.
+    ///
+    /// # Returns
+    ///
+    /// 1. [`ControlFlow::Continue`] if a critical error was encountered. The [`FailoverStrategy`]
+    ///    can be run in order to handle pending and future layer requests.
+    /// 2. [`ControlFlow::Break`] if the proxy exited normally, or no layer connection was accepted
+    ///    within the given `first_timeout`.
     async fn run_inner(
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
-    ) -> Result<(), ProxyFailure> {
+    ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
         self.task_txs
             .agent
             .send(ClientMessage::SwitchProtocolVersion(
@@ -248,17 +254,9 @@ impl IntProxy {
                         ?task_update,
                         "Received a task update",
                     );
-                    let update_res = proxy.handle_task_update(task_id, task_update).await;
-                    match update_res {
-                        Err(InternalProxyError::Startup(err) ) => {
-                            tracing::error!(%err, "Critical error in background task update");
-                            Err(ProxyFailure::Startup(err))?
-                        }
-                        Err(InternalProxyError::Runtime(err)) => {
-                            tracing::error!(%err, "Manageable error in background task update, proxy is entering in failover state...");
-                            return Err(ProxyFailure::Runtime(FailoverStrategy::from_failed_proxy(proxy, err)))
-                        }
-                        _ => ()
+                    if let Err(error) = proxy.handle_task_update(task_id, task_update).await {
+                        tracing::error!(%error, "Proxy encountered a critical error, and is entering the failover state...");
+                        return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
                     }
                 }
 
@@ -266,8 +264,18 @@ impl IntProxy {
                     proxy.ping_pong_update_allowed = true;
                 }
 
+                _ = proxy.process_logging_interval.tick() => {
+                    // Always log this, even if there are no connected layers.
+                    // This way we can be sure that intproxy's Tokio runtime is making progress.
+                    tracing::info!(
+                        count = proxy.connected_layers.len(),
+                        layers = ?proxy.connected_layers,
+                        "State of connected layers",
+                    );
+                }
+
                 _ = time::sleep(first_timeout), if !proxy.any_connection_accepted => {
-                    Err(ProxyStartupError::ConnectionAcceptTimeout)?;
+                    return ControlFlow::Break(Err(ProxyStartupError::ConnectionAcceptTimeout));
                 },
 
                 _ = time::sleep(idle_timeout), if proxy.any_connection_accepted && !proxy.has_layer_connections() => {
@@ -290,7 +298,7 @@ impl IntProxy {
             );
         }
 
-        Ok(())
+        ControlFlow::Break(Ok(()))
     }
 
     /// Routes a [`ProxyMessage`] to the correct background task.
@@ -312,6 +320,8 @@ impl IntProxy {
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
 
+                self.connected_layers
+                    .insert(new_layer.id, new_layer.process_info);
                 let tx = self.background_tasks.register(
                     LayerConnection::new(new_layer.stream, new_layer.id),
                     MainTaskId::LayerConnection(new_layer.id),
@@ -373,10 +383,17 @@ impl IntProxy {
         &mut self,
         task_id: MainTaskId,
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
-    ) -> Result<(), InternalProxyError> {
+    ) -> Result<(), ProxyRuntimeError> {
         match (task_id, update) {
-            (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(Ok(()))) => {
-                tracing::trace!(layer_id = id, "Layer connection closed");
+            (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(result)) => {
+                match result {
+                    Ok(()) => {
+                        tracing::info!(layer_id = id, "Layer connection closed");
+                    }
+                    Err(error) => {
+                        tracing::error!(layer_id = id, %error, "Layer connection failed");
+                    }
+                }
 
                 let msg = LayerClosed { id: LayerId(id) };
 
@@ -390,6 +407,8 @@ impl IntProxy {
                     .await;
 
                 self.task_txs.layers.remove(&LayerId(id));
+                self.connected_layers.remove(&LayerId(id));
+                self.pending_layers.retain(|(layer_id, _)| layer_id.0 != id);
             }
 
             (task_id, TaskUpdate::Finished(res)) => match res {
@@ -414,6 +433,7 @@ impl IntProxy {
     }
 
     /// Routes most messages from the agent to the correct background task.
+    ///
     /// Some messages are handled here.
     async fn handle_agent_message(
         &mut self,
@@ -434,6 +454,12 @@ impl IntProxy {
                 self.task_txs
                     .ping_pong
                     .send(PingPongMessage::AgentSentPong)
+                    .await
+            }
+            DaemonMessage::OperatorPing(id) => {
+                self.task_txs
+                    .agent
+                    .send(ClientMessage::OperatorPong(id))
                     .await
             }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
@@ -522,9 +548,9 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvRes(res))
                     .await
             }
-            other => {
+            message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(
-                    UnexpectedAgentMessage(other),
+                    UnexpectedAgentMessage(message),
                 ))?;
             }
         }
@@ -658,6 +684,7 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
     use mirrord_intproxy_protocol::{
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
@@ -699,7 +726,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Default::default(),
+            Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -719,12 +749,16 @@ mod test {
             .0
             .send(&LocalMessage {
                 message_id: 0,
-                inner: LayerToProxyMessage::NewSession(NewSessionRequest::New(ProcessInfo {
-                    pid: 1337,
-                    name: "hello there".into(),
-                    cmdline: vec!["hello there".into()],
-                    loaded: true,
-                })),
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: 1337,
+                        parent_pid: 1336,
+                        name: "hello there".into(),
+                        cmdline: vec!["hello there".into()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
             })
             .await
             .unwrap();
@@ -790,7 +824,6 @@ mod test {
 
         proxy_handle.await.unwrap().unwrap();
     }
-
     /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
     #[tokio::test]
     async fn switch_to_failover() {
@@ -800,7 +833,6 @@ mod test {
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
-
         let proxy_addr = listener.local_addr().unwrap();
 
         let agent_conn = AgentConnection {
@@ -813,7 +845,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Default::default(),
+            Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -826,12 +861,16 @@ mod test {
         encoder
             .send(&LocalMessage {
                 message_id: 0,
-                inner: LayerToProxyMessage::NewSession(NewSessionRequest::New(ProcessInfo {
-                    pid: 1337,
-                    name: "hello there".into(),
-                    cmdline: vec!["hello there".into()],
-                    loaded: true,
-                })),
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: 1337,
+                        parent_pid: 1336,
+                        name: "hello there".into(),
+                        cmdline: vec!["hello there".into()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
             })
             .await
             .unwrap();
@@ -900,7 +939,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Default::default(),
+            Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         tokio::time::timeout(
             Duration::from_millis(200),

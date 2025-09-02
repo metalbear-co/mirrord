@@ -59,17 +59,14 @@ impl LayerInitializer {
         let id = self.next_layer_id;
         self.next_layer_id.0 += 1;
 
-        let parent_id = match msg.inner {
-            LayerToProxyMessage::NewSession(NewSessionRequest::New(process_info)) => {
-                tracing::info!(?process_info, "New session");
-                None
-            }
-            LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => {
-                tracing::info!(?parent, "Forked session");
-                Some(parent)
-            }
+        let NewSessionRequest {
+            parent_layer,
+            process_info,
+        } = match msg.inner {
+            LayerToProxyMessage::NewSession(request) => request,
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
+        tracing::info!(?parent_layer, ?process_info, "New layer connected");
 
         let mut encoder: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, _> =
             AsyncEncoder::new(decoder.into_inner());
@@ -86,7 +83,8 @@ impl LayerInitializer {
         Ok(NewLayer {
             stream,
             id,
-            parent_id,
+            parent_id: parent_layer,
+            process_info,
         })
     }
 }

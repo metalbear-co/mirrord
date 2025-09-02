@@ -30,7 +30,7 @@ use thiserror::Error;
     about,
     long_about = r#"
 Encountered an issue? Have a feature request?
-Join our Slack at https://metalbear.co/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.co"#
+Join our Slack at https://metalbear.com/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.com"#
 )]
 pub(super) struct Cli {
     #[command(subcommand)]
@@ -99,6 +99,14 @@ pub(super) enum Commands {
         /// Port on which the extproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+        /// Debug arguments.
+        ///
+        /// These are passed only for visibility in `ps` output,
+        /// to improve debugging experience.
+        ///
+        /// Should not be used from within the extproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
     },
 
     /// Spawned:
@@ -112,6 +120,14 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+        /// Debug arguments.
+        ///
+        /// These are passed only for visibility in `ps` output,
+        /// to improve debugging experience.
+        ///
+        /// Should not be used from within the intproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
     },
 
     /// Forward local ports to hosts available from the cluster
@@ -703,7 +719,7 @@ pub(super) enum OperatorCommand {
 
 #[derive(Args, Debug)]
 pub(super) struct OperatorSetupParams {
-    /// ToS can be read here <https://metalbear.co/legal/terms>
+    /// ToS can be read here <https://metalbear.com/legal/terms>
     #[arg(long)]
     pub(super) accept_tos: bool,
 
@@ -764,6 +780,12 @@ pub(super) struct OperatorSetupParams {
         hide = true
     )]
     pub(super) stateful_sessions: bool,
+
+    /// Enable MySQL database branching.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a mysql branching component.
+    #[arg(long, visible_alias = "mysql", default_value_t = false)]
+    pub(super) mysql_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.

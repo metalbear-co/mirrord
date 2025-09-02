@@ -23,6 +23,7 @@ pub mod copy_target;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod mysql_branching;
 pub mod policy;
 pub mod profile;
 pub mod session;
@@ -210,14 +211,62 @@ impl MirrordOperatorSpec {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CopyTargetEntry {
+    pub pod_name: String,
+    pub copy_target: CopyTargetCrd,
+}
+
+/// Compatibility enum for CopyTargetEntry that can handle both old tuple format and new struct
+/// format.
+///
+/// This enum provides backward/forward compatibility by accepting both:
+/// - Modern: The new CopyTargetEntry struct format (for OpenAPI v2 compatibility)
+/// - Legacy: The old tuple format (String, CopyTargetCrd)
+///
+/// The JsonSchema implementation only exposes the modern format to ensure clean OpenAPI schemas,
+/// while serde can still deserialize both formats from existing data.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CopyTargetEntryCompat {
+    Modern(CopyTargetEntry),
+    Legacy(String, CopyTargetCrd), // tuple format
+}
+
+impl JsonSchema for CopyTargetEntryCompat {
+    fn schema_name() -> String {
+        "CopyTargetEntry".to_owned()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        // Only expose the modern schema in OpenAPI
+        CopyTargetEntry::json_schema(schema_gen)
+    }
+}
+
+impl CopyTargetEntryCompat {
+    pub fn to_copy_target_entry(&self) -> CopyTargetEntry {
+        match self {
+            CopyTargetEntryCompat::Modern(entry) => entry.clone(),
+            CopyTargetEntryCompat::Legacy(pod_name, copy_target) => CopyTargetEntry {
+                pod_name: pod_name.clone(),
+                copy_target: copy_target.clone(),
+            },
+        }
+    }
+
+    pub fn from_copy_target_entry(entry: CopyTargetEntry) -> Self {
+        CopyTargetEntryCompat::Modern(entry)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 
     /// Option because added later.
-    /// (copy-target pod name, copy-target resource)
-    pub copy_targets: Option<Vec<(String, CopyTargetCrd)>>,
+    pub copy_targets: Option<Vec<CopyTargetEntryCompat>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -227,13 +276,63 @@ pub struct MirrordOperatorStatusStatistics {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LockedPort {
+    pub port: u16,
+    pub kind: String,
+    pub filter: Option<String>,
+}
+
+/// Compatibility enum for LockedPort that can handle both old tuple format and new struct format.
+///
+/// This enum provides backward/forward compatibility by accepting both:
+/// - Modern: The new LockedPort struct format (for OpenAPI v2 compatibility)
+/// - Legacy: The old tuple format (u16, String, `Option<String>`)
+///
+/// The JsonSchema implementation only exposes the modern format to ensure clean OpenAPI schemas,
+/// while serde can still deserialize both formats from existing data.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum LockedPortCompat {
+    Modern(LockedPort),
+    Legacy(u16, String, Option<String>), // tuple format
+}
+
+impl JsonSchema for LockedPortCompat {
+    fn schema_name() -> String {
+        "LockedPort".to_owned()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        // Only expose the modern schema in OpenAPI
+        LockedPort::json_schema(schema_gen)
+    }
+}
+
+impl LockedPortCompat {
+    pub fn to_locked_port(&self) -> LockedPort {
+        match self {
+            LockedPortCompat::Modern(locked_port) => locked_port.clone(),
+            LockedPortCompat::Legacy(port, kind, filter) => LockedPort {
+                port: *port,
+                kind: kind.clone(),
+                filter: filter.clone(),
+            },
+        }
+    }
+
+    pub fn from_locked_port(locked_port: LockedPort) -> Self {
+        LockedPortCompat::Modern(locked_port)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
     pub id: Option<String>,
     pub duration_secs: u64,
     pub user: String,
     pub target: String,
     pub namespace: Option<String>,
-    pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
+    pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
 }
@@ -281,6 +380,7 @@ pub enum NewOperatorFeature {
     LayerReconnect,
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
+    MySqlBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -304,6 +404,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingDirect => {
                 "SQS queue splitting without copy target"
             }
+            NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

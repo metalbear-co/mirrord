@@ -100,6 +100,7 @@ pub enum FileRequest {
 
     /// Same as StatFs, but results in the V2 response.
     StatFsV2(StatFsRequestV2),
+    Rename(RenameRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -142,6 +143,10 @@ pub enum ClientMessage {
     ReadyForLogs,
     Vpn(ClientVpn),
     GetAddrInfoRequestV2(GetAddrInfoRequestV2),
+    /// Pong message that replies to [`DaemonMessage::OperatorPing`].
+    ///
+    /// Has the same ID that we got from the [`DaemonMessage::OperatorPing`].
+    OperatorPong(u128),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -167,6 +172,7 @@ pub enum FileResponse {
     RemoveDir(RemoteResult<()>),
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
+    Rename(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
@@ -191,6 +197,12 @@ pub enum DaemonMessage {
     PauseTarget(crate::pause::DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
     Vpn(ServerVpn),
+    /// Ping message that comes from the operator to mirrord.
+    ///
+    /// - Unlike other `DaemonMessage`s, this should never come from the agent!
+    ///
+    /// Holds the unique id of this ping.
+    OperatorPing(u128),
 }
 
 pub struct ProtocolCodec<I, O> {

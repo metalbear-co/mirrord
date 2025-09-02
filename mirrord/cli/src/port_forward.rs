@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -25,7 +26,7 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
-    tcp::{Filter, HttpFilter, StealType},
+    tcp::{Filter, HttpFilter, HttpMethodFilter, StealType},
 };
 use thiserror::Error;
 use tokio::{
@@ -336,10 +337,25 @@ impl PortForwarder {
             DaemonMessage::Pong if self.waiting_for_pong => {
                 self.waiting_for_pong = false;
             }
-            other => {
+            DaemonMessage::OperatorPing(id) => {
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::OperatorPong(id))
+                    .await
+                    .ok();
+            }
+            message @ (DaemonMessage::File(..)
+            | DaemonMessage::Pong
+            | DaemonMessage::Tcp(..)
+            | DaemonMessage::GetEnvVarsResponse(..)
+            | DaemonMessage::PauseTarget(..)
+            | DaemonMessage::SwitchProtocolVersionResponse(..)
+            | DaemonMessage::UdpOutgoing(..)
+            | DaemonMessage::Vpn(..)
+            | DaemonMessage::TcpSteal(..)) => {
                 // includes unexepcted DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
-                    "unexpected message from agent: {other:?}"
+                    "unexpected message from agent: {message:?}"
                 )));
             }
         }
@@ -582,6 +598,13 @@ impl ReversePortForwarder {
                     .send(IncomingProxyMessage::AgentSteal(msg))
                     .await
             }
+            DaemonMessage::OperatorPing(id) => {
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::OperatorPong(id))
+                    .await
+                    .ok();
+            }
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
                 LogLevel::Error => tracing::error!("agent log: {}", log_message.message),
@@ -593,10 +616,17 @@ impl ReversePortForwarder {
             DaemonMessage::Pong if self.waiting_for_pong => {
                 self.waiting_for_pong = false;
             }
-            // Includes unexpected DaemonMessage::Pong
-            other => {
+            message @ DaemonMessage::UdpOutgoing(_)
+            | message @ DaemonMessage::TcpOutgoing(_)
+            | message @ DaemonMessage::File(_)
+            | message @ DaemonMessage::GetEnvVarsResponse(_)
+            | message @ DaemonMessage::GetAddrInfoResponse(_)
+            | message @ DaemonMessage::PauseTarget(_)
+            | message @ DaemonMessage::SwitchProtocolVersionResponse(_)
+            | message @ DaemonMessage::Vpn(_)
+            | message @ DaemonMessage::Pong => {
                 return Err(PortForwardError::AgentError(format!(
-                    "unexpected message from agent: {other:?}"
+                    "unexpected message from agent: {message:?}"
                 )));
             }
         }
@@ -926,6 +956,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: Some(path),
                 header_filter: None,
+                method_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -936,6 +967,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: Some(header),
+                method_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -946,6 +978,18 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
+                method_filter: Some(method),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => StealHttpFilter::Filter(HttpFilter::Method(
+                HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+            )),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
@@ -954,6 +998,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
+                method_filter: None,
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
@@ -962,6 +1007,7 @@ impl IncomingMode {
             HttpFilterConfig {
                 path_filter: None,
                 header_filter: None,
+                method_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -982,6 +1028,9 @@ impl IncomingMode {
                 }
                 InnerFilter::Header { header } => HttpFilter::Header(
                     Filter::new(header.clone()).expect("invalid filter expression"),
+                ),
+                InnerFilter::Method { method } => HttpFilter::Method(
+                    HttpMethodFilter::from_str(method).expect("invalid method filter string"),
                 ),
             })
             .collect();

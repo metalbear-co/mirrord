@@ -104,15 +104,20 @@ fn init_proxy_tracing_registry(
 
 pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
     if crate::util::intproxy_container_mode().not() {
-        // When the intproxy does not run in a sidecar container, it logs to a file.
-        let log_destination = &config.internal_proxy.log_destination;
         init_proxy_tracing_registry(
-            log_destination,
+            &config.internal_proxy.log_destination,
             &config.internal_proxy.log_level,
             config.internal_proxy.json_log,
         )
         .map_err(|fail| {
-            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
+            InternalProxyError::OpenLogFile(
+                config
+                    .internal_proxy
+                    .log_destination
+                    .to_string_lossy()
+                    .to_string(),
+                fail,
+            )
         })
     } else {
         // When the intproxy runs in a sidecar container, it logs directly to stderr.

@@ -89,6 +89,18 @@ impl RuntimeCommandBuilder {
         }
     }
 
+    pub fn add_platform<P>(&mut self, platform: P)
+    where
+        P: Into<String>,
+    {
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
+                self.push_arg("--platform");
+                self.push_arg(platform);
+            }
+        }
+    }
+
     pub fn with_command(
         self,
         command: ContainerRuntimeCommand,

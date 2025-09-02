@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    ops::Not,
     time::Duration,
 };
 
@@ -16,7 +17,7 @@ use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
-    tcp::HTTP_COMPOSITE_FILTER_VERSION,
+    tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION},
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
@@ -204,27 +205,48 @@ impl MirrordExecution {
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        if config.feature.network.incoming.http_filter.is_composite() {
-            let version = match &connect_info {
-                AgentConnectInfo::Operator(OperatorSession {
-                    operator_protocol_version: Some(version),
-                    ..
-                }) => Some(version.clone()),
-                AgentConnectInfo::DirectKubernetes(_) => {
-                    Some(MirrordExecution::get_agent_version(&mut connection).await?)
-                }
-                _ => None,
-            };
-            if !version
-                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(&version))
-                .unwrap_or(false)
-            {
-                Err(ConfigError::Conflict(format!(
-                    "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. \
-                    Consider using a newer version of mirrord-agent",
-                    *HTTP_COMPOSITE_FILTER_VERSION
-                )))?
+        let agent_protocol_version = match &connect_info {
+            AgentConnectInfo::Operator(OperatorSession {
+                operator_protocol_version: Some(version),
+                ..
+            }) => Some(version.clone()),
+            AgentConnectInfo::DirectKubernetes(_) => {
+                Some(MirrordExecution::get_agent_version(&mut connection).await?)
             }
+            _ => None,
+        };
+
+        if config.feature.network.incoming.http_filter.is_composite()
+            && agent_protocol_version
+                .as_ref()
+                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(version))
+                .unwrap_or(false)
+                .not()
+        {
+            Err(ConfigError::Conflict(format!(
+                "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. \
+                    Consider using a newer version of mirrord-agent",
+                *HTTP_COMPOSITE_FILTER_VERSION
+            )))?
+        }
+
+        if config
+            .feature
+            .network
+            .incoming
+            .http_filter
+            .has_method_filter()
+            && agent_protocol_version
+                .as_ref()
+                .map(|version| HTTP_METHOD_FILTER_VERSION.matches(version))
+                .unwrap_or(false)
+                .not()
+        {
+            Err(ConfigError::Conflict(format!(
+                "Cannot use 'method' HTTP filter type, protocol version used by mirrord-agent must match {}. \
+                    Consider using a newer version of mirrord-agent",
+                *HTTP_METHOD_FILTER_VERSION
+            )))?
         }
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
@@ -265,6 +287,10 @@ impl MirrordExecution {
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command
             .arg("intproxy")
+            // Start of debug args. Don't add real args after this point,
+            // `_debug_args` Clap field will swallow them.
+            .arg("--log-destination")
+            .arg(config.internal_proxy.log_destination.as_os_str())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null())
@@ -426,6 +452,12 @@ impl MirrordExecution {
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command
             .arg("extproxy")
+            // Start of debug args. Don't add real args after this point,
+            // `_debug_args` Clap field will swallow them.
+            .arg("--extproxy-log-destination")
+            .arg(config.external_proxy.log_destination.as_os_str())
+            .arg("--intproxy-log-destination")
+            .arg(config.internal_proxy.log_destination.as_os_str())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null())
