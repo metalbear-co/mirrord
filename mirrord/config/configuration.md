@@ -517,7 +517,7 @@ When using`mirrord container` with external_proxy TLS enabled (is enabled by def
 can specify the path where the certificate `.pem` file will be created, in the cli
 container.
 
-Defaults to `"/mirrord/mirrord-tls.pem"`.
+Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
 
 ### container.override_host_ip {#container-override_host_ip}
 
