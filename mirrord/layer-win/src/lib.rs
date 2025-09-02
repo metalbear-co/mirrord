@@ -208,7 +208,10 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 
 fn mirrord_start() -> anyhow::Result<()> {
     // Create Windows console, and redirects std handles.
-    console::create()?;
+    if let Err(e) = console::create() {
+        println!("WARNING: couldn't initialize console: {:?}", e);
+    }
+
     println!("Console initialized");
 
     initialize_proxy_connection()?;
