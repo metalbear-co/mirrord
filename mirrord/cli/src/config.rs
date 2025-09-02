@@ -696,7 +696,8 @@ pub(super) enum OperatorCommand {
     /// This will install the operator, which requires a seat based license to be used.
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.
-    #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
+    // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
+    #[clap(hide(true))]
     Setup(#[clap(flatten)] OperatorSetupParams),
     /// Print operator status
     Status {

@@ -601,6 +601,7 @@ pub struct WorkloadQueueRegistryStatus {
     status = "WorkloadQueueRegistryStatus",
     namespaced
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
@@ -608,6 +609,13 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
+
+    /// Timeout for waiting until workload patch takes effect, that is - at least one pod reads
+    /// from the main temporary queue.
+    ///
+    /// Specified in seconds. Defaults to 120s.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workload_restart_timeout: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
