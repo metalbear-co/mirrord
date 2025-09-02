@@ -696,7 +696,8 @@ pub(super) enum OperatorCommand {
     /// This will install the operator, which requires a seat based license to be used.
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.
-    #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
+    // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
+    #[clap(hide(true))]
     Setup(#[clap(flatten)] OperatorSetupParams),
     /// Print operator status
     Status {
@@ -780,6 +781,12 @@ pub(super) struct OperatorSetupParams {
         hide = true
     )]
     pub(super) stateful_sessions: bool,
+
+    /// Enable MySQL database branching.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a mysql branching component.
+    #[arg(long, visible_alias = "mysql", default_value_t = false)]
+    pub(super) mysql_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.

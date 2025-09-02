@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.160.0](https://github.com/metalbear-co/mirrord/tree/3.160.0) - 2025-09-02
+
+
+### Added
+
+- Added hook for the `rename` function, enabled with the
+  `experimental.hook_rename` setting.
+  [#3456](https://github.com/metalbear-co/mirrord/issues/3456)
+- Introduced `MysqlBranchDatabase` CRD.
+- `workloadRestartTimeout` field for `MirrordWorkloadQueueRegistry`, that
+  controls the timeout for the target workload to restart on the first SQS
+  session start of a target.
+
+
+### Internal
+
+- Hide `operator setup` command from `--help`.
+
 ## [3.159.2](https://github.com/metalbear-co/mirrord/tree/3.159.2) - 2025-09-01
 
 

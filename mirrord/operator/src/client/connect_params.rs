@@ -29,10 +29,18 @@ pub struct ConnectParams<'a> {
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_name: Option<String>,
+
+    /// Resource names of the database branches to use for the connection.
+    #[serde(with = "mysql_branches_serde")]
+    pub mysql_branch_names: Vec<String>,
 }
 
 impl<'a> ConnectParams<'a> {
-    pub fn new(config: &'a LayerConfig, branch_name: Option<String>) -> Self {
+    pub fn new(
+        config: &'a LayerConfig,
+        branch_name: Option<String>,
+        mysql_branch_names: Vec<String>,
+    ) -> Self {
         Self {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
@@ -40,6 +48,7 @@ impl<'a> ConnectParams<'a> {
             kafka_splits: config.feature.split_queues.kafka().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
+            mysql_branch_names,
         }
     }
 }
@@ -63,6 +72,23 @@ mod queue_splits_serde {
         let as_json =
             serde_json::to_string(queue_splits).expect("serialization to memory should not fail");
         serializer.serialize_str(as_json.as_str())
+    }
+}
+
+mod mysql_branches_serde {
+    use serde::Serializer;
+
+    pub fn serialize<S>(mysql_branches: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if mysql_branches.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(mysql_branches)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
+        }
     }
 }
 

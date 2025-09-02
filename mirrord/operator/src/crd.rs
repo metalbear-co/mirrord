@@ -23,6 +23,7 @@ pub mod copy_target;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod mysql_branching;
 pub mod policy;
 pub mod profile;
 pub mod session;
@@ -379,6 +380,7 @@ pub enum NewOperatorFeature {
     LayerReconnect,
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
+    MySqlBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -402,6 +404,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingDirect => {
                 "SQS queue splitting without copy target"
             }
+            NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -598,6 +601,7 @@ pub struct WorkloadQueueRegistryStatus {
     status = "WorkloadQueueRegistryStatus",
     namespaced
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
@@ -605,6 +609,13 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
+
+    /// Timeout for waiting until workload patch takes effect, that is - at least one pod reads
+    /// from the main temporary queue.
+    ///
+    /// Specified in seconds. Defaults to 120s.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workload_restart_timeout: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]

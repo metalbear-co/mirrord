@@ -747,6 +747,123 @@
       },
       "additionalProperties": false
     },
+    "DatabaseBranchConfig": {
+      "description": "Configuration for a database branch.\n\nBy specifying a unique `id`, the branch database will be reused if not expired.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
+      "type": "object",
+      "required": [
+        "connection",
+        "type"
+      ],
+      "properties": {
+        "connection": {
+          "description": "The database connection details.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DbBranchingConnectionSource"
+            }
+          ]
+        },
+        "id": {
+          "description": "A unique identifier chosen by the user. This is useful when reusing branch database sharing among different Kubernetes users.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Name of the database",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ttl_secs": {
+          "description": "The time-to-live (TTL) for the branch database, in seconds.",
+          "default": 60,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "description": "The database type.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DbBranchingDatabaseType"
+            }
+          ]
+        },
+        "version": {
+          "description": "The database image version.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "DatabaseBranchesConfig": {
+      "description": "A list of configuration for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DatabaseBranchConfig"
+      }
+    },
+    "DbBranchingConnectionSource": {
+      "description": "Options for connecting to the database.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "DbBranchingConnectionSourceKind": {
+      "description": "Different ways to source the connection options.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "DbBranchingDatabaseType": {
+      "description": "Supported database types.",
+      "type": "string",
+      "enum": [
+        "mysql"
+      ]
+    },
     "DeploymentTarget": {
       "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
@@ -956,6 +1073,14 @@
             "null"
           ]
         },
+        "hook_rename": {
+          "title": "_experimental_ hook_rename {#experimental-hook_rename}",
+          "description": "Enables hooking the `rename` function.\n\nUseful if you need file remapping and your application uses `rename`, i.e. `php-fpm`, `twig`, to create and rename temporary files.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "idle_local_http_connection_timeout": {
           "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
           "description": "Sets a timeout for idle local HTTP connections (in milliseconds).\n\nHTTP requests stolen with a filter are delivered to the local application from a HTTP connection made from the local machine. Once a request is delivered, the connection is cached for some time, so that it can be reused to deliver the next request.\n\nThis timeout determines for how long such connections are cached.\n\nSet to 0 to disable caching local HTTP connections (connections will be dropped as soon as the request is delivered).\n\nDefaults to 3000ms.",
@@ -1112,6 +1237,18 @@
           "anyOf": [
             {
               "$ref": "#/definitions/CopyTargetFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "db_branches": {
+          "title": "feature.db_branches {#feature-db_branches}",
+          "description": "Configuration for the database branching feature.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DatabaseBranchesConfig"
             },
             {
               "type": "null"

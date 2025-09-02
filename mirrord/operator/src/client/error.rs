@@ -16,6 +16,7 @@ pub enum OperatorOperation {
     GettingStatus,
     SessionManagement,
     ListingTargets,
+    MysqlBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -28,6 +29,7 @@ impl fmt::Display for OperatorOperation {
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
+            Self::MysqlBranching => "mysql branching",
         };
 
         f.write_str(as_str)
@@ -77,6 +79,9 @@ pub enum OperatorApiError {
 
     #[error("copied target failed: {}", message.as_deref().unwrap_or("reason unknown"))]
     CopiedTargetFailed { message: Option<String> },
+
+    #[error("operation timed out: {}", operation)]
+    OperationTimeout { operation: OperatorOperation },
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
