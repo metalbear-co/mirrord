@@ -332,10 +332,10 @@ where
 ///
 /// 1. In properly isolated Kubernetes implementations (unlike kind, for example), unprivileged
 ///    agents will never be able to load kernel modules. This is because the agent container does
-///    not have `CAP_SYS_MODULE`.
+///    not have [`Capability::CAP_SYS_MODULE`].
 /// 2. Even in properly isolated Kubernetes implementations, privileged agents might still be able
-///    to load kernel modules. Because of this, this function will drop the `CAP_SYS_MODULE` before
-///    running any iptables commands.
+///    to load kernel modules. Because of this, this function will drop the
+///    [`Capability::CAP_SYS_MODULE`] before running any iptables commands.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     /// Whether we should use ip6tables-nft when no backend is explicitly configured,
     ///
