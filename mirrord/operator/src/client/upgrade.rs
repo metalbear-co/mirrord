@@ -17,9 +17,8 @@ use kube::{
     client::{Body, UpgradeConnectionError},
     core::ErrorResponse,
 };
-use mirrord_kube::BearClient;
 use tokio_retry::{
-    Retry, RetryIf,
+    Retry,
     strategy::{ExponentialBackoff, jitter},
 };
 use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};

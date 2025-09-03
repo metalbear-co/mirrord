@@ -18,7 +18,7 @@ use mirrord_auth::{
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
-    BearApi, BearClient,
+    BearApi, RetryConfig,
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -170,7 +170,7 @@ impl fmt::Debug for OperatorSessionConnection {
 /// Wrapper over mirrord operator API.
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
-    client: BearClient,
+    client: Client,
     /// Prepared client certificate. If present, [`Self::client`] sends [`CLIENT_CERT_HEADER`] with
     /// each request.
     client_cert: C,
@@ -221,12 +221,15 @@ impl OperatorApi<NoClientCert> {
         let base_config = Self::base_client_config(config).await?;
         let client = progress
             .suspend(|| Client::try_from(base_config.clone()))
-            .map(|client| BearClient::new(client))
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
-        let operator: Result<MirrordOperatorCrd, _> =
-            BearApi::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
+        let operator: Result<MirrordOperatorCrd, _> = BearApi::all(
+            client.clone(),
+            RetryConfig::new(config.start_retries_max, config.start_retries_interval_ms),
+        )
+        .get(OPERATOR_STATUS_NAME)
+        .await;
 
         let error = match operator {
             Ok(operator) => {
@@ -249,7 +252,7 @@ impl OperatorApi<NoClientCert> {
 
             // kube api failed to get the operator, let's see if it's installed though
             Err(error @ kube::Error::Api(..)) => {
-                match discovery::operator_installed(client.as_kube_client()).await {
+                match discovery::operator_installed(&client).await {
                     // operator is required, but we failed for some reason
                     Err(..) if config.operator == Some(true) => error,
                     // the operator is not installed, or discovery failed and the operator is not
@@ -315,7 +318,7 @@ impl OperatorApi<NoClientCert> {
 
         match result {
             Ok((new_client, cert)) => OperatorApi {
-                client: BearClient::new(new_client),
+                client: new_client,
                 client_cert: MaybeClientCert {
                     cert_result: Ok(cert),
                 },
@@ -419,7 +422,7 @@ where
 
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
-        self.client.as_kube_client()
+        &self.client
     }
 
     /// Creates a base [`Config`] for creating kube [`Client`]s.
@@ -926,8 +929,14 @@ impl OperatorApi<PreparedClientCert> {
             .exclude_init_containers
             .clone();
 
-        let copy_target_api: BearApi<CopyTargetCrd> =
-            BearApi::namespaced(self.client.clone(), namespace);
+        let copy_target_api: BearApi<CopyTargetCrd> = BearApi::namespaced(
+            self.client.clone(),
+            namespace,
+            RetryConfig::new(
+                layer_config.start_retries_max,
+                layer_config.start_retries_interval_ms,
+            ),
+        );
 
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
@@ -988,8 +997,14 @@ impl OperatorApi<PreparedClientCert> {
 
         let user_id = self.get_user_id_str();
 
-        let copy_target_api: BearApi<CopyTargetCrd> =
-            BearApi::namespaced(self.client.clone(), namespace);
+        let copy_target_api: BearApi<CopyTargetCrd> = BearApi::namespaced(
+            self.client.clone(),
+            namespace,
+            RetryConfig::new(
+                layer_config.start_retries_max,
+                layer_config.start_retries_interval_ms,
+            ),
+        );
         let copy_target_spec = CopyTargetSpec {
             target,
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
@@ -1120,7 +1135,6 @@ impl OperatorApi<PreparedClientCert> {
             .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
 
         let client = Client::try_from(config)
-            .map(|client| BearClient::new(client))
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
@@ -1132,7 +1146,7 @@ impl OperatorApi<PreparedClientCert> {
     /// Creates websocket connection to the operator target.
     #[tracing::instrument(level = Level::TRACE, skip(client), err)]
     async fn connect_target(
-        client: &BearClient,
+        client: &Client,
         session: &OperatorSession,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         let request = Request::builder()
@@ -1176,8 +1190,14 @@ impl OperatorApi<PreparedClientCert> {
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let mysql_branch_api: BearApi<MysqlBranchDatabase> =
-            BearApi::namespaced(self.client.clone(), namespace);
+        let mysql_branch_api: BearApi<MysqlBranchDatabase> = BearApi::namespaced(
+            self.client.clone(),
+            namespace,
+            RetryConfig::new(
+                layer_config.start_retries_max,
+                layer_config.start_retries_interval_ms,
+            ),
+        );
 
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,

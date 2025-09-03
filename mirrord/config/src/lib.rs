@@ -379,6 +379,9 @@ pub struct LayerConfig {
     /// being added to.
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
+
+    pub start_retries_max: usize,
+    pub start_retries_interval_ms: u64,
 }
 
 impl LayerConfig {
@@ -1082,6 +1085,8 @@ mod tests {
             use_proxy: None,
             experimental: None,
             skip_sip: None,
+            start_retries_max: None,
+            start_retries_interval_ms: None,
         };
 
         assert_eq!(config, expect);

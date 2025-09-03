@@ -6,8 +6,7 @@ use std::{
 };
 
 use fs4::tokio::AsyncFileExt;
-use kube::Resource;
-use mirrord_kube::BearClient;
+use kube::{Client, Resource};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -118,7 +117,7 @@ impl CredentialStore {
     #[tracing::instrument(level = "trace", skip(self, client))]
     pub async fn get_or_init<R>(
         &mut self,
-        client: &BearClient,
+        client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
     ) -> Result<&mut Credentials, CredentialStoreError>
@@ -193,7 +192,7 @@ impl CredentialStoreSync {
     /// The exclusive file lock is already acquired.
     async fn access_credential<R, C, V>(
         &mut self,
-        client: &BearClient,
+        client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
         callback: C,
@@ -233,7 +232,7 @@ impl CredentialStoreSync {
     /// Get or create specific client certificate with an exclusive lock on the file.
     pub async fn get_client_certificate<R>(
         &mut self,
-        client: &BearClient,
+        client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
     ) -> Result<Certificate, CredentialStoreError>
