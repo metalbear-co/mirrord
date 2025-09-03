@@ -1,9 +1,12 @@
+#![deny(unused_crate_dependencies)]
+
 use std::{
     fmt::Debug,
     ops::Not,
     sync::{Arc, LazyLock, OnceLock},
 };
 
+use caps::{CapSet, Capability};
 use enum_dispatch::enum_dispatch;
 use mirrord_agent_env::mesh::MeshVendor;
 use tracing::{Level, warn};
@@ -316,9 +319,23 @@ where
 /// 1. If mesh rules are found with `ip[6]tables-nft`, `ip[6]tables-nft` wrapper will be returned.
 /// 2. Otherwise, if mesh rules are found with `ip[6]tables-legacy`, `ip[6]tables-legacy` wrapper
 ///    will be returned.
-/// 3. Otherwise, `ip[6]tables-legacy` is able to add a dummy rule into "nat" table,
+/// 3. Otherwise, `ip[6]tables-legacy` is able to add a dummy rule into the "nat" table,
 ///    `ip[6]tables-legacy` wrapper will be returned.
 /// 4. Otherwise, `ip[6]tables-nft` wrapper will be returned.
+///
+/// # Safety
+///
+/// Unless `nftables` argument is provided, this function will use iptables commands when detecting
+/// the correct backend to use. Such actions can automatically load backend-specific kernel
+/// modules, and switch the active iptables backend in the kernel, at least in some cases. This is
+/// **not** acceptable for us.
+///
+/// 1. In properly isolated Kubernetes implementations (unlike kind, for example), unprivileged
+///    agents will never be able to load kernel modules. This is because the agent container does
+///    not have `CAP_SYS_MODULE`.
+/// 2. Even in properly isolated Kubernetes implementations, privileged agents might still be able
+///    to load kernel modules. Because of this, this function will drop the `CAP_SYS_MODULE` before
+///    running any iptables commands.
 pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     /// Whether we should use ip6tables-nft when no backend is explicitly configured,
     ///
@@ -354,45 +371,39 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     let legacy = get_iptables(Some(false), ip6);
     let nft = get_iptables(Some(true), ip6);
 
-    let nft_mesh = MeshVendor::detect(&nft).inspect_err(|error| {
-        tracing::warn!(
-            %error,
-            command = nft.tables.cmd,
-            "Failed to detect mesh rules with iptables-nft, assuming no mesh rules.",
-        );
-    });
-    let nft_mesh_detected = nft_mesh.as_ref().is_ok_and(Option::is_some);
-    if nft_mesh_detected {
-        tracing::info!(
-            cmd = nft.tables.cmd,
-            detect_mesh_result = ?nft_mesh,
-            "Using iptables-nft backend picked based on mesh rules detection."
-        );
-        let _ = detected_nftables.set(true);
-        return nft;
-    }
+    try_drop_cap_sys_module();
 
-    let legacy_mesh = MeshVendor::detect(&legacy).inspect_err(|error| {
-        tracing::warn!(
-            %error,
-            command = nft.tables.cmd,
-            "Failed to detect mesh rules with iptables-legacy, assuming no mesh rules.",
-        );
-    });
-    let legacy_mesh_detected = legacy_mesh.as_ref().is_ok_and(Option::is_some);
-    if legacy_mesh_detected {
-        tracing::info!(
-            cmd = legacy.tables.cmd,
-            detect_mesh_result = ?legacy_mesh,
-            "Using iptables-legacy backend picked based on mesh rules detection."
-        );
-        let _ = detected_nftables.set(false);
-        return legacy;
+    for (backend, is_nft) in [(&legacy, false), (&nft, true)] {
+        match MeshVendor::detect(backend) {
+            Ok(Some(mesh)) => {
+                tracing::info!(
+                    %mesh,
+                    command = backend.tables.cmd,
+                    "Detected mesh rules with one of the iptables backends. \
+                    Using this backend."
+                );
+                let _ = detected_nftables.set(is_nft);
+                return backend.clone();
+            }
+            Ok(None) => {
+                tracing::debug!(
+                    command = backend.tables.cmd,
+                    "No mesh rules detected with one of the iptables backends."
+                );
+            }
+            Err(error) => {
+                tracing::debug!(
+                    error = %error,
+                    command = backend.tables.cmd,
+                    "Failed to detect mesh rules with one of the iptables backends."
+                );
+            }
+        }
     }
 
     let legacy_works = legacy
         .tables
-        .append("nat", "INPUT", "-p 255 -j DROP")
+        .append("nat", "INPUT", "-p 255 -j RETURN")
         .inspect_err(|error| {
             tracing::debug!(
                 %error,
@@ -403,8 +414,8 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
         })
         .is_ok();
     let _ = detected_nftables.set(legacy_works.not());
-    if legacy_works {
-        let _ = legacy.tables.delete("nat", "INPUT", "-p 255 -j DROP")
+    let wrapper = if legacy_works {
+        let _ = legacy.tables.delete("nat", "INPUT", "-p 255 -j RETURN")
             .inspect_err(|error| {
                 tracing::error!(
                     %error,
@@ -416,6 +427,32 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
         legacy
     } else {
         nft
+    };
+
+    tracing::info!(
+        command = wrapper.tables.cmd,
+        "Using iptables backend picked based on kernel support for iptables-legacy.",
+    );
+
+    wrapper
+}
+
+/// Drops [`Capability::CAP_SYS_MODULE`] from the current thread.
+///
+/// This will prevent the thread from loading kernel modules.
+fn try_drop_cap_sys_module() {
+    let has_cap = caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_MODULE)
+        .inspect_err(|error| tracing::warn!(%error, "Failed to check if the current thread has CAP_SYS_MODULE."))
+        .unwrap_or_default();
+    if has_cap.not() {
+        tracing::debug!("Verified that the current thread does not have CAP_SYS_MODULE.");
+        return;
+    }
+
+    if let Err(error) = caps::drop(None, CapSet::Effective, Capability::CAP_SYS_MODULE) {
+        tracing::error!(%error, "Failed to drop CAP_SYS_MODULE from the current thread.");
+    } else {
+        tracing::debug!("Dropped CAP_SYS_MODULE from the current thread.");
     }
 }
 
