@@ -24,7 +24,7 @@ use super::utils::{
     GetAddrInfoResponseExtWin, ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo,
     evict_old_cache_entries, intelligent_truncate, validate_buffer_params,
 };
-use crate::{common::make_proxy_request_with_response, PROXY_CONNECTION};
+use crate::{PROXY_CONNECTION, common::make_proxy_request_with_response};
 
 /// Holds the pair of IP addresses with their hostnames, resolved remotely.
 /// This is the Windows equivalent of REMOTE_DNS_REVERSE_MAPPING.

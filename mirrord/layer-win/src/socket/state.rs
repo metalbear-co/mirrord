@@ -16,7 +16,7 @@ use winapi::{
     um::winsock2::SOCKET,
 };
 
-use super::{utils::SocketAddrExtWin};
+use super::utils::SocketAddrExtWin;
 use crate::{common::make_proxy_request_with_response, socket::WindowsDnsResolver};
 
 // Helper function to convert Windows socket types to SocketKind

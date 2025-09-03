@@ -3,10 +3,17 @@
 use std::{ffi::c_void, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use winapi::{shared::ntdef::{HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID, ULONG}, um::winnt::ACCESS_MASK};
+use str_win::u16_buffer_to_string;
+use winapi::{
+    shared::{ntdef::{
+        HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID, ULONG,
+    }, ntstatus::STATUS_OBJECT_PATH_NOT_FOUND},
+    um::winnt::ACCESS_MASK,
+};
 
 use crate::{PROXY_CONNECTION, apply_hook};
 
+pub mod util;
 
 // https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1611
 type NtCreateFileType = unsafe extern "system" fn(
@@ -20,7 +27,7 @@ type NtCreateFileType = unsafe extern "system" fn(
     ULONG,
     ULONG,
     PVOID,
-    ULONG
+    ULONG,
 ) -> NTSTATUS;
 static NT_CREATE_FILE_ORIGINAL: OnceLock<&NtCreateFileType> = OnceLock::new();
 
@@ -30,16 +37,47 @@ unsafe extern "system" fn nt_create_file_hook(
     object_attributes: POBJECT_ATTRIBUTES,
     io_status_block: *mut c_void,
     allocation_size: PLARGE_INTEGER,
-    file_attributes_: ULONG,
+    file_attributes: ULONG,
     share_access: ULONG,
     create_disposition: ULONG,
     create_options: ULONG,
     ea_buf: PVOID,
-    ea_size: ULONG
+    ea_size: ULONG,
 ) -> NTSTATUS {
     unsafe {
+        // Get the name from the buffer
+        let name_ustr = (*object_attributes).ObjectName;
+        let name_raw =
+            &*std::ptr::slice_from_raw_parts((*name_ustr).Buffer, (*name_ustr).Length as _);
+        let name = u16_buffer_to_string(name_raw);
+
+        // Try to get path
+
         let original = NT_CREATE_FILE_ORIGINAL.get().unwrap();
-        original(file_handle, desired_access, object_attributes, io_status_block, allocation_size, file_attributes_, share_access, create_disposition, create_options, ea_buf, ea_size)
+        let ret = original(
+            file_handle,
+            desired_access,
+            object_attributes,
+            io_status_block,
+            allocation_size,
+            file_attributes,
+            share_access,
+            create_disposition,
+            create_options,
+            ea_buf,
+            ea_size,
+        );
+
+        println!(
+            "create_file: {name} {file_attributes} {share_access} {create_disposition} {create_options} -> {ret}"
+        );
+
+        // This is usually the case when a Linux path is provided.
+        if ret == STATUS_OBJECT_PATH_NOT_FOUND {
+
+        }
+
+        ret
     }
 }
 
