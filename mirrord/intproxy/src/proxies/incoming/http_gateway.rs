@@ -4,12 +4,17 @@ use std::{
     error::Report,
     fmt,
     net::SocketAddr,
-    ops::ControlFlow,
+    ops::{ControlFlow, Not},
     time::{Duration, Instant},
 };
 
+use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::{StatusCode, body::Incoming, http::response::Parts};
+use hyper::{
+    StatusCode,
+    body::{Frame, Incoming},
+    http::response::Parts,
+};
 use mirrord_protocol::{
     Payload,
     batched_body::BatchedBody,
@@ -78,56 +83,47 @@ impl HttpGatewayTask {
         }
     }
 
-    /// Handles gRPC error responses by ensuring grpc-status and grpc-message are available as
-    /// trailers. This is necessary because gRPC clients expect error information in trailers
-    /// for proper error handling.
-    fn ensure_grpc_trailers(
-        &self,
-        headers: &hyper::HeaderMap,
-        mut body_frames: VecDeque<InternalHttpBodyFrame>,
-    ) -> VecDeque<InternalHttpBodyFrame> {
-        // Check if this is a gRPC response
+    /// Handles gRPC error responses by ensuring `grpc-status` and `grpc-message`
+    /// headers are available as trailers.
+    ///  
+    /// This is necessary, because gRPC clients expect error information in trailers  
+    /// for proper error handling, and hyper seems to prefer merging the trailers  
+    /// into response parts.
+    fn ensure_grpc_trailers(headers: &hyper::HeaderMap, body_frames: &mut Vec<Frame<Bytes>>) {
         let is_grpc = headers
             .get("content-type")
             .and_then(|ct| ct.to_str().ok())
-            .map(|ct| ct.starts_with("application/grpc"))
-            .unwrap_or(false);
-
-        if !is_grpc {
-            return body_frames;
+            .is_some_and(|ct| ct.starts_with("application/grpc"));
+        if is_grpc.not() {
+            return;
         }
 
-        let grpc_status = headers
+        let is_error = headers
             .get("grpc-status")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(0);
-
-        // For gRPC error responses (grpc-status != 0), ensure trailers contain the error info
-        if grpc_status != 0 {
-            let mut trailers = hyper::HeaderMap::new();
-
-            if let Some(status) = headers.get("grpc-status") {
-                trailers.insert("grpc-status", status.clone());
-            }
-            if let Some(message) = headers.get("grpc-message") {
-                trailers.insert("grpc-message", message.clone());
-            }
-
-            // Add trailers to the body if not already present and we have trailers to add
-            if !trailers.is_empty() {
-                // Check if trailers already exist in the frames
-                let has_trailers = body_frames
-                    .iter()
-                    .any(|frame| matches!(frame, InternalHttpBodyFrame::Trailers(_)));
-
-                if !has_trailers {
-                    body_frames.push_back(InternalHttpBodyFrame::Trailers(trailers));
-                }
-            }
+            .is_some_and(|status| status != 0);
+        if is_error.not() {
+            return;
         }
 
-        body_frames
+        let has_trailers = body_frames.iter().any(Frame::is_trailers);
+        if has_trailers {
+            return;
+        }
+
+        let mut trailers = hyper::HeaderMap::new();
+        if let Some(status) = headers.get("grpc-status") {
+            trailers.insert("grpc-status", status.clone());
+        }
+        if let Some(message) = headers.get("grpc-message") {
+            trailers.insert("grpc-message", message.clone());
+        }
+        if trailers.is_empty() {
+            return;
+        }
+
+        body_frames.push(Frame::trailers(trailers));
     }
 
     /// Handles the response if we operate in [`ResponseMode::Chunked`].
@@ -145,19 +141,18 @@ impl HttpGatewayTask {
         mut body: Incoming,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<ControlFlow<()>, LocalHttpError> {
-        let frames = body
+        let mut frames = body
             .ready_frames()
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
         if frames.is_last {
-            let mut ready_frames = frames
+            Self::ensure_grpc_trailers(&parts.headers, &mut frames.frames);
+
+            let ready_frames = frames
                 .frames
                 .into_iter()
                 .map(InternalHttpBodyFrame::from)
                 .collect::<VecDeque<_>>();
-
-            // Handle gRPC error responses by ensuring grpc-status and grpc-message are in trailers
-            ready_frames = self.ensure_grpc_trailers(&parts.headers, ready_frames);
 
             tracing::debug!(
                 ?ready_frames,
@@ -190,8 +185,7 @@ impl HttpGatewayTask {
             but response body may not be finished yet"
         );
 
-        // Clone headers to use later in the streaming loop
-        let headers_for_trailers = parts.headers.clone();
+        let headers_cloned = parts.headers.clone();
 
         let response = HttpResponse {
             port: self.request.port,
@@ -211,22 +205,17 @@ impl HttpGatewayTask {
         loop {
             let start = Instant::now();
             match body.next_frames().await {
-                Ok(frames) => {
+                Ok(mut frames) => {
+                    if frames.is_last {
+                        Self::ensure_grpc_trailers(&headers_cloned, &mut frames.frames);
+                    }
+
                     let is_last = frames.is_last;
-                    let mut frames = frames
+                    let frames = frames
                         .frames
                         .into_iter()
                         .map(InternalHttpBodyFrame::from)
                         .collect::<Vec<_>>();
-
-                    // For the final chunk of a gRPC error response, ensure trailers are included
-                    if is_last {
-                        let body_frames: VecDeque<InternalHttpBodyFrame> =
-                            frames.into_iter().collect();
-                        let body_frames =
-                            self.ensure_grpc_trailers(&headers_for_trailers, body_frames);
-                        frames = body_frames.into_iter().collect();
-                    }
 
                     tracing::trace!(
                         ?frames,
@@ -334,13 +323,20 @@ impl HttpGatewayTask {
             }
             Some(ResponseMode::Framed) => {
                 let start = Instant::now();
-                let mut body = InternalHttpBody::from_body(body)
-                    .await
-                    .map_err(LocalHttpError::ReadBodyFailed)?;
 
-                // Handle gRPC error responses by ensuring grpc-status and grpc-message are in
-                // trailers
-                body.0 = self.ensure_grpc_trailers(&parts.headers, body.0);
+                let mut frames = Vec::new();
+                while let Some(res) = body.frame().await {
+                    let frame = res.map_err(LocalHttpError::ReadBodyFailed)?;
+                    frames.push(frame);
+                }
+
+                Self::ensure_grpc_trailers(&parts.headers, &mut frames);
+
+                let frames = frames
+                    .into_iter()
+                    .map(InternalHttpBodyFrame::from)
+                    .collect::<VecDeque<_>>();
+                let body = InternalHttpBody(frames);
 
                 tracing::debug!(
                     ?body,
@@ -475,11 +471,11 @@ mod test {
         Method, Request, Response, StatusCode, Version,
         body::{Frame, Incoming},
         header::{self, CONNECTION, HeaderValue, UPGRADE},
-        server::conn::http1,
+        server::conn::{http1, http2},
         service::service_fn,
         upgrade::Upgraded,
     };
-    use hyper_util::rt::TokioIo;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
     use mirrord_protocol::{
         ConnectionId, ToPayload,
         tcp::{HttpRequest, InternalHttpRequest},
@@ -1167,7 +1163,7 @@ mod test {
             });
 
             let (connection, _) = listener.accept().await.unwrap();
-            http1::Builder::new()
+            http2::Builder::new(TokioExecutor::new())
                 .serve_connection(TokioIo::new(connection), service)
                 .await
                 .unwrap()
@@ -1181,7 +1177,7 @@ mod test {
                 method: Method::POST,
                 uri: "/service.TestService/GetResource".parse().unwrap(),
                 headers: Default::default(),
-                version: Version::HTTP_11,
+                version: Version::HTTP_2,
                 body: Default::default(),
             },
         };
@@ -1219,19 +1215,18 @@ mod test {
                     "resource not found"
                 );
 
-                // Verify trailers were added to the body
-                let mut has_trailers = false;
-                for frame in &response.internal_response.body.0 {
-                    if let InternalHttpBodyFrame::Trailers(trailers) = frame {
-                        assert_eq!(trailers.get("grpc-status").unwrap(), "5");
-                        assert_eq!(trailers.get("grpc-message").unwrap(), "resource not found");
-                        has_trailers = true;
-                    }
-                }
-                assert!(
-                    has_trailers,
-                    "Expected gRPC trailers to be added to response body"
-                );
+                let trailers = response
+                    .internal_response
+                    .body
+                    .0
+                    .iter()
+                    .find_map(|frame| match frame {
+                        InternalHttpBodyFrame::Trailers(trailers) => Some(trailers),
+                        InternalHttpBodyFrame::Data(..) => None,
+                    })
+                    .expect("gRPC trailers should be added to the response");
+                assert_eq!(trailers.get("grpc-status").unwrap(), "5");
+                assert_eq!(trailers.get("grpc-message").unwrap(), "resource not found");
             }
             other => panic!("unexpected task message: {other:?}"),
         }
