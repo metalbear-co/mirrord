@@ -194,7 +194,7 @@ impl DateValidityExt for rfc5280::Validity {
 /// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
-    use kube::{Client, Resource, api::PostParams};
+    use kube::{Resource, api::PostParams};
     use mirrord_kube::{BearApi, BearClient};
 
     use super::*;

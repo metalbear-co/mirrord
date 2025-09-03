@@ -45,6 +45,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-retry = { workspace = true, optional = true }
+http.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true

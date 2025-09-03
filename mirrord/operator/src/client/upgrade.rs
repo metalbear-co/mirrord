@@ -17,6 +17,11 @@ use kube::{
     client::{Body, UpgradeConnectionError},
     core::ErrorResponse,
 };
+use mirrord_kube::BearClient;
+use tokio_retry::{
+    Retry, RetryIf,
+    strategy::{ExponentialBackoff, jitter},
+};
 use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
 
 const WS_PROTOCOL: &str = "v4.channel.k8s.io";
@@ -134,11 +139,16 @@ pub async fn connect_ws(
         HeaderValue::from_static(WS_PROTOCOL),
     );
 
-    let res = client
-        .send(Request::from_parts(parts, Body::from(body)))
-        .await?;
-    let res = verify_response(res, &key).await?;
-    match hyper::upgrade::on(res).await {
+    let retry_strategy = ExponentialBackoff::from_millis(10).map(jitter).take(1);
+
+    let response = Retry::spawn(retry_strategy, || async {
+        let request = Request::from_parts(parts.clone(), Body::from(body.clone()));
+        client.send(request).await
+    })
+    .await?;
+
+    let verified_response = verify_response(response, &key).await?;
+    match hyper::upgrade::on(verified_response).await {
         Ok(upgraded) => {
             Ok(WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Client, None).await)
         }

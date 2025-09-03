@@ -4,7 +4,7 @@ use std::{
 };
 
 use kube::{
-    Api, Resource,
+    Resource,
     api::{ListParams, ObjectMeta},
     runtime::wait::await_condition,
 };

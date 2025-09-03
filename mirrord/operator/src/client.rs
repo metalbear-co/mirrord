@@ -7,7 +7,7 @@ use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
 use kube::{
-    Api, Client, Config, Resource,
+    Client, Config, Resource,
     api::{ListParams, PostParams},
 };
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
@@ -315,7 +315,7 @@ impl OperatorApi<NoClientCert> {
 
         match result {
             Ok((new_client, cert)) => OperatorApi {
-                client: new_client,
+                client: BearClient::new(new_client),
                 client_cert: MaybeClientCert {
                     cert_result: Ok(cert),
                 },
@@ -419,7 +419,7 @@ where
 
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
-        &self.client
+        self.client.as_kube_client()
     }
 
     /// Creates a base [`Config`] for creating kube [`Client`]s.
@@ -988,7 +988,8 @@ impl OperatorApi<PreparedClientCert> {
 
         let user_id = self.get_user_id_str();
 
-        let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+        let copy_target_api: BearApi<CopyTargetCrd> =
+            BearApi::namespaced(self.client.clone(), namespace);
         let copy_target_spec = CopyTargetSpec {
             target,
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
@@ -1119,6 +1120,7 @@ impl OperatorApi<PreparedClientCert> {
             .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
 
         let client = Client::try_from(config)
+            .map(|client| BearClient::new(client))
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
@@ -1130,7 +1132,7 @@ impl OperatorApi<PreparedClientCert> {
     /// Creates websocket connection to the operator target.
     #[tracing::instrument(level = Level::TRACE, skip(client), err)]
     async fn connect_target(
-        client: &Client,
+        client: &BearClient,
         session: &OperatorSession,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         let request = Request::builder()

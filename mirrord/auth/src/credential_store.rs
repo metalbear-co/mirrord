@@ -6,7 +6,7 @@ use std::{
 };
 
 use fs4::tokio::AsyncFileExt;
-use kube::{Client, Resource};
+use kube::Resource;
 use mirrord_kube::BearClient;
 use serde::{Deserialize, Serialize};
 use tokio::{

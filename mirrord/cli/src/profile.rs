@@ -3,14 +3,13 @@
 
 use std::{fmt::Display, str::FromStr};
 
-use kube::Client;
 use miette::Diagnostic;
 use mirrord_config::{
     LayerConfig,
     feature::{FeatureConfig, network::incoming::IncomingMode},
     util::VecOrSingle,
 };
-use mirrord_kube::{BearApi, api::kubernetes::create_kube_config, error::KubeApiError};
+use mirrord_kube::{BearApi, BearClient, api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{
     FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordProfile,
 };
@@ -230,13 +229,14 @@ async fn fetch_profile(
     config: &LayerConfig,
     profile_identifier: &ProfileIdentifier,
 ) -> Result<ProfileFetchResult, KubeApiError> {
-    let client: Client = create_kube_config(
+    let client: BearClient = create_kube_config(
         config.accept_invalid_certificates,
         config.kubeconfig.as_deref(),
         config.kube_context.clone(),
     )
     .await?
     .try_into()
+    .map(|client| BearClient::new(client))
     .map_err(KubeApiError::from)?;
 
     match profile_identifier {

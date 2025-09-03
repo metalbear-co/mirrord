@@ -16,14 +16,16 @@
 //! Turn this feature on if you want to connect to agent pods from outside the cluster with port
 //! forwarding.
 
+use http::{Request, Response};
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
     Api, Client, Resource,
     api::{ListParams, ObjectList, PostParams},
+    client::Body,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tokio_retry::{
-    Retry, RetryIf,
+    Action, Retry, RetryIf,
     strategy::{ExponentialBackoff, jitter},
 };
 use tracing::Level;
@@ -40,6 +42,36 @@ pub struct BearClient {
 }
 
 impl BearClient {
+    #[tracing::instrument(level = Level::INFO, skip(self, action), err)]
+    async fn retry_operation<T, A>(&self, action: A) -> kube::Result<T>
+    where
+        A: Action<Item = T, Error = kube::Error>,
+    {
+        let retry_strategy = self
+            .exponential_backoff
+            .clone()
+            .map(jitter)
+            .take(self.max_attempts);
+
+        let result = RetryIf::spawn(
+            retry_strategy,
+            action,
+            (|fail| {
+                matches!(
+                    fail,
+                    kube::Error::HyperError(..)
+                        | kube::Error::Service(..)
+                        | kube::Error::HttpError(..)
+                        | kube::Error::Auth(..)
+                        | kube::Error::UpgradeConnection(..)
+                )
+            }) as fn(&A::Error) -> bool,
+        )
+        .await;
+
+        Ok(result?)
+    }
+
     pub fn default_namespace(&self) -> &str {
         self.kube_client.default_namespace()
     }
@@ -95,42 +127,33 @@ where
     R: Clone + DeserializeOwned + std::fmt::Debug,
 {
     #[tracing::instrument(level = Level::INFO, skip(self, action), err)]
-    async fn retry_operation<Fun, Fut, T>(
-        &self,
-        fail: kube::error::Error,
-        action: Fun,
-    ) -> kube::Result<T>
+    async fn retry_operation<T, A>(&self, action: A) -> kube::Result<T>
     where
-        Fun: FnMut() -> Fut,
-        Fut: Future<Output = Result<T, kube::error::Error>>,
+        A: Action<Item = T, Error = kube::Error>,
     {
-        match fail {
-            kube::Error::HyperError(..)
-            | kube::Error::Service(..)
-            | kube::Error::HttpError(..)
-            | kube::Error::Auth(..)
-            | kube::Error::UpgradeConnection(..) => {
-                let retry_strategy = self
-                    .exponential_backoff
-                    .clone()
-                    .map(jitter)
-                    .take(self.max_attempts);
+        let retry_strategy = self
+            .exponential_backoff
+            .clone()
+            .map(jitter)
+            .take(self.max_attempts);
 
-                Ok(Retry::spawn(retry_strategy, action).await?)
-            }
-            kube::Error::Api(..)
-            | kube::Error::RustlsTls(..)
-            | kube::Error::Discovery(..)
-            | kube::Error::TlsRequired
-            | kube::Error::InferConfig(..)
-            | kube::Error::BuildRequest(..)
-            | kube::Error::SerdeError(..)
-            | kube::Error::ReadEvents(..)
-            | kube::Error::LinesCodecMaxLineLengthExceeded
-            | kube::Error::FromUtf8(_)
-            | kube::Error::ProxyProtocolUnsupported { .. }
-            | kube::Error::ProxyProtocolDisabled { .. } => Err(fail),
-        }
+        let result = RetryIf::spawn(
+            retry_strategy,
+            action,
+            (|fail| {
+                matches!(
+                    fail,
+                    kube::Error::HyperError(..)
+                        | kube::Error::Service(..)
+                        | kube::Error::HttpError(..)
+                        | kube::Error::Auth(..)
+                        | kube::Error::UpgradeConnection(..)
+                )
+            }) as fn(&A::Error) -> bool,
+        )
+        .await;
+
+        Ok(result?)
     }
 
     #[tracing::instrument(level = Level::INFO, skip(self))]
@@ -140,15 +163,12 @@ where
 
     #[tracing::instrument(level = Level::INFO, skip(self), ret, err)]
     pub async fn get(&self, name: &str) -> kube::Result<R> {
-        match self.kube_api.get(name).await {
-            Ok(resource) => Ok(resource),
-            Err(fail) => Ok(self
-                .retry_operation(fail, || async {
-                    tracing::info!("retrying ...");
-                    self.kube_api.get(name).await
-                })
-                .await?),
-        }
+        Ok(self
+            .retry_operation(|| async {
+                tracing::info!("retrying ...");
+                self.kube_api.get(name).await
+            })
+            .await?)
     }
 
     pub async fn create_subresource<T>(
@@ -161,47 +181,34 @@ where
     where
         T: DeserializeOwned,
     {
-        match self
-            .kube_api
-            .create_subresource::<T>(subresource_name, name, pp, data.clone())
-            .await
-        {
-            Ok(r) => Ok(r),
-            Err(fail) => Ok(self
-                .retry_operation(fail, || async {
-                    tracing::info!("retrying ...");
-                    self.kube_api
-                        .create_subresource::<T>(subresource_name, name, pp, data.clone())
-                        .await
-                })
-                .await?),
-        }
+        Ok(self
+            .retry_operation(|| async {
+                tracing::info!("retrying ...");
+                self.kube_api
+                    .create_subresource::<T>(subresource_name, name, pp, data.clone())
+                    .await
+            })
+            .await?)
     }
 
     pub async fn create(&self, pp: &PostParams, data: &R) -> kube::Result<R>
     where
         R: Serialize,
     {
-        match self.kube_api.create(pp, data).await {
-            Ok(r) => Ok(r),
-            Err(fail) => Ok(self
-                .retry_operation(fail, || async {
-                    tracing::info!("retrying ...");
-                    self.kube_api.create(pp, data).await
-                })
-                .await?),
-        }
+        Ok(self
+            .retry_operation(|| async {
+                tracing::info!("retrying ...");
+                self.kube_api.create(pp, data).await
+            })
+            .await?)
     }
 
     pub async fn list(&self, lp: &ListParams) -> kube::Result<ObjectList<R>> {
-        match self.kube_api.list(lp).await {
-            Ok(r) => Ok(r),
-            Err(fail) => Ok(self
-                .retry_operation(fail, || async {
-                    tracing::info!("retrying ...");
-                    self.kube_api.list(lp).await
-                })
-                .await?),
-        }
+        Ok(self
+            .retry_operation(|| async {
+                tracing::info!("retrying ...");
+                self.kube_api.list(lp).await
+            })
+            .await?)
     }
 }
