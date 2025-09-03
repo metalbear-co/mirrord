@@ -22,6 +22,7 @@ use winapi::{
 
 use crate::{hooks::initialize_hooks, setup::LayerSetup};
 
+pub(crate) mod common;
 mod console;
 pub mod error;
 mod hooks;

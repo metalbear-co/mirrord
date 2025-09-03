@@ -24,7 +24,7 @@ use super::utils::{
     GetAddrInfoResponseExtWin, ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo,
     evict_old_cache_entries, intelligent_truncate, validate_buffer_params,
 };
-use crate::PROXY_CONNECTION;
+use crate::{common::make_proxy_request_with_response, PROXY_CONNECTION};
 
 /// Holds the pair of IP addresses with their hostnames, resolved remotely.
 /// This is the Windows equivalent of REMOTE_DNS_REVERSE_MAPPING.
@@ -388,21 +388,6 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
     CString::new("127.0.0.1").ok()
 }
 
-/// Helper function to make proxy request with response (Windows version)
-pub fn make_windows_proxy_request_with_response<T>(request: T) -> Result<T::Response, String>
-where
-    T: mirrord_intproxy_protocol::IsLayerRequestWithResponse + std::fmt::Debug,
-    T::Response: std::fmt::Debug,
-{
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or_else(|| "ProxyConnection not initialized".to_string())?
-            .make_request_with_response(request)
-            .map_err(|e| format!("Proxy request failed: {:?}", e))
-    }
-}
-
 /// Windows-specific implementation of GetAddrInfo using mirrord's remote DNS resolution.
 ///
 /// This function handles the complete GetAddrInfo workflow including service ports,
@@ -483,7 +468,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
         flags: 0,
     };
 
-    let response = make_windows_proxy_request_with_response(request)
+    let response = make_proxy_request_with_response(request)
         .map_err(|e| format!("DNS request failed: {}", e))?;
 
     // Convert response back to Windows ADDRINFO structures using trait method

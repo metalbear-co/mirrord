@@ -16,8 +16,8 @@ use winapi::{
     um::winsock2::SOCKET,
 };
 
-use super::{hostname::make_windows_proxy_request_with_response, utils::SocketAddrExtWin};
-use crate::socket::WindowsDnsResolver;
+use super::{utils::SocketAddrExtWin};
+use crate::{common::make_proxy_request_with_response, socket::WindowsDnsResolver};
 
 // Helper function to convert Windows socket types to SocketKind
 fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
@@ -238,7 +238,7 @@ pub fn setup_listening(
         subscription: PortSubscription::Steal(StealType::All(bind_addr.port())),
     };
 
-    match make_windows_proxy_request_with_response(port_subscribe) {
+    match make_proxy_request_with_response(port_subscribe) {
         Ok(_) => {
             tracing::info!(
                 "setup_listening -> successfully subscribed to port {} for socket {}",
@@ -249,12 +249,12 @@ pub fn setup_listening(
         }
         Err(e) => {
             tracing::error!(
-                "setup_listening -> failed to subscribe to port {}: {}",
+                "setup_listening -> failed to subscribe to port {}: {:?}",
                 bind_addr.port(),
                 e
             );
             Err(format!(
-                "Failed to subscribe to port {}: {}",
+                "Failed to subscribe to port {}: {:?}",
                 bind_addr.port(),
                 e
             ))
@@ -324,7 +324,7 @@ pub fn connect_through_proxy(
     };
 
     // Make the proxy request
-    match make_windows_proxy_request_with_response(request) {
+    match make_proxy_request_with_response(request) {
         Ok(Ok(response)) => {
             tracing::info!(
                 "connect_through_proxy -> got proxy response: layer_address={:?}, in_cluster_address={:?}, connection_id={:?}",

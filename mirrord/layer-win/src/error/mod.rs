@@ -4,6 +4,7 @@ pub(crate) mod windows;
 
 use std::{env::VarError, net::AddrParseError};
 
+use mirrord_layer_lib::proxy_connection::ProxyError;
 use thiserror::Error;
 
 use crate::error::windows::WindowsError;
@@ -17,6 +18,11 @@ pub enum Error {
     MissingEnvIntProxyAddr(VarError),
     #[error("Intproxy address malformed: {0}")]
     MalformedIntProxyAddr(AddrParseError),
+
+    #[error("Proxy Connection variable is not initialized")]
+    ProxyConnectionNotInitialized,
+    #[error("Proxy Connection operation failed: {0}")]
+    ProxyConnectionError(ProxyError),
 
     #[error("Failed allocating console: {0}")]
     FailedAllocatingConsole(WindowsError),

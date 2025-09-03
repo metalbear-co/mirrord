@@ -1866,6 +1866,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns_resolve"
+version = "0.1.0"
+
+[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2122,6 +2126,13 @@ dependencies = [
  "toml 0.8.23",
  "uncased",
  "version_check",
+]
+
+[[package]]
+name = "fileops"
+version = "3.159.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -3381,6 +3392,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "winapi",
+ "windows-strings",
 ]
 
 [[package]]
@@ -3442,6 +3454,10 @@ name = "linux-raw-sys"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
+
+[[package]]
+name = "listen_ports"
+version = "3.159.0"
 
 [[package]]
 name = "litemap"
@@ -3930,9 +3946,12 @@ dependencies = [
 name = "mirrord-layer-lib"
 version = "3.159.0"
 dependencies = [
+ "bincode 2.0.1",
  "libc",
+ "mirrord-config",
  "mirrord-intproxy-protocol",
  "mirrord-protocol",
+ "socket2 0.5.10",
  "thiserror 2.0.12",
  "tracing",
  "winapi",
@@ -4404,6 +4423,10 @@ checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "outgoing"
+version = "3.159.0"
 
 [[package]]
 name = "outref"
@@ -5100,6 +5123,13 @@ dependencies = [
  "rustls-pki-types",
  "time",
  "yasna",
+]
+
+[[package]]
+name = "recv_from"
+version = "0.1.0"
+dependencies = [
+ "socket2 0.5.10",
 ]
 
 [[package]]
