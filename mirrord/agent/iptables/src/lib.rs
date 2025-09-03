@@ -319,8 +319,8 @@ where
 /// 1. If mesh rules are found with `ip[6]tables-nft`, `ip[6]tables-nft` wrapper will be returned.
 /// 2. Otherwise, if mesh rules are found with `ip[6]tables-legacy`, `ip[6]tables-legacy` wrapper
 ///    will be returned.
-/// 3. Otherwise, `ip[6]tables-legacy` is able to add a dummy rule into the "nat" table,
-///    `ip[6]tables-legacy` wrapper will be returned.
+/// 3. Otherwise, if `ip[6]tables-legacy` is functional (checked by adding a dummy rule into the
+///    "nat" table), `ip[6]tables-legacy` wrapper will be returned.
 /// 4. Otherwise, `ip[6]tables-nft` wrapper will be returned.
 ///
 /// # Safety
