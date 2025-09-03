@@ -1506,6 +1506,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "caps"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "190baaad529bcfbde9e1a19022c42781bdb6ff9de25721abdb8fd98c0807730b"
+dependencies = [
+ "libc",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "cargo_metadata"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4438,13 +4448,13 @@ name = "mirrord-agent-iptables"
 version = "3.160.0"
 dependencies = [
  "async-trait",
+ "caps",
  "enum_dispatch",
  "fancy-regex",
  "iptables",
  "mirrord-agent-env",
  "mockall",
  "nix 0.29.0",
- "rand 0.9.2",
  "tokio",
  "tracing",
 ]
