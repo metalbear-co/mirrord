@@ -34,6 +34,7 @@ client = [
 ]
 
 [dependencies]
+mirrord-kube = { path = "../kube"}
 chrono.workspace = true
 whoami = { version = "1", optional = true }
 home = { workspace = true, optional = true }

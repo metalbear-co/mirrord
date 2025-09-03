@@ -18,6 +18,7 @@ use mirrord_auth::{
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
+    BearApi, BearClient,
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -169,7 +170,7 @@ impl fmt::Debug for OperatorSessionConnection {
 /// Wrapper over mirrord operator API.
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
-    client: Client,
+    client: BearClient,
     /// Prepared client certificate. If present, [`Self::client`] sends [`CLIENT_CERT_HEADER`] with
     /// each request.
     client_cert: C,
@@ -220,11 +221,12 @@ impl OperatorApi<NoClientCert> {
         let base_config = Self::base_client_config(config).await?;
         let client = progress
             .suspend(|| Client::try_from(base_config.clone()))
+            .map(|client| BearClient::new(client))
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
         let operator: Result<MirrordOperatorCrd, _> =
-            Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
+            BearApi::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
 
         let error = match operator {
             Ok(operator) => {
@@ -247,7 +249,7 @@ impl OperatorApi<NoClientCert> {
 
             // kube api failed to get the operator, let's see if it's installed though
             Err(error @ kube::Error::Api(..)) => {
-                match discovery::operator_installed(&client).await {
+                match discovery::operator_installed(client.as_kube_client()).await {
                     // operator is required, but we failed for some reason
                     Err(..) if config.operator == Some(true) => error,
                     // the operator is not installed, or discovery failed and the operator is not
@@ -924,7 +926,9 @@ impl OperatorApi<PreparedClientCert> {
             .exclude_init_containers
             .clone();
 
-        let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+        let copy_target_api: BearApi<CopyTargetCrd> =
+            BearApi::namespaced(self.client.clone(), namespace);
+
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
             target,
@@ -1045,7 +1049,7 @@ impl OperatorApi<PreparedClientCert> {
             .name
             .clone()
             .ok_or_else(|| KubeApiError::invalid_state(&copied, "no name"))?;
-        let api = Api::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
+        let api = BearApi::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
         let mut wait_subtask: Option<P> = None;
 
         loop {
@@ -1170,8 +1174,8 @@ impl OperatorApi<PreparedClientCert> {
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let mysql_branch_api: Api<MysqlBranchDatabase> =
-            Api::namespaced(self.client.clone(), namespace);
+        let mysql_branch_api: BearApi<MysqlBranchDatabase> =
+            BearApi::namespaced(self.client.clone(), namespace);
 
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,

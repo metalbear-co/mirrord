@@ -4474,6 +4474,7 @@ dependencies = [
  "home",
  "k8s-openapi",
  "kube",
+ "mirrord-kube",
  "pem",
  "reqwest",
  "serde",

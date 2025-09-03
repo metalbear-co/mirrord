@@ -328,6 +328,7 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
+#[tracing::instrument(level = Level::INFO, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
@@ -359,6 +360,7 @@ where
                 .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
                     let expanded = shellexpand::full(&path_str)
                         .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
                     Kubeconfig::read_from(expanded.deref())
                         .and_then(|config| merged_kubeconfig.merge(config))
                         .map_err(KubeApiError::from)

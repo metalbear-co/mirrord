@@ -1,4 +1,7 @@
-use std::{io, io::Write, net::SocketAddr};
+use std::{
+    io::{self, Write},
+    net::SocketAddr,
+};
 
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use nix::libc;

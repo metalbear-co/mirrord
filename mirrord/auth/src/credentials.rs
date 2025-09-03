@@ -194,7 +194,8 @@ impl DateValidityExt for rfc5280::Validity {
 /// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
-    use kube::{Api, Client, Resource, api::PostParams};
+    use kube::{Client, Resource, api::PostParams};
+    use mirrord_kube::{BearApi, BearClient};
 
     use super::*;
     use crate::error::CredentialStoreError;
@@ -203,7 +204,7 @@ pub mod client {
         /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
         /// If the `key_pair` is not given, the request is signed with a randomly generated one.
         pub async fn init<R>(
-            client: Client,
+            client: BearClient,
             common_name: &str,
             key_pair: Option<KeyPair>,
         ) -> Result<Self, CredentialStoreError>
@@ -221,7 +222,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: Api<R> = Api::all(client);
+            let api: BearApi<R> = BearApi::all(client);
 
             let certificate: Certificate = api
                 .create_subresource(
@@ -242,7 +243,7 @@ pub mod client {
         /// Returned certificate replaces the [`Certificate`] stored in this struct.
         pub async fn refresh<R>(
             &mut self,
-            client: Client,
+            client: BearClient,
             common_name: &str,
         ) -> Result<(), CredentialStoreError>
         where
@@ -254,7 +255,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: Api<R> = Api::all(client);
+            let api: BearApi<R> = BearApi::all(client);
 
             let certificate: Certificate = api
                 .create_subresource(
