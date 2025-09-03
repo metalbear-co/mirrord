@@ -2,6 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
+#![feature(slice_pattern)]
 use std::{
     net::SocketAddr,
     sync::{Mutex, OnceLock},
