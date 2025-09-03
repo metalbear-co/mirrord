@@ -1,0 +1,1 @@
+Changed MySQL database branch's default TTL to 5 minutes.
