@@ -8,6 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::Response;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
@@ -528,8 +529,7 @@ impl TcpStealerApi {
                 };
                 let response =
                     response.map_body(|body| std::iter::once(InternalHttpBodyFrame::Data(body)));
-                connection.send_response(response).await;
-                connection.send_response_frame(None).await;
+                connection.send_response(response, true).await;
             }
 
             LayerTcpSteal::HttpResponseFramed(response) => {
@@ -540,8 +540,7 @@ impl TcpStealerApi {
                     return Ok(());
                 };
                 let response = response.map_body(|body| body.0);
-                connection.send_response(response).await;
-                connection.send_response_frame(None).await;
+                connection.send_response(response, true).await;
             }
 
             LayerTcpSteal::HttpResponseChunked(response) => match response {
@@ -552,7 +551,7 @@ impl TcpStealerApi {
                     let Some(connection) = self.connections.get_mut(&response.connection_id) else {
                         return Ok(());
                     };
-                    connection.send_response(response).await;
+                    connection.send_response(response, false).await;
                 }
                 ChunkedResponse::Body(body) => {
                     if body.request_id != 0 {
@@ -644,7 +643,7 @@ impl ClientConnectionState {
         }
     }
 
-    async fn send_response<B>(&mut self, response: HttpResponse<B>)
+    async fn send_response<B>(&mut self, response: HttpResponse<B>, body_finished: bool)
     where
         B: IntoIterator<Item = InternalHttpBodyFrame>,
     {
@@ -657,17 +656,32 @@ impl ClientConnectionState {
             }
         };
 
-        let mut hyper_response = Response::new(());
-        *hyper_response.status_mut() = response.internal_response.status;
-        *hyper_response.headers_mut() = response.internal_response.headers;
-        *hyper_response.version_mut() = response.internal_response.version;
-        let (parts, _) = hyper_response.into_parts();
+        let parts = {
+            let mut hyper_response = Response::new(());
+            *hyper_response.status_mut() = response.internal_response.status;
+            *hyper_response.headers_mut() = response.internal_response.headers;
+            *hyper_response.version_mut() = response.internal_response.version;
+            hyper_response.into_parts().0
+        };
 
-        let body_provider = response_provider.send(parts);
-        for frame in response.internal_response.body {
-            body_provider.send_frame(frame.into()).await;
+        if body_finished {
+            let body = InternalHttpBody(response.internal_response.body.into_iter().collect())
+                .map_err(|_| unreachable!());
+            let body = BoxBody::new(body);
+            let response = Response::from_parts(parts, body);
+            match response_provider.send_finished(response) {
+                Some(data_tx) => *self = Self::HttpUpgraded { data_tx },
+                None => {
+                    *self = Self::Closed;
+                }
+            }
+        } else {
+            let body_provider = response_provider.send(parts);
+            for frame in response.internal_response.body {
+                body_provider.send_frame(frame.into()).await;
+            }
+            *self = Self::HttpResponseReceived { body_provider };
         }
-        *self = Self::HttpResponseReceived { body_provider };
     }
 }
 
