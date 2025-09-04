@@ -855,6 +855,28 @@ A list of configurations for database branches.
 }
 ```
 
+Configuration for a database branch.
+
+By specifying a unique `id`, the branch database will be reused if not expired.
+
+Example:
+
+```json
+{
+  "id": "my-branch-db",
+  "name": "my-database-name",
+  "ttl_secs": 120,
+  "type": "mysql",
+  "version": "8.0",
+  "connection": {
+    "url": {
+      "type": "env",
+      "variable": "DB_CONNECTION_URL"
+    }
+  }
+}
+```
+
 ## feature.env {#feature-env}
 
 Allows the user to set or override the local process' environment variables with the ones
@@ -1847,6 +1869,8 @@ will be used, and your local application will not receive any messages from that
   }
 }
 ```
+
+More queue types might be added in the future.
 
 ## internal_proxy {#root-internal_proxy}
 

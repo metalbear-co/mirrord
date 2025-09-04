@@ -70,28 +70,35 @@ impl DatabaseBranchesConfig {
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchFileConfig")]
 pub struct DatabaseBranchConfig {
+    /// <!--${internal}-->
     /// A unique identifier chosen by the user. This is useful when reusing branch database
     /// sharing among different Kubernetes users.
     pub id: Option<String>,
 
+    /// <!--${internal}-->
     /// Name of the database
     pub name: Option<String>,
 
+    /// <!--${internal}-->
     /// The time-to-live (TTL) for the branch database, in seconds. Defaults to 300 seconds.
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
 
+    /// <!--${internal}-->
     /// The database type.
     #[serde(rename = "type")]
     pub _type: DatabaseType,
 
+    /// <!--${internal}-->
     /// The database image version.
     pub version: Option<String>,
 
+    /// <!--${internal}-->
     /// The database connection details.
     pub connection: ConnectionSource,
 }
 
+/// <!--${internal}-->
 /// Supported database types.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingDatabaseType")]
@@ -100,6 +107,7 @@ pub enum DatabaseType {
     MySql,
 }
 
+/// <!--${internal}-->
 /// Options for connecting to the database.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
