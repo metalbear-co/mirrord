@@ -106,7 +106,7 @@ impl KubernetesAPI {
     }
 
     /// Connect to the agent using plain TCP connection.
-    // #[cfg(feature = "incluster")]
+    #[cfg(feature = "incluster")]
     pub async fn create_connection(
         &self,
         AgentKubernetesConnectInfo {
