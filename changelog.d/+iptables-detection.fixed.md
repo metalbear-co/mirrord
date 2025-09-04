@@ -1,1 +1,0 @@
-Fixed iptables backend detection on kernel 6.12+.
