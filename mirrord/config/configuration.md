@@ -828,6 +828,33 @@ This option is compatible only with deployment targets.
     }
 ```
 
+## feature.db_branches {#feature-db_branches}
+
+Configuration for the database branching feature.
+
+A list of configurations for database branches.
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "name": "my-database-name",
+        "ttl_secs": 120,
+        "type": "mysql",
+        "version": "8.0",
+        "connection": {
+          "url": {
+            "type": "env",
+            "variable": "DB_CONNECTION_URL"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
 ## feature.env {#feature-env}
 
 Allows the user to set or override the local process' environment variables with the ones

@@ -1,12 +1,13 @@
 use std::ops::Deref;
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
+use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
+use crate::config::{self, source::MirrordConfigSource};
 
-/// A list of configuration for database branches.
+/// A list of configurations for database branches.
 ///
 /// ```json
 /// {
@@ -66,7 +67,8 @@ impl DatabaseBranchesConfig {
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[config(map_to = "DatabaseBranchFileConfig")]
 pub struct DatabaseBranchConfig {
     /// A unique identifier chosen by the user. This is useful when reusing branch database
     /// sharing among different Kubernetes users.
@@ -75,9 +77,9 @@ pub struct DatabaseBranchConfig {
     /// Name of the database
     pub name: Option<String>,
 
-    /// The time-to-live (TTL) for the branch database, in seconds.
+    /// The time-to-live (TTL) for the branch database, in seconds. Defaults to 300 seconds.
     #[serde(default = "default_ttl_secs")]
-    pub ttl_secs: Option<u64>,
+    pub ttl_secs: u64,
 
     /// The database type.
     #[serde(rename = "type")]
@@ -117,22 +119,18 @@ pub enum ConnectionSourceKind {
     },
 }
 
-fn default_ttl_secs() -> Option<u64> {
-    Some(60)
-}
-
-impl MirrordConfig for DatabaseBranchesConfig {
+impl config::MirrordConfig for DatabaseBranchesConfig {
     type Generated = Self;
 
     fn generate_config(
         self,
-        _context: &mut ConfigContext,
+        _context: &mut config::ConfigContext,
     ) -> crate::config::Result<Self::Generated> {
         Ok(self)
     }
 }
 
-impl FromMirrordConfig for DatabaseBranchesConfig {
+impl config::FromMirrordConfig for DatabaseBranchesConfig {
     type Generator = Self;
 }
 
@@ -140,4 +138,8 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("mysql_branch_count", self.mysql().count());
     }
+}
+
+fn default_ttl_secs() -> u64 {
+    300
 }
