@@ -1,1 +1,0 @@
-Changed backoff intervals between intproxy->operator reconnect attemps. Improved logs.

@@ -778,12 +778,9 @@
           ]
         },
         "ttl_secs": {
-          "description": "The time-to-live (TTL) for the branch database, in seconds.",
-          "default": 60,
-          "type": [
-            "integer",
-            "null"
-          ],
+          "description": "The time-to-live (TTL) for the branch database, in seconds. Defaults to 300 seconds.",
+          "default": 300,
+          "type": "integer",
           "format": "uint64",
           "minimum": 0.0
         },
@@ -805,7 +802,7 @@
       }
     },
     "DatabaseBranchesConfig": {
-      "description": "A list of configuration for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
+      "description": "A list of configurations for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
       "type": "array",
       "items": {
         "$ref": "#/definitions/DatabaseBranchConfig"
