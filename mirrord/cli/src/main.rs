@@ -649,7 +649,10 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
     RETRY_KUBE_OPERATIONS.get_or_init(|| {
-        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+        RetryConfig::new(
+            config.startup_retries_interval_ms,
+            config.startup_retries_max_attempts,
+        )
     });
 
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
@@ -898,7 +901,10 @@ fn main() -> miette::Result<()> {
                 let config = mirrord_config::util::read_resolved_config()?;
 
                 RETRY_KUBE_OPERATIONS.get_or_init(|| {
-                    RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+                    RetryConfig::new(
+                        config.startup_retries_interval_ms,
+                        config.startup_retries_max_attempts,
+                    )
                 });
 
                 logging::init_extproxy_tracing_registry(&config)?;

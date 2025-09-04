@@ -242,8 +242,8 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
 
     RETRY_KUBE_OPERATIONS.get_or_init(|| {
         RetryConfig::new(
-            layer_config.start_retries_interval_ms,
-            layer_config.start_retries_max,
+            layer_config.startup_retries_interval_ms,
+            layer_config.startup_retries_max_attempts,
         )
     });
 

@@ -380,11 +380,27 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
 
+    /// ## startup_retries_max_attempts {#root-startup_retries_max_attempts}
+    ///
+    /// Sets the max amount of retries that mirrord will try to perform during its startup, for
+    /// cluster operations, such as searching for the target pod, connecting to the
+    /// mirrord-operator, creating the mirrord-agent.
+    ///
+    /// If you are having cluster connectivity issues when starting mirrord, setting this config
+    /// and [`startup_retries_interval_ms`](#root-startup_retries_interval_ms) may help.
     #[config(default = 1)]
-    pub start_retries_max: usize,
+    pub startup_retries_max_attempts: usize,
 
-    #[config(default = 100)]
-    pub start_retries_interval_ms: u64,
+    /// ## startup_retries_interval_ms {#root-startup_retries_interval_ms}
+    ///
+    /// Sets the interval (in milliseconds) between mirrord startup retries during its startup, for
+    /// cluster operations, such as searching for the target pod, connecting to the
+    /// mirrord-operator, creating the mirrord-agent.
+    ///
+    /// If you are having cluster connectivity issues when starting mirrord, setting this config
+    /// and [`startup_retries_max_attempts`](#root-startup_retries_max_attempts) may help.
+    #[config(default = 50)]
+    pub startup_retries_interval_ms: u64,
 }
 
 impl LayerConfig {
@@ -1088,8 +1104,8 @@ mod tests {
             use_proxy: None,
             experimental: None,
             skip_sip: None,
-            start_retries_max: None,
-            start_retries_interval_ms: None,
+            startup_retries_max_attempts: None,
+            startup_retries_interval_ms: None,
         };
 
         assert_eq!(config, expect);

@@ -48,7 +48,10 @@ pub async fn dump_command(
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
     RETRY_KUBE_OPERATIONS.get_or_init(|| {
-        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+        RetryConfig::new(
+            config.startup_retries_interval_ms,
+            config.startup_retries_max_attempts,
+        )
     });
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
