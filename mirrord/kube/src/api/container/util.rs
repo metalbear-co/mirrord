@@ -76,7 +76,7 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
     }
 
     if params.idle_ttl.is_zero().not() {
-        env.push(envs::IDDLE_TTL.as_k8s_spec(&params.idle_ttl.as_secs()))
+        env.push(envs::IDLE_TTL.as_k8s_spec(&params.idle_ttl.as_secs()))
     }
 
     env
