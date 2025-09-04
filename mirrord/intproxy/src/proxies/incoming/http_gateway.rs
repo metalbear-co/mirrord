@@ -97,6 +97,9 @@ impl HttpGatewayTask {
             .ready_frames()
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
+        // If all frames are instantly ready, **always** send the full response in one message.
+        // This is important for proper handling of gRPC error responses,
+        // as it affects structure of HTTP/2 frames returned to the gRPC client.
         if frames.is_last {
             let ready_frames = frames
                 .frames
