@@ -4572,6 +4572,8 @@ dependencies = [
  "rustls 0.23.31",
  "semver 1.0.26",
  "serde",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
  "thiserror 2.0.16",
  "tokio",
  "tokio-retry",

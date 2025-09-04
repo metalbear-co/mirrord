@@ -696,7 +696,7 @@ mod test {
 
     use crate::{
         IntProxy,
-        agent_conn::{AgentConnection, ReconnectFlow},
+        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -719,7 +719,7 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
@@ -838,7 +838,7 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
@@ -932,7 +932,7 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
