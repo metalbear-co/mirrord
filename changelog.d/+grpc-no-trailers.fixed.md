@@ -1,1 +1,0 @@
-Fixed an issue where mirrord was not handling gRPC error responses properly, resulting in errors like "server closed connection with RST_STREAM without sending trailers".

@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.161.0](https://github.com/metalbear-co/mirrord/tree/3.161.0) - 2025-09-04
+
+
+### Added
+
+- Added config for specifying mirrord-tls.pem path when using mirrord container
+  command. [#3508](https://github.com/metalbear-co/mirrord/issues/3508)
+
+
+### Changed
+
+- Changed MySQL database branch's default TTL to 5 minutes.
+
+
+### Fixed
+
+- Fixed an issue where mirrord was not handling gRPC error responses properly,
+  resulting in errors like "server closed connection with RST_STREAM without
+  sending trailers".
+- Fixed iptables backend detection on kernel 6.12+.
+
+
+### Internal
+
+- Changed backoff intervals between intproxy->operator reconnect attemps.
+  Improved logs.
+
 ## [3.160.0](https://github.com/metalbear-co/mirrord/tree/3.160.0) - 2025-09-02
 
 
