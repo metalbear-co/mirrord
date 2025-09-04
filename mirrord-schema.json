@@ -756,7 +756,7 @@
       ],
       "properties": {
         "connection": {
-          "description": "The database connection details.",
+          "description": "<!--${internal}--> The database connection details.",
           "allOf": [
             {
               "$ref": "#/definitions/DbBranchingConnectionSource"
@@ -764,28 +764,28 @@
           ]
         },
         "id": {
-          "description": "A unique identifier chosen by the user. This is useful when reusing branch database sharing among different Kubernetes users.",
+          "description": "<!--${internal}--> A unique identifier chosen by the user. This is useful when reusing branch database sharing among different Kubernetes users.",
           "type": [
             "string",
             "null"
           ]
         },
         "name": {
-          "description": "Name of the database",
+          "description": "<!--${internal}--> Name of the database",
           "type": [
             "string",
             "null"
           ]
         },
         "ttl_secs": {
-          "description": "The time-to-live (TTL) for the branch database, in seconds. Defaults to 300 seconds.",
+          "description": "<!--${internal}--> The time-to-live (TTL) for the branch database, in seconds. Defaults to 300 seconds.",
           "default": 300,
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
         },
         "type": {
-          "description": "The database type.",
+          "description": "<!--${internal}--> The database type.",
           "allOf": [
             {
               "$ref": "#/definitions/DbBranchingDatabaseType"
@@ -793,7 +793,7 @@
           ]
         },
         "version": {
-          "description": "The database image version.",
+          "description": "<!--${internal}--> The database image version.",
           "type": [
             "string",
             "null"
@@ -809,7 +809,7 @@
       }
     },
     "DbBranchingConnectionSource": {
-      "description": "Options for connecting to the database.",
+      "description": "<!--${internal}--> Options for connecting to the database.",
       "oneOf": [
         {
           "type": "object",
@@ -855,7 +855,7 @@
       ]
     },
     "DbBranchingDatabaseType": {
-      "description": "Supported database types.",
+      "description": "<!--${internal}--> Supported database types.",
       "type": "string",
       "enum": [
         "mysql"
