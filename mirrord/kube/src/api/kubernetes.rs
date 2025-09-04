@@ -160,7 +160,7 @@ impl KubernetesAPI {
         Ok(conn)
     }
 
-    /// Connects to the agent using kube's [`Api::portforward`].
+    /// Connects to the agent using kube's [`kube::Api::portforward`].
     #[cfg(feature = "portforward")]
     pub async fn create_connection_portforward(
         &self,
