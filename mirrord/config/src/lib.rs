@@ -380,7 +380,10 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
 
+    #[config(default = 1)]
     pub start_retries_max: usize,
+
+    #[config(default = 100)]
     pub start_retries_interval_ms: u64,
 }
 

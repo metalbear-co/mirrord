@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use kube::{Api, core::ErrorResponse};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_kube::RetryConfig;
 use mirrord_operator::{
     client::{
         MaybeClientCert, OperatorApi,
@@ -50,8 +51,15 @@ impl SessionCommandHandler {
         let operator_api =
             match OperatorApi::try_new(&config, &mut NullReporter::default(), &progress).await? {
                 Some(api) => {
-                    api.prepare_client_cert(&mut NullReporter::default(), &progress)
-                        .await
+                    api.prepare_client_cert(
+                        &mut NullReporter::default(),
+                        &progress,
+                        Some(RetryConfig::new(
+                            config.start_retries_interval_ms,
+                            config.start_retries_max,
+                        )),
+                    )
+                    .await
                 }
                 None => {
                     subtask.failure(Some("operator not found"));
@@ -119,7 +127,7 @@ impl SessionCommandHandler {
                 operation: OperatorOperation::SessionManagement,
             },
         })
-        // Finish the progress report here if we have an error response. 
+        // Finish the progress report here if we have an error response.
         .inspect_err(|fail| {
             sub_progress.failure(Some(&fail.to_string()));
             progress.failure(Some("Session management operation failed!"));

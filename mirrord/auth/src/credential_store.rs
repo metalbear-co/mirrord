@@ -7,6 +7,7 @@ use std::{
 
 use fs4::tokio::AsyncFileExt;
 use kube::{Client, Resource};
+use mirrord_kube::RetryConfig;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -120,6 +121,7 @@ impl CredentialStore {
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
+        retry_config: Option<RetryConfig>,
     ) -> Result<&mut Credentials, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
@@ -137,6 +139,7 @@ impl CredentialStore {
                     client.clone(),
                     &Self::certificate_common_name(),
                     key_pair,
+                    retry_config,
                 )
                 .await?;
                 entry.insert(credentials)
@@ -146,7 +149,11 @@ impl CredentialStore {
 
                 if !credentials.is_valid() {
                     credentials
-                        .refresh::<R>(client.clone(), &Self::certificate_common_name())
+                        .refresh::<R>(
+                            client.clone(),
+                            &Self::certificate_common_name(),
+                            retry_config,
+                        )
                         .await?;
                 }
 
@@ -196,6 +203,7 @@ impl CredentialStoreSync {
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
         callback: C,
+        retry_config: Option<RetryConfig>,
     ) -> Result<V, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
@@ -210,7 +218,12 @@ impl CredentialStoreSync {
 
         let value = callback(
             store
-                .get_or_init::<R>(client, operator_fingerprint, operator_subscription_id)
+                .get_or_init::<R>(
+                    client,
+                    operator_fingerprint,
+                    operator_subscription_id,
+                    retry_config,
+                )
                 .await?,
         );
 
@@ -235,6 +248,7 @@ impl CredentialStoreSync {
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
+        retry_config: Option<RetryConfig>,
     ) -> Result<Certificate, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
@@ -251,6 +265,7 @@ impl CredentialStoreSync {
                 operator_fingerprint,
                 operator_subscription_id,
                 |credentials| credentials.as_ref().clone(),
+                retry_config,
             )
             .await;
 

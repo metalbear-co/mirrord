@@ -32,7 +32,7 @@ pub mod api;
 pub mod error;
 pub mod resolved;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RetryConfig {
     exponential_backoff: ExponentialBackoff,
     max_attempts: usize,
@@ -48,12 +48,10 @@ impl Default for RetryConfig {
 }
 
 impl RetryConfig {
-    pub fn new(exponential_backoff: Option<u64>, max_attempts: Option<usize>) -> Self {
+    pub fn new(exponential_backoff: u64, max_attempts: usize) -> Self {
         Self {
-            exponential_backoff: ExponentialBackoff::from_millis(
-                exponential_backoff.unwrap_or(100),
-            ),
-            max_attempts: max_attempts.unwrap_or(1),
+            exponential_backoff: ExponentialBackoff::from_millis(exponential_backoff),
+            max_attempts,
         }
     }
 }
@@ -98,10 +96,11 @@ where
         A: Action<Item = T, Error = kube::Error>,
     {
         let retry_strategy = self
+            .retry_config
             .exponential_backoff
             .clone()
             .map(jitter)
-            .take(self.max_attempts);
+            .take(self.retry_config.max_attempts);
 
         let result = RetryIf::spawn(
             retry_strategy,

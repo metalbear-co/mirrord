@@ -226,7 +226,10 @@ impl OperatorApi<NoClientCert> {
 
         let operator: Result<MirrordOperatorCrd, _> = BearApi::all(
             client.clone(),
-            RetryConfig::new(config.start_retries_max, config.start_retries_interval_ms),
+            Some(RetryConfig::new(
+                config.start_retries_interval_ms,
+                config.start_retries_max,
+            )),
         )
         .get(OPERATOR_STATUS_NAME)
         .await;
@@ -281,6 +284,7 @@ impl OperatorApi<NoClientCert> {
         self,
         reporter: &mut R,
         progress: &P,
+        retry_config: Option<RetryConfig>,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
@@ -289,7 +293,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
 
         let result = try {
-            let certificate = self.get_client_certificate().await?;
+            let certificate = self.get_client_certificate(retry_config).await?;
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
                 client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
@@ -518,7 +522,10 @@ where
     /// Retrieves client [`Certificate`] from local credential store or requests one from the
     /// operator.
     #[tracing::instrument(level = Level::TRACE, err)]
-    async fn get_client_certificate(&self) -> Result<Certificate, OperatorApiError> {
+    async fn get_client_certificate(
+        &self,
+        retry_config: Option<RetryConfig>,
+    ) -> Result<Certificate, OperatorApiError> {
         let Some(fingerprint) = self.operator.spec.license.fingerprint.clone() else {
             return Err(OperatorApiError::ClientCertError(
                 "license fingerprint is missing from the mirrord operator resource".to_string(),
@@ -538,6 +545,7 @@ where
                 &self.client,
                 fingerprint,
                 subscription_id,
+                retry_config,
             )
             .await
             .map_err(|error| {
@@ -932,10 +940,10 @@ impl OperatorApi<PreparedClientCert> {
         let copy_target_api: BearApi<CopyTargetCrd> = BearApi::namespaced(
             self.client.clone(),
             namespace,
-            RetryConfig::new(
-                layer_config.start_retries_max,
+            Some(RetryConfig::new(
                 layer_config.start_retries_interval_ms,
-            ),
+                layer_config.start_retries_max,
+            )),
         );
 
         let copy_target_name = TargetCrd::urlfied_name(&target);
@@ -960,7 +968,8 @@ impl OperatorApi<PreparedClientCert> {
             })?;
         subtask.success(Some("target copy created"));
 
-        self.wait_for_copy_ready(copied, progress).await
+        self.wait_for_copy_ready(copied, progress, layer_config)
+            .await
     }
 
     async fn try_reuse_copy_target<P: Progress>(
@@ -1000,10 +1009,10 @@ impl OperatorApi<PreparedClientCert> {
         let copy_target_api: BearApi<CopyTargetCrd> = BearApi::namespaced(
             self.client.clone(),
             namespace,
-            RetryConfig::new(
-                layer_config.start_retries_max,
+            Some(RetryConfig::new(
                 layer_config.start_retries_interval_ms,
-            ),
+                layer_config.start_retries_max,
+            )),
         );
         let copy_target_spec = CopyTargetSpec {
             target,
@@ -1032,7 +1041,10 @@ impl OperatorApi<PreparedClientCert> {
             });
 
         let existing = match existing {
-            Some(existing) => match self.wait_for_copy_ready(existing, progress).await {
+            Some(existing) => match self
+                .wait_for_copy_ready(existing, progress, layer_config)
+                .await
+            {
                 Ok(copied) => Some(copied),
                 Err(OperatorApiError::CopiedTargetFailed { .. }) => None,
                 Err(error) => return Err(error),
@@ -1054,6 +1066,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         mut copied: CopyTargetCrd,
         progress: &P,
+        layer_config: &LayerConfig,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let namespace = copied
             .metadata
@@ -1065,7 +1078,14 @@ impl OperatorApi<PreparedClientCert> {
             .name
             .clone()
             .ok_or_else(|| KubeApiError::invalid_state(&copied, "no name"))?;
-        let api = BearApi::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
+        let api = BearApi::<CopyTargetCrd>::namespaced(
+            self.client.clone(),
+            namespace,
+            Some(RetryConfig::new(
+                layer_config.start_retries_interval_ms,
+                layer_config.start_retries_max,
+            )),
+        );
         let mut wait_subtask: Option<P> = None;
 
         loop {
@@ -1193,10 +1213,10 @@ impl OperatorApi<PreparedClientCert> {
         let mysql_branch_api: BearApi<MysqlBranchDatabase> = BearApi::namespaced(
             self.client.clone(),
             namespace,
-            RetryConfig::new(
-                layer_config.start_retries_max,
+            Some(RetryConfig::new(
                 layer_config.start_retries_interval_ms,
-            ),
+                layer_config.start_retries_max,
+            )),
         );
 
         let DatabaseBranchParams {

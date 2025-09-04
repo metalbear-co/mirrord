@@ -6,6 +6,7 @@ use kube::Client;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
+    RetryConfig,
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
@@ -94,7 +95,16 @@ impl FoundTargets {
         {
             tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
 
-            let api = api.prepare_client_cert(&mut reporter, &progress).await;
+            let api = api
+                .prepare_client_cert(
+                    &mut reporter,
+                    &progress,
+                    Some(RetryConfig::new(
+                        config.start_retries_interval_ms,
+                        config.start_retries_max,
+                    )),
+                )
+                .await;
 
             api.inspect_cert_error(
                 |error| tracing::error!(%error, "failed to prepare client certificate"),
