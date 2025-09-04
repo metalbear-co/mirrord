@@ -35,7 +35,8 @@
           "--target", "x86_64-pc-windows-msvc"
         ],
         "env": {
-          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
+          // "MIRRORD_LAYER_WAIT_FOR_DEBUGGER": "1",
+          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll",
           "RUST_BACKTRACE": "full",
           "RUST_MIN_STACK": "16777216",
           "MIRRORD_TESTS_USE_BINARY": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
@@ -48,10 +49,12 @@
       // "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-08b24540faf8040c.exe",
       "args": [
         // "--features", "cli", 
-        "--", "--nocapture", "--test-threads=1"
+        "traffic_tests",
+        "--", "--nocapture", "--test-threads=1", 
       ],
       "env": {
-        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
+        // "MIRRORD_LAYER_WAIT_FOR_DEBUGGER": "1",
+        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll",
         "RUST_BACKTRACE": "full",
         "RUST_MIN_STACK": "16777216",
       },
@@ -83,7 +86,7 @@
         },
         {
           "name": "MIRRORD_LAYER_FILE",
-          "value": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll"
+          "value": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll"
         },
         {
           "name": "MIRRORD_OPERATOR_ENABLE", 
@@ -143,7 +146,7 @@
       "cwd": "${workspaceFolder}/tests",
       "env": {
         "MIRRORD_DISABLE_VERSION_CHECK": "true",
-        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
+        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll",
         "RUST_BACKTRACE": "full"
       }
     },
@@ -159,7 +162,7 @@
           "name": "mirrord"
         },
         "env": {
-          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug-overflow/layer_win.dll",
+          "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug-overflow/mirrord_layer_win.dll",
           "RUST_BACKTRACE": "full",
           "RUST_MIN_STACK": "33554432",
           "RUSTFLAGS": "-C link-args=/STACK:33554432"
@@ -171,7 +174,7 @@
       "program": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug-overflow/mirrord.exe",
       "env": {
         "MIRRORD_DISABLE_VERSION_CHECK": "true",
-        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug-overflow/layer_win.dll",
+        "MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug-overflow/mirrord_layer_win.dll",
         "MIRRORD_OPERATOR_ENABLE": "false",
         "RUST_BACKTRACE": "full",
         "RUST_MIN_STACK": "33554432",

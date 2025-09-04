@@ -19,17 +19,25 @@ use mirrord_config::feature::network::{
 };
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::outgoing::SocketAddress;
+#[cfg(unix)]
+pub use ops::sendmsg;
 // Re-export ops module items
 pub use ops::{
-    ConnectError, ConnectFn, ConnectResult, connect_outgoing, connect_outgoing_udp,
+    ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
     connect_outgoing_with_call, create_outgoing_request, is_unix_address, prepare_outgoing_address,
-    update_socket_connected_state,
+    send_dns_patch, send_to, update_socket_connected_state,
 };
 use socket2::SockAddr;
 // Re-export sockets module items
-pub use sockets::{SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor};
+pub use sockets::{
+    SHARED_SOCKETS_ENV_VAR, SOCKETS, SocketDescriptor, get_bound_address, get_connected_addresses,
+    get_socket, get_socket_state, is_socket_in_state, is_socket_managed, register_socket,
+    remove_socket, set_socket_state,
+};
 #[cfg(windows)]
 use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+
+pub use crate::{ConnectError, HookResult};
 
 /// Contains the addresses of a mirrord connected socket.
 ///

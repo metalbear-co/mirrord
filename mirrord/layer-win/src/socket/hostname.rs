@@ -13,7 +13,10 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    HostnameResult, get_hostname, socket::dns::update_dns_reverse_mapping,
+    HostnameResult,
+    error::{AddrInfoError, HookError, HookResult},
+    get_hostname,
+    socket::dns::update_dns_reverse_mapping,
     unix::UnixHostnameResolver,
 };
 use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
@@ -23,8 +26,8 @@ use winapi::{
 };
 
 use super::utils::{
-    GetAddrInfoResponseExtWin, ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo,
-    intelligent_truncate, validate_buffer_params,
+    ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo, intelligent_truncate,
+    validate_buffer_params,
 };
 use crate::PROXY_CONNECTION;
 
@@ -375,7 +378,7 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
 }
 
 /// Helper function to make proxy request with response (Windows version)
-pub fn make_windows_proxy_request_with_response<T>(request: T) -> Result<T::Response, String>
+pub fn make_windows_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
 where
     T: mirrord_intproxy_protocol::IsLayerRequestWithResponse + std::fmt::Debug,
     T::Response: std::fmt::Debug,
@@ -383,9 +386,9 @@ where
     unsafe {
         PROXY_CONNECTION
             .get()
-            .ok_or_else(|| "ProxyConnection not initialized".to_string())?
+            .ok_or(HookError::CannotGetProxyConnection)?
             .make_request_with_response(request)
-            .map_err(|e| format!("Proxy request failed: {:?}", e))
+            .map_err(|err| HookError::from(err))
     }
 }
 
@@ -399,11 +402,11 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
     raw_node: Option<String>,
     raw_service: Option<String>,
     raw_hints: Option<&T>,
-) -> Result<ManagedAddrInfo<T>, String> {
+) -> HookResult<ManagedAddrInfo<T>> {
     // Convert node to string
     let node = match raw_node {
         Some(s) => s,
-        None => return Err("Node name is required".to_string()),
+        None => return Err(AddrInfoError::NullPointer.into()),
     };
 
     // Convert service to port number
@@ -433,7 +436,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
 
     if !should_resolve_remotely {
         tracing::warn!("Using local DNS resolution for {}", node);
-        return Err("Should use local DNS resolution".to_string());
+        return Err(AddrInfoError::ResolveDisabled(node).into());
     }
 
     tracing::warn!("Using remote DNS resolution for {}", node);
@@ -469,12 +472,9 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
         flags: 0,
     };
 
-    let response = make_windows_proxy_request_with_response(request)
-        .map_err(|e| format!("DNS request failed: {}", e))?;
-
+    let response = make_windows_proxy_request_with_response(request)?;
     // Convert response back to Windows ADDRINFO structures using trait method
-    let ptr = unsafe { response.to_windows_addrinfo::<T>()? };
-    Ok(unsafe { ManagedAddrInfo::new(ptr) })
+    Ok(ManagedAddrInfo::<T>::try_from(response)?)
 }
 
 /// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.

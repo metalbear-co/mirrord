@@ -1,18 +1,20 @@
 //! Utility functions for Windows socket operations
 
-use std::{alloc::Layout, collections::HashMap, mem, net::SocketAddr, ptr};
+use std::{alloc::Layout, mem, net::SocketAddr, ptr};
+
+use mirrord_layer_lib::{
+    HookResult,
+    error::{AddrInfoError, HookError},
+};
+use mirrord_protocol::error::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
 
 /// Macro to safely allocate memory for Windows structures with error handling
 #[macro_export]
 macro_rules! unsafe_alloc {
-    ($type:ty, $error_msg:expr) => {{
+    ($type:ty, $err: expr) => {{
         let layout = std::alloc::Layout::new::<$type>();
         let ptr = unsafe { std::alloc::alloc(layout) as *mut $type };
-        if ptr.is_null() {
-            Err($error_msg.to_string())
-        } else {
-            Ok(ptr)
-        }
+        if ptr.is_null() { Err($err) } else { Ok(ptr) }
     }};
 }
 
@@ -416,37 +418,12 @@ pub fn validate_buffer_params(
     Some(buffer_size)
 }
 
-/// Implement simple LRU eviction for cache to avoid clearing entire cache
-///
-/// This function provides a generic cache eviction strategy that removes approximately
-/// half of the oldest entries when the cache size exceeds the maximum limit.
-pub fn evict_old_cache_entries<K, V>(cache: &mut HashMap<K, V>, max_size: usize)
-where
-    K: Clone + std::hash::Hash + Eq,
-{
-    if cache.len() >= max_size {
-        // Simple eviction: remove oldest entries (first half of current entries)
-        // This is a compromise between performance and memory usage
-        let keys_to_remove: Vec<K> = cache.keys().take(max_size / 2).cloned().collect();
-
-        for key in keys_to_remove {
-            cache.remove(&key);
-        }
-
-        tracing::debug!(
-            "Cache evicted {} old entries, {} remaining",
-            max_size / 2,
-            cache.len()
-        );
-    }
-}
-
 /// Trait to abstract over Windows ADDRINFO types (ADDRINFOA and ADDRINFOW)
 pub trait WindowsAddrInfo: Sized {
     type CanonName;
 
     /// Allocate a new instance
-    unsafe fn alloc() -> Result<*mut Self, String>;
+    unsafe fn alloc() -> Result<*mut Self, AddrInfoError>;
 
     /// Fill the structure with the given parameters
     unsafe fn fill(
@@ -465,7 +442,7 @@ pub trait WindowsAddrInfo: Sized {
     unsafe fn set_next(ptr: *mut Self, next: *mut Self);
 
     /// Convert a string to the appropriate canonical name type
-    fn string_to_canonname(s: String) -> Result<Self::CanonName, String>;
+    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError>;
 
     /// Get null canonical name
     fn null_canonname() -> Self::CanonName;
@@ -493,8 +470,8 @@ pub trait WindowsAddrInfo: Sized {
 impl WindowsAddrInfo for ADDRINFOA {
     type CanonName = *mut i8;
 
-    unsafe fn alloc() -> Result<*mut Self, String> {
-        unsafe_alloc!(ADDRINFOA, "Failed to allocate ADDRINFOA")
+    unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
+        unsafe_alloc!(ADDRINFOA, AddrInfoError::AllocationFailed)
     }
 
     unsafe fn fill(
@@ -526,11 +503,11 @@ impl WindowsAddrInfo for ADDRINFOA {
         }
     }
 
-    fn string_to_canonname(s: String) -> Result<Self::CanonName, String> {
+    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
         use std::ffi::CString;
         match CString::new(s) {
             Ok(cstr) => Ok(cstr.into_raw()),
-            Err(_) => Ok(ptr::null_mut()),
+            Err(_) => Err(AddrInfoError::NullPointer),
         }
     }
 
@@ -571,8 +548,8 @@ impl WindowsAddrInfo for ADDRINFOA {
 impl WindowsAddrInfo for ADDRINFOW {
     type CanonName = *mut u16;
 
-    unsafe fn alloc() -> Result<*mut Self, String> {
-        unsafe_alloc!(ADDRINFOW, "Failed to allocate ADDRINFOW")
+    unsafe fn alloc() -> Result<*mut Self, AddrInfoError> {
+        unsafe_alloc!(ADDRINFOW, AddrInfoError::AllocationFailed)
     }
 
     unsafe fn fill(
@@ -604,13 +581,14 @@ impl WindowsAddrInfo for ADDRINFOW {
         }
     }
 
-    fn string_to_canonname(s: String) -> Result<Self::CanonName, String> {
+    fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
         // Convert UTF-8 string to UTF-16 wide string
         let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-        let layout = std::alloc::Layout::array::<u16>(wide.len()).map_err(|_| "Layout error")?;
+        let layout = std::alloc::Layout::array::<u16>(wide.len())
+            .map_err(|e| AddrInfoError::LayoutError(e))?;
         let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
         if ptr.is_null() {
-            return Ok(ptr::null_mut());
+            return Err(AddrInfoError::NullPointer);
         }
         unsafe {
             std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
@@ -738,63 +716,20 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
     }
 }
 
-impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe {
-                // Walk the entire chain and free each node
-                let mut current = self.ptr;
-                while !current.is_null() {
-                    let next = (*current).ai_next();
+impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
+    type Error = HookError;
 
-                    // Free the sockaddr structure
-                    let addr = (*current).ai_addr();
-                    if !addr.is_null() {
-                        let sockaddr_layout = if (*current).ai_family() == AF_INET {
-                            Layout::new::<SOCKADDR_IN>()
-                        } else {
-                            Layout::new::<SOCKADDR_IN6>()
-                        };
-                        std::alloc::dealloc(addr as *mut u8, sockaddr_layout);
-                    }
-
-                    // Free the canonical name
-                    let canonname = (*current).ai_canonname();
-                    T::free_canonname(canonname);
-
-                    // Free the ADDRINFO structure itself
-                    let addrinfo_layout = Layout::new::<T>();
-                    std::alloc::dealloc(current as *mut u8, addrinfo_layout);
-
-                    current = next;
-                }
-            }
-        }
-    }
-}
-
-/// Windows-specific extensions for GetAddrInfoResponse trait
-pub trait GetAddrInfoResponseExtWin {
-    /// Generic method to convert mirrord DNS response to Windows ADDRINFO linked list
-    ///
-    /// This allocates Windows-compatible ADDRINFO structures that can be freed
-    /// by our freeaddrinfo_detour function.
-    unsafe fn to_windows_addrinfo<T: WindowsAddrInfo>(self) -> Result<*mut T, String>;
-}
-
-impl GetAddrInfoResponseExtWin for GetAddrInfoResponse {
-    unsafe fn to_windows_addrinfo<T: WindowsAddrInfo>(self) -> Result<*mut T, String> {
+    fn try_from(response: GetAddrInfoResponse) -> HookResult<Self> {
         // Check if the response was successful and ensure we have addresses to process
-        let dns_lookup = self
-            .0
-            .map_err(|e| format!("DNS lookup failed: {:?}", e))
-            .and_then(|lookup| {
-                if lookup.is_empty() {
-                    Err("No addresses in DNS response".to_string())
-                } else {
-                    Ok(lookup)
-                }
-            })?;
+        let dns_lookup = (*response).clone().and_then(|lookup| {
+            if lookup.is_empty() {
+                Err(ResponseError::DnsLookup(DnsLookupError {
+                    kind: ResolveErrorKindInternal::NoRecordsFound(0),
+                }))
+            } else {
+                Ok(lookup)
+            }
+        })?;
 
         let mut first_addrinfo: *mut T = ptr::null_mut();
         let mut current_addrinfo: *mut T = ptr::null_mut();
@@ -807,7 +742,7 @@ impl GetAddrInfoResponseExtWin for GetAddrInfoResponse {
             let (sockaddr_ptr, sockaddr_len, family) = match lookup_record.ip {
                 std::net::IpAddr::V4(ipv4) => {
                     let sockaddr_in_ptr =
-                        unsafe_alloc!(SOCKADDR_IN, "Failed to allocate SOCKADDR_IN")?;
+                        unsafe_alloc!(SOCKADDR_IN, AddrInfoError::AllocationFailed)?;
 
                     unsafe {
                         (*sockaddr_in_ptr).sin_family = AF_INET as u16;
@@ -824,7 +759,7 @@ impl GetAddrInfoResponseExtWin for GetAddrInfoResponse {
                 }
                 std::net::IpAddr::V6(ipv6) => {
                     let sockaddr_in6_ptr =
-                        unsafe_alloc!(SOCKADDR_IN6, "Failed to allocate SOCKADDR_IN6")?;
+                        unsafe_alloc!(SOCKADDR_IN6, AddrInfoError::AllocationFailed)?;
 
                     unsafe {
                         (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;
@@ -881,7 +816,42 @@ impl GetAddrInfoResponseExtWin for GetAddrInfoResponse {
             // guard.insert(addrinfo_ptr as usize, ...);
         }
 
-        Ok(first_addrinfo)
+        Ok(unsafe { Self::new(first_addrinfo) })
+    }
+}
+
+impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe {
+                // Walk the entire chain and free each node
+                let mut current = self.ptr;
+                while !current.is_null() {
+                    let next = (*current).ai_next();
+
+                    // Free the sockaddr structure
+                    let addr = (*current).ai_addr();
+                    if !addr.is_null() {
+                        let sockaddr_layout = if (*current).ai_family() == AF_INET {
+                            Layout::new::<SOCKADDR_IN>()
+                        } else {
+                            Layout::new::<SOCKADDR_IN6>()
+                        };
+                        std::alloc::dealloc(addr as *mut u8, sockaddr_layout);
+                    }
+
+                    // Free the canonical name
+                    let canonname = (*current).ai_canonname();
+                    T::free_canonname(canonname);
+
+                    // Free the ADDRINFO structure itself
+                    let addrinfo_layout = Layout::new::<T>();
+                    std::alloc::dealloc(current as *mut u8, addrinfo_layout);
+
+                    current = next;
+                }
+            }
+        }
     }
 }
 
@@ -926,24 +896,6 @@ mod tests {
         // Should either preserve "app-" pattern or break at word boundary
         assert!(truncated.len() <= 10);
         assert!(!truncated.ends_with('-') || truncated == "app-");
-    }
-
-    #[test]
-    fn test_evict_old_cache_entries() {
-        let mut cache = HashMap::new();
-        let max_size = 10;
-
-        // Fill cache beyond limit
-        for i in 0..(max_size + 5) {
-            cache.insert(format!("key{}", i), format!("value{}", i));
-        }
-
-        let original_size = cache.len();
-        evict_old_cache_entries(&mut cache, max_size);
-
-        // Should have evicted half the entries
-        assert!(cache.len() < original_size);
-        assert!(cache.len() <= max_size);
     }
 
     #[test]

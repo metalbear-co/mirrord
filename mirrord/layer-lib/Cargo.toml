@@ -19,6 +19,7 @@ workspace = true
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-layer-macro = { path = "../layer/macro" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 
 bincode.workspace = true
@@ -28,6 +29,7 @@ thiserror.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+nix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", features = ["winbase", "debugapi", "ws2def", "winsock2"] }
+winapi = { version = "0.3.9", features = ["winbase", "debugapi", "ws2def", "winsock2", "errhandlingapi"] }

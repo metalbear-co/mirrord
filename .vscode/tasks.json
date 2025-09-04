@@ -22,7 +22,7 @@
 			"command": "cargo",
 			"args": [
 				"build",
-				"-p", "mirrord", "-p", "layer-win", "-p", "target-dummy", "-p", "rust-e2e-fileops",
+				"-p", "mirrord", "-p", "mirrord-layer-win", "-p", "target-dummy", "-p", "rust-e2e-fileops",
 				"--target", "x86_64-pc-windows-msvc"
 				// "--release" // uncomment if building in release mode
 			],

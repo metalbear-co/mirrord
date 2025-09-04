@@ -2,186 +2,29 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use mirrord_intproxy_protocol::{
-    NetProtocol, OutgoingConnectRequest, PortSubscribe, PortSubscription,
+    NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe, PortSubscription,
 };
 // Import the new connect_outgoing function from layer-lib
-use mirrord_layer_lib::socket::ops::{ConnectError, ConnectResult, connect_outgoing};
+use mirrord_layer_lib::ConnectError;
+use mirrord_layer_lib::socket::ops::{ConnectResult, connect_outgoing};
 // Re-export shared types from layer-lib and use unified SOCKETS
 pub use mirrord_layer_lib::socket::{
-    Bound, Connected, ConnectionThrough, SOCKETS, SocketKind, SocketState, UserSocket,
+    Bound, Connected, ConnectionThrough, HookResult, SocketDescriptor, SocketKind, SocketState,
+    UserSocket, get_socket, is_ignored_port, register_socket, set_socket_state,
 };
-use mirrord_protocol::{ConnectionId, outgoing::SocketAddress, tcp::StealType};
+use mirrord_protocol::{outgoing::SocketAddress, tcp::StealType};
 use socket2::SockAddr;
 use winapi::{
     shared::{minwindef::INT, ws2def::SOCKADDR},
     um::winsock2::SOCKET,
 };
 
-use super::{hostname::make_windows_proxy_request_with_response, utils::SocketAddrExtWin};
-use crate::socket::WindowsDnsResolver;
+use super::hostname::make_windows_proxy_request_with_response;
+use crate::socket::{WindowsDnsResolver, hostname};
 
-// Helper function to convert Windows socket types to SocketKind
-fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
-    #[cfg(target_os = "windows")]
-    use winapi::um::winsock2::{SOCK_DGRAM, SOCK_STREAM};
-
-    if socket_type == SOCK_STREAM {
-        Ok(SocketKind::Tcp(socket_type))
-    } else if socket_type == SOCK_DGRAM {
-        Ok(SocketKind::Udp(socket_type))
-    } else {
-        Err(format!("Unsupported socket type: {}", socket_type))
-    }
-}
-
-/// Register a new socket with the unified SOCKETS collection
-pub fn register_socket(socket: SOCKET, domain: i32, socket_type: i32, protocol: i32) {
-    let kind = match socket_kind_from_type(socket_type) {
-        Ok(kind) => kind,
-        Err(e) => {
-            tracing::warn!("Failed to create socket kind: {}", e);
-            return;
-        }
-    };
-
-    let user_socket = UserSocket::new(
-        domain,
-        socket_type,
-        protocol,
-        SocketState::Initialized,
-        kind,
-    );
-
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during registration, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    sockets.insert(socket, Arc::new(user_socket));
-    tracing::info!("SocketManager: Registered socket {} with mirrord", socket);
-}
-
-/// Update the state of a managed socket
-pub fn set_socket_state(socket: SOCKET, new_state: SocketState) {
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during state update, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    if let Some(socket_ref) = sockets.get_mut(&socket) {
-        if let Some(socket_mut) = Arc::get_mut(socket_ref) {
-            // Exclusive access - can modify in place
-            socket_mut.state = new_state;
-            tracing::debug!("SocketManager: Updated socket {} state in-place", socket);
-        } else {
-            // Arc is shared - must clone and replace
-            let mut new_socket = (**socket_ref).clone();
-            new_socket.state = new_state;
-            sockets.insert(socket, Arc::new(new_socket));
-            tracing::debug!(
-                "SocketManager: Arc for socket {} is shared, cloning for state update",
-                socket
-            );
-        }
-    } else {
-        tracing::warn!(
-            "SocketManager: Attempted to update state for unmanaged socket {}",
-            socket
-        );
-    }
-}
-
-/// Remove a socket from the managed collection
-pub fn remove_socket(socket: SOCKET) {
-    let mut sockets = match SOCKETS.lock() {
-        Ok(sockets) => sockets,
-        Err(poisoned) => {
-            tracing::warn!(
-                "SocketManager: sockets mutex was poisoned during removal, attempting recovery"
-            );
-            poisoned.into_inner()
-        }
-    };
-
-    let sockets_removed = sockets.remove(&socket).is_some();
-
-    if sockets_removed {
-        tracing::debug!(
-            "SocketManager: Removed socket {} from mirrord tracking",
-            socket
-        );
-    }
-}
-
-/// Get socket info
-pub fn get_socket(socket: SOCKET) -> Option<Arc<UserSocket>> {
-    SOCKETS
-        .lock()
-        .ok()
-        .and_then(|sockets| sockets.get(&socket).cloned())
-}
-
-/// Check if a socket is managed by mirrord
-pub fn is_socket_managed(socket: SOCKET) -> bool {
-    SOCKETS
-        .lock()
-        .map(|sockets| sockets.contains_key(&socket))
-        .unwrap_or(false)
-}
-
-/// Get socket state for a specific socket
-pub fn get_socket_state(socket: SOCKET) -> Option<SocketState> {
-    SOCKETS
-        .lock()
-        .ok()
-        .and_then(|sockets| sockets.get(&socket).map(|s| s.state.clone()))
-}
-
-/// Check if socket is in a specific state
-pub fn is_socket_in_state(socket: SOCKET, state_check: impl Fn(&SocketState) -> bool) -> bool {
-    get_socket_state(socket)
-        .map(|state| state_check(&state))
-        .unwrap_or(false)
-}
-
-/// Get bound address for a socket if it's in bound state
-pub fn get_bound_address(socket: SOCKET) -> Option<SocketAddr> {
-    get_socket_state(socket).and_then(|state| match state {
-        SocketState::Bound(bound) => Some(bound.requested_address),
-        SocketState::Listening(bound) => Some(bound.requested_address),
-        _ => None,
-    })
-}
-
-/// Get connected addresses for a socket if it's in connected state
-pub fn get_connected_addresses(
-    socket: SOCKET,
-) -> Option<(SocketAddress, SocketAddress, Option<SocketAddress>)> {
-    get_socket_state(socket).and_then(|state| match state {
-        SocketState::Connected(connected) => Some((
-            connected.remote_address,
-            connected.local_address,
-            connected.layer_address,
-        )),
-        _ => None,
-    })
-}
-
-/// Result of attempting to establish a proxy connection
-#[derive(Debug)]
-pub enum ProxyConnectResult {
-    Success(Connected, Option<ConnectionId>),
-    Fallback,
+/// Windows-specific wrapper for registering sockets with additional Windows context
+pub fn register_windows_socket(socket: SOCKET, domain: i32, socket_type: i32, protocol: i32) {
+    register_socket(socket, domain, socket_type, protocol);
 }
 
 /// Perform a proxy bind operation and return the bound address
@@ -270,7 +113,7 @@ pub fn register_accepted_socket(
     };
 
     // Register the accepted socket using the unified SOCKETS
-    register_socket(socket, domain, socket_type, 0);
+    register_windows_socket(socket, domain, socket_type, 0);
     set_socket_state(socket, SocketState::Connected(connected));
 
     tracing::info!(
@@ -289,23 +132,47 @@ pub fn connect_through_proxy_with_layer_lib<F>(
     user_socket: Arc<UserSocket>,
     remote_addr: SocketAddr,
     connect_fn: F,
-) -> Result<ConnectResult, ConnectError>
+) -> HookResult<ConnectResult>
 where
-    F: FnOnce(SOCKET, SockAddr) -> ConnectResult,
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
     tracing::info!(
         "connect_through_proxy_with_layer_lib -> intercepting connection to {}",
         remote_addr
     );
 
-    // Create the proxy request function that matches layer-lib expectations
-    let proxy_request_fn = |request: OutgoingConnectRequest| -> Result<_, ConnectError> {
-        match make_windows_proxy_request_with_response(request) {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e))),
-            Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e))),
+    let raw_remote_addr = SockAddr::from(remote_addr);
+    let optional_ip_address = raw_remote_addr.as_socket();
+    if let Some(ip_address) = optional_ip_address {
+        // let ip = ip_address.ip();
+        // if (ip.is_loopback() || ip.is_unspecified())
+        //     && let Some(result) = connect_to_local_address(sockfd, &user_socket_info,
+        // ip_address)? {
+        //     // `result` here is always a success, as error and bypass are returned on the `?`
+        //     // above.
+        //     return Detour::Success(result);
+        // }
+
+        if is_ignored_port(&ip_address) {
+            return Err(ConnectError::BypassPort(ip_address.port()).into());
         }
+
+        // // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
+        // let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
+        // if bypass_debugger_check.not() && crate::setup().is_debugger_port(&ip_address) {
+        //     return Detour::Bypass(Bypass::Port(ip_address.port()));
+        // }
     };
+
+    // Create the proxy request function that matches layer-lib expectations
+    let proxy_request_fn =
+        |request: OutgoingConnectRequest| -> HookResult<OutgoingConnectResponse> {
+            match hostname::make_windows_proxy_request_with_response(request) {
+                Ok(Ok(response)) => Ok(response),
+                Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
+                Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
+            }
+        };
 
     // Determine the protocol
     let protocol = match user_socket.kind {
@@ -316,52 +183,36 @@ where
     // Convert SocketAddr to SockAddr for layer-lib
     let remote_sock_addr = SockAddr::from(remote_addr);
 
-    // Use layer-lib's connect_outgoing_with_call function for TCP connections
-    connect_outgoing(
-        socket,
-        remote_sock_addr,
-        user_socket.clone(),
-        protocol,
-        proxy_request_fn,
-        connect_fn,
-    )
-}
+    let enabled_tcp_outgoing = crate::layer_setup().outgoing_config().tcp;
+    let enabled_udp_outgoing = crate::layer_setup().outgoing_config().udp;
 
-/// Handle successful proxy connection result, updating socket state
-pub fn handle_connection_success(
-    socket: SOCKET,
-    connected: Connected,
-    function_name: &str,
-) -> Result<(SOCKADDR, INT), Box<dyn std::error::Error>> {
-    // Convert the layer address to SOCKADDR and connect
-    let layer_addr = connected.layer_address.as_ref().unwrap();
+    match NetProtocol::from(user_socket.kind) {
+        NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true, _, _>(
+            socket,
+            remote_sock_addr,
+            user_socket,
+            NetProtocol::Datagrams,
+            proxy_request_fn,
+            connect_fn,
+        ),
 
-    // Convert SocketAddress to SocketAddr
-    let socket_addr = match layer_addr {
-        SocketAddress::Ip(addr) => *addr,
-        _ => return Err("Unix sockets not supported on Windows".into()),
-    };
+        NetProtocol::Stream => match user_socket.state {
+            SocketState::Initialized | SocketState::Bound(..)
+                // || (remote_addr.is_unix() && !unix_streams.is_empty())
+                if (optional_ip_address.is_some() && enabled_tcp_outgoing) => connect_outgoing::<true, _, _>(
+                    socket,
+                    remote_sock_addr,
+                    user_socket,
+                    protocol,
+                    proxy_request_fn,
+                    connect_fn,
+                ),
 
-    // Create a buffer for the sockaddr
-    let mut sockaddr_buffer: [u8; 128] = [0; 128];
-    let mut sockaddr_len = sockaddr_buffer.len() as INT;
+            _ => Err(ConnectError::DisabledOutgoing(socket).into())
+        },
 
-    // Use the SocketAddrExtWin trait method
-    unsafe {
-        socket_addr.to_windows_sockaddr_checked(
-            sockaddr_buffer.as_mut_ptr() as *mut SOCKADDR,
-            &mut sockaddr_len,
-        )?;
+        _ => Err(ConnectError::DisabledOutgoing(socket).into()),
     }
-
-    let sockaddr = unsafe { std::ptr::read(sockaddr_buffer.as_ptr() as *const SOCKADDR) };
-
-    // Update socket state first
-    set_socket_state(socket, SocketState::Connected(connected));
-
-    tracing::debug!("{} -> updated socket state to Connected", function_name);
-
-    Ok((sockaddr, sockaddr_len))
 }
 
 /// Log connection result and return it
@@ -439,14 +290,6 @@ pub fn validate_socket_for_outgoing(socket: SOCKET, function_name: &str) -> Sock
     }
 }
 
-/// Result of complete proxy connection attempt including validation and preparation
-pub enum ProxyConnectionResult {
-    /// Connection was successfully prepared, returns prepared sockaddr and length
-    Success((SOCKADDR, INT)),
-    /// Connection should fall back to original (not managed, disabled, or failed)
-    Fallback,
-}
-
 /// Complete proxy connection flow that handles validation, conversion, and preparation
 ///
 /// This function encapsulates the entire flow from raw sockaddr to prepared connection:
@@ -463,9 +306,9 @@ pub fn attempt_proxy_connection<F>(
     namelen: INT,
     function_name: &str,
     connect_fn: F,
-) -> Result<ConnectResult, ConnectError>
+) -> HookResult<ConnectResult>
 where
-    F: FnOnce(SOCKET, SockAddr) -> ConnectResult,
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
     use super::utils::SocketAddrExtWin;
 
@@ -476,7 +319,7 @@ where
                 "{} -> socket not managed or fallback mode, using original",
                 function_name
             );
-            return Err(ConnectError::Fallback);
+            return Err(ConnectError::Fallback.into());
         }
         SocketValidationResult::Intercept => {
             // proceed
@@ -492,7 +335,7 @@ where
                 function_name,
                 socket
             );
-            return Err(ConnectError::Fallback);
+            return Err(ConnectError::Fallback.into());
         }
     };
 
@@ -504,7 +347,7 @@ where
                 "{} -> failed to convert sockaddr, falling back to original",
                 function_name
             );
-            return Err(ConnectError::Fallback);
+            return Err(ConnectError::Fallback.into());
         }
     };
 
@@ -535,7 +378,7 @@ where
                 function_name,
                 remote_addr
             );
-            return Err(ConnectError::Fallback);
+            return Err(ConnectError::Fallback.into());
         }
         Err(e) => {
             tracing::warn!(
@@ -543,7 +386,7 @@ where
                 function_name,
                 e
             );
-            return Err(ConnectError::Fallback);
+            return Err(ConnectError::Fallback.into());
         }
     }
 

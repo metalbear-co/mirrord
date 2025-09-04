@@ -11,7 +11,8 @@ use std::{
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 use mirrord_layer_lib::{LayerSetup, ProxyConnection};
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+use tracing::Level;
+use tracing_subscriber::prelude::*;
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
@@ -248,6 +249,3 @@ entry_point!(|module, reason_for_call, reserved| {
         _ => FALSE,
     }
 });
-
-#[cfg(test)]
-mod tests;

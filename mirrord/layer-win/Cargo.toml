@@ -1,5 +1,5 @@
 [package]
-name = "layer-win"
+name = "mirrord-layer-win"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

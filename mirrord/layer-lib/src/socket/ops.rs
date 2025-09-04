@@ -1,15 +1,31 @@
+#[cfg(unix)]
+use std::os::unix::io::RawFd;
 use std::{net::SocketAddr, sync::Arc};
 
+#[cfg(unix)]
+use libc::{AF_UNIX, c_void, sockaddr, socklen_t};
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
+use tracing::{debug, error, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
 
-use crate::socket::{Connected, SocketState, UserSocket};
+use super::sockets::set_socket_state;
+use crate::{
+    HookError, HookResult,
+    error::ConnectError,
+    socket::{Connected, SOCKETS, SocketState, UserSocket},
+};
+
+// Platform-specific socket descriptor type
+#[cfg(unix)]
+pub type SocketDescriptor = RawFd;
+#[cfg(windows)]
+pub type SocketDescriptor = SOCKET;
 
 #[cfg(windows)]
 #[allow(non_camel_case_types)]
@@ -28,7 +44,7 @@ pub type SOCK_ADDR_LEN_T = libc::socklen_t;
 macro_rules! connect_fn_def {
     ($conv:expr) => {
         unsafe extern $conv fn (
-            sockfd: SOCKET,
+            sockfd: SocketDescriptor,
             addr: *const SOCK_ADDR_T,
             addrlen: SOCK_ADDR_LEN_T,
         ) -> i32
@@ -123,23 +139,6 @@ fn set_last_error(error: i32) {
     unsafe { winapi::um::winsock2::WSASetLastError(error) };
 }
 
-/// Error types for connect operations
-#[derive(Debug, thiserror::Error)]
-pub enum ConnectError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Socket not found: {0}")]
-    SocketNotFound(SOCKET),
-    #[error("Invalid socket state: {0}")]
-    InvalidState(SOCKET),
-    #[error("Address conversion error")]
-    AddressConversion,
-    #[error("Proxy request failed: {0}")]
-    ProxyRequest(String),
-    #[error("Fallback to original connection")]
-    Fallback,
-}
-
 /// Common logic for outgoing connections that can be used by platform-specific implementations.
 ///
 /// This function handles the mirrord proxy connection setup but leaves the actual socket
@@ -155,30 +154,37 @@ pub enum ConnectError {
 ///
 /// ## Returns
 /// A `ConnectResult` containing the connection result and any error information
-pub fn connect_outgoing<P, C>(
-    sockfd: SOCKET,
+#[mirrord_layer_macro::instrument(
+    level = "debug",
+    ret,
+    skip(_user_socket_info, proxy_request_fn, connect_fn)
+)]
+pub fn connect_outgoing<const CALL_CONNECT: bool, P, F>(
+    sockfd: SocketDescriptor,
     remote_address: SockAddr,
-    mut user_socket_info: Arc<UserSocket>,
+    _user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
     proxy_request_fn: P,
-    connect_fn: C,
-) -> Result<ConnectResult, ConnectError>
+    connect_fn: F,
+) -> HookResult<ConnectResult>
 where
-    P: FnOnce(OutgoingConnectRequest) -> Result<OutgoingConnectResponse, ConnectError>,
-    C: FnOnce(SOCKET, SockAddr) -> ConnectResult,
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
     // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_address: SockAddr| -> Result<ConnectResult, ConnectError> {
+    let remote_connection = |remote_address: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
-        let remote_address =
-            SocketAddress::try_from(remote_address).map_err(|_| ConnectError::AddressConversion)?;
+        let remote_address = SocketAddress::try_from(remote_address).unwrap();
 
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
         };
 
-        let response = proxy_request_fn(request)?;
+        let response = match proxy_request_fn(request) {
+            Ok(response) => response,
+            Err(e) => return Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
+        };
 
         let OutgoingConnectResponse {
             layer_address,
@@ -187,13 +193,22 @@ where
         } = response;
 
         // Connect to the interceptor socket that is listening.
-        let layer_address_sock = SockAddr::try_from(layer_address.clone())
-            .map_err(|_| ConnectError::AddressConversion)?;
-
-        let connect_result = connect_fn(sockfd, layer_address_sock);
+        let connect_result: ConnectResult = if CALL_CONNECT {
+            let layer_address = SockAddr::try_from(layer_address.clone())?;
+            connect_fn(sockfd, layer_address)
+        } else {
+            ConnectResult {
+                result: 0,
+                error: None,
+            }
+        };
 
         if connect_result.is_failure() {
-            return Err(ConnectError::Io(std::io::Error::last_os_error()));
+            error!(
+                "connect -> Failed call to connect_fn with {:#?}",
+                connect_result,
+            );
+            Err(std::io::Error::last_os_error())?
         }
 
         let connected = Connected {
@@ -202,10 +217,9 @@ where
             layer_address: Some(layer_address),
         };
 
-        // Update the socket state
-        Arc::get_mut(&mut user_socket_info)
-            .ok_or(ConnectError::InvalidState(sockfd))?
-            .state = SocketState::Connected(connected);
+        trace!("we are connected {connected:#?}");
+
+        set_socket_state(sockfd, SocketState::Connected(connected));
 
         Ok(connect_result)
     };
@@ -258,19 +272,24 @@ pub fn prepare_outgoing_address(address: SocketAddr) -> SocketAddress {
 }
 
 /// Version of connect_outgoing that performs the actual connect call when needed
+#[mirrord_layer_macro::instrument(
+    level = "debug",
+    ret,
+    skip(user_socket_info, proxy_request_fn, actual_connect_fn)
+)]
 pub fn connect_outgoing_with_call<P, F>(
-    sockfd: SOCKET,
+    sockfd: SocketDescriptor,
     remote_address: SockAddr,
     user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
     proxy_request_fn: P,
     actual_connect_fn: F,
-) -> Result<ConnectResult, ConnectError>
+) -> HookResult<ConnectResult>
 where
-    F: FnOnce(SOCKET, SockAddr) -> ConnectResult,
-    P: FnOnce(OutgoingConnectRequest) -> Result<OutgoingConnectResponse, ConnectError>,
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
-    let connect_fn = |sockfd: SOCKET, addr: SockAddr| -> ConnectResult {
+    let connect_fn = |sockfd: SocketDescriptor, addr: SockAddr| -> ConnectResult {
         #[cfg(unix)]
         let result = unsafe { actual_connect_fn(sockfd, addr.as_ptr(), addr.len()) };
 
@@ -280,7 +299,7 @@ where
         ConnectResult::from(result)
     };
 
-    connect_outgoing(
+    connect_outgoing::<true, _, _>(
         sockfd,
         remote_address,
         user_socket_info,
@@ -292,22 +311,26 @@ where
 
 /// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
 /// only)
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info, proxy_request_fn))]
 pub fn connect_outgoing_udp<P>(
-    sockfd: SOCKET,
+    sockfd: SocketDescriptor,
     remote_address: SockAddr,
     user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
     proxy_request_fn: P,
-) -> Result<ConnectResult, ConnectError>
+) -> HookResult<ConnectResult>
 where
-    P: FnOnce(OutgoingConnectRequest) -> Result<OutgoingConnectResponse, ConnectError>,
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
 {
-    let connect_fn = |_sockfd: SOCKET, _addr: SockAddr| -> ConnectResult {
-        // For UDP, we don't actually connect, just return success
-        ConnectResult::new(0, None)
+    // No-op connect function for UDP
+    let connect_fn = |_sockfd: SocketDescriptor, _: SockAddr| -> ConnectResult {
+        ConnectResult {
+            result: 0,
+            error: None,
+        }
     };
 
-    connect_outgoing(
+    connect_outgoing::<false, _, _>(
         sockfd,
         remote_address,
         user_socket_info,
@@ -315,6 +338,432 @@ where
         proxy_request_fn,
         connect_fn,
     )
+}
+
+/// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
+///
+/// This function is used for DNS resolution handling and socket address mapping. When sending
+/// UDP packets to non-port-53 destinations, it checks if the destination is one of our bound
+/// sockets and returns the actual address if found.
+///
+/// ## Parameters
+/// - `sockfd`: The socket file descriptor
+/// - `user_socket_info`: Information about the socket making the request
+/// - `destination`: The destination address being sent to
+///
+/// ## Returns
+/// The actual socket address to send to, which may be different from the requested destination
+/// if the destination is one of our managed sockets.
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info))]
+pub fn send_dns_patch(
+    sockfd: SocketDescriptor,
+    user_socket_info: Arc<UserSocket>,
+    destination: SocketAddr,
+) -> HookResult<SockAddr> {
+    let mut sockets = SOCKETS.lock()?;
+    // We want to keep holding this socket.
+    sockets.insert(sockfd, user_socket_info);
+
+    // Sending a packet on port NOT 53.
+    let actual_destination = sockets
+        .iter()
+        .filter(|(_, socket)| socket.kind.is_udp())
+        // Is the `destination` one of our sockets? If so, then we grab the actual address,
+        // instead of the, possibly fake address from mirrord.
+        .find_map(|(_, receiver_socket)| match &receiver_socket.state {
+            SocketState::Bound(crate::socket::Bound {
+                requested_address,
+                address,
+            }) => {
+                // Special case for port `0`, see `getsockname`.
+                if requested_address.port() == 0 {
+                    (SocketAddr::new(requested_address.ip(), address.port()) == destination)
+                        .then_some(*address)
+                } else {
+                    (*requested_address == destination).then_some(*address)
+                }
+            }
+            SocketState::Connected(Connected {
+                remote_address,
+                layer_address,
+                ..
+            }) => {
+                let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
+                let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
+
+                if remote_address == destination {
+                    Some(layer_address)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .ok_or(HookError::ManagedSocketNotFound(destination))?;
+
+    Ok(actual_destination.into())
+}
+
+/// Platform-specific sendto function type definitions
+#[cfg(unix)]
+pub type SendtoFn = unsafe extern "C" fn(
+    sockfd: SocketDescriptor,
+    buf: *const c_void,
+    len: usize,
+    flags: i32,
+    dest_addr: *const sockaddr,
+    addrlen: socklen_t,
+) -> isize;
+
+#[cfg(windows)]
+pub type SendtoFn = unsafe extern "system" fn(
+    s: SOCKET,
+    buf: *const i8,
+    len: i32,
+    flags: i32,
+    to: *const winapi::shared::ws2def::SOCKADDR,
+    tolen: i32,
+) -> i32;
+
+/// ## DNS resolution on port `53`
+///
+/// There is a bit of trickery going on here, as this function first triggers a _semantical_
+/// connection to an interceptor socket (we don't [`connect`] this `sockfd`, just change the
+/// [`UserSocket`] state), and only then calls the actual [`sendto`] to send `raw_message` to
+/// the interceptor address (instead of the `raw_destination`).
+///
+/// Once the [`UserSocket`] is in the [`Connected`] state, then any other [`sendto`] call with
+/// a [`None`] `raw_destination` will call the original [`sendto`] to the bound `address`. A
+/// similar logic applies to a [`Bound`] socket.
+///
+/// ## Usage
+///
+/// This function preserves the architecture and comments from the original Unix layer
+/// implementation, providing a cross-platform interface for UDP sendto operations that
+/// supports both DNS resolution (port 53) and regular UDP packet sending.
+///
+/// ## Parameters
+/// - `sockfd`: Socket file descriptor
+/// - `raw_message`: Pointer to the message buffer
+/// - `message_length`: Length of the message
+/// - `flags`: Send flags
+/// - `raw_destination`: Pointer to destination address
+/// - `sendto_fn`: Platform-specific sendto function
+/// - `proxy_request_fn`: Function to make proxy requests
+///
+/// ## Returns
+/// HookResult<isize>
+#[mirrord_layer_macro::instrument(
+    level = "debug",
+    ret,
+    skip(raw_message, destination, sendto_fn, proxy_request_fn)
+)]
+pub fn send_to<P, F>(
+    sockfd: SocketDescriptor,
+    raw_message: *const u8,
+    message_length: usize,
+    flags: i32,
+    destination: SocketAddr,
+    sendto_fn: F,
+    proxy_request_fn: P,
+) -> HookResult<isize>
+where
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(SocketDescriptor, *const u8, usize, i32, SockAddr) -> HookResult<isize>,
+{
+    let raw_destination = SockAddr::from(destination);
+    trace!("destination {:?}", destination);
+
+    let user_socket_info = SOCKETS
+        .lock()?
+        .remove(&sockfd)
+        .ok_or(HookError::SocketNotFound(sockfd))?;
+
+    // we don't support unix sockets which don't use `connect`
+    #[cfg(unix)]
+    if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
+        && !matches!(user_socket_info.state, SocketState::Connected(_))
+    {
+        return Err(HookError::UnsupportedSocketType);
+    }
+
+    // Currently this flow only handles DNS resolution.
+    // So here we have to check for 2 things:
+    //
+    // 1. Are we sending something port 53? Then we use mirrord flow;
+    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
+    // we've bound the destination socket.
+    //
+    // If none of the above are true, then the destination is some real address outside our scope.
+    if let Some(destination) = raw_destination
+        .as_socket()
+        .filter(|destination| destination.port() != 53)
+    {
+        debug!(
+            "layer-lib send_to -> non-DNS destination (port {}), checking for DNS patch",
+            destination.port()
+        );
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination.into())?;
+
+        sendto_fn(
+            sockfd,
+            raw_message,
+            message_length,
+            flags,
+            rawish_true_destination,
+        )
+    } else {
+        connect_outgoing_udp(
+            sockfd,
+            destination.into(),
+            user_socket_info,
+            NetProtocol::Datagrams,
+            proxy_request_fn,
+        )?;
+
+        let layer_address: SockAddr = SOCKETS
+            .lock()?
+            .get(&sockfd)
+            .and_then(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.layer_address.clone(),
+                _ => unreachable!(),
+            })
+            .ok_or(HookError::ManagedSocketNotFound(destination))?
+            .try_into()?;
+
+        // Convert Windows parameters to cross-platform format
+        sendto_fn(sockfd, raw_message, message_length, flags, layer_address)
+    }
+}
+
+/// Platform-specific sendmsg function type definitions
+#[cfg(unix)]
+pub type SendmsgFn =
+    unsafe extern "C" fn(sockfd: SocketDescriptor, msg: *const libc::msghdr, flags: i32) ->
+isize;
+
+#[cfg(windows)]
+#[allow(non_snake_case)] // Windows API uses Hungarian notation
+#[allow(improper_ctypes_definitions)] // Windows API callback types
+pub type SendmsgFn = unsafe extern "system" fn(
+    s: SOCKET,
+    lpBuffers: *const winapi::shared::ws2def::WSABUF,
+    dwBufferCount: u32,
+    lpNumberOfBytesSent: *mut u32,
+    dwFlags: u32,
+    lpTo: *const winapi::shared::ws2def::SOCKADDR,
+    iTolen: i32,
+    lpOverlapped: *mut winapi::um::minwinbase::OVERLAPPED,
+    lpCompletionRoutine: Option<winapi::um::winsock2::LPWSAOVERLAPPED_COMPLETION_ROUTINE>,
+) -> i32;
+
+/// Same behavior as [`send_to`], the only difference is that here we deal with message headers,
+/// instead of directly with socket addresses.
+///
+/// This function provides cross-platform sendmsg functionality that works with both Unix
+/// `msghdr` structures and Windows `WSABUF` arrays, while preserving the original Unix layer's
+/// architecture and DNS resolution logic.
+///
+/// ## Parameters
+/// - `sockfd`: Socket file descriptor
+/// - `raw_message_header`: Platform-specific message header
+/// - `flags`: Send flags
+/// - `sendmsg_fn`: Platform-specific sendmsg function
+/// - `proxy_request_fn`: Function to make proxy requests
+///
+/// ## Returns
+/// HookResult<isize>
+#[cfg(unix)]
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(raw_message_header, sendmsg_fn, proxy_request_fn))]
+pub fn sendmsg<P, F>(
+    sockfd: SocketDescriptor,
+    raw_message_header: *const libc::msghdr,
+    flags: i32,
+    sendmsg_fn: F,
+    proxy_request_fn: P,
+) -> HookResult<isize>
+where
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(SocketDescriptor, *const libc::msghdr, i32) -> HookResult<isize>,
+{
+    // We have a destination, so apply our fake `connect` patch.
+    let destination = if !unsafe { (*raw_message_header).msg_name.is_null() } {
+        let raw_destination = unsafe { (*raw_message_header).msg_name } as *const libc::sockaddr;
+        let destination_length = unsafe { (*raw_message_header).msg_namelen };
+        SockAddr::try_from_raw(raw_destination, destination_length)
+            .ok_or_else(|| HookError::BadPointer)?
+    } else {
+        return Err(HookError::AddressConversion);
+    };
+
+    let destination_addr = destination.as_socket()
+        .ok_or_else(|| HookError::AddressConversion)?;
+
+    debug!("layer-lib sendmsg -> destination: {:?}", destination_addr);
+
+    let user_socket_info = SOCKETS
+        .lock()?
+        .remove(&sockfd)
+        .ok_or(HookError::SocketNotFound(sockfd))?;
+
+    // we don't support unix sockets which don't use `connect`
+    if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
+        && !matches!(user_socket_info.state, SocketState::Connected(_))
+    {
+        return Err(HookError::UnsupportedSocketType);
+    }
+
+    // Currently this flow only handles DNS resolution.
+    // So here we have to check for 2 things:
+    //
+    // 1. Are we sending something port 53? Then we use mirrord flow;
+    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
+    // we've bound the destination socket.
+    //
+    // If none of the above are true, then the destination is some real address outside our scope.
+    if destination_addr.port() != 53 {
+        debug!(
+            "layer-lib sendmsg -> non-DNS destination (port {}), checking for DNS patch",
+            destination_addr.port()
+        );
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination_addr)?;
+
+        let mut true_message_header = Box::new(unsafe { *raw_message_header });
+
+        unsafe {
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_from_nonoverlapping(
+                    rawish_true_destination.as_ptr() as *const _,
+                    rawish_true_destination.len() as usize,
+                );
+        }
+        true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
+
+        sendmsg_fn(sockfd, true_message_header.as_ref(), flags)
+    } else {
+        // DNS resolution flow
+        connect_outgoing_udp(
+            sockfd,
+            destination,
+            user_socket_info,
+            NetProtocol::Datagrams,
+            proxy_request_fn,
+        )?;
+
+        let layer_address: SockAddr = SOCKETS
+            .lock()?
+            .get(&sockfd)
+            .and_then(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.layer_address.clone(),
+                _ => unreachable!(),
+            })
+            .ok_or(HookError::ManagedSocketNotFound(destination_addr))?
+            .try_into()?;
+
+        let mut true_message_header = Box::new(unsafe { *raw_message_header });
+
+        unsafe {
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_from_nonoverlapping(
+                    layer_address.as_ptr() as *const _,
+                    layer_address.len() as usize,
+                );
+        }
+        true_message_header.as_mut().msg_namelen = layer_address.len();
+
+        sendmsg_fn(sockfd, true_message_header.as_ref(), flags)
+    }
+}
+
+/// Windows version of sendmsg function that provides similar functionality to the Unix version
+/// but works with Windows WSABUF structures and addressing
+#[cfg(windows)]
+#[allow(non_snake_case)] // Windows API uses Hungarian notation
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(lpBuffers, sendmsg_fn, proxy_request_fn))]
+pub fn sendmsg<P, F>(
+    s: SOCKET,
+    lpBuffers: *const winapi::shared::ws2def::WSABUF,
+    dwBufferCount: u32,
+    lpNumberOfBytesSent: *mut u32,
+    dwFlags: u32,
+    destination: SocketAddr,  // Take SocketAddr directly instead of raw pointer
+    sendmsg_fn: F,
+    proxy_request_fn: P,
+) -> HookResult<i32>
+where
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(
+        SOCKET,
+        *const winapi::shared::ws2def::WSABUF,
+        u32,
+        *mut u32,
+        u32,
+        SockAddr,
+    ) -> HookResult<i32>,
+{
+    debug!("layer-lib sendmsg (Windows) -> destination: {:?}", destination);
+
+    let user_socket_info = SOCKETS
+        .lock()?
+        .remove(&s)
+        .ok_or(HookError::SocketNotFound(s))?;
+
+    // Currently this flow only handles DNS resolution.
+    // So here we have to check for 2 things:
+    //
+    // 1. Are we sending something port 53? Then we use mirrord flow;
+    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
+    // we've bound the destination socket.
+    //
+    // If none of the above are true, then the destination is some real address outside our scope.
+    if destination.port() != 53 {
+        debug!(
+            "layer-lib sendmsg (Windows) -> non-DNS destination (port {}), checking for DNS patch",
+            destination.port()
+        );
+        let rawish_true_destination = send_dns_patch(s, user_socket_info, destination)?;
+
+        sendmsg_fn(
+            s,
+            lpBuffers,
+            dwBufferCount,
+            lpNumberOfBytesSent,
+            dwFlags,
+            rawish_true_destination,
+        )
+    } else {
+        // DNS resolution flow
+        connect_outgoing_udp(
+            s,
+            destination.into(),
+            user_socket_info,
+            NetProtocol::Datagrams,
+            proxy_request_fn,
+        )?;
+
+        let layer_address: SockAddr = SOCKETS
+            .lock()?
+            .get(&s)
+            .and_then(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.layer_address.clone(),
+                _ => unreachable!(),
+            })
+            .ok_or(HookError::ManagedSocketNotFound(destination))?
+            .try_into()?;
+
+        sendmsg_fn(
+            s,
+            lpBuffers,
+            dwBufferCount,
+            lpNumberOfBytesSent,
+            dwFlags,
+            layer_address,
+        )
+    }
 }
 
 #[cfg(test)]

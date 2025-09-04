@@ -2,6 +2,7 @@
 
 pub mod common;
 pub mod dns_selector;
+pub mod error;
 pub mod hostname;
 pub mod proxy_connection;
 pub mod socket;
@@ -11,6 +12,7 @@ pub mod socket;
 pub mod unix;
 
 pub use common::setup::LayerSetup;
+pub use error::*;
 pub use hostname::*;
 pub use proxy_connection::ProxyConnection;
 pub use unix::UnixHostnameResolver;
