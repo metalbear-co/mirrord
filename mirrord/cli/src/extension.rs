@@ -51,7 +51,10 @@ pub(crate) async fn extension_exec(
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
     RETRY_KUBE_OPERATIONS.get_or_init(|| {
-        RetryConfig::new(config.startup_retries_interval_ms, config.startup_retries_max_attempts)
+        RetryConfig::new(
+            config.startup_retries_interval_ms,
+            config.startup_retries_max_attempts,
+        )
     });
 
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;

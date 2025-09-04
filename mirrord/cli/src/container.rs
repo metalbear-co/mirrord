@@ -227,7 +227,10 @@ pub async fn container_command(
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
     RETRY_KUBE_OPERATIONS.get_or_init(|| {
-        RetryConfig::new(config.startup_retries_interval_ms, config.startup_retries_max_attempts)
+        RetryConfig::new(
+            config.startup_retries_interval_ms,
+            config.startup_retries_max_attempts,
+        )
     });
 
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
@@ -289,7 +292,10 @@ pub async fn container_ext_command(
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
     RETRY_KUBE_OPERATIONS.get_or_init(|| {
-        RetryConfig::new(config.startup_retries_interval_ms, config.startup_retries_max_attempts)
+        RetryConfig::new(
+            config.startup_retries_interval_ms,
+            config.startup_retries_max_attempts,
+        )
     });
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
