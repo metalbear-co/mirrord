@@ -292,9 +292,16 @@ impl RestartableBackgroundTask for AgentConnection {
                     .max_delay(Duration::from_secs(8))
                     .take(10);
 
-                let connection = Retry::spawn(retry_strategy, || async move {
-                    AgentConnection::new(config, connect_info.clone(), &mut NullReporter::default())
+                let connection = Retry::spawn(retry_strategy, || async {
+                    message_bus
+                        .closed_token()
+                        .run_until_cancelled(AgentConnection::new(
+                            config,
+                            connect_info.clone(),
+                            &mut NullReporter::default(),
+                        ))
                         .await
+                        .transpose()
                         .inspect_err(|error| {
                             tracing::error!(
                                 error = %Report::new(error),
@@ -306,7 +313,7 @@ impl RestartableBackgroundTask for AgentConnection {
                 .await;
 
                 match connection {
-                    Ok(connection) => {
+                    Ok(Some(connection)) => {
                         *self = connection;
                         message_bus
                             .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::End))
@@ -314,9 +321,9 @@ impl RestartableBackgroundTask for AgentConnection {
 
                         ControlFlow::Continue(())
                     }
-                    Err(..) => ControlFlow::Break(AgentConnectionTaskError::ChannelError(
-                        self.reconnect.kind(),
-                    )),
+                    Ok(None) | Err(..) => ControlFlow::Break(
+                        AgentConnectionTaskError::ChannelError(self.reconnect.kind()),
+                    ),
                 }
             }
         }

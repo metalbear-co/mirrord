@@ -148,14 +148,7 @@ impl BackgroundTask for TcpProxyTask {
             .take()
             .expect("task should have a valid connection before run");
 
-        let Some((mut stream, read_buf)) = message_bus
-            .closed()
-            .cancel_on_close(connection.connect())
-            .await
-            .transpose()?
-        else {
-            return Ok(());
-        };
+        let (mut stream, read_buf) = connection.connect().await?;
 
         if self.discard_data.not() && read_buf.is_empty().not() {
             // We don't send empty data,
