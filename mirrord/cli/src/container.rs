@@ -10,6 +10,7 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
+use mirrord_kube::{RETRY_KUBE_OPERATIONS, RetryConfig};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;
@@ -225,6 +226,10 @@ pub async fn container_command(
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+    });
+
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
     let (runtime_command, _execution_info, _tls_setup) =
@@ -282,6 +287,10 @@ pub async fn container_ext_command(
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
+
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+    });
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()

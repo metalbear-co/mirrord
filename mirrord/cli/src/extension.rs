@@ -1,5 +1,6 @@
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS, RetryConfig};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
@@ -48,6 +49,11 @@ pub(crate) async fn extension_exec(
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", args.target);
 
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+    });
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(

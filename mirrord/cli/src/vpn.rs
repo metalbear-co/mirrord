@@ -1,7 +1,7 @@
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::api::kubernetes::create_kube_config;
+use mirrord_kube::{RETRY_KUBE_OPERATIONS, RetryConfig, api::kubernetes::create_kube_config};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
@@ -21,6 +21,11 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+    });
+
     config.agent.privileged = true;
 
     let client = create_kube_config(

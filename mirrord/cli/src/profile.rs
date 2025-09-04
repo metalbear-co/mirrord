@@ -10,9 +10,7 @@ use mirrord_config::{
     feature::{FeatureConfig, network::incoming::IncomingMode},
     util::VecOrSingle,
 };
-use mirrord_kube::{
-    BearApi, RetryConfig, api::kubernetes::create_kube_config, error::KubeApiError,
-};
+use mirrord_kube::{BearApi, api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{
     FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordProfile,
 };
@@ -243,24 +241,11 @@ async fn fetch_profile(
 
     match profile_identifier {
         ProfileIdentifier::Cluster(profile) => {
-            let api = BearApi::<MirrordClusterProfile>::all(
-                client,
-                Some(RetryConfig::new(
-                    config.start_retries_interval_ms,
-                    config.start_retries_max,
-                )),
-            );
+            let api = BearApi::<MirrordClusterProfile>::all(client);
             Ok(ProfileFetchResult::Cluster(api.get(profile).await?))
         }
         ProfileIdentifier::Namespaced { namespace, profile } => {
-            let api = BearApi::<MirrordProfile>::namespaced(
-                client,
-                namespace,
-                Some(RetryConfig::new(
-                    config.start_retries_interval_ms,
-                    config.start_retries_max,
-                )),
-            );
+            let api = BearApi::<MirrordProfile>::namespaced(client, namespace);
             Ok(ProfileFetchResult::Namespaced(api.get(profile).await?))
         }
     }

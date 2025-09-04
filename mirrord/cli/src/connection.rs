@@ -4,7 +4,6 @@ use mirrord_analytics::Reporter;
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    RetryConfig,
     api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -82,14 +81,7 @@ where
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
     let api = api
-        .prepare_client_cert(
-            analytics,
-            progress,
-            Some(RetryConfig::new(
-                config.start_retries_interval_ms,
-                config.start_retries_max,
-            )),
-        )
+        .prepare_client_cert(analytics, progress)
         .await
         .into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));

@@ -195,7 +195,7 @@ impl DateValidityExt for rfc5280::Validity {
 #[cfg(feature = "client")]
 pub mod client {
     use kube::{Client, Resource, api::PostParams};
-    use mirrord_kube::{BearApi, RetryConfig};
+    use mirrord_kube::BearApi;
 
     use super::*;
     use crate::error::CredentialStoreError;
@@ -207,7 +207,6 @@ pub mod client {
             client: Client,
             common_name: &str,
             key_pair: Option<KeyPair>,
-            retry_config: Option<RetryConfig>,
         ) -> Result<Self, CredentialStoreError>
         where
             R: Resource + Clone + Debug,
@@ -223,7 +222,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: BearApi<R> = BearApi::all(client, retry_config);
+            let api: BearApi<R> = BearApi::all(client);
 
             let certificate: Certificate = api
                 .create_subresource(
@@ -246,7 +245,6 @@ pub mod client {
             &mut self,
             client: Client,
             common_name: &str,
-            retry_config: Option<RetryConfig>,
         ) -> Result<(), CredentialStoreError>
         where
             R: Resource + Clone + Debug,
@@ -257,7 +255,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: BearApi<R> = BearApi::all(client, retry_config);
+            let api: BearApi<R> = BearApi::all(client);
 
             let certificate: Certificate = api
                 .create_subresource(

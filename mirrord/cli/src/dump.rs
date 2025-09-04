@@ -7,6 +7,7 @@ use std::{
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS, RetryConfig};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
@@ -45,6 +46,10 @@ pub async fn dump_command(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
 
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(config.start_retries_interval_ms, config.start_retries_max)
+    });
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(

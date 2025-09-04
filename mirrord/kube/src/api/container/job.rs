@@ -6,7 +6,7 @@ use k8s_openapi::api::{
     core::v1::{Pod, PodTemplateSpec},
 };
 use kube::{
-    Api, Client, ResourceExt,
+    Client, ResourceExt,
     api::{ObjectMeta, PostParams},
     runtime::{WatchStreamExt, watcher},
 };
@@ -16,6 +16,7 @@ use tokio::pin;
 use tracing::debug;
 
 use crate::{
+    BearApi,
     api::{
         container::{
             ContainerParams, ContainerVariant,
@@ -54,9 +55,9 @@ where
         .labels(&format!("job-name={}", params.name))
         .timeout(60);
 
-    let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
+    let pod_api: BearApi<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
-    let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
+    let stream = watcher(pod_api.as_kube_api().clone(), watcher_config).applied_objects();
     pin!(stream);
 
     let agent_pod = stream
