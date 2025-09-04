@@ -252,8 +252,6 @@ pub(crate) struct MysqlBranchParams {
 }
 
 impl MysqlBranchParams {
-    const MYSQL_BRANCH_DEFAULT_TTL: u64 = 120;
-
     pub(crate) fn new(id: &str, config: &DatabaseBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = match &config.connection {
@@ -272,7 +270,7 @@ impl MysqlBranchParams {
             database_name: config.name.clone(),
             connection_source,
             target: target.clone(),
-            ttl_secs: config.ttl_secs.unwrap_or(Self::MYSQL_BRANCH_DEFAULT_TTL),
+            ttl_secs: config.ttl_secs,
             mysql_version: config.version.clone(),
         };
         let labels = BTreeMap::from([(
