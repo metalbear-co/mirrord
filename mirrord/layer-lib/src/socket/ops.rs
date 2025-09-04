@@ -311,7 +311,7 @@ where
 
 /// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
 /// only)
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info, proxy_request_fn))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(user_socket_info, proxy_request_fn))]
 pub fn connect_outgoing_udp<P>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
@@ -354,7 +354,7 @@ where
 /// ## Returns
 /// The actual socket address to send to, which may be different from the requested destination
 /// if the destination is one of our managed sockets.
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(user_socket_info))]
 pub fn send_dns_patch(
     sockfd: SocketDescriptor,
     user_socket_info: Arc<UserSocket>,
@@ -574,7 +574,7 @@ pub type SendmsgFn = unsafe extern "system" fn(
 /// ## Returns
 /// HookResult<isize>
 #[cfg(unix)]
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(raw_message_header, sendmsg_fn, proxy_request_fn))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_message_header, sendmsg_fn, proxy_request_fn))]
 pub fn sendmsg<P, F>(
     sockfd: SocketDescriptor,
     raw_message_header: *const libc::msghdr,
@@ -683,7 +683,7 @@ where
 /// but works with Windows WSABUF structures and addressing
 #[cfg(windows)]
 #[allow(non_snake_case)] // Windows API uses Hungarian notation
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(lpBuffers, sendmsg_fn, proxy_request_fn))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(lpBuffers, sendmsg_fn, proxy_request_fn))]
 pub fn sendmsg<P, F>(
     s: SOCKET,
     lpBuffers: *const winapi::shared::ws2def::WSABUF,

@@ -421,7 +421,7 @@ type GetSockOptType = unsafe extern "system" fn(
 static GET_SOCK_OPT_ORIGINAL: OnceLock<&GetSockOptType> = OnceLock::new();
 
 /// Windows socket hook for socket creation
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> SOCKET {
     tracing::trace!(
         "socket_detour -> af: {}, type: {}, protocol: {}",
@@ -456,7 +456,7 @@ unsafe extern "system" fn socket_detour(af: INT, r#type: INT, protocol: INT) -> 
 }
 
 /// Windows socket hook for bind
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("bind_detour -> socket: {}, namelen: {}", s, namelen);
 
@@ -502,7 +502,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 }
 
 /// Windows socket hook for listen
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     tracing::trace!("listen_detour -> socket: {}, backlog: {}", s, backlog);
 
@@ -553,7 +553,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 }
 
 /// Windows socket hook for connect
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("connect_detour -> socket: {}, namelen: {}", s, namelen);
 
@@ -587,7 +587,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
 }
 
 /// Windows socket hook for accept
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn accept_detour(
     s: SOCKET,
     addr: *mut SOCKADDR,
@@ -656,7 +656,7 @@ unsafe extern "system" fn accept_detour(
 }
 
 /// Windows socket hook for getsockname
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getsockname_detour(
     s: SOCKET,
     name: *mut SOCKADDR,
@@ -715,7 +715,7 @@ unsafe extern "system" fn getsockname_detour(
 }
 
 /// Windows socket hook for getpeername
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getpeername_detour(
     s: SOCKET,
     name: *mut SOCKADDR,
@@ -751,7 +751,7 @@ unsafe extern "system" fn getpeername_detour(
 }
 
 /// Pass-through hook for WSAStartup
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_startup_detour(wVersionRequested: u16, lpWSAData: *mut u8) -> i32 {
     tracing::debug!("WSAStartup called with version: {}", wVersionRequested);
 
@@ -766,7 +766,7 @@ unsafe extern "system" fn wsa_startup_detour(wVersionRequested: u16, lpWSAData: 
 }
 
 /// Pass-through hook for WSACleanup
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_cleanup_detour() -> i32 {
     // Pass through to original - let Windows Sockets handle cleanup
     let original = WSA_CLEANUP_ORIGINAL.get().unwrap();
@@ -774,7 +774,7 @@ unsafe extern "system" fn wsa_cleanup_detour() -> i32 {
 }
 
 /// Socket management detour for ioctlsocket() - controls I/O mode of socket
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn ioctlsocket_detour(s: SOCKET, cmd: i32, argp: *mut u32) -> i32 {
     // Pass through to original - interceptor handles I/O control for managed sockets
     let original = IOCTL_SOCKET_ORIGINAL.get().unwrap();
@@ -782,7 +782,7 @@ unsafe extern "system" fn ioctlsocket_detour(s: SOCKET, cmd: i32, argp: *mut u32
 }
 
 /// Socket management detour for select() - monitors socket readiness
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn select_detour(
     nfds: i32,
     readfds: *mut fd_set,
@@ -796,7 +796,7 @@ unsafe extern "system" fn select_detour(
 }
 
 /// Windows socket hook for WSAGetLastError (error information)
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_get_last_error_detour() -> i32 {
     let original = WSA_GET_LAST_ERROR_ORIGINAL.get().unwrap();
     let result = unsafe { original() };
@@ -807,7 +807,7 @@ unsafe extern "system" fn wsa_get_last_error_detour() -> i32 {
 }
 
 /// Windows socket hook for WSASocket (advanced socket creation)
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_socket_detour(
     af: i32,
     socket_type: i32,
@@ -835,7 +835,7 @@ unsafe extern "system" fn wsa_socket_detour(
     socket
 }
 
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_socket_w_detour(
     af: i32,
     socket_type: i32,
@@ -865,7 +865,7 @@ unsafe extern "system" fn wsa_socket_w_detour(
 
 /// Windows socket hook for WSAConnect (asynchronous connect)
 /// Node.js uses this for non-blocking connect operations
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_connect_detour(
     s: SOCKET,
     name: *const SOCKADDR,
@@ -909,7 +909,7 @@ unsafe extern "system" fn wsa_connect_detour(
 
 /// Windows socket hook for WSAAccept (asynchronous accept)
 /// Node.js uses this for non-blocking accept operations
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_accept_detour(
     s: SOCKET,
     addr: *mut SOCKADDR,
@@ -926,7 +926,7 @@ unsafe extern "system" fn wsa_accept_detour(
 
 /// Windows socket hook for WSASend (asynchronous send)
 /// Node.js uses this extensively for overlapped I/O operations
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_send_detour(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -1006,7 +1006,7 @@ unsafe extern "system" fn wsa_send_detour(
 
 /// Windows socket hook for WSARecv (asynchronous receive)
 /// Node.js uses this extensively for overlapped I/O operations
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_recv_detour(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -1041,7 +1041,7 @@ unsafe extern "system" fn wsa_recv_detour(
 /// Node.js uses this for overlapped UDP operations
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
 /// and socket routing while preserving compatibility with Windows overlapped I/O.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_send_to_detour(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -1194,7 +1194,7 @@ unsafe extern "system" fn wsa_send_to_detour(
 
 /// Windows socket hook for WSARecvFrom (asynchronous UDP receive)
 /// Node.js uses this for overlapped UDP operations
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_recv_from_detour(
     s: SOCKET,
     lpBuffers: *mut u8,
@@ -1230,7 +1230,7 @@ unsafe extern "system" fn wsa_recv_from_detour(
 }
 
 /// Windows winsock hook for gethostname
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT {
     tracing::debug!("gethostname_detour called with namelen: {}", namelen);
 
@@ -1299,7 +1299,7 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
 }
 
 /// Windows kernel32 hook for GetComputerNameA
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *mut u32) -> i32 {
     let original = GET_COMPUTER_NAME_A_ORIGINAL.get().unwrap();
     unsafe {
@@ -1313,7 +1313,7 @@ unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *
 }
 
 /// Windows kernel32 hook for GetComputerNameW
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: *mut u32) -> i32 {
     let original = GET_COMPUTER_NAME_W_ORIGINAL.get().unwrap();
     unsafe {
@@ -1327,7 +1327,7 @@ unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: 
 }
 
 /// Windows kernel32 hook for GetComputerNameExA
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_ex_a_detour(
     name_type: u32,
     lpBuffer: *mut i8,
@@ -1470,7 +1470,7 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
 }
 
 /// Windows kernel32 hook for GetComputerNameExW
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_ex_w_detour(
     name_type: u32,
     lpBuffer: *mut u16,
@@ -1586,7 +1586,7 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
 }
 
 /// Hook for gethostbyname to handle DNS resolution of our modified hostname
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT {
     if name.is_null() {
         tracing::debug!("gethostbyname: name is null, calling original");
@@ -1646,7 +1646,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
 ///
 /// This follows the same pattern as the Unix layer but uses Windows types and calling conventions.
 /// It converts Windows ADDRINFOA structures and makes DNS requests through the mirrord agent.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getaddrinfo_detour(
     raw_node: *const u8,
     raw_service: *const u8,
@@ -1697,7 +1697,7 @@ unsafe extern "system" fn getaddrinfo_detour(
 }
 
 /// Hook for GetAddrInfoW (Unicode version) to handle DNS resolution
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getaddrinfow_detour(
     node_name: *const u16,
     service_name: *const u16,
@@ -1758,7 +1758,7 @@ unsafe extern "system" fn getaddrinfow_detour(
 ///
 /// This follows the same pattern as the Unix layer - it checks if the structure
 /// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     unsafe {
         // note: supports both ADDRINFOA and ADDRINFOW,
@@ -1775,7 +1775,7 @@ unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
 /// Note: For mirrord-managed outgoing connections, data flows automatically through
 /// the interceptor. This detour just passes through to the original recv() which
 /// operates on the socket connected to the interceptor.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn recv_detour(s: SOCKET, buf: *mut i8, len: INT, flags: INT) -> INT {
     // Pass through to original - interceptor handles data routing for managed sockets
     let original = RECV_ORIGINAL.get().unwrap();
@@ -1786,7 +1786,7 @@ unsafe extern "system" fn recv_detour(s: SOCKET, buf: *mut i8, len: INT, flags: 
 ///
 /// For mirrord-managed outgoing connections, this checks if the socket should be intercepted
 /// and routes data through the proxy if outgoing traffic is enabled.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags: INT) -> INT {
     tracing::trace!("send_detour -> socket: {}, len: {}", s, len);
 
@@ -1844,7 +1844,7 @@ unsafe extern "system" fn send_detour(s: SOCKET, buf: *const i8, len: INT, flags
 ///
 /// Note: UDP/datagram sockets typically aren't managed by mirrord outgoing connections,
 /// so this is primarily a pass-through for compatibility.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn recvfrom_detour(
     s: SOCKET,
     buf: *mut i8,
@@ -1862,7 +1862,7 @@ unsafe extern "system" fn recvfrom_detour(
 ///
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
 /// and socket routing while preserving compatibility with Windows applications.
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn sendto_detour(
     s: SOCKET,
     buf: *const i8,
@@ -1943,7 +1943,7 @@ unsafe extern "system" fn sendto_detour(
 }
 
 /// Socket management detour for closesocket() - closes a socket
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
@@ -1955,7 +1955,7 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
 }
 
 /// Socket management detour for shutdown() - shuts down part or all of a socket connection
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn shutdown_detour(s: SOCKET, how: INT) -> INT {
     // Pass through to original - interceptor handles connection shutdown for managed sockets
     let original = SHUTDOWN_ORIGINAL.get().unwrap();
@@ -1963,7 +1963,7 @@ unsafe extern "system" fn shutdown_detour(s: SOCKET, how: INT) -> INT {
 }
 
 /// Socket option detour for setsockopt() - sets socket options
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn setsockopt_detour(
     s: SOCKET,
     level: INT,
@@ -1977,7 +1977,7 @@ unsafe extern "system" fn setsockopt_detour(
 }
 
 /// Socket option detour for getsockopt() - gets socket options
-#[mirrord_layer_macro::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getsockopt_detour(
     s: SOCKET,
     level: INT,
