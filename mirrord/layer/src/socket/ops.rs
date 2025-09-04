@@ -42,14 +42,6 @@ use crate::{
     file::{self, OPEN_FILES},
 };
 
-/// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
-/// [`remote_getaddrinfo`].
-///
-/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
-/// [`connect`] with, so we can resolve it locally when neccessary.
-pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
@@ -935,9 +927,9 @@ pub(super) fn remote_getaddrinfo(
     })?
     .0?;
 
-    let mut remote_dns_reverse_mapping = REMOTE_DNS_REVERSE_MAPPING.lock()?;
+    // Update the unified DNS reverse mapping
     addr_info_list.iter().for_each(|lookup| {
-        remote_dns_reverse_mapping.insert(lookup.ip, lookup.name.clone());
+        update_dns_reverse_mapping(lookup.ip, lookup.name.clone());
     });
 
     Ok(addr_info_list

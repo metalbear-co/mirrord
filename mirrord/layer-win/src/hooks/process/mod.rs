@@ -27,7 +27,7 @@ unsafe extern "system" fn nt_create_process_hook(
     process_handle_ptr: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_proess: HANDLE,
+    parent_process: HANDLE,
     inherit_object_table: BOOLEAN,
     section_handle: HANDLE,
     debug_port: HANDLE,
@@ -39,7 +39,7 @@ unsafe extern "system" fn nt_create_process_hook(
             process_handle_ptr,
             desired_access,
             object_attributes_ptr,
-            parent_proess,
+            parent_process,
             inherit_object_table,
             section_handle,
             debug_port,
@@ -66,20 +66,27 @@ unsafe extern "system" fn nt_create_process_ex_hook(
     process_handle_ptr: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_proess: HANDLE,
+    parent_process: HANDLE,
     flags: ULONG,
     section_handle: HANDLE,
     debug_port: HANDLE,
     token_handle: HANDLE,
     reserved: ULONG,
 ) -> NTSTATUS {
+    // Configuration check for future use
+    let _env_enabled = &crate::layer_setup().layer_config().feature.env;
+    let _fs_enabled = &crate::layer_setup().layer_config().feature.fs;
+    let _network_enabled = &crate::layer_setup().layer_config().feature.network;
+
+    // TODO: Implement process creation interception based on configuration
+    // For now, call the original function
+    let original = NT_CREATE_PROCESS_EX_ORIGINAL.get().unwrap();
     unsafe {
-        let original = NT_CREATE_PROCESS_EX_ORIGINAL.get().unwrap();
         original(
             process_handle_ptr,
             desired_access,
             object_attributes_ptr,
-            parent_proess,
+            parent_process,
             flags,
             section_handle,
             debug_port,
