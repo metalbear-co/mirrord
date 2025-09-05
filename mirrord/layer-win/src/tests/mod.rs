@@ -1,3 +1,3 @@
-mod hooks;
 mod error;
+mod hooks;
 mod process;

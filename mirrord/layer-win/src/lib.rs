@@ -17,6 +17,7 @@ use winapi::{
     um::{
         debugapi::DebugBreak,
         processthreadsapi::GetCurrentProcessId,
+        wincon::{ATTACH_PARENT_PROCESS, AttachConsole},
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
@@ -204,12 +205,14 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    // Create Windows console, and redirects std handles.
-    if let Err(e) = console::create() {
-        println!("WARNING: couldn't initialize console: {:?}", e);
-    }
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 
-    println!("Console initialized");
+    // Create Windows console, and redirects std handles.
+    //if let Err(e) = console::create() {
+    //    println!("WARNING: couldn't initialize console: {:?}", e);
+    //}
+
+    //println!("Console initialized");
 
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");

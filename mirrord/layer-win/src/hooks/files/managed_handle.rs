@@ -2,8 +2,13 @@
 
 use std::{cell::LazyCell, collections::HashMap, sync::RwLock};
 
-use winapi::{shared::{minwindef::ULONG, ntdef::HANDLE}, um::winnt::ACCESS_MASK};
-
+use winapi::{
+    shared::{
+        minwindef::{FILETIME, ULONG},
+        ntdef::HANDLE,
+    },
+    um::winnt::ACCESS_MASK,
+};
 
 /// This is a [`HANDLE`] type. The values start with [`MIRRORD_FIRST_MANAGED_HANDLE`].
 /// To know what data is held behind this, look at [`HandleContext`].
@@ -13,7 +18,8 @@ pub type MirrordHandle = HANDLE;
 pub const MIRRORD_FIRST_MANAGED_HANDLE: MirrordHandle = 0x50000000 as _;
 
 /// This is a [`RwLock`]-guarded [`HashMap`] of [`MirrordHandle`]'s that map to [`HandleContext`]'s.
-pub static mut MANAGED_HANDLES: RwLock<LazyCell<HashMap<MirrordHandle, HandleContext>>> = RwLock::new(LazyCell::new(|| HashMap::new()));
+pub static mut MANAGED_HANDLES: RwLock<LazyCell<HashMap<MirrordHandle, HandleContext>>> =
+    RwLock::new(LazyCell::new(|| HashMap::new()));
 
 /// The data behind a [`MirrordHandle`].
 pub struct HandleContext {
@@ -31,21 +37,27 @@ pub struct HandleContext {
     pub create_options: ULONG,
     /// The Linux path, maps to the `fd`
     pub path: String,
+    /// Creation time as [`FILETIME`]
+    pub creation_time: FILETIME,
 }
 
 /// Try to linearly insert a new [`MirrordHandle`] starting at [`MIRRORD_FIRST_MANAGED_HANDLE`].
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `handle_context`: The first state of the context behind the handle.
-/// 
+///
 /// # Return value
-/// 
+///
 /// * `Some(MirrordHandle)` if the operation succeeded
 /// * `None` if the operation failed
 pub fn try_insert_handle(handle_context: HandleContext) -> Option<MirrordHandle> {
     if let Ok(mut handles) = unsafe { MANAGED_HANDLES.try_write() } {
-        let new_handle = handles.keys().last().map(|x| (*x as usize + 1) as _).unwrap_or(MIRRORD_FIRST_MANAGED_HANDLE);
+        let new_handle = handles
+            .keys()
+            .last()
+            .map(|x| (*x as usize + 1) as _)
+            .unwrap_or(MIRRORD_FIRST_MANAGED_HANDLE);
         handles.insert(new_handle, handle_context);
 
         Some(new_handle)

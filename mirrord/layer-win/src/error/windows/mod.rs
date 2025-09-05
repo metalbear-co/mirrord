@@ -105,3 +105,9 @@ impl Debug for WindowsError {
         ))
     }
 }
+
+impl PartialEq for WindowsError {
+    fn eq(&self, other: &Self) -> bool {
+        self.error == other.error
+    }
+}

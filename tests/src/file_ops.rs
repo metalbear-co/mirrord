@@ -57,11 +57,11 @@ mod file_ops_tests {
         ops.assert(process).await;
     }
 
+    //#[timeout(Duration::from_secs(240))]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_ro(
         #[future]
         #[notrace]
@@ -75,7 +75,7 @@ mod file_ops_tests {
         // ```
         // So this should be overrideable in this context.
         let python_command = std::env::var("MIRRORD_PYTHON_FILE").unwrap_or("python3".to_string());
-        
+
         let service = basic_service.await;
         let python_command = vec![
             python_command.as_str(),

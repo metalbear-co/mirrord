@@ -1,9 +1,6 @@
 //! Utility module for files redirection.
 
-use std::{fs::OpenOptions, path::{Path, PathBuf}};
-
-use mirrord_protocol::file::OpenOptionsInternal;
-use winapi::um::winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_DATA, FILE_WRITE_DATA};
+use std::path::{Path, PathBuf};
 
 // This prefix is a way to explicitly indicate that we're looking in
 // the global namespace for a path.

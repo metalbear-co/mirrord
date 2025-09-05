@@ -3386,6 +3386,7 @@ dependencies = [
  "mirrord-intproxy-protocol",
  "mirrord-layer-lib",
  "mirrord-protocol",
+ "phnt",
  "str-win",
  "thiserror 2.0.12",
  "tokio",
@@ -4160,6 +4161,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nt-string"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64f73b19d9405e886b53b9dee286e7fbb622a5276a7fd143c2d8e4dac3a0c6c"
+dependencies = [
+ "displaydoc",
+ "widestring",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4667,6 +4678,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "phnt"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a88b858d3d129dd19de9bd1e4318b20753f2c92bea944fc0fb2728e444bf5f44"
+dependencies = [
+ "nt-string",
+ "quote",
+ "syn 2.0.104",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5129,7 +5152,7 @@ dependencies = [
 name = "recv_from"
 version = "0.1.0"
 dependencies = [
- "socket2 0.5.10",
+ "socket2 0.6.0",
 ]
 
 [[package]]
