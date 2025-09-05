@@ -166,6 +166,26 @@
         }
       ]
     },
+    "startup_retries_interval_ms": {
+      "title": "startup_retries_interval_ms {#root-startup_retries_interval_ms}",
+      "description": "Sets the interval (in milliseconds) between mirrord startup retries during its startup, for cluster operations, such as searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent.\n\nIf you are having cluster connectivity issues when starting mirrord, setting this config and [`startup_retries_max_attempts`](#root-startup_retries_max_attempts) may help.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "startup_retries_max_attempts": {
+      "title": "startup_retries_max_attempts {#root-startup_retries_max_attempts}",
+      "description": "Sets the max amount of retries that mirrord will try to perform during its startup, for cluster operations, such as searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent.\n\nIf you are having cluster connectivity issues when starting mirrord, setting this config and [`startup_retries_interval_ms`](#root-startup_retries_interval_ms) may help.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
     "target": {
       "title": "target {#root-target}",
       "anyOf": [

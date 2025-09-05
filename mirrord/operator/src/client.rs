@@ -7,7 +7,7 @@ use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
 use kube::{
-    Api, Client, Config, Resource,
+    Client, Config, Resource,
     api::{ListParams, PostParams},
 };
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
@@ -18,6 +18,7 @@ use mirrord_auth::{
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
+    BearApi,
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -224,7 +225,7 @@ impl OperatorApi<NoClientCert> {
             .map_err(OperatorApiError::CreateKubeClient)?;
 
         let operator: Result<MirrordOperatorCrd, _> =
-            Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
+            BearApi::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
 
         let error = match operator {
             Ok(operator) => {
@@ -924,7 +925,9 @@ impl OperatorApi<PreparedClientCert> {
             .exclude_init_containers
             .clone();
 
-        let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+        let copy_target_api: BearApi<CopyTargetCrd> =
+            BearApi::namespaced(self.client.clone(), namespace);
+
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
             target,
@@ -984,7 +987,8 @@ impl OperatorApi<PreparedClientCert> {
 
         let user_id = self.get_user_id_str();
 
-        let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+        let copy_target_api: BearApi<CopyTargetCrd> =
+            BearApi::namespaced(self.client.clone(), namespace);
         let copy_target_spec = CopyTargetSpec {
             target,
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
@@ -1045,7 +1049,7 @@ impl OperatorApi<PreparedClientCert> {
             .name
             .clone()
             .ok_or_else(|| KubeApiError::invalid_state(&copied, "no name"))?;
-        let api = Api::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
+        let api = BearApi::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
         let mut wait_subtask: Option<P> = None;
 
         loop {
@@ -1170,8 +1174,8 @@ impl OperatorApi<PreparedClientCert> {
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let mysql_branch_api: Api<MysqlBranchDatabase> =
-            Api::namespaced(self.client.clone(), namespace);
+        let mysql_branch_api: BearApi<MysqlBranchDatabase> =
+            BearApi::namespaced(self.client.clone(), namespace);
 
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,

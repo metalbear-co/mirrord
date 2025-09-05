@@ -273,6 +273,7 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS, RetryConfig};
 use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
@@ -646,6 +647,14 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(
+            config.startup_retries_interval_ms,
+            config.startup_retries_max_attempts,
+        )
+    });
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
@@ -767,6 +776,7 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
+    // TODO(alex) [high]: 2nd fetch from cluster here.
     let (connection_info, connection) =
         create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
 
@@ -889,6 +899,14 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+
+                RETRY_KUBE_OPERATIONS.get_or_init(|| {
+                    RetryConfig::new(
+                        config.startup_retries_interval_ms,
+                        config.startup_retries_max_attempts,
+                    )
+                });
+
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
             }

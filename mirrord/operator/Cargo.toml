@@ -78,6 +78,7 @@ serde_urlencoded = { version = "0.7", optional = true }
 serde_yaml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tokio-retry = { workspace = true }
 tokio-tungstenite = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }

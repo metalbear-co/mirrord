@@ -119,7 +119,7 @@ impl SessionCommandHandler {
                 operation: OperatorOperation::SessionManagement,
             },
         })
-        // Finish the progress report here if we have an error response. 
+        // Finish the progress report here if we have an error response.
         .inspect_err(|fail| {
             sub_progress.failure(Some(&fail.to_string()));
             progress.failure(Some("Session management operation failed!"));

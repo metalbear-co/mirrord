@@ -126,7 +126,7 @@ rustls = "0.23"
 # Used by `operator`, `tests`.
 tokio-tungstenite = { version = "0.24" }
 
-# Used by `operator`, `agent`.
+# Used by `operator`, `agent`, `kube`.
 http = { version = "1" }
 
 # Used by `intproxy`, `cli`.

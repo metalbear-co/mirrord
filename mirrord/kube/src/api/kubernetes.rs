@@ -5,7 +5,7 @@ use std::{
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    Api, Client, Config, Discovery,
+    Client, Config, Discovery,
     config::{KubeConfigOptions, Kubeconfig},
 };
 use mirrord_agent_env::mesh::MeshVendor;
@@ -21,6 +21,7 @@ use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
+    BearApi,
     api::{
         container::{
             ContainerApi, ContainerParams,
@@ -120,7 +121,9 @@ impl KubernetesAPI {
         use k8s_openapi::api::core::v1::Pod;
         use tokio::net::TcpStream;
 
-        let pod_api: Api<Pod> = Api::namespaced(self.client.clone(), pod_namespace);
+        use crate::BearApi;
+
+        let pod_api: BearApi<Pod> = BearApi::namespaced(self.client.clone(), pod_namespace);
 
         let pod = pod_api.get(pod_name).await?;
 
@@ -157,7 +160,7 @@ impl KubernetesAPI {
         Ok(conn)
     }
 
-    /// Connects to the agent using kube's [`Api::portforward`].
+    /// Connects to the agent using kube's [`kube::Api::portforward`].
     #[cfg(feature = "portforward")]
     pub async fn create_connection_portforward(
         &self,
@@ -328,6 +331,7 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
+#[tracing::instrument(level = Level::INFO, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
@@ -359,6 +363,7 @@ where
                 .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
                     let expanded = shellexpand::full(&path_str)
                         .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
                     Kubeconfig::read_from(expanded.deref())
                         .and_then(|config| merged_kubeconfig.merge(config))
                         .map_err(KubeApiError::from)
@@ -381,14 +386,14 @@ where
 }
 
 #[tracing::instrument(level = "trace", skip(client))]
-pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
+pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> BearApi<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,
     <K as kube::Resource>::DynamicType: Default,
 {
     if let Some(namespace) = namespace {
-        Api::namespaced(client.clone(), namespace)
+        BearApi::namespaced(client.clone(), namespace)
     } else {
-        Api::default_namespaced(client.clone())
+        BearApi::default_namespaced(client.clone())
     }
 }

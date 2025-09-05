@@ -6,6 +6,7 @@ use kube::Client;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
+    RETRY_KUBE_OPERATIONS, RetryConfig,
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
@@ -238,6 +239,13 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
 
     let mut layer_config = LayerConfig::resolve(&mut cfg_config)?;
+
+    RETRY_KUBE_OPERATIONS.get_or_init(|| {
+        RetryConfig::new(
+            layer_config.startup_retries_interval_ms,
+            layer_config.startup_retries_max_attempts,
+        )
+    });
 
     if let Some(namespace) = args.namespace {
         layer_config.target.namespace.replace(namespace);

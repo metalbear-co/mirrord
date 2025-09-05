@@ -22,6 +22,7 @@ use thiserror::Error;
 use tracing::Level;
 
 use crate::{
+    BearApi,
     api::{
         container::{check_mesh_vendor, choose_container},
         kubernetes::get_k8s_resource_api,
@@ -395,7 +396,7 @@ pub trait RuntimeDataFromLabels {
         client: &Client,
     ) -> impl Future<Output = Result<Vec<Pod>>> {
         async {
-            let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
+            let api: BearApi<<Self as RuntimeDataFromLabels>::Resource> =
                 get_k8s_resource_api(client, resource.meta().namespace.as_deref());
             let name = resource
                 .meta()
@@ -416,7 +417,7 @@ pub trait RuntimeDataFromLabels {
                 ..Default::default()
             };
 
-            let pod_api: Api<Pod> =
+            let pod_api: BearApi<Pod> =
                 get_k8s_resource_api(client, resource.meta().namespace.as_deref());
             let pods = pod_api.list(&list_params).await?;
 
@@ -434,7 +435,7 @@ where
     T: RuntimeDataFromLabels,
 {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
+        let api: BearApi<<Self as RuntimeDataFromLabels>::Resource> =
             get_k8s_resource_api(client, namespace);
         let resource = api.get(&self.name()).await?;
         let pods = Self::get_pods(&resource, client).await?;
