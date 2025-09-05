@@ -205,14 +205,12 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-
     // Create Windows console, and redirects std handles.
-    //if let Err(e) = console::create() {
-    //    println!("WARNING: couldn't initialize console: {:?}", e);
-    //}
+    if let Err(e) = console::create() {
+        println!("WARNING: couldn't initialize console: {:?}", e);
+    }
 
-    //println!("Console initialized");
+    println!("Console initialized");
 
     initialize_proxy_connection()?;
     println!("ProxyConnection initialized");
