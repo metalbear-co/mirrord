@@ -2,7 +2,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, Hash)]
 #[kube(
     group = "mirrord.metalbear.co",
     version = "v1alpha",
@@ -18,7 +18,7 @@ pub struct MirrordClusterWorkloadPatchSpec {
     pub requests: Vec<PatchRequest>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchedWorkloadRef {
     pub api_version: String,
@@ -27,16 +27,17 @@ pub struct PatchedWorkloadRef {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchRequest {
     pub uid: String,
-    pub injected_env: Vec<InjectedEnvVar>,
+    pub extra_inline_env: Vec<ExtraInlineEnv>,
+    pub replicas: Option<i32>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct InjectedEnvVar {
+pub struct ExtraInlineEnv {
     pub container: String,
     pub variable: String,
     pub value: String,
