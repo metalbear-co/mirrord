@@ -216,6 +216,7 @@ impl OutgoingProxy {
                 message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
                     layer_address,
                     in_cluster_address: local_address,
+                    connection_id,
                 })),
                 message_id,
                 layer_id,

@@ -10,7 +10,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
-    FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
+    ConnectionId, FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
     dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::SocketAddress,
@@ -245,6 +245,8 @@ pub struct OutgoingConnectResponse {
     pub layer_address: SocketAddress,
     /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddress,
+    /// Connection ID assigned by the agent for this connection.
+    pub connection_id: ConnectionId,
 }
 
 /// A helper trait for `layer -> proxy` requests.

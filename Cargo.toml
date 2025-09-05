@@ -3,15 +3,19 @@
 members = [
     "mirrord/intproxy",
     "mirrord/str-win",
+    "mirrord/layer-lib",
+    "mirrord/layer-win",
+    #"tests/win",
+    "mirrord/str-win",
     "mirrord/layer-win",
     #"tests/win",
     #"mirrord/agent/env",
     #"mirrord/agent/iptables",
-    #"mirrord/layer/tests/apps/fileops",
-    #"mirrord/layer/tests/apps/outgoing",
-    #"mirrord/layer/tests/apps/listen_ports",
-    #"mirrord/layer/tests/apps/dns_resolve",
-    #"mirrord/layer/tests/apps/recv_from",
+    "mirrord/layer/tests/apps/fileops",
+    "mirrord/layer/tests/apps/outgoing",
+    "mirrord/layer/tests/apps/listen_ports",
+    "mirrord/layer/tests/apps/dns_resolve",
+    "mirrord/layer/tests/apps/recv_from",
     #"mirrord/layer/tests/apps/issue1776",
     #"mirrord/layer/tests/apps/issue1776portnot53",
     #"mirrord/layer/tests/apps/issue1899",
@@ -21,13 +25,15 @@ members = [
     #"mirrord/layer/tests/apps/rebind0",
     #"sample/rust",
     #"medschool",
-    #"tests",
-    #"tests/rust-e2e-fileops",
+    "tests",
+    "tests/rust-e2e-fileops",
     #"tests/rust-unix-socket-client",
     #"tests/rust-bypassed-unix-socket",
     #"tests/issue1317",
     #"tests/rust-websockets",
     #"tests/rust-sqs-printer",
+    #"mirrord-win-poc/ifeo/*",
+    "mirrord-win-poc/manual-exec/*",
 ]
 resolver = "2"
 
@@ -66,7 +72,7 @@ actix-codec = "0.5"
 bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 
-tokio = { version = "1", features = ["fs", "net", "io-util"] }
+tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -201,6 +207,17 @@ hex = "0.4"
 # Used by `config`, `protocol`.
 strum = "0.27.1"
 strum_macros = "0.27.1"
+
+# Used by `cli`
+dll-syringe = "0.16.0"
+
+# Used by `cli`, `intproxy`
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

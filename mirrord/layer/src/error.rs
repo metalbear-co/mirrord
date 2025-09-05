@@ -1,11 +1,14 @@
 use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use ignore_codes::*;
+#[cfg(not(target_os = "windows"))]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
+// test file not compatible for windows
+#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};

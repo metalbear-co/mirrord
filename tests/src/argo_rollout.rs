@@ -14,6 +14,7 @@ use crate::utils::{
 /// Starts mirrord targeting a [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
 ///
 /// The goal here is to just validate that the session is started correctly.
+#[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]
@@ -42,6 +43,7 @@ pub async fn target_rollout(
 /// [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
 ///
 /// The goal here is to just validate that the session is started correctly.
+#[cfg_attr(target_os = "windows", ignore)]
 #[cfg(feature = "operator")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

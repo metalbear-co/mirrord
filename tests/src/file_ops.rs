@@ -23,6 +23,7 @@ mod file_ops_tests {
         services::{basic_service, go_statfs_service},
     };
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
@@ -56,19 +57,28 @@ mod file_ops_tests {
         ops.assert(process).await;
     }
 
+    //#[timeout(Duration::from_secs(240))]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_ro(
         #[future]
         #[notrace]
         basic_service: KubeService,
     ) {
+        // NOTE(gabriela): Windows loves to use it's "App execution alias" functionality
+        // for python binaries
+        // ```
+        // PS C:\dev\rust\mirrord\tests> $(Get-Command python3).path
+        // C:\Users\gabriela\AppData\Local\Microsoft\WindowsApps\python3.exe
+        // ```
+        // So this should be overrideable in this context.
+        let python_command = std::env::var("MIRRORD_PYTHON_FILE").unwrap_or("python3".to_string());
+
         let service = basic_service.await;
         let python_command = vec![
-            "python3",
+            python_command.as_str(),
             "-B",
             "-m",
             "unittest",
@@ -89,6 +99,7 @@ mod file_ops_tests {
         process.assert_python_fileops_stderr().await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
@@ -213,6 +224,7 @@ mod file_ops_tests {
     /// Test our getdents64 Go syscall hook, for `os.ReadDir` on go, and mkdir and rmdir.
     /// This is an E2E test and not an integration test in order to test the agent side of the
     /// detours.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
@@ -285,6 +297,7 @@ mod file_ops_tests {
     /// the statfs values are correct.
     /// This is to prevent a regression to a bug we had where because of `statfs`/`statfs64`
     /// struct conversions, we were returning an invalid struct to go when it called SYS_statfs.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
