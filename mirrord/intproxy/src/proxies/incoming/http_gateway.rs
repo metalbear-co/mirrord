@@ -346,13 +346,24 @@ impl BackgroundTask for HttpGatewayTask {
             .max_delay(Duration::from_millis(500))
             .take(9);
 
-        let guard = message_bus.closed();
+        let closed_token = message_bus.closed_token().clone();
 
         let mut attempt = 0;
         let error = loop {
             attempt += 1;
             tracing::debug!(attempt, "Starting send attempt");
-            match guard.cancel_on_close(self.send_attempt(message_bus)).await {
+
+            let send_result = if self.response_mode.is_some() {
+                closed_token
+                    .run_until_cancelled(self.send_attempt(message_bus))
+                    .await
+            } else {
+                // If we're in mirror mode, we cannot cancel the request when the remote connection
+                // ends. The local application processes the request independently.
+                self.send_attempt(message_bus).await.into()
+            };
+
+            match send_result {
                 None | Some(Ok(())) => return Ok(()),
                 Some(Err(error)) => {
                     let backoff = error.can_retry().then(|| backoffs.next()).flatten();
@@ -375,8 +386,19 @@ impl BackgroundTask for HttpGatewayTask {
                         "Trying again after backoff",
                     );
 
-                    if guard.cancel_on_close(time::sleep(backoff)).await.is_none() {
-                        return Ok(());
+                    if self.response_mode.is_some() {
+                        if closed_token
+                            .run_until_cancelled(time::sleep(backoff))
+                            .await
+                            .is_none()
+                        {
+                            return Ok(());
+                        }
+                    } else {
+                        // If we're in mirror mode, we cannot cancel the request when the remote
+                        // connection ends. The local application processes
+                        // the request independently.
+                        time::sleep(backoff).await;
                     }
                 }
             }

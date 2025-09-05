@@ -4579,6 +4579,7 @@ dependencies = [
  "tokio-retry",
  "tokio-rustls 0.26.2",
  "tokio-stream",
+ "tokio-util",
  "tracing",
 ]
 
