@@ -20,6 +20,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
 };
+use mirrord_layer_lib::socket::dns::update_dns_reverse_mapping;
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},

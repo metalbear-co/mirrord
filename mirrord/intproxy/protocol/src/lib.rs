@@ -245,8 +245,6 @@ pub struct OutgoingConnectResponse {
     pub layer_address: SocketAddress,
     /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddress,
-    /// Connection ID assigned by the agent for this connection.
-    pub connection_id: ConnectionId,
 }
 
 /// A helper trait for `layer -> proxy` requests.

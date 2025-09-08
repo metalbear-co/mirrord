@@ -188,7 +188,6 @@ where
         let OutgoingConnectResponse {
             layer_address,
             in_cluster_address,
-            ..
         } = response;
 
         // Connect to the interceptor socket that is listening.

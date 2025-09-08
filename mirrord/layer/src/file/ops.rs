@@ -14,7 +14,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(not(target_os = "windows"))]
 use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]

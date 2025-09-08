@@ -11,8 +11,6 @@ use crate::detour::{Bypass, Detour};
 
 /// Unix-specific extensions for DnsSelector
 impl DnsSelector {
-    /// Bypasses queries that should be done locally (Unix-specific method).
-    /// Returns Detour<()> which is used by the Unix layer's detour system.
     #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
         match self.check_query_result(node, port) {

@@ -4,31 +4,31 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
-    // {
-    //   "type": "lldb",
-    //   "request": "launch",
-    //   "name": "cargo test",
-    //   "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
-    //   "args": [
-    //     "test_include_complex_configuration"
-    //   ],
-    //   "cwd": "${workspaceFolder}",
-    //   "sourceMap": {},
-    //   "sourceLanguages": [
-    //     "rust"
-    //   ],
-    // },
-    // {
-    //   "name": "lldb: Attach to Child",
-    //   "type": "lldb",
-    //   "request": "attach",
-    //   "pid": "${command:pickProcess}", // or hardcode PID
-    //   "stopOnEntry": true
-    // },   
     {
       "type": "lldb",
       "request": "launch",
-      "name": "1. test mirrord (lldb)",
+      "name": "cargo test",
+      "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
+      "args": [
+        "test_include_complex_configuration"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": [
+        "rust"
+      ],
+    },
+    {
+      "name": "lldb: Attach to Child",
+      "type": "lldb",
+      "request": "attach",
+      "pid": "${command:pickProcess}", // or hardcode PID
+      "stopOnEntry": true
+    },   
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "[win] test mirrord (lldb)",
       "cargo": {
         "args": [
           "test", "traffic_tests", "--manifest-path", "tests/Cargo.toml", "--no-run",
@@ -46,9 +46,7 @@
         },
       },
       "cwd": "${workspaceFolder}/tests",
-      // "program": "target/x86_64-pc-windows-msvc/debug/deps/tests-08b24540faf8040c.exe",
       "args": [
-        // "--features", "cli", 
         "traffic_tests",
         "--", "--nocapture", "--test-threads=1", 
       ],
@@ -73,7 +71,7 @@
     {
       "type": "cppvsdbg",
       "request": "launch",
-      "name": "2. debug cli exec",
+      "name": "[win] debug cli exec",
       "program": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord.exe",
       "args": [
         "exec", "-c", "--target", "pod/hostname-echo-vmfbvdd-cff7dd694-wgzx4/container/test", "--", "python3", "-u", "C:\\Users\\Daniel\\git\\mirrord\\tests\\debug_python.py"

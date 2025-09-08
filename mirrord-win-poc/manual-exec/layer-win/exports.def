@@ -1,3 +1,0 @@
-LIBRARY layer_win
-EXPORTS
-    DllMain

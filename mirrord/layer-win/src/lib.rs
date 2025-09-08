@@ -129,19 +129,6 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    // // Wait for initialization thread to complete before detaching
-    // if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock() {
-    //     if let Some(handle) = thread_handle.take() {
-    //         // This may block but it's necessary to prevent process hanging
-    //         if let Err(e) = handle.join() {
-    //             eprintln!(
-    //                 "Warning: Failed to join initialization thread during DLL detach: {:?}",
-    //                 e
-    //             );
-    //         }
-    //     }
-    // }
-
     // Release detour guard - use unwrap_or to avoid panicking during detach
     if let Err(e) = release_detour_guard() {
         eprintln!(
@@ -149,9 +136,6 @@ fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
             e
         );
     }
-
-    // Note: PROXY_CONNECTION is OnceLock and will be cleaned up automatically
-    // when the process exits. The underlying TcpStream will close properly.
 
     TRUE
 }

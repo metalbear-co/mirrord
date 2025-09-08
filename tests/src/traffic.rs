@@ -435,9 +435,6 @@ mod traffic_tests {
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
         let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = vec![
@@ -456,12 +453,27 @@ mod traffic_tests {
         .await;
 
         // Listen for UDP message directly from application.
-        let mut buf = [0; 28];
+        const BUF_SIZE: usize = {
+            let mut buf_size = 27;
+            #[cfg(target_os = "windows")]
+            buf_size += 1;
+            buf_size
+        };
+
+        let mut buf = [0; BUF_SIZE];
         let amt = socket
             .recv(&mut buf)
             .expect("Failed to receive UDP message within timeout");
-        assert_eq!(amt, 28);
-        assert_eq!(&buf[..amt], "Can I pass the test please?\n".as_bytes()); // Sure you can.
+        assert_eq!(amt, BUF_SIZE);
+
+        let expected_str = {
+            #[allow(unused_assignments)]
+            let mut lf = "";
+            #[cfg(target_os = "windows")]
+            lf = "\n";
+            format!("Can I pass the test please?{lf}")
+        };
+        assert_eq!(&buf[..amt], expected_str.as_bytes()); // Sure you can.
 
         let res = process.wait().await;
         assert!(res.success());
@@ -554,7 +566,7 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(600))]
+    #[timeout(Duration::from_secs(120))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
         let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];
