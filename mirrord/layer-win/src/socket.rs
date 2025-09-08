@@ -30,12 +30,7 @@ use winapi::{
     },
     um::{
         errhandlingapi::SetLastError,
-        sysinfoapi::{
-            ComputerNameDnsDomain, ComputerNameDnsFullyQualified, ComputerNameDnsHostname,
-            ComputerNameMax, ComputerNameNetBIOS, ComputerNamePhysicalDnsDomain,
-            ComputerNamePhysicalDnsFullyQualified, ComputerNamePhysicalDnsHostname,
-            ComputerNamePhysicalNetBIOS,
-        },
+        sysinfoapi::ComputerNameMax,
         winsock2::{
             HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, fd_set, timeval,
         },
@@ -1357,7 +1352,7 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
 
                     // Check if buffer is large enough (needs space for characters + null
                     // terminator)
-                    if current_buffer_size < required_size {
+                    if current_buffer_size <= required_size {
                         // Buffer too small - set required size and return ERROR_MORE_DATA
                         unsafe {
                             *nSize = (required_size + 1) as u32; // Include null terminator in required size
@@ -1375,14 +1370,14 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
                     }
 
                     // Buffer is large enough - copy the hostname
-                    if !lpBuffer.is_null() && current_buffer_size > 0 {
+                    if !lpBuffer.is_null() && current_buffer_size > required_size {
                         unsafe {
                             std::ptr::copy_nonoverlapping(
                                 dns_bytes.as_ptr(),
                                 lpBuffer as *mut u8,
                                 dns_bytes.len(),
                             );
-                            // Add null terminator
+                            // Add null terminator - safe because we verified buffer size above
                             *(lpBuffer.add(dns_bytes.len())) = 0;
                             *nSize = required_size as u32; // Set actual length (excluding null terminator)
                         }
@@ -1473,15 +1468,15 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
 
                     let current_buffer_size = unsafe { *nSize } as usize;
 
-                    // Check if buffer is large enough
-                    if current_buffer_size < required_size {
+                    // Check if buffer is large enough (needs space for UTF-16 chars + null terminator)
+                    if current_buffer_size <= required_size {
                         // Buffer too small - set required size and return ERROR_MORE_DATA
                         unsafe {
-                            *nSize = (required_size + 1) as u32;
+                            *nSize = (required_size + 1) as u32; // Include null terminator
                         }
                         tracing::debug!(
                             "GetComputerNameExW: buffer too small, need {} chars, have {}",
-                            required_size,
+                            required_size + 1,
                             current_buffer_size
                         );
                         unsafe { SetLastError(ERROR_MORE_DATA) };
@@ -1489,13 +1484,15 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
                     }
 
                     // Buffer is large enough - copy the hostname
-                    if !lpBuffer.is_null() && current_buffer_size > 0 {
+                    if !lpBuffer.is_null() && current_buffer_size > required_size {
                         unsafe {
                             std::ptr::copy_nonoverlapping(
                                 name_utf16.as_ptr(),
                                 lpBuffer,
                                 name_utf16.len(),
                             );
+                            // Add UTF-16 null terminator - safe because we verified buffer size above
+                            *(lpBuffer.add(name_utf16.len())) = 0;
                             *nSize = name_utf16.len() as u32; // Set actual length (excluding null terminator)
                         }
                         tracing::debug!(

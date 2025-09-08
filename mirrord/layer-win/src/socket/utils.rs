@@ -170,10 +170,16 @@ pub unsafe fn socketaddr_to_windows_sockaddr(
         return Err(10014); // WSAEFAULT
     }
 
+    // Additional safety check for namelen dereference
+    let name_len_value = unsafe { *namelen };
+    if name_len_value < 0 {
+        return Err(10014); // WSAEFAULT - invalid length
+    }
+
     match addr {
         SocketAddr::V4(addr_v4) => {
             let size = std::mem::size_of::<SOCKADDR_IN>() as INT;
-            if unsafe { *namelen } < size {
+            if name_len_value < size {
                 return Err(10014); // WSAEFAULT - buffer too small
             }
 
@@ -197,7 +203,7 @@ pub unsafe fn socketaddr_to_windows_sockaddr(
         }
         SocketAddr::V6(addr_v6) => {
             let size = std::mem::size_of::<SOCKADDR_IN6>() as INT;
-            if unsafe { *namelen } < size {
+            if name_len_value < size {
                 return Err(10014); // WSAEFAULT - buffer too small
             }
 
@@ -261,6 +267,11 @@ pub unsafe fn socket_address_to_sockaddr(
 /// This function is useful for truncating hostnames while preserving meaningful patterns
 /// that might be important for identification or debugging purposes.
 pub fn intelligent_truncate(text: &str, max_len: usize) -> String {
+    // Prevent potential issues with max_len of 0
+    if max_len == 0 {
+        return String::new();
+    }
+
     if text.len() <= max_len {
         return text.to_string();
     }
@@ -271,7 +282,7 @@ pub fn intelligent_truncate(text: &str, max_len: usize) -> String {
     // Try to find and preserve important patterns
     for pattern in IMPORTANT_PATTERNS {
         if let Some(start) = text.find(pattern) {
-            let pattern_end = start + pattern.len();
+            let pattern_end = start.saturating_add(pattern.len()); // Prevent overflow
 
             // If the pattern plus some context fits in the buffer
             if pattern_end <= max_len {

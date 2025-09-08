@@ -11,8 +11,7 @@ use std::{
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 use mirrord_layer_lib::{LayerSetup, ProxyConnection};
-use tracing::Level;
-use tracing_subscriber::{prelude::*, fmt::format::FmtSpan};
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{

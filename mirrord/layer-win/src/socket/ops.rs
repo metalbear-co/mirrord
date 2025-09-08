@@ -44,6 +44,11 @@ impl WSABufferData {
             return None;
         }
 
+        // Prevent excessive buffer counts that could cause DoS
+        if dwBufferCount > 64 {
+            return None;
+        }
+
         let wsabuf_array = lpBuffers as *const WSABUF;
         let mut buffers = Vec::with_capacity(dwBufferCount as usize);
         let mut total_length = 0usize;
@@ -57,6 +62,13 @@ impl WSABufferData {
 
             let buf_ptr = wsabuf.buf as *const u8;
             let buf_len = wsabuf.len;
+
+            // Prevent integer overflow in total_length calculation
+            if total_length.saturating_add(buf_len as usize)
+                > total_length.wrapping_add(buf_len as usize)
+            {
+                return None; // Would overflow
+            }
 
             buffers.push((buf_ptr, buf_len));
             total_length += buf_len as usize;
