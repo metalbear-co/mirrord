@@ -1,6 +1,7 @@
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, Hash)]
 #[kube(
@@ -30,7 +31,7 @@ pub struct PatchedWorkloadRef {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchRequest {
-    pub uid: String,
+    pub uid: Uuid,
     pub extra_inline_env: Vec<ExtraInlineEnv>,
     pub replicas: Option<i32>,
 }
