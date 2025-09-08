@@ -83,6 +83,10 @@ pub enum ConnectError {
     DisabledOutgoing(usize),
     #[error("Bypass port: {0}")]
     BypassPort(u16),
+    #[error("Parameter missing: {0}")]
+    ParameterMissing(String),
+    #[error("Address unreachable")]
+    AddressUnreachable(String),
 }
 
 /// Error types for sendto operations

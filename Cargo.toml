@@ -11,11 +11,11 @@ members = [
     #"tests/win",
     #"mirrord/agent/env",
     #"mirrord/agent/iptables",
-    "mirrord/layer/tests/apps/fileops",
+    #"mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
     "mirrord/layer/tests/apps/listen_ports",
     "mirrord/layer/tests/apps/dns_resolve",
-    "mirrord/layer/tests/apps/recv_from",
+    #"mirrord/layer/tests/apps/recv_from",
     #"mirrord/layer/tests/apps/issue1776",
     #"mirrord/layer/tests/apps/issue1776portnot53",
     #"mirrord/layer/tests/apps/issue1899",
@@ -217,6 +217,12 @@ windows = { version = "0.61", features = [
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
+winapi = { version = "0.3.9", features = [
+    "winbase", "minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", 
+    "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", 
+    "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv"
+] }
+
 
 
 [workspace.lints.rustdoc]

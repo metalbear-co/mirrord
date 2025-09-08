@@ -5,20 +5,18 @@
 #![allow(clippy::too_many_arguments)]
 
 mod hostname;
+mod ops;
 mod state;
 mod utils;
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::OnceLock,
-};
+use std::{net::SocketAddr, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
     HookResult,
     error::{ConnectError, HookError, SendToError},
     socket::{
-        Bound, ConnectResult, DnsResolver, SocketDescriptor, SocketKind, SocketState,
+        Bound, ConnectResult, SocketDescriptor, SocketKind, SocketState,
         dns::update_dns_reverse_mapping, get_bound_address, get_connected_addresses, get_socket,
         get_socket_state, is_socket_in_state, is_socket_managed, remove_socket, send_to,
         set_socket_state,
@@ -28,7 +26,7 @@ use socket2::SockAddr;
 use winapi::{
     shared::{
         minwindef::INT,
-        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, WSABUF},
+        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
     um::{
         errhandlingapi::SetLastError,
@@ -38,149 +36,24 @@ use winapi::{
             ComputerNamePhysicalDnsFullyQualified, ComputerNamePhysicalDnsHostname,
             ComputerNamePhysicalNetBIOS,
         },
-        winsock2::{HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, fd_set, timeval},
+        winsock2::{
+            HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, fd_set, timeval,
+        },
+        // ws2tcpip::{GetNameInfoW, socklen_t},
     },
 };
 use windows_strings::{PCSTR, PCWSTR};
-
-/// Wrapper around Windows WSABUF array for safe buffer handling
-#[derive(Debug)]
-struct WSABufferData {
-    buffers: Vec<(*const u8, u32)>,
-    total_length: usize,
-}
-
-impl WSABufferData {
-    /// Create from raw WSABUF array pointer and count
-    unsafe fn from_raw(lpBuffers: *const u8, dwBufferCount: u32) -> Option<Self> {
-        if lpBuffers.is_null() || dwBufferCount == 0 {
-            return None;
-        }
-
-        let wsabuf_array = lpBuffers as *const WSABUF;
-        let mut buffers = Vec::with_capacity(dwBufferCount as usize);
-        let mut total_length = 0usize;
-
-        for i in 0..dwBufferCount {
-            // SAFETY: We've verified that wsabuf_array is not null and i is within bounds
-            let wsabuf = unsafe { &*wsabuf_array.add(i as usize) };
-            if wsabuf.buf.is_null() {
-                return None; // Invalid buffer
-            }
-
-            let buf_ptr = wsabuf.buf as *const u8;
-            let buf_len = wsabuf.len;
-
-            buffers.push((buf_ptr, buf_len));
-            total_length += buf_len as usize;
-        }
-
-        Some(Self {
-            buffers,
-            total_length,
-        })
-    }
-
-    /// Get the first buffer for simple single-buffer operations
-    fn first_buffer(&self) -> Option<(*const u8, u32)> {
-        self.buffers.first().copied()
-    }
-
-    /// Check if this is a simple single-buffer case
-    fn is_single_buffer(&self) -> bool {
-        self.buffers.len() == 1
-    }
-
-    /// Get total data length across all buffers
-    fn total_length(&self) -> usize {
-        self.total_length
-    }
-
-    /// Get number of buffers
-    fn buffer_count(&self) -> usize {
-        self.buffers.len()
-    }
-
-    /// Create a WSABUF for a single buffer (for calling original functions)
-    fn create_single_wsabuf(&self, buffer: *const u8, length: u32) -> WSABUF {
-        WSABUF {
-            len: length,
-            buf: buffer as *mut i8,
-        }
-    }
-}
-
-impl TryFrom<(*const u8, u32)> for WSABufferData {
-    type Error = &'static str;
-
-    fn try_from((lpBuffers, dwBufferCount): (*const u8, u32)) -> Result<Self, Self::Error> {
-        // SAFETY: This is inherently unsafe since we're dealing with raw pointers
-        // The caller must ensure the pointers are valid
-        unsafe { Self::from_raw(lpBuffers, dwBufferCount) }.ok_or("Invalid WSABUF data")
-    }
-}
-
-impl TryFrom<(*mut u8, u32)> for WSABufferData {
-    type Error = &'static str;
-
-    fn try_from((lpBuffers, dwBufferCount): (*mut u8, u32)) -> Result<Self, Self::Error> {
-        // Convert *mut u8 to *const u8 and delegate to the const version
-        Self::try_from((lpBuffers as *const u8, dwBufferCount))
-    }
-}
 
 use self::{
     hostname::{
         MANAGED_ADDRINFO, free_managed_addrinfo, handle_hostname_ansi, handle_hostname_unicode,
         is_remote_hostname, resolve_hostname_with_fallback, windows_getaddrinfo,
     },
-    state::{
-        log_connection_result, proxy_bind, register_accepted_socket, register_windows_socket,
-        setup_listening,
-    },
+    ops::{WSABufferData, log_connection_result},
+    state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
     utils::{ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, extract_ip_from_hostent},
 };
 use crate::apply_hook;
-
-/// Windows-specific DNS resolver implementation
-struct WindowsDnsResolver;
-
-impl DnsResolver for WindowsDnsResolver {
-    type Error = Box<dyn std::error::Error + Send + Sync>;
-
-    fn resolve_hostname(
-        &self,
-        hostname: &str,
-        _port: u16,
-        _family: i32,
-        _protocol: i32,
-    ) -> Result<Vec<IpAddr>, Self::Error> {
-        // Use the existing Windows remote DNS resolution
-        match hostname::remote_dns_resolve(hostname) {
-            Ok(records) => Ok(records.into_iter().map(|(_, ip)| ip).collect()),
-            Err(e) => {
-                tracing::debug!("Remote DNS resolution failed for {}: {}", hostname, e);
-                // Fallback to local resolution as in Unix layer
-                use std::net::ToSocketAddrs;
-                match (hostname, 0u16).to_socket_addrs() {
-                    Ok(addresses) => Ok(addresses.map(|addr| addr.ip()).collect()),
-                    Err(local_err) => {
-                        tracing::debug!(
-                            "Local DNS resolution also failed for {}: {}",
-                            hostname,
-                            local_err
-                        );
-                        Ok(vec![]) // No records found
-                    }
-                }
-            }
-        }
-    }
-
-    fn remote_dns_enabled(&self) -> bool {
-        crate::layer_setup().remote_dns_enabled()
-    }
-}
 
 // Function type definitions for original Windows socket functions
 type SocketType = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
@@ -482,7 +355,11 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
                             address: bound_addr,
                         };
                         set_socket_state(s, SocketState::Bound(bound));
-                        tracing::info!("bind_detour -> socket {} bound through mirrord proxy", s);
+                        tracing::info!(
+                            "bind_detour -> socket {} bound through mirrord proxy to addr {}",
+                            s,
+                            bound_addr
+                        );
                     }
 
                     return result;
@@ -571,19 +448,35 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
     let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len() as i32) };
-        ConnectResult::from(log_connection_result(result, "connect_detour"))
+        log_connection_result(result, "connect_detour", addr);
+        ConnectResult::from(result)
     };
 
-    if let Ok(connect_result) =
-        state::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn)
-    {
-        return connect_result.result();
+    let raw_addr = SockAddr::from(
+        SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
+    );
+    match ops::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
+        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
+            tracing::error!(
+                "connect_detour -> socket {} connect target {:?} is unreachable: {}",
+                s,
+                raw_addr,
+                e
+            );
+            return SOCKET_ERROR;
+        }
+        Err(_) => {
+            tracing::debug!("connect_detour -> socket {} not managed, using original", s);
+        }
+        Ok(connect_result) => {
+            return connect_result.result();
+        }
     }
 
     // fallback to original
     let original = CONNECT_ORIGINAL.get().unwrap();
     let result = unsafe { original(s, name, namelen) };
-    log_connection_result(result, "connect_detour")
+    result
 }
 
 /// Windows socket hook for accept
@@ -891,20 +784,37 @@ unsafe extern "system" fn wsa_connect_detour(
                 lpGQOS,
             )
         };
-        return ConnectResult::from(log_connection_result(result, "wsa_connect_detour"));
+        log_connection_result(result, "wsa_connect_detour", addr);
+        return ConnectResult::from(result);
     };
 
-    // Attempt complete proxy connection flow
-    if let Ok(connect_result) =
-        state::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn)
-    {
-        return connect_result.result();
+    let raw_addr = SockAddr::from(
+        SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
+    );
+    match ops::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
+        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
+            tracing::error!(
+                "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
+                s,
+                raw_addr,
+                e
+            );
+            return SOCKET_ERROR;
+        }
+        Err(_) => {
+            tracing::debug!(
+                "wsa_connect_detour -> socket {} not managed, using original",
+                s
+            );
+        }
+        Ok(connect_result) => {
+            return connect_result.result();
+        }
     }
 
     // Fallback to original function
-    let original = WSA_CONNECT_ORIGINAL.get().unwrap();
-    let result = unsafe { original(s, name, namelen, lpCallerData, lpCalleeData, lpSQOS, lpGQOS) };
-    log_connection_result(result, "wsa_connect_detour")
+    let connect_res = connect_fn(s, raw_addr);
+    connect_res.result()
 }
 
 /// Windows socket hook for WSAAccept (asynchronous accept)
@@ -939,8 +849,33 @@ unsafe extern "system" fn wsa_send_detour(
     tracing::trace!(
         "wsa_send_detour -> socket: {}, buffer_count: {}",
         s,
-        dwBufferCount
+        dwBufferCount,
     );
+
+    // Helper function to consolidate all fallback calls to original WSASend
+    let fallback_to_original = |reason: &str| {
+        tracing::debug!("wsa_send_detour -> falling back to original: {}", reason);
+        let original = WSA_SEND_ORIGINAL.get().unwrap();
+        let res = unsafe {
+            original(
+                s,
+                lpBuffers,
+                dwBufferCount,
+                lpNumberOfBytesSent,
+                dwFlags,
+                lpOverlapped,
+                lpCompletionRoutine,
+            )
+        };
+        tracing::debug!(
+            "wsa_send_detour -> socket: {}, sentBytes: {}, result: {}, getlasterror: {}",
+            s,
+            unsafe { *lpNumberOfBytesSent },
+            res,
+            unsafe { WSAGetLastError() }
+        );
+        res
+    };
 
     // Check if this socket is managed by mirrord
     let managed_socket = get_socket(s);
@@ -967,18 +902,22 @@ unsafe extern "system" fn wsa_send_detour(
         };
 
         if should_intercept {
+            let socket_state =
+                get_socket_state(s).map_or("Unknown".to_string(), |state| format!("{:?}", state));
             // Check if this socket is in connected state (proxy connection established)
             if is_socket_in_state(s, |state| matches!(state, SocketState::Connected(_))) {
                 tracing::debug!(
                     "wsa_send_detour -> socket {} is connected via proxy, data will be routed through proxy",
                     s
                 );
+
                 // For proxy-connected sockets, the data routing happens automatically
                 // through the proxy connection established in connect_detour/wsa_connect_detour
             } else {
                 tracing::debug!(
-                    "wsa_send_detour -> socket {} is managed but not connected via proxy, using original",
-                    s
+                    "wsa_send_detour -> socket {} is managed but not connected ({}) via proxy, using original",
+                    s,
+                    socket_state
                 );
             }
         } else {
@@ -990,18 +929,7 @@ unsafe extern "system" fn wsa_send_detour(
     }
 
     // Pass through to original - the proxy connection handles the routing if established
-    let original = WSA_SEND_ORIGINAL.get().unwrap();
-    unsafe {
-        original(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesSent,
-            dwFlags,
-            lpOverlapped,
-            lpCompletionRoutine,
-        )
-    }
+    fallback_to_original("expected - passing through to original")
 }
 
 /// Windows socket hook for WSARecv (asynchronous receive)
@@ -1060,7 +988,6 @@ unsafe extern "system" fn wsa_send_to_detour(
         iTolen
     );
 
-    // Create the proxy request function that matches layer-lib expectations
     let proxy_request_fn = |request| -> HookResult<_> {
         match hostname::make_windows_proxy_request_with_response(request) {
             Ok(Ok(response)) => Ok(response),
@@ -1088,14 +1015,6 @@ unsafe extern "system" fn wsa_send_to_detour(
         }
     };
 
-    // Convert Windows destination address to cross-platform format
-    let raw_destination = match SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) {
-        Some(addr) => addr,
-        None => {
-            return fallback_to_original("failed to parse destination address");
-        }
-    };
-
     // Handle overlapped I/O operations by falling back to original for async operations
     if !lpOverlapped.is_null() || !lpCompletionRoutine.is_null() {
         return fallback_to_original("overlapped I/O detected");
@@ -1116,6 +1035,37 @@ unsafe extern "system" fn wsa_send_to_detour(
         buffer_data.total_length(),
         buffer_data.is_single_buffer()
     );
+
+    tracing::debug!("wsa_send_to_detour -> buffer: {:?}", buffer_data);
+
+    // From Docs: (https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-wsasendto#remarks)
+    // The WSASendTo function is normally used on a connectionless socket specified by s to send a
+    // datagram contained in one or more buffers to a specific peer socket identified by the lpTo
+    // parameter. Even if the connectionless socket has been previously connected using the
+    // connect function to a specific address, lpTo overrides the destination address for that
+    // particular datagram only. On a connection-oriented socket, the lpTo and iToLen parameters
+    // are ignored; in this case, the WSASendTo is equivalent to WSASend.
+    if lpTo.is_null() || iTolen <= 0 {
+        // For connection-oriented sockets or when no destination is specified,
+        // WSASendTo is equivalent to WSASend
+        return unsafe {
+            wsa_send_detour(
+                s,
+                lpBuffers,
+                dwBufferCount,
+                lpNumberOfBytesSent,
+                dwFlags,
+                lpOverlapped,
+                lpCompletionRoutine,
+            )
+        };
+    }
+
+    // Convert Windows destination address to cross-platform format
+    let raw_destination = match SocketAddr::try_from_raw(lpTo as *const _, iTolen as _) {
+        Some(addr) => addr,
+        None => unreachable!(),
+    };
 
     // For simple single-buffer case, use layer-lib functionality
     if buffer_data.is_single_buffer() {
@@ -1155,14 +1105,14 @@ unsafe extern "system" fn wsa_send_to_detour(
                 }
 
                 unsafe { *lpNumberOfBytesSent = bytes_sent };
-                Ok(bytes_sent as isize)
+                Ok(result.try_into().unwrap())
             } else {
                 Err(SendToError::SendFailed(result.try_into().unwrap()).into())
             }
         };
 
         // Use the shared layer-lib sendto functionality
-        if let Ok(sendto_result) = send_to(
+        match send_to(
             s,
             first_buf_ptr,
             first_buf_len as usize,
@@ -1171,17 +1121,18 @@ unsafe extern "system" fn wsa_send_to_detour(
             wsa_sendto_fn,
             proxy_request_fn,
         ) {
-            tracing::debug!(
-                "wsa_send_to_detour -> layer-lib sendto success: {} bytes",
-                sendto_result
-            );
-            if sendto_result >= 0 {
-                0 // WSA_SUCCESS
-            } else {
-                SOCKET_ERROR
+            Ok(sendto_result) => {
+                tracing::debug!(
+                    "wsa_send_to_detour -> layer-lib sendto success: {} bytes",
+                    sendto_result
+                );
+                // WSASendTo returns 0 on success
+                0
             }
-        } else {
-            fallback_to_original("layer-lib sendto failed")
+            Err(_) => {
+                // On error, fall back to original function
+                fallback_to_original("layer-lib sendto failed")
+            }
         }
     } else {
         // For multi-buffer or complex cases, fall back to original function
@@ -1417,7 +1368,9 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
                             required_size + 1,
                             current_buffer_size
                         );
-                        unsafe { SetLastError(ERROR_MORE_DATA); }
+                        unsafe {
+                            SetLastError(ERROR_MORE_DATA);
+                        }
                         return 0; // FALSE
                     }
 

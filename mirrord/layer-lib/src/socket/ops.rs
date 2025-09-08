@@ -159,7 +159,7 @@ fn set_last_error(error: i32) {
     ret,
     skip(_user_socket_info, proxy_request_fn, connect_fn)
 )]
-pub fn connect_outgoing<const CALL_CONNECT: bool, P, F>(
+pub fn connect_outgoing<P, F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
     _user_socket_info: Arc<UserSocket>,
@@ -172,9 +172,9 @@ where
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
     // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_address: SockAddr| -> HookResult<ConnectResult> {
+    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_address).unwrap();
+        let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
 
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
@@ -193,35 +193,13 @@ where
         } = response;
 
         // Connect to the interceptor socket that is listening.
-        let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address.clone())?;
-            connect_fn(sockfd, layer_address)
-        } else {
-            ConnectResult {
-                result: 0,
-                error: None,
-            }
-        };
-
-        if connect_result.is_failure() {
-            error!(
-                "connect -> Failed call to connect_fn with {:#?}",
-                connect_result,
-            );
-            Err(std::io::Error::last_os_error())?
-        }
-
-        let connected = Connected {
-            remote_address,
-            local_address: in_cluster_address,
-            layer_address: Some(layer_address),
-        };
-
-        trace!("we are connected {connected:#?}");
-
-        set_socket_state(sockfd, SocketState::Connected(connected));
-
-        Ok(connect_result)
+        call_connect_fn(
+            connect_fn,
+            sockfd,
+            remote_addr,
+            Some(in_cluster_address),
+            Some(layer_address),
+        )
     };
 
     if remote_address.is_unix() {
@@ -232,6 +210,88 @@ where
         // outgoing selector configuration
         remote_connection(remote_address)
     }
+}
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(connect_fn))]
+pub fn call_connect_fn<F>(
+    connect_fn: F,
+    sockfd: SocketDescriptor,
+    remote_addr: SockAddr,
+    in_cluster_address_opt: Option<SocketAddress>,
+    layer_address_opt: Option<SocketAddress>,
+) -> HookResult<ConnectResult>
+where
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
+{
+    let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
+    let (connect_result, connected) = match (
+        layer_address_opt.clone(),
+        in_cluster_address_opt.clone(),
+    ) {
+        (Some(layer_address), Some(in_cluster_address)) => {
+            debug!(
+                "call_connect_fn -> connecting to remote_address={:?}, in_cluster_address={:?}, layer_address={:?}",
+                remote_address, in_cluster_address, layer_address
+            );
+
+            let layer_addr = SockAddr::try_from(layer_address.clone())?;
+            let connect_result: ConnectResult = connect_fn(sockfd, layer_addr);
+            if connect_result.is_failure() {
+                error!(
+                    "connect -> Failed call to connect_fn with {:#?}",
+                    connect_result,
+                );
+                return Err(std::io::Error::last_os_error().into());
+            }
+
+            (
+                connect_result,
+                Connected {
+                    remote_address: layer_address.clone(),
+                    local_address: in_cluster_address,
+                    layer_address: Some(layer_address),
+                },
+            )
+        }
+        _ => {
+            // both or none of layer_address and in_cluster_address must be provided
+            if layer_address_opt.is_none() ^ in_cluster_address_opt.is_none() {
+                return Err(ConnectError::ParameterMissing(format!(
+                    "layer_address: {:?}, in_cluster_address: {:?}",
+                    layer_address_opt, in_cluster_address_opt
+                ))
+                .into());
+            }
+
+            debug!(
+                "call_connect_fn -> connecting to remote_address={:?} (no mirrord interception)",
+                remote_address
+            );
+
+            let connect_result: ConnectResult = connect_fn(sockfd, remote_addr);
+            if connect_result.is_failure() {
+                error!(
+                    "connect -> Failed call to connect_fn with {:#?}",
+                    connect_result,
+                );
+                return Err(std::io::Error::last_os_error().into());
+            }
+
+            (
+                connect_result,
+                Connected {
+                    remote_address: remote_address.clone(),
+                    local_address: remote_address,
+                    layer_address: None,
+                },
+            )
+        }
+    };
+
+    trace!("we are connected {connected:#?}");
+
+    set_socket_state(sockfd, SocketState::Connected(connected));
+
+    Ok(connect_result)
 }
 
 /// Creates an outgoing connection request for the specified address and protocol
@@ -299,7 +359,7 @@ where
         ConnectResult::from(result)
     };
 
-    connect_outgoing::<true, _, _>(
+    connect_outgoing(
         sockfd,
         remote_address,
         user_socket_info,
@@ -330,7 +390,7 @@ where
         }
     };
 
-    connect_outgoing::<false, _, _>(
+    connect_outgoing(
         sockfd,
         remote_address,
         user_socket_info,
@@ -533,236 +593,6 @@ where
 
         // Convert Windows parameters to cross-platform format
         sendto_fn(sockfd, raw_message, message_length, flags, layer_address)
-    }
-}
-
-/// Platform-specific sendmsg function type definitions
-#[cfg(unix)]
-pub type SendmsgFn =
-    unsafe extern "C" fn(sockfd: SocketDescriptor, msg: *const libc::msghdr, flags: i32) ->
-isize;
-
-#[cfg(windows)]
-#[allow(non_snake_case)] // Windows API uses Hungarian notation
-#[allow(improper_ctypes_definitions)] // Windows API callback types
-pub type SendmsgFn = unsafe extern "system" fn(
-    s: SOCKET,
-    lpBuffers: *const winapi::shared::ws2def::WSABUF,
-    dwBufferCount: u32,
-    lpNumberOfBytesSent: *mut u32,
-    dwFlags: u32,
-    lpTo: *const winapi::shared::ws2def::SOCKADDR,
-    iTolen: i32,
-    lpOverlapped: *mut winapi::um::minwinbase::OVERLAPPED,
-    lpCompletionRoutine: Option<winapi::um::winsock2::LPWSAOVERLAPPED_COMPLETION_ROUTINE>,
-) -> i32;
-
-/// Same behavior as [`send_to`], the only difference is that here we deal with message headers,
-/// instead of directly with socket addresses.
-///
-/// This function provides cross-platform sendmsg functionality that works with both Unix
-/// `msghdr` structures and Windows `WSABUF` arrays, while preserving the original Unix layer's
-/// architecture and DNS resolution logic.
-///
-/// ## Parameters
-/// - `sockfd`: Socket file descriptor
-/// - `raw_message_header`: Platform-specific message header
-/// - `flags`: Send flags
-/// - `sendmsg_fn`: Platform-specific sendmsg function
-/// - `proxy_request_fn`: Function to make proxy requests
-///
-/// ## Returns
-/// HookResult<isize>
-#[cfg(unix)]
-#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_message_header, sendmsg_fn, proxy_request_fn))]
-pub fn sendmsg<P, F>(
-    sockfd: SocketDescriptor,
-    raw_message_header: *const libc::msghdr,
-    flags: i32,
-    sendmsg_fn: F,
-    proxy_request_fn: P,
-) -> HookResult<isize>
-where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-    F: FnOnce(SocketDescriptor, *const libc::msghdr, i32) -> HookResult<isize>,
-{
-    // We have a destination, so apply our fake `connect` patch.
-    let destination = if !unsafe { (*raw_message_header).msg_name.is_null() } {
-        let raw_destination = unsafe { (*raw_message_header).msg_name } as *const libc::sockaddr;
-        let destination_length = unsafe { (*raw_message_header).msg_namelen };
-        SockAddr::try_from_raw(raw_destination, destination_length)
-            .ok_or_else(|| HookError::BadPointer)?
-    } else {
-        return Err(HookError::AddressConversion);
-    };
-
-    let destination_addr = destination.as_socket()
-        .ok_or_else(|| HookError::AddressConversion)?;
-
-    debug!("layer-lib sendmsg -> destination: {:?}", destination_addr);
-
-    let user_socket_info = SOCKETS
-        .lock()?
-        .remove(&sockfd)
-        .ok_or(HookError::SocketNotFound(sockfd))?;
-
-    // we don't support unix sockets which don't use `connect`
-    if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
-        && !matches!(user_socket_info.state, SocketState::Connected(_))
-    {
-        return Err(HookError::UnsupportedSocketType);
-    }
-
-    // Currently this flow only handles DNS resolution.
-    // So here we have to check for 2 things:
-    //
-    // 1. Are we sending something port 53? Then we use mirrord flow;
-    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
-    // we've bound the destination socket.
-    //
-    // If none of the above are true, then the destination is some real address outside our scope.
-    if destination_addr.port() != 53 {
-        debug!(
-            "layer-lib sendmsg -> non-DNS destination (port {}), checking for DNS patch",
-            destination_addr.port()
-        );
-        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination_addr)?;
-
-        let mut true_message_header = Box::new(unsafe { *raw_message_header });
-
-        unsafe {
-            true_message_header
-                .as_mut()
-                .msg_name
-                .copy_from_nonoverlapping(
-                    rawish_true_destination.as_ptr() as *const _,
-                    rawish_true_destination.len() as usize,
-                );
-        }
-        true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
-
-        sendmsg_fn(sockfd, true_message_header.as_ref(), flags)
-    } else {
-        // DNS resolution flow
-        connect_outgoing_udp(
-            sockfd,
-            destination,
-            user_socket_info,
-            NetProtocol::Datagrams,
-            proxy_request_fn,
-        )?;
-
-        let layer_address: SockAddr = SOCKETS
-            .lock()?
-            .get(&sockfd)
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => connected.layer_address.clone(),
-                _ => unreachable!(),
-            })
-            .ok_or(HookError::ManagedSocketNotFound(destination_addr))?
-            .try_into()?;
-
-        let mut true_message_header = Box::new(unsafe { *raw_message_header });
-
-        unsafe {
-            true_message_header
-                .as_mut()
-                .msg_name
-                .copy_from_nonoverlapping(
-                    layer_address.as_ptr() as *const _,
-                    layer_address.len() as usize,
-                );
-        }
-        true_message_header.as_mut().msg_namelen = layer_address.len();
-
-        sendmsg_fn(sockfd, true_message_header.as_ref(), flags)
-    }
-}
-
-/// Windows version of sendmsg function that provides similar functionality to the Unix version
-/// but works with Windows WSABUF structures and addressing
-#[cfg(windows)]
-#[allow(non_snake_case)] // Windows API uses Hungarian notation
-#[mirrord_layer_macro::instrument(level = "trace", ret, skip(lpBuffers, sendmsg_fn, proxy_request_fn))]
-pub fn sendmsg<P, F>(
-    s: SOCKET,
-    lpBuffers: *const winapi::shared::ws2def::WSABUF,
-    dwBufferCount: u32,
-    lpNumberOfBytesSent: *mut u32,
-    dwFlags: u32,
-    destination: SocketAddr,  // Take SocketAddr directly instead of raw pointer
-    sendmsg_fn: F,
-    proxy_request_fn: P,
-) -> HookResult<i32>
-where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-    F: FnOnce(
-        SOCKET,
-        *const winapi::shared::ws2def::WSABUF,
-        u32,
-        *mut u32,
-        u32,
-        SockAddr,
-    ) -> HookResult<i32>,
-{
-    debug!("layer-lib sendmsg (Windows) -> destination: {:?}", destination);
-
-    let user_socket_info = SOCKETS
-        .lock()?
-        .remove(&s)
-        .ok_or(HookError::SocketNotFound(s))?;
-
-    // Currently this flow only handles DNS resolution.
-    // So here we have to check for 2 things:
-    //
-    // 1. Are we sending something port 53? Then we use mirrord flow;
-    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
-    // we've bound the destination socket.
-    //
-    // If none of the above are true, then the destination is some real address outside our scope.
-    if destination.port() != 53 {
-        debug!(
-            "layer-lib sendmsg (Windows) -> non-DNS destination (port {}), checking for DNS patch",
-            destination.port()
-        );
-        let rawish_true_destination = send_dns_patch(s, user_socket_info, destination)?;
-
-        sendmsg_fn(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesSent,
-            dwFlags,
-            rawish_true_destination,
-        )
-    } else {
-        // DNS resolution flow
-        connect_outgoing_udp(
-            s,
-            destination.into(),
-            user_socket_info,
-            NetProtocol::Datagrams,
-            proxy_request_fn,
-        )?;
-
-        let layer_address: SockAddr = SOCKETS
-            .lock()?
-            .get(&s)
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => connected.layer_address.clone(),
-                _ => unreachable!(),
-            })
-            .ok_or(HookError::ManagedSocketNotFound(destination))?
-            .try_into()?;
-
-        sendmsg_fn(
-            s,
-            lpBuffers,
-            dwBufferCount,
-            lpNumberOfBytesSent,
-            dwFlags,
-            layer_address,
-        )
     }
 }
 
