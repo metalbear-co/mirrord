@@ -3,7 +3,7 @@ use k8s_openapi::api::core::v1::{
     Capabilities, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
 };
 use kube::{
-    Client,
+    Api, Client,
     api::PostParams,
     runtime::{WatchStreamExt, watcher},
 };
@@ -15,7 +15,6 @@ use tracing::debug;
 
 use super::util::agent_env;
 use crate::{
-    BearApi,
     api::{
         container::{
             ContainerParams, ContainerVariant,
@@ -62,7 +61,7 @@ where
     let mut ephemeral_container: KubeEphemeralContainer = variant.as_update();
     debug!("Requesting ephemeral_containers_subresource");
 
-    let pod_api = BearApi::namespaced(client.clone(), &runtime_data.pod_namespace);
+    let pod_api = Api::namespaced(client.clone(), &runtime_data.pod_namespace);
     let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
     let container_spec = pod
         .spec
@@ -131,7 +130,7 @@ where
 
     let mut container_progress = progress.subtask("waiting for container to be ready...");
 
-    let stream = watcher(pod_api.as_kube_api().clone(), watcher_config).applied_objects();
+    let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
     pin!(stream);
 
     while let Some(Ok(pod)) = stream.next().await {

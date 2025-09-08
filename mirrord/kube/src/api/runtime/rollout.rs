@@ -1,12 +1,11 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Client, Resource, api::ListParams};
+use kube::{Api, Client, Resource, api::ListParams};
 use mirrord_config::target::rollout::RolloutTarget;
 
 use super::RuntimeDataFromLabels;
 use crate::{
-    BearApi,
     api::{kubernetes::rollout::Rollout, runtime::get_k8s_resource_api},
     error::{KubeApiError, Result},
 };
@@ -54,8 +53,7 @@ impl RuntimeDataFromLabels for RolloutTarget {
             ..Default::default()
         };
 
-        let pod_api: BearApi<Pod> =
-            get_k8s_resource_api(client, resource.meta().namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(client, resource.meta().namespace.as_deref());
         let pods = pod_api.list(&list_params).await?;
 
         Ok(pods.items)

@@ -194,8 +194,7 @@ impl DateValidityExt for rfc5280::Validity {
 /// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
-    use kube::{Client, Resource, api::PostParams};
-    use mirrord_kube::BearApi;
+    use kube::{Api, Client, Resource, api::PostParams};
 
     use super::*;
     use crate::error::CredentialStoreError;
@@ -222,7 +221,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: BearApi<R> = BearApi::all(client);
+            let api: Api<R> = Api::all(client);
 
             let certificate: Certificate = api
                 .create_subresource(
@@ -255,7 +254,7 @@ pub mod client {
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: BearApi<R> = BearApi::all(client);
+            let api: Api<R> = Api::all(client);
 
             let certificate: Certificate = api
                 .create_subresource(

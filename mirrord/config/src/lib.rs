@@ -16,6 +16,7 @@ pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
+pub mod retry;
 pub mod target;
 pub mod util;
 
@@ -49,6 +50,7 @@ use crate::{
         fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
     },
     internal_proxy::InternalProxyConfig,
+    retry::StartupRetryConfig,
     target::TargetConfig,
     util::VecOrSingle,
 };
@@ -380,27 +382,8 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
 
-    /// ## startup_retries_max_attempts {#root-startup_retries_max_attempts}
-    ///
-    /// Sets the max amount of retries that mirrord will try to perform during its startup, for
-    /// cluster operations, such as searching for the target pod, connecting to the
-    /// mirrord-operator, creating the mirrord-agent.
-    ///
-    /// If you are having cluster connectivity issues when starting mirrord, setting this config
-    /// and [`startup_retries_interval_ms`](#root-startup_retries_interval_ms) may help.
-    #[config(default = 1)]
-    pub startup_retries_max_attempts: usize,
-
-    /// ## startup_retries_interval_ms {#root-startup_retries_interval_ms}
-    ///
-    /// Sets the interval (in milliseconds) between mirrord startup retries during its startup, for
-    /// cluster operations, such as searching for the target pod, connecting to the
-    /// mirrord-operator, creating the mirrord-agent.
-    ///
-    /// If you are having cluster connectivity issues when starting mirrord, setting this config
-    /// and [`startup_retries_max_attempts`](#root-startup_retries_max_attempts) may help.
-    #[config(default = 50)]
-    pub startup_retries_interval_ms: u64,
+    #[config(nested)]
+    pub startup_retry: StartupRetryConfig,
 }
 
 impl LayerConfig {
@@ -1104,8 +1087,7 @@ mod tests {
             use_proxy: None,
             experimental: None,
             skip_sip: None,
-            startup_retries_max_attempts: None,
-            startup_retries_interval_ms: None,
+            startup_retry: None,
         };
 
         assert_eq!(config, expect);

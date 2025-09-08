@@ -5,7 +5,8 @@ use std::{
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    Client, Config, Discovery,
+    Api, Client, Config, Discovery,
+    client::ClientBuilder,
     config::{KubeConfigOptions, Kubeconfig},
 };
 use mirrord_agent_env::mesh::MeshVendor;
@@ -17,11 +18,12 @@ use mirrord_config::{
 };
 use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
-    BearApi,
+    RetryKube,
     api::{
         container::{
             ContainerApi, ContainerParams,
@@ -58,7 +60,13 @@ impl KubernetesAPI {
         )
         .await?;
 
-        let client = progress.suspend(|| client_config.try_into())?;
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(client_config.clone()))?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &config.startup_retry,
+            )?))
+            .build();
 
         let mut agent = config.agent.clone();
         if config
@@ -121,9 +129,7 @@ impl KubernetesAPI {
         use k8s_openapi::api::core::v1::Pod;
         use tokio::net::TcpStream;
 
-        use crate::BearApi;
-
-        let pod_api: BearApi<Pod> = BearApi::namespaced(self.client.clone(), pod_namespace);
+        let pod_api: Api<Pod> = Api::namespaced(self.client.clone(), pod_namespace);
 
         let pod = pod_api.get(pod_name).await?;
 
@@ -386,14 +392,14 @@ where
 }
 
 #[tracing::instrument(level = "trace", skip(client))]
-pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> BearApi<K>
+pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,
     <K as kube::Resource>::DynamicType: Default,
 {
     if let Some(namespace) = namespace {
-        BearApi::namespaced(client.clone(), namespace)
+        Api::namespaced(client.clone(), namespace)
     } else {
-        BearApi::default_namespaced(client.clone())
+        Api::default_namespaced(client.clone())
     }
 }

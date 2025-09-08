@@ -3,14 +3,14 @@
 
 use std::{fmt::Display, str::FromStr};
 
-use kube::Client;
+use kube::{Api, Client};
 use miette::Diagnostic;
 use mirrord_config::{
     LayerConfig,
     feature::{FeatureConfig, network::incoming::IncomingMode},
     util::VecOrSingle,
 };
-use mirrord_kube::{BearApi, api::kubernetes::create_kube_config, error::KubeApiError};
+use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{
     FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordProfile,
 };
@@ -241,11 +241,11 @@ async fn fetch_profile(
 
     match profile_identifier {
         ProfileIdentifier::Cluster(profile) => {
-            let api = BearApi::<MirrordClusterProfile>::all(client);
+            let api = Api::<MirrordClusterProfile>::all(client);
             Ok(ProfileFetchResult::Cluster(api.get(profile).await?))
         }
         ProfileIdentifier::Namespaced { namespace, profile } => {
-            let api = BearApi::<MirrordProfile>::namespaced(client, namespace);
+            let api = Api::<MirrordProfile>::namespaced(client, namespace);
             Ok(ProfileFetchResult::Namespaced(api.get(profile).await?))
         }
     }

@@ -4,7 +4,7 @@ use std::{
 };
 
 use kube::{
-    Resource,
+    Api, Resource,
     api::{ListParams, ObjectMeta},
     runtime::wait::await_condition,
 };
@@ -15,7 +15,7 @@ use mirrord_config::{
     },
     target::{Target, TargetDisplay},
 };
-use mirrord_kube::{BearApi, error::KubeApiError};
+use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
 use tracing::Level;
 use uuid::Uuid;
@@ -36,7 +36,7 @@ const MYSQL_BRANCH_CREATION_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout after [`MYSQL_BRANCH_CREATION_TIMEOUT`].
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
 pub(crate) async fn create_mysql_branches<P: Progress>(
-    api: &BearApi<MysqlBranchDatabase>,
+    api: &Api<MysqlBranchDatabase>,
     params: HashMap<BranchDatabaseId, MysqlBranchParams>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
@@ -85,18 +85,14 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
     let ready = branch_names
         .iter()
         .map(|name| {
-            await_condition(
-                api.as_kube_api().clone(),
-                name,
-                |db: Option<&MysqlBranchDatabase>| {
-                    db.and_then(|db| {
-                        db.status
-                            .as_ref()
-                            .map(|status| status.phase == BranchDatabasePhase::Ready)
-                    })
-                    .unwrap_or(false)
-                },
-            )
+            await_condition(api.clone(), name, |db: Option<&MysqlBranchDatabase>| {
+                db.and_then(|db| {
+                    db.status
+                        .as_ref()
+                        .map(|status| status.phase == BranchDatabasePhase::Ready)
+                })
+                .unwrap_or(false)
+            })
         })
         .collect::<Vec<_>>();
 
@@ -120,7 +116,7 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
 /// 1. it has a user specified unique ID, and
 /// 2. it is in the "Ready" phase.
 pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
-    api: &BearApi<MysqlBranchDatabase>,
+    api: &Api<MysqlBranchDatabase>,
     params: &HashMap<BranchDatabaseId, MysqlBranchParams>,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {

@@ -7,7 +7,7 @@ use std::{
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS, RetryConfig};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, RetryKube};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
@@ -26,6 +26,7 @@ use tracing::{debug, info};
 
 use super::config::DumpArgs;
 use crate::{
+    CliError,
     connection::{AgentConnection, create_and_connect},
     error::CliResult,
     user_data::UserData,
@@ -47,12 +48,9 @@ pub async fn dump_command(
 
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
-    RETRY_KUBE_OPERATIONS.get_or_init(|| {
-        RetryConfig::new(
-            config.startup_retries_interval_ms,
-            config.startup_retries_max_attempts,
-        )
-    });
+    let retry_startup_kube_ops = RetryKube::try_from(&config.startup_retry)
+        .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
+    RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(

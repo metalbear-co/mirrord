@@ -2,13 +2,13 @@ use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
-use kube::api::LogParams;
+use kube::{Api, api::LogParams};
 use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use regex::Regex;
 use tracing::warn;
 
-use crate::{BearApi, api::container::ContainerParams, error::Result};
+use crate::{api::container::ContainerParams, error::Result};
 
 static AGENT_READY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("agent ready( - version (\\S+))?").expect("failed to create regex")
@@ -107,7 +107,7 @@ pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -
  */
 #[tracing::instrument(level = "trace", skip(pod_api), ret)]
 pub(super) async fn wait_for_agent_startup(
-    pod_api: &BearApi<Pod>,
+    pod_api: &Api<Pod>,
     pod_name: &str,
     container_name: String,
 ) -> Result<Option<String>> {
