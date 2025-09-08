@@ -17,7 +17,7 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 /// Allows the user to target a pod created dynamically from the original [`target`](#target).
 /// The new pod inherits most of the original target's specification, e.g. labels.
 ///
-/// See the [copy target reference](https://metalbear.co/mirrord/docs/reference/copy-target/)
+/// See the [copy target reference](https://metalbear.com/mirrord/docs/reference/copy-target/)
 /// for more details.
 ///
 /// ### Minimal `copy_target` config {#copy_target-minimal}

@@ -14,6 +14,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::{StreamExt, StreamMap, StreamNotifyClose, wrappers::ReceiverStream};
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 pub type MessageBus<T> =
     MessageBusInner<<T as BackgroundTask>::MessageIn, <T as BackgroundTask>::MessageOut>;
@@ -23,7 +24,7 @@ pub type MessageBus<T> =
 pub struct MessageBusInner<MessageIn, MessageOut> {
     tx: Sender<MessageOut>,
     rx: Receiver<MessageIn>,
-    // Note if adding any new fields do look at `MessageBus::cast`'s unsafe block.
+    token: CancellationToken,
 }
 
 impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
@@ -33,6 +34,7 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
     }
 
     /// Receives a message from this task's parent.
+    ///
     /// [`None`] means that the channel is closed and there will be no more messages.
     pub async fn recv(&mut self) -> Option<MessageIn> {
         tokio::select! {
@@ -41,65 +43,11 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
         }
     }
 
-    /// Returns a [`Closed`] instance for this [`MessageBus`].
-    pub(crate) fn closed(&self) -> Closed<MessageOut> {
-        Closed(self.tx.clone())
-    }
-}
-
-/// A helper struct bound to some [`MessageBus`] instance.
-///
-/// Used in [`BackgroundTask`]s to `.await` on [`Future`]s without lingering after their
-/// [`MessageBus`] is closed.
-///
-/// Its lifetime does not depend on the origin [`MessageBus`] and it does not hold any references
-/// to it, so that you can use it **and** the [`MessageBus`] at the same time.
-///
-/// # Usage example
-///
-/// ```ignore
-/// use std::convert::Infallible;
-///
-/// use mirrord_intproxy::background_tasks::{BackgroundTask, Closed, MessageBus};
-///
-/// struct ExampleTask;
-///
-/// impl ExampleTask {
-///     /// Thanks to the usage of [`Closed`] in [`Self::run`],
-///     /// this function can freely resolve [`Future`]s and use the [`MessageBus`].
-///     /// When the [`MessageBus`] is closed, the whole task will exit.
-///     ///
-///     /// To achieve the same without [`Closed`], you'd need to wrap each
-///     /// [`Future`] resolution with [`tokio::select`].
-///     async fn do_work(&self, message_bus: &mut MessageBus<Self>) {}
-/// }
-///
-/// impl BackgroundTask for ExampleTask {
-///     type MessageIn = Infallible;
-///     type MessageOut = Infallible;
-///     type Error = Infallible;
-///
-///     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-///         let closed: Closed<Self> = message_bus.closed();
-///         closed.cancel_on_close(self.do_work(message_bus)).await;
-///         Ok(())
-///     }
-/// }
-/// ```
-pub(crate) struct Closed<Out>(Sender<Out>);
-
-impl<T> Closed<T> {
-    /// Resolves the given [`Future`], unless the origin [`MessageBus`] closes first.
+    /// Returns a [`CancellationToken`] that will be cancelled once this message bus is closed.
     ///
-    /// # Returns
-    ///
-    /// * [`Some`] holding the future output - if the future resolved first
-    /// * [`None`] - if the [`MessageBus`] closed first
-    pub(crate) async fn cancel_on_close<F: Future>(&self, future: F) -> Option<F::Output> {
-        tokio::select! {
-            _ = self.0.closed() => None,
-            output = future => Some(output)
-        }
+    /// Enables waiting for message bus close without consuming messages buffered in the channel.
+    pub(crate) fn closed_token(&self) -> &CancellationToken {
+        &self.token
     }
 }
 
@@ -237,9 +185,12 @@ where
             StreamNotifyClose::new(ReceiverStream::new(out_msg_rx)),
         );
 
+        let token = CancellationToken::new();
+
         let mut message_bus = MessageBus::<T> {
             tx: out_msg_tx,
             rx: in_msg_rx,
+            token: token.clone(),
         };
 
         self.handles.insert(
@@ -247,7 +198,10 @@ where
             tokio::spawn(async move { task.run(&mut message_bus).await.map_err(Into::into) }),
         );
 
-        TaskSender(in_msg_tx)
+        TaskSender {
+            tx: in_msg_tx,
+            _drop_guard: token.drop_guard(),
+        }
     }
 
     pub fn register_restartable<T>(
@@ -372,16 +326,19 @@ impl<MOut, Err: fmt::Debug> TaskUpdate<MOut, Err> {
     }
 }
 
-/// A struct that can be used to send messages to a [`BackgroundTask`] registered
-///
 /// A struct that can be used to send messages to a [`BackgroundTask`] registered in the
-/// [`BackgroundTasks`] struct. Dropping this sender will close the channel of messages consumed by
+/// [`BackgroundTasks`] struct.
+///
+/// Dropping this sender will close the channel of messages consumed by
 /// the task (see [`MessageBus`]). This should trigger task exit.
-pub struct TaskSender<T: BackgroundTask>(Sender<T::MessageIn>);
+pub struct TaskSender<T: BackgroundTask> {
+    tx: Sender<T::MessageIn>,
+    _drop_guard: DropGuard,
+}
 
 impl<T: BackgroundTask> TaskSender<T> {
     /// Attempt to send a message to the task.
     pub async fn send<M: Into<T::MessageIn>>(&self, msg: M) {
-        let _ = self.0.send(msg.into()).await;
+        let _ = self.tx.send(msg.into()).await;
     }
 }

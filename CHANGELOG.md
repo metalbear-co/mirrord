@@ -8,6 +8,91 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.161.0](https://github.com/metalbear-co/mirrord/tree/3.161.0) - 2025-09-04
+
+
+### Added
+
+- Added config for specifying mirrord-tls.pem path when using mirrord container
+  command. [#3508](https://github.com/metalbear-co/mirrord/issues/3508)
+
+
+### Changed
+
+- Changed MySQL database branch's default TTL to 5 minutes.
+
+
+### Fixed
+
+- Fixed an issue where mirrord was not handling gRPC error responses properly,
+  resulting in errors like "server closed connection with RST_STREAM without
+  sending trailers".
+- Fixed iptables backend detection on kernel 6.12+.
+
+
+### Internal
+
+- Changed backoff intervals between intproxy->operator reconnect attemps.
+  Improved logs.
+
+## [3.160.0](https://github.com/metalbear-co/mirrord/tree/3.160.0) - 2025-09-02
+
+
+### Added
+
+- Added hook for the `rename` function, enabled with the
+  `experimental.hook_rename` setting.
+  [#3456](https://github.com/metalbear-co/mirrord/issues/3456)
+- Introduced `MysqlBranchDatabase` CRD.
+- `workloadRestartTimeout` field for `MirrordWorkloadQueueRegistry`, that
+  controls the timeout for the target workload to restart on the first SQS
+  session start of a target.
+
+
+### Internal
+
+- Hide `operator setup` command from `--help`.
+
+## [3.159.2](https://github.com/metalbear-co/mirrord/tree/3.159.2) - 2025-09-01
+
+
+### Changed
+
+- A mirrord session can now be terminated early if a remote DNS lookup fails
+  with `permission denied` error.
+  This error indicates that the Kubernetes cluster is hardened and the
+  mirrord-agent might not be fully functional.
+  The behavior is controlled with the `experimental.dns_permission_error_fatal`
+  setting, and enabled by default in OSS.
+
+
+### Fixed
+
+- Fixed a compatability issue with openapiv2 for operator CRDs
+  [#3398](https://github.com/metalbear-co/mirrord/issues/3398)
+
+
+### Internal
+
+- Added a suggestion to use mfT when encountering `AgentError::IPTablesDirty` in
+  error messages.
+- Added a github action to build windows builds.
+- Updated all metalbear.co urls to metalbear.com.
+- Upgraded Frida dependency.
+
+## [3.159.1](https://github.com/metalbear-co/mirrord/tree/3.159.1) - 2025-08-27
+
+### Changed
+
+- Default "/run/" and "/selinux" to local.
+- SimpleProgress implementation now handles prints nicely instead of debug
+  print.
+- Changed some Debug implementations to not print HTTP body.
+
+### Fixed
+
+- Removed conntrack-related bogus warnings from mirrord-agent logs.
+
 ## [3.159.0](https://github.com/metalbear-co/mirrord/tree/3.159.0) - 2025-08-24
 
 

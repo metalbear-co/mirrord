@@ -45,6 +45,9 @@ pub static STATFS_VERSION: LazyLock<VersionReq> =
 pub static STATFS_V2_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.18.0".parse().expect("Bad Identifier"));
 
+pub static RENAME_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.21.0".parse().expect("Bad Identifier"));
+
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
@@ -668,4 +671,10 @@ pub struct GetDEnts64Response {
     pub fd: u64,
     pub entries: Vec<DirEntryInternal>,
     pub result_size: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct RenameRequest {
+    pub old_path: PathBuf,
+    pub new_path: PathBuf,
 }

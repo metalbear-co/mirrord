@@ -1,6 +1,6 @@
 use std::{ptr::null_mut, sync::LazyLock};
 
-use frida_gum::{Gum, Module, NativePointer, interceptor::Interceptor};
+use frida_gum::{Gum, Module, NativePointer, Process, interceptor::Interceptor};
 use tracing::trace;
 
 use crate::{LayerError, Result};
@@ -8,42 +8,31 @@ use crate::{LayerError, Result};
 static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 
 /// Struct for managing the hooks using Frida.
-pub(crate) struct HookManager {
+pub(crate) struct HookManager<'a> {
     interceptor: Interceptor,
-    modules: Vec<String>,
+    modules: Vec<Module>,
+    // process is need for Linux build and having different struct between OS feels over kill
+    #[allow(dead_code)]
+    process: Process<'a>,
 }
 
-/// Gets available modules in current process.
-/// NOTE: Gum must be initialized or it will crash.
-fn get_modules() -> Vec<String> {
-    Module::obtain(&GUM)
-        .enumerate_modules()
-        .iter()
-        .map(|m| m.name.clone())
-        .collect()
-}
-
-/// Wrapper function that maps it to our error for convinence.
-fn get_export_by_name(module: Option<&str>, symbol: &str) -> Result<NativePointer> {
-    Module::obtain(&GUM)
-        .find_export_by_name(module, symbol)
-        .ok_or_else(|| LayerError::NoExportName(symbol.to_string()))
-}
-
-impl HookManager {
+impl<'a> HookManager<'a> {
     /// Hook the first function exported from a lib that is in modules and is hooked succesfully
-    fn hook_any_lib_export(
+    pub(crate) fn hook_any_lib_export(
         &mut self,
         symbol: &str,
         detour: *mut libc::c_void,
+        filter: Option<&str>,
     ) -> Result<NativePointer> {
         for module in &self.modules {
             // In this case we only want libs, no "main binaries"
-            if !module.starts_with("lib") {
+            let module_name = module.name();
+            if !module_name.starts_with(filter.unwrap_or("lib")) {
                 continue;
             }
-            if let Ok(function) = get_export_by_name(Some(module), symbol) {
-                trace!("found {symbol:?} in {module:?}, hooking");
+
+            if let Some(function) = module.find_export_by_name(symbol) {
+                trace!("found {symbol:?} in {module_name:?}, hooking");
                 match self.interceptor.replace(
                     function,
                     NativePointer(detour),
@@ -51,7 +40,7 @@ impl HookManager {
                 ) {
                     Ok(original) => return Ok(original),
                     Err(err) => {
-                        trace!("hook {symbol:?} in {module:?} failed with err {err:?}")
+                        trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}")
                     }
                 }
             }
@@ -69,30 +58,14 @@ impl HookManager {
     ) -> Result<NativePointer> {
         // First try to hook the default exported one, if it fails, fallback to first lib that
         // provides it.
-        let function = get_export_by_name(None, symbol)?;
-
-        self.interceptor
-            .replace(function, NativePointer(detour), NativePointer(null_mut()))
-            .or_else(|_| self.hook_any_lib_export(symbol, detour))
-    }
-
-    #[cfg(target_os = "linux")]
-    /// Hook a symbol that isn't exported.
-    /// It is valuable when hooking internal stuff. (Go)
-    fn hook_symbol(
-        &mut self,
-        module: &str,
-        symbol: &str,
-        detour: *mut libc::c_void,
-    ) -> Result<NativePointer> {
-        let function = Module::obtain(&GUM)
-            .find_symbol_by_name(module, symbol)
-            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
-
-        // on Go we use `replace_fast` since we don't use the original function.
-        self.interceptor
-            .replace_fast(function, NativePointer(detour))
-            .map_err(Into::into)
+        let function = Module::find_global_export_by_name(symbol);
+        match function {
+            Some(func) => self
+                .interceptor
+                .replace(func, NativePointer(detour), NativePointer(null_mut()))
+                .or_else(|_| self.hook_any_lib_export(symbol, detour, None)),
+            None => self.hook_any_lib_export(symbol, detour, None),
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -102,9 +75,16 @@ impl HookManager {
         symbol: &str,
         detour: *mut libc::c_void,
     ) -> Result<NativePointer> {
-        // This can't fail
-        let module = self.modules.first().unwrap().clone();
-        self.hook_symbol(&module, symbol, detour)
+        let function = self
+            .process
+            .main_module
+            .find_symbol_by_name(symbol)
+            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
+
+        // on Go we use `replace_fast` since we don't use the original function.
+        self.interceptor
+            .replace_fast(function, NativePointer(detour))
+            .map_err(Into::into)
     }
 
     /// Resolve symbol in main module
@@ -114,24 +94,25 @@ impl HookManager {
     ))]
     pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
-        let module = self.modules.first().unwrap().clone();
-        Module::obtain(&GUM).find_symbol_by_name(&module, symbol)
+        self.process.main_module.find_symbol_by_name(symbol)
     }
 }
 
-impl Default for HookManager {
+impl<'a> Default for HookManager<'a> {
     fn default() -> Self {
         let mut interceptor = Interceptor::obtain(&GUM);
         interceptor.begin_transaction();
-        let modules = get_modules();
+        let process = Process::obtain(&GUM);
+        let modules = process.enumerate_modules();
         Self {
             interceptor,
             modules,
+            process,
         }
     }
 }
 
-impl Drop for HookManager {
+impl<'a> Drop for HookManager<'a> {
     fn drop(&mut self) {
         self.interceptor.end_transaction()
     }
