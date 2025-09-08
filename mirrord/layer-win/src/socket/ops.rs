@@ -4,15 +4,12 @@ use std::{
 };
 
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
-// Re-export shared types from layer-lib
-pub use mirrord_layer_lib::socket::{
-    ConnectionThrough, HookResult, SocketDescriptor, SocketKind, SocketState, UserSocket,
-    get_socket, is_ignored_port,
-};
 use mirrord_layer_lib::{
-    ConnectError,
+    common::{layer_setup, proxy_connection::make_proxy_request_with_response},
+    error::ConnectError,
     socket::{
-        DnsResolver,
+        ConnectionThrough, DnsResolver, HookResult, SocketDescriptor, SocketKind, SocketState,
+        UserSocket, get_socket, is_ignored_port,
         ops::{ConnectResult, call_connect_fn, connect_outgoing},
     },
 };
@@ -163,7 +160,7 @@ impl DnsResolver for WindowsDnsResolver {
     }
 
     fn remote_dns_enabled(&self) -> bool {
-        crate::layer_setup().remote_dns_enabled()
+        layer_setup().remote_dns_enabled()
     }
 }
 
@@ -271,7 +268,7 @@ where
 
     // Check the outgoing selector to determine routing
     let resolver = WindowsDnsResolver;
-    match crate::layer_setup()
+    match layer_setup()
         .outgoing_selector()
         .get_connection_through_with_resolver(remote_addr, protocol, &resolver)
     {
@@ -311,7 +308,7 @@ where
     // Create the proxy request function that matches layer-lib expectations
     let proxy_request_fn =
         |request: OutgoingConnectRequest| -> HookResult<OutgoingConnectResponse> {
-            match hostname::make_windows_proxy_request_with_response(request) {
+            match make_proxy_request_with_response(request) {
                 Ok(Ok(response)) => Ok(response),
                 Ok(Err(e)) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
                 Err(e) => Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
@@ -321,8 +318,8 @@ where
     // Convert SocketAddr to SockAddr for layer-lib
     let remote_sock_addr = SockAddr::from(remote_addr);
 
-    let enabled_tcp_outgoing = crate::layer_setup().outgoing_config().tcp;
-    let enabled_udp_outgoing = crate::layer_setup().outgoing_config().udp;
+    let enabled_tcp_outgoing = layer_setup().outgoing_config().tcp;
+    let enabled_udp_outgoing = layer_setup().outgoing_config().udp;
 
     match NetProtocol::from(user_socket.kind) {
         NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing(

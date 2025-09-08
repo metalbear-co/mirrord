@@ -7,6 +7,10 @@ use std::ffi::CString;
 
 use tracing::trace;
 
+use crate::common::proxy_connection::{
+    make_proxy_request_no_response, make_proxy_request_with_response,
+};
+
 /// Error type for hostname operations
 #[derive(Debug, thiserror::Error)]
 pub enum HostnameError {
@@ -106,6 +110,156 @@ pub fn get_hostname<R: HostnameResolver>(resolver: &R) -> HostnameResult {
     }
 
     resolver.fetch_remote_hostname()
+}
+
+/// Generic helper to read a file from the remote target via ProxyConnection
+fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> Result<Vec<u8>, HostnameError> {
+    use std::path::PathBuf;
+
+    use mirrord_protocol::file::{
+        CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
+    };
+
+    // Open the file on the remote target
+    let open_request = OpenFileRequest {
+        path: PathBuf::from(file_path),
+        open_options: OpenOptionsInternal {
+            read: true,
+            write: false,
+            append: false,
+            truncate: false,
+            create: false,
+            create_new: false,
+        },
+    };
+
+    let open_response = make_proxy_request_with_response(open_request)
+        .map_err(|e| HostnameError::Protocol(format!("Failed to open {}: {e}", file_path)))?;
+
+    let fd = open_response
+        .map_err(|e| HostnameError::Protocol(format!("Remote error opening {}: {e:?}", file_path)))?
+        .fd;
+
+    // Read the file content
+    let read_request = ReadFileRequest {
+        remote_fd: fd,
+        buffer_size: max_size,
+    };
+
+    let read_result = make_proxy_request_with_response(read_request).map_err(|e| {
+        // Try to close the file even if read failed
+        let _ = make_proxy_request_no_response(CloseFileRequest { fd });
+        HostnameError::Protocol(format!("Failed to read {}: {e}", file_path))
+    });
+
+    // Always try to close the file, regardless of read success
+    let _ = make_proxy_request_no_response(CloseFileRequest { fd });
+
+    let config_bytes = read_result?
+        .map_err(|e| HostnameError::Protocol(format!("Remote error reading {}: {e:?}", file_path)))?
+        .bytes
+        .to_vec();
+
+    Ok(config_bytes)
+}
+
+/// Fetch Samba NetBIOS configuration from remote target via ProxyConnection by reading
+/// /etc/samba/smb.conf
+pub fn fetch_samba_config_via_proxy() -> Result<Option<String>, HostnameError> {
+    // Read /etc/samba/smb.conf from the remote target (max 64KB should be enough)
+    let config_bytes = read_remote_file_via_proxy("/etc/samba/smb.conf", 65536)?;
+
+    // Parse the configuration to find NetBIOS name
+    let config_content = String::from_utf8_lossy(&config_bytes);
+    let netbios_name = parse_samba_netbios_name(&config_content);
+
+    Ok(netbios_name)
+}
+
+/// Parse Samba configuration content to extract NetBIOS name
+///
+/// Looks for patterns like:
+/// - netbios name = HOSTNAME
+/// - netbios name=HOSTNAME
+/// - workgroup = WORKGROUP (fallback)
+pub fn parse_samba_netbios_name(config: &str) -> Option<String> {
+    let mut in_global_section = false;
+    let mut netbios_name = None;
+    let mut workgroup = None;
+
+    for line in config.lines() {
+        let line = line.trim();
+
+        // Skip comments and empty lines
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+
+        // Check for section headers
+        if line.starts_with('[') && line.ends_with(']') {
+            in_global_section = line.eq_ignore_ascii_case("[global]");
+            continue;
+        }
+
+        // Only process global section
+        if !in_global_section {
+            continue;
+        }
+
+        // Look for netbios name setting
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim().to_lowercase();
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+
+            match key.as_str() {
+                "netbios name" => {
+                    if !value.is_empty() {
+                        netbios_name = Some(value.to_uppercase());
+                        break; // netbios name takes precedence
+                    }
+                }
+                "workgroup" => {
+                    if !value.is_empty() && workgroup.is_none() {
+                        workgroup = Some(value.to_uppercase());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Return netbios name if found, otherwise workgroup as fallback
+    netbios_name.or(workgroup)
+}
+
+/// Perform remote DNS resolution via ProxyConnection using mirrord protocol
+pub fn remote_dns_resolve_via_proxy(
+    hostname: &str,
+) -> Result<Vec<(String, std::net::IpAddr)>, HostnameError> {
+    use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
+
+    let request = GetAddrInfoRequestV2 {
+        node: hostname.to_string(),
+        service_port: 0,
+        flags: 0,
+        family: AddressFamily::Any,
+        socktype: SockType::Any,
+        protocol: 0,
+    };
+
+    // DNS requests have a different response type, so we need to handle them directly
+    let response = make_proxy_request_with_response(request).map_err(|e| {
+        HostnameError::Protocol(format!("Proxy request failed for DNS resolution: {e}"))
+    })?;
+
+    let addr_info_list = response
+        .0
+        .map_err(|e| HostnameError::Protocol(format!("Remote DNS resolution failed: {e:?}")))?;
+
+    Ok(addr_info_list
+        .into_iter()
+        .map(|LookupRecord { name, ip }| (name, ip))
+        .collect())
 }
 
 #[cfg(test)]

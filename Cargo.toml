@@ -6,9 +6,6 @@ members = [
     "mirrord/layer-lib",
     "mirrord/layer-win",
     #"tests/win",
-    "mirrord/str-win",
-    "mirrord/layer-win",
-    #"tests/win",
     #"mirrord/agent/env",
     #"mirrord/agent/iptables",
     #"mirrord/layer/tests/apps/fileops",
@@ -33,7 +30,7 @@ members = [
     #"tests/rust-websockets",
     #"tests/rust-sqs-printer",
     #"mirrord-win-poc/ifeo/*",
-    "mirrord-win-poc/manual-exec/*",
+    #"mirrord-win-poc/manual-exec/*",
 ]
 resolver = "2"
 

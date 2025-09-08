@@ -3,13 +3,12 @@ use std::net::SocketAddr;
 
 use mirrord_intproxy_protocol::{PortSubscribe, PortSubscription};
 // Re-export shared types from layer-lib and use unified SOCKETS
-pub use mirrord_layer_lib::socket::{
-    Bound, Connected, SocketState, register_socket, set_socket_state,
+pub use mirrord_layer_lib::{
+    common::proxy_connection::make_proxy_request_with_response,
+    socket::{Bound, Connected, SocketState, register_socket, set_socket_state},
 };
 use mirrord_protocol::{outgoing::SocketAddress, tcp::StealType};
 use winapi::um::winsock2::SOCKET;
-
-use super::hostname::make_windows_proxy_request_with_response;
 
 /// Windows-specific wrapper for registering sockets with additional Windows context
 pub fn register_windows_socket(socket: SOCKET, domain: i32, socket_type: i32, protocol: i32) {
@@ -64,7 +63,7 @@ pub fn setup_listening(
         subscription: PortSubscription::Steal(StealType::All(bind_addr.port())),
     };
 
-    match make_windows_proxy_request_with_response(port_subscribe) {
+    match make_proxy_request_with_response(port_subscribe) {
         Ok(_) => {
             tracing::info!(
                 "setup_listening -> successfully subscribed to port {} for socket {}",

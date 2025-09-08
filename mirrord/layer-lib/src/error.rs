@@ -3,11 +3,12 @@
 //! This module provides error types that can be shared between the Unix layer and Windows
 //! layer-win, along with platform-specific conversions to native error codes.
 
-use std::{env::VarError, net::SocketAddr, str::ParseBoolError};
+use std::{env::VarError, io, net::SocketAddr, str::ParseBoolError, sync::PoisonError};
 
 #[cfg(unix)]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
+use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -15,9 +16,6 @@ use mirrord_sip::SipError;
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
-
-// Import ProxyError and SipError (conditionally)
-use crate::proxy_connection::ProxyError;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -51,6 +49,29 @@ mod ignore_codes {
         }
     }
 }
+
+#[derive(Debug, Error)]
+pub enum ProxyError {
+    #[error("{0}")]
+    CodecError(#[from] CodecError),
+    #[error("connection closed")]
+    ConnectionClosed,
+    #[error("unexpected response: {0:?}")]
+    UnexpectedResponse(ProxyToLayerMessage),
+    #[error("critical error: {0}")]
+    ProxyFailure(String),
+    #[error("connection lock poisoned")]
+    LockPoisoned,
+    #[error("{0}")]
+    IoFailed(#[from] io::Error),
+}
+
+impl<T> From<PoisonError<T>> for ProxyError {
+    fn from(_value: PoisonError<T>) -> Self {
+        Self::LockPoisoned
+    }
+}
+
 /// Error types for connect operations
 #[derive(Debug, thiserror::Error)]
 pub enum AddrInfoError {
@@ -87,6 +108,46 @@ pub enum ConnectError {
     ParameterMissing(String),
     #[error("Address unreachable")]
     AddressUnreachable(String),
+}
+
+/// Errors that can occur during hostname resolution operations.
+///
+/// This error type covers various failure modes when resolving hostnames,
+/// reading configuration files, or performing DNS operations.
+#[derive(Error, Debug)]
+pub enum HostnameResolveError {
+    #[error("Proxy connection not available")]
+    ProxyConnectionUnavailable,
+
+    #[error("Failed to open file {path}: {details}")]
+    FileOpenError { path: String, details: &'static str },
+
+    #[error("Failed to read file {path}: {details}")]
+    FileReadError { path: String, details: &'static str },
+
+    #[error("Remote error while accessing file {path}: {error}")]
+    RemoteFileError { path: String, error: &'static str },
+
+    #[error("DNS resolution failed for hostname '{hostname}': {details}")]
+    DnsResolutionFailed {
+        hostname: String,
+        details: &'static str,
+    },
+
+    #[error("Invalid hostname: '{hostname}' (reason: {reason})")]
+    InvalidHostname {
+        hostname: String,
+        reason: &'static str,
+    },
+
+    #[error("Configuration parsing error in {file}: {details}")]
+    ConfigParseError { file: String, details: &'static str },
+
+    #[error("No hostname available from any source")]
+    NoHostnameAvailable,
+
+    #[error("Cache lock error: {details}")]
+    CacheLockError { details: &'static str },
 }
 
 /// Error types for sendto operations
@@ -201,6 +262,9 @@ pub enum HookError {
 
     #[error("mirrord-layer: SendTo failed with `{0}`!")]
     SendToError(#[from] SendToError),
+
+    #[error("mirrord-layer: Hostname resolution failed with `{0}`!")]
+    HostnameResolveError(#[from] HostnameResolveError),
 }
 
 /// Errors internal to mirrord-layer.
@@ -285,6 +349,7 @@ impl From<frida_gum::Error> for LayerError {
 
 pub type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
+pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
 
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
@@ -402,6 +467,7 @@ impl From<HookError> for i64 {
             HookError::ConnectError(_) => platform_errors::EFAULT,
             HookError::AddrInfoError(_) => platform_errors::EFAULT,
             HookError::SendToError(_) => platform_errors::EFAULT,
+            HookError::HostnameResolveError(_) => platform_errors::EFAULT,
         };
 
         // Set platform-specific error

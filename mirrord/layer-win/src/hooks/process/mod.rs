@@ -3,6 +3,7 @@
 use std::{ffi::c_void, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
+use mirrord_layer_lib::common::layer_setup;
 use winapi::{
     shared::ntdef::{BOOLEAN, NTSTATUS, PCOBJECT_ATTRIBUTES, PHANDLE, ULONG},
     um::winnt::{ACCESS_MASK, HANDLE},
@@ -74,9 +75,9 @@ unsafe extern "system" fn nt_create_process_ex_hook(
     reserved: ULONG,
 ) -> NTSTATUS {
     // Configuration check for future use
-    let _env_enabled = &crate::layer_setup().layer_config().feature.env;
-    let _fs_enabled = &crate::layer_setup().layer_config().feature.fs;
-    let _network_enabled = &crate::layer_setup().layer_config().feature.network;
+    let _env_enabled = &layer_setup().layer_config().feature.env;
+    let _fs_enabled = &layer_setup().layer_config().feature.fs;
+    let _network_enabled = &layer_setup().layer_config().feature.network;
 
     // TODO: Implement process creation interception based on configuration
     // For now, call the original function

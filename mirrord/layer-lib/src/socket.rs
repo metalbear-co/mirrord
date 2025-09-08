@@ -37,7 +37,7 @@ pub use sockets::{
 #[cfg(windows)]
 use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 
-pub use crate::{ConnectError, HookResult};
+pub use crate::error::{ConnectError, HookResult};
 
 /// Contains the addresses of a mirrord connected socket.
 ///

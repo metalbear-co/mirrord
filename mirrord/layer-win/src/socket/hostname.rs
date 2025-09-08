@@ -13,23 +13,33 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    HostnameResult,
-    error::{AddrInfoError, HookError, HookResult},
-    get_hostname,
+    common::{
+        layer_setup,
+        proxy_connection::{PROXY_CONNECTION, make_proxy_request_with_response},
+    },
+    error::{AddrInfoError, HookResult, HostnameResolveError},
+    hostname::{
+        HostnameError, HostnameResult, fetch_samba_config_via_proxy, get_hostname,
+        remote_dns_resolve_via_proxy,
+    },
     socket::dns::update_dns_reverse_mapping,
     unix::UnixHostnameResolver,
 };
-use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
+use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, SockType};
 use winapi::{
     shared::ws2def::{AF_INET, AF_INET6},
-    um::winsock2::{SOCK_DGRAM, SOCK_STREAM},
+    um::{
+        sysinfoapi::{
+            ComputerNameDnsDomain, ComputerNameDnsFullyQualified, ComputerNameDnsHostname,
+            ComputerNameNetBIOS, ComputerNamePhysicalDnsDomain,
+            ComputerNamePhysicalDnsFullyQualified, ComputerNamePhysicalDnsHostname,
+            ComputerNamePhysicalNetBIOS,
+        },
+        winsock2::{SOCK_DGRAM, SOCK_STREAM},
+    },
 };
 
-use super::utils::{
-    ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo, intelligent_truncate,
-    validate_buffer_params,
-};
-use crate::PROXY_CONNECTION;
+use super::utils::{ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo, validate_buffer_params};
 
 /// Keep track of managed address info structures for proper cleanup.
 /// Maps pointer addresses to the ManagedAddrInfo objects that own them.
@@ -42,156 +52,168 @@ pub const MAX_COMPUTERNAME_LENGTH: usize = 15;
 /// Reasonable buffer limit for hostname functions to prevent abuse
 pub const REASONABLE_BUFFER_LIMIT: usize = 16 * 8; // Allow for longer DNS names
 
+/// NetBIOS name cache to avoid repeatedly reading Samba config
+static NETBIOS_NAME_CACHE: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Read remote Samba configuration to determine NetBIOS name
+///
+/// This function reads `/etc/samba/smb.conf` from the remote target to extract
+/// the configured NetBIOS name, which is more accurate than hostname truncation.
+pub fn get_remote_netbios_name() -> Option<String> {
+    // Check cache first to avoid repeated file operations
+    if let Ok(cache) = NETBIOS_NAME_CACHE.lock() {
+        if cache.is_some() {
+            return cache.clone();
+        }
+    }
+
+    let netbios_name = read_samba_config().unwrap_or_else(|e| {
+        tracing::debug!(
+            "Failed to read Samba config, using hostname fallback: {}",
+            e
+        );
+        None
+    });
+
+    // Cache the result (even if None)
+    if let Ok(mut cache) = NETBIOS_NAME_CACHE.lock() {
+        *cache = netbios_name.clone();
+    }
+
+    netbios_name
+}
+
+/// Read and parse /etc/samba/smb.conf for NetBIOS name configuration
+fn read_samba_config() -> Result<Option<String>, HostnameResolveError> {
+    tracing::debug!("Reading remote /etc/samba/smb.conf for NetBIOS name");
+
+    match fetch_samba_config_via_proxy() {
+        Ok(netbios_name) => {
+            tracing::debug!("Parsed NetBIOS name from Samba config: {:?}", netbios_name);
+            Ok(netbios_name)
+        }
+        Err(HostnameError::Protocol(_msg)) => Err(HostnameResolveError::RemoteFileError {
+            path: "/etc/samba/smb.conf".to_string(),
+            error: "Remote file operation failed",
+        }),
+        Err(_) => Err(HostnameResolveError::ProxyConnectionUnavailable),
+    }
+}
+
 /// Resolve hostname remotely through mirrord agent (similar to Unix layer's remote_getaddrinfo)
-pub fn remote_dns_resolve(
-    hostname: &str,
-) -> Result<Vec<(String, IpAddr)>, Box<dyn std::error::Error>> {
+pub fn remote_dns_resolve(hostname: &str) -> Result<Vec<(String, IpAddr)>, HostnameResolveError> {
     tracing::debug!("Performing remote DNS resolution for: {}", hostname);
 
-    let request = GetAddrInfoRequestV2 {
-        node: hostname.to_string(),
-        service_port: 0,
-        flags: 0,
-        family: AddressFamily::Any,
-        socktype: SockType::Any,
-        protocol: 0,
-    };
-
-    // Use the Windows proxy connection directly
-    let response = unsafe {
-        let proxy_connection = PROXY_CONNECTION
-            .get()
-            .ok_or("Proxy connection not available")?;
-
-        proxy_connection
-            .make_request_with_response(request)
-            .map_err(|e| format!("Proxy request failed: {:?}", e))?
-    };
-
-    let addr_info_list = response
-        .0
-        .map_err(|e| format!("Remote DNS resolution failed: {:?}", e))?;
-
-    // Update reverse mapping cache using the unified implementation
-    for lookup in addr_info_list.iter() {
-        update_dns_reverse_mapping(lookup.ip, lookup.name.clone());
-    }
-
-    Ok(addr_info_list
-        .into_iter()
-        .map(|LookupRecord { name, ip }| (name, ip))
-        .collect())
-}
-
-/// Truncates hostname to fit within MAX_COMPUTERNAME_LENGTH, preserving important parts
-fn truncate_to_computer_name_length(hostname: &str) -> String {
-    // Extract the first component if it's a FQDN
-    if let Some(first_part) = hostname.split('.').next()
-        && first_part.len() <= MAX_COMPUTERNAME_LENGTH
-        && !first_part.is_empty()
-    {
-        return first_part.to_string();
-    }
-
-    // If hostname is too long, use intelligent truncation
-    if hostname.len() > MAX_COMPUTERNAME_LENGTH {
-        return intelligent_truncate(hostname, MAX_COMPUTERNAME_LENGTH);
-    }
-
-    hostname.to_string()
-}
-
-/// Attempts to get a DNS resolvable hostname using remote resolver
-/// Returns None if resolution fails or hostname is not DNS resolvable
-pub fn get_dns_hostname_with_resolver(hostname: &str) -> Option<String> {
-    use std::net::IpAddr;
-
-    // Try to parse as IP address first - if it's already an IP, we can't use it as a hostname
-    if hostname.parse::<IpAddr>().is_ok() {
-        tracing::debug!("Input '{}' is an IP address, not a hostname", hostname);
-        return None;
-    }
-
-    // Validate hostname length for safety
-    if hostname.is_empty() || hostname.len() > 1024 {
-        tracing::debug!("Invalid hostname length: {}", hostname.len());
-        return None;
-    }
-
-    // Try to resolve the hostname using remote DNS resolution through mirrord agent
-    match remote_dns_resolve(hostname) {
+    match remote_dns_resolve_via_proxy(hostname) {
         Ok(results) => {
-            if !results.is_empty() {
-                tracing::debug!("Remote DNS resolution successful for '{}'", hostname);
-                Some(hostname.to_string())
-            } else {
-                tracing::debug!(
-                    "Remote DNS resolution returned no results for '{}'",
-                    hostname
-                );
-                // Even if resolution fails, we can still provide a meaningful DNS name
-                // This is important for cases where the hostname exists in the cluster
-                Some(truncate_to_computer_name_length(hostname))
+            // Update reverse mapping cache using the unified implementation
+            for (name, ip) in results.iter() {
+                update_dns_reverse_mapping(*ip, name.clone());
             }
+            Ok(results)
         }
-        Err(e) => {
-            tracing::debug!("Remote DNS resolution failed for '{}': {}", hostname, e);
-
-            // Fallback: try local resolution as last resort
-            match std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:0", hostname)) {
-                Ok(mut addrs) => {
-                    if let Some(addr) = addrs.next() {
-                        let ip = addr.ip();
-                        tracing::debug!(
-                            "Local fallback resolution successful: '{}' -> {}",
-                            hostname,
-                            ip
-                        );
-                        Some(hostname.to_string())
-                    } else {
-                        Some(truncate_to_computer_name_length(hostname))
-                    }
-                }
-                Err(_) => {
-                    // Even if all resolution fails, provide a meaningful DNS name
-                    Some(truncate_to_computer_name_length(hostname))
-                }
-            }
-        }
+        Err(HostnameError::Protocol(_msg)) => Err(HostnameResolveError::DnsResolutionFailed {
+            hostname: hostname.to_string(),
+            details: "Remote DNS resolution failed",
+        }),
+        Err(_) => Err(HostnameResolveError::ProxyConnectionUnavailable),
     }
 }
 
 /// Get hostname using the Unix hostname resolver (works for Windows too since target is Linux)
 pub fn get_hostname_with_resolver() -> HostnameResult {
-    unsafe {
-        match PROXY_CONNECTION.get() {
-            Some(proxy) => {
-                tracing::debug!("ProxyConnection found, using remote resolver");
-                let resolver = UnixHostnameResolver::remote(proxy);
-                let result = get_hostname(&resolver);
-                tracing::debug!("Remote hostname resolver result: {:?}", result);
-                result
-            }
-            None => {
-                tracing::warn!("ProxyConnection not initialized, falling back to local hostname");
-                HostnameResult::UseLocal
-            }
+    match PROXY_CONNECTION.get() {
+        Some(proxy) => {
+            tracing::debug!("ProxyConnection found, using remote resolver");
+            let resolver = UnixHostnameResolver::remote(proxy);
+            let result = get_hostname(&resolver);
+            tracing::debug!("Remote hostname resolver result: {:?}", result);
+            result
+        }
+        None => {
+            tracing::warn!("ProxyConnection not initialized, falling back to local hostname");
+            HostnameResult::UseLocal
         }
     }
 }
 
-/// Helper function to get DNS hostname with fallback using remote resolver
-pub fn get_hostname_with_fallback() -> Option<String> {
-    match get_hostname_with_resolver() {
-        HostnameResult::Success(hostname) => {
-            let hostname_str = hostname.to_string_lossy();
+/// Get hostname for specific Windows computer name type
+///
+/// This function handles the logic for determining what hostname to return
+/// based on the Windows GetComputerNameEx name_type parameter.
+///
+/// Returns None if the hostname feature is disabled or if no hostname is available.
+pub fn get_hostname_for_name_type(name_type: u32) -> Option<String> {
+    // Check if hostname feature is enabled
+    let hostname_enabled = layer_setup().layer_config().feature.hostname;
+    if !hostname_enabled {
+        tracing::debug!("Hostname feature disabled for name_type {}", name_type);
+        return None;
+    }
 
-            // Use the new resolver-based DNS hostname function
+    match name_type {
+        ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => {
+            // Try to get NetBIOS name from Samba configuration first
+            if let Some(netbios_name) = get_remote_netbios_name() {
+                if !netbios_name.is_empty() {
+                    let result = netbios_name.to_uppercase();
+                    tracing::debug!(
+                        "Got NetBIOS name from Samba config for name_type {}: '{}'",
+                        name_type,
+                        result
+                    );
+                    return Some(result);
+                }
+            }
 
-            get_dns_hostname_with_resolver(&hostname_str)
-                .or_else(|| Some(intelligent_truncate(&hostname_str, MAX_COMPUTERNAME_LENGTH)))
+            // Try regular hostname resolution for NetBIOS
+            match get_hostname_with_resolver() {
+                HostnameResult::Success(hostname_cstring) => {
+                    let hostname = hostname_cstring.to_string_lossy().to_string();
+                    let netbios = hostname.to_uppercase();
+                    tracing::debug!(
+                        "Got NetBIOS name from hostname resolution for name_type {}: '{}'",
+                        name_type,
+                        netbios
+                    );
+                    Some(netbios)
+                }
+                _ => {
+                    tracing::debug!("No NetBIOS name available for name_type {}", name_type);
+                    None // Let original Windows function handle if remote resolution fails
+                }
+            }
         }
-        HostnameResult::UseLocal | HostnameResult::Error(_) => None,
+        ComputerNameDnsHostname
+        | ComputerNameDnsFullyQualified
+        | ComputerNamePhysicalDnsHostname
+        | ComputerNamePhysicalDnsFullyQualified => {
+            // Use regular hostname for DNS types
+            match get_hostname_with_resolver() {
+                HostnameResult::Success(dns_cstring) => {
+                    let dns_name = dns_cstring.to_string_lossy().to_string();
+                    tracing::debug!(
+                        "Got DNS hostname for name_type {}: '{}'",
+                        name_type,
+                        dns_name
+                    );
+                    Some(dns_name)
+                }
+                _ => {
+                    tracing::debug!("No DNS hostname available for name_type {}", name_type);
+                    None // Let original Windows function handle if remote resolution fails
+                }
+            }
+        }
+        ComputerNameDnsDomain | ComputerNamePhysicalDnsDomain => {
+            // Domain variants - return empty string (no domain info available)
+            tracing::debug!("Returning empty domain name for name_type {}", name_type);
+            Some(String::new())
+        }
+        _ => {
+            tracing::debug!("Unsupported name_type: {}", name_type);
+            None
+        }
     }
 }
 
@@ -208,7 +230,7 @@ where
     tracing::debug!("{} hook called", function_name);
 
     // Check if hostname feature is enabled
-    let hostname_enabled = crate::layer_setup().layer_config().feature.hostname;
+    let hostname_enabled = layer_setup().layer_config().feature.hostname;
     tracing::debug!(
         "{}: hostname feature enabled: {}",
         function_name,
@@ -218,8 +240,10 @@ where
     if hostname_enabled
         && let Some(buffer_size) =
             validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
-        && let Some(dns_name) = get_hostname_with_fallback()
+        && let HostnameResult::Success(dns_cstring) = get_hostname_with_resolver()
     {
+        // Try to get remote hostname
+        let dns_name = dns_cstring.to_string_lossy().to_string();
         let hostname_bytes = dns_name.as_bytes();
         let hostname_with_null: Vec<u8> = hostname_bytes.to_vec();
 
@@ -263,7 +287,7 @@ where
     tracing::debug!("{} hook called", function_name);
 
     // Check if hostname feature is enabled
-    let hostname_enabled = crate::layer_setup().layer_config().feature.hostname;
+    let hostname_enabled = layer_setup().layer_config().feature.hostname;
     tracing::debug!(
         "{}: hostname feature enabled: {}",
         function_name,
@@ -273,8 +297,10 @@ where
     if hostname_enabled
         && let Some(buffer_size) =
             validate_buffer_params(lpBuffer as *mut u8, nSize, REASONABLE_BUFFER_LIMIT)
-        && let Some(dns_name) = get_hostname_with_fallback()
+        && let HostnameResult::Success(dns_cstring) = get_hostname_with_resolver()
     {
+        // Try to get remote hostname
+        let dns_name = dns_cstring.to_string_lossy().to_string();
         let dns_utf16: Vec<u16> = dns_name.encode_utf16().collect();
 
         if dns_utf16.len() <= buffer_size && !lpBuffer.is_null() && buffer_size > 0 {
@@ -320,7 +346,7 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
 
     // Check if we should resolve this hostname remotely using the DNS selector
     let should_resolve_remotely = {
-        let result = crate::layer_setup()
+        let result = layer_setup()
             .dns_selector()
             .should_resolve_remotely(hostname, 0);
         tracing::debug!(
@@ -377,21 +403,6 @@ pub fn resolve_hostname_with_fallback(hostname: &str) -> Option<CString> {
     CString::new("127.0.0.1").ok()
 }
 
-/// Helper function to make proxy request with response (Windows version)
-pub fn make_windows_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
-where
-    T: mirrord_intproxy_protocol::IsLayerRequestWithResponse + std::fmt::Debug,
-    T::Response: std::fmt::Debug,
-{
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(|err| HookError::from(err))
-    }
-}
-
 /// Windows-specific implementation of GetAddrInfo using mirrord's remote DNS resolution.
 ///
 /// This function handles the complete GetAddrInfo workflow including service ports,
@@ -420,7 +431,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
 
     // Check DNS selector to determine if this should be resolved remotely
     let should_resolve_remotely = {
-        let result = crate::layer_setup()
+        let result = layer_setup()
             .dns_selector()
             .should_resolve_remotely(&node, port);
         tracing::debug!("DNS selector check for '{}': {}", node, result);
@@ -472,7 +483,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
         flags: 0,
     };
 
-    let response = make_windows_proxy_request_with_response(request)?;
+    let response = make_proxy_request_with_response(request)?;
     // Convert response back to Windows ADDRINFO structures using trait method
     Ok(ManagedAddrInfo::<T>::try_from(response)?)
 }
@@ -506,19 +517,6 @@ pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_truncate_to_computer_name_length() {
-        // Test FQDN extraction
-        let fqdn = "test-pod.default.svc.cluster.local";
-        let truncated = truncate_to_computer_name_length(&fqdn);
-        assert_eq!(truncated, "test-pod");
-
-        // Test already short hostname
-        let short = "short";
-        let truncated_short = truncate_to_computer_name_length(&short);
-        assert_eq!(truncated_short, "short");
-    }
 
     #[test]
     fn test_remote_hostname_detection() {

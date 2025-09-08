@@ -9,8 +9,8 @@ use std::{ffi::CString, path::PathBuf};
 use tracing::trace;
 
 use crate::{
+    common::proxy_connection::ProxyConnection,
     hostname::{HostnameError, HostnameResolver, HostnameResult},
-    proxy_connection::ProxyConnection,
 };
 
 /// Unix-specific hostname resolver that fetches hostname from remote /etc/hostname

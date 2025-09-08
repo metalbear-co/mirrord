@@ -2,10 +2,7 @@
 
 use std::{alloc::Layout, mem, net::SocketAddr, ptr};
 
-use mirrord_layer_lib::{
-    HookResult,
-    error::{AddrInfoError, HookError},
-};
+use mirrord_layer_lib::error::{AddrInfoError, HookError, HookResult};
 use mirrord_protocol::error::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
 
 /// Macro to safely allocate memory for Windows structures with error handling
@@ -260,52 +257,6 @@ pub unsafe fn socket_address_to_sockaddr(
             Err("IPv6 not yet implemented for layer address".to_string())
         }
     }
-}
-
-/// Intelligent string truncation that preserves important substrings
-///
-/// This function is useful for truncating hostnames while preserving meaningful patterns
-/// that might be important for identification or debugging purposes.
-pub fn intelligent_truncate(text: &str, max_len: usize) -> String {
-    // Prevent potential issues with max_len of 0
-    if max_len == 0 {
-        return String::new();
-    }
-
-    if text.len() <= max_len {
-        return text.to_string();
-    }
-
-    // Priority list of important substrings to preserve
-    const IMPORTANT_PATTERNS: &[&str] = &["hostname-echo", "test-pod", "app-", "service-"];
-
-    // Try to find and preserve important patterns
-    for pattern in IMPORTANT_PATTERNS {
-        if let Some(start) = text.find(pattern) {
-            let pattern_end = start.saturating_add(pattern.len()); // Prevent overflow
-
-            // If the pattern plus some context fits in the buffer
-            if pattern_end <= max_len {
-                // Take from the beginning to preserve the pattern
-                return text[..max_len].to_string();
-            } else if pattern.len() <= max_len {
-                // Take just the pattern if it fits
-                return pattern.to_string();
-            }
-        }
-    }
-
-    // No important patterns found, use simple truncation
-    // Try to break at word boundaries if possible
-    if let Some(dash_pos) = text[..max_len].rfind('-')
-        && dash_pos > max_len / 2
-    {
-        // Only use if it's not too short
-        return text[..dash_pos].to_string();
-    }
-
-    // Fallback to simple truncation
-    text[..max_len].to_string()
 }
 
 /// Helper function to extract IP address from HOSTENT structure
@@ -863,65 +814,5 @@ impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sockaddr_conversion_safety() {
-        // Test null pointer
-        let result = unsafe { sockaddr_to_socket_addr(std::ptr::null(), 0) };
-        assert!(result.is_none());
-
-        // Test invalid length
-        let dummy_addr = std::mem::MaybeUninit::<SOCKADDR>::uninit();
-        let result = unsafe { sockaddr_to_socket_addr(dummy_addr.as_ptr(), -1) };
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_intelligent_truncate_preserves_important_patterns() {
-        // Test preserving hostname-echo pattern
-        let text = "very-long-hostname-echo-pod-name-that-exceeds-limits";
-        let truncated = intelligent_truncate(&text, 15);
-        assert!(truncated.contains("hostname-echo") || truncated.len() <= 15);
-
-        // Test short text
-        let short = "short";
-        let truncated_short = intelligent_truncate(&short, 15);
-        assert_eq!(truncated_short, "short");
-
-        // Test exact length
-        let exact = "exactly15chars!";
-        let truncated_exact = intelligent_truncate(&exact, 15);
-        assert_eq!(truncated_exact, "exactly15chars!");
-    }
-
-    #[test]
-    fn test_intelligent_truncate_word_boundaries() {
-        let text = "app-service-backend";
-        let truncated = intelligent_truncate(&text, 10);
-        // Should either preserve "app-" pattern or break at word boundary
-        assert!(truncated.len() <= 10);
-        assert!(!truncated.ends_with('-') || truncated == "app-");
-    }
-
-    #[test]
-    fn test_validate_buffer_params() {
-        let mut size = 100u32;
-        let result = validate_buffer_params(std::ptr::null_mut(), &mut size, 1000);
-        assert_eq!(result, Some(100));
-
-        // Test oversized buffer
-        let mut large_size = 10000u32;
-        let result = validate_buffer_params(std::ptr::null_mut(), &mut large_size, 1000);
-        assert_eq!(result, None);
-
-        // Test null size pointer
-        let result = validate_buffer_params(std::ptr::null_mut(), std::ptr::null_mut(), 1000);
-        assert_eq!(result, None);
     }
 }

@@ -16,8 +16,7 @@ use winapi::um::winsock2::SOCKET;
 
 use super::sockets::set_socket_state;
 use crate::{
-    HookError, HookResult,
-    error::ConnectError,
+    error::{ConnectError, HookError, HookResult},
     socket::{Connected, SOCKETS, SocketState, UserSocket},
 };
 

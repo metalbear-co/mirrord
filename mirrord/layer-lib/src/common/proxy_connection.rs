@@ -3,10 +3,9 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    io,
     net::{SocketAddr, TcpStream},
     sync::{
-        Mutex, PoisonError,
+        Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -15,33 +14,13 @@ use std::{
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
-    codec::{self, CodecError, SyncDecoder, SyncEncoder},
+    codec::{self, SyncDecoder, SyncEncoder},
 };
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum ProxyError {
-    #[error("{0}")]
-    CodecError(#[from] CodecError),
-    #[error("connection closed")]
-    ConnectionClosed,
-    #[error("unexpected response: {0:?}")]
-    UnexpectedResponse(ProxyToLayerMessage),
-    #[error("critical error: {0}")]
-    ProxyFailure(String),
-    #[error("connection lock poisoned")]
-    LockPoisoned,
-    #[error("{0}")]
-    IoFailed(#[from] io::Error),
-}
+use crate::error::{HookError, HookResult, ProxyError, ProxyResult};
 
-impl<T> From<PoisonError<T>> for ProxyError {
-    fn from(_value: PoisonError<T>) -> Self {
-        Self::LockPoisoned
-    }
-}
-
-pub type Result<T> = core::result::Result<T, ProxyError>;
+/// Global proxy connection instance, shared across the layer
+pub static PROXY_CONNECTION: std::sync::OnceLock<ProxyConnection> = std::sync::OnceLock::new();
 
 #[derive(Debug)]
 pub struct ProxyConnection {
@@ -57,7 +36,7 @@ impl ProxyConnection {
         proxy_addr: SocketAddr,
         session: NewSessionRequest,
         timeout: Duration,
-    ) -> Result<Self> {
+    ) -> ProxyResult<Self> {
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
@@ -82,7 +61,7 @@ impl ProxyConnection {
             sender: Mutex::new(sender),
             responses: Mutex::new(responses),
             next_message_id: AtomicU64::new(1),
-            layer_id: *layer_id,
+            layer_id: layer_id.clone(),
             proxy_addr,
         })
     }
@@ -91,7 +70,7 @@ impl ProxyConnection {
         self.next_message_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn send(&self, message: LayerToProxyMessage) -> Result<MessageId> {
+    pub fn send(&self, message: LayerToProxyMessage) -> ProxyResult<MessageId> {
         let message_id = self.next_message_id();
         let message = LocalMessage {
             message_id,
@@ -105,7 +84,7 @@ impl ProxyConnection {
         Ok(message_id)
     }
 
-    pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
+    pub fn receive(&self, response_id: u64) -> ProxyResult<ProxyToLayerMessage> {
         let response = self.responses.lock()?.receive(response_id)?;
         match response {
             ProxyToLayerMessage::ProxyFailed(error_msg) => Err(ProxyError::ProxyFailure(error_msg)),
@@ -113,7 +92,7 @@ impl ProxyConnection {
         }
     }
 
-    pub fn make_request_with_response<T>(&self, request: T) -> Result<T::Response>
+    pub fn make_request_with_response<T>(&self, request: T) -> ProxyResult<T::Response>
     where
         T: IsLayerRequestWithResponse + Debug,
         T::Response: Debug,
@@ -126,7 +105,7 @@ impl ProxyConnection {
     pub fn make_request_no_response<T: IsLayerRequest + Debug>(
         &self,
         request: T,
-    ) -> Result<MessageId> {
+    ) -> ProxyResult<MessageId> {
         self.send(request.wrap())
     }
 
@@ -153,7 +132,7 @@ impl ResponseManager {
         }
     }
 
-    fn receive(&mut self, response_id: u64) -> Result<ProxyToLayerMessage> {
+    fn receive(&mut self, response_id: u64) -> ProxyResult<ProxyToLayerMessage> {
         if let Some(response) = self.outstanding_responses.remove(&response_id) {
             return Ok(response);
         }
@@ -172,4 +151,31 @@ impl ResponseManager {
                 .insert(response.message_id, response.inner);
         }
     }
+}
+
+/// Generic helper to make proxy requests with consistent error handling
+pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
+{
+    PROXY_CONNECTION
+        .get()
+        .ok_or(HookError::CannotGetProxyConnection)?
+        .make_request_with_response(request)
+        .map_err(HookError::ProxyError)
+}
+
+/// Generic helper function to proxy a request that might have a large response to mirrord intproxy.
+/// Blocks until the request is sent.
+pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
+    request: T,
+) -> HookResult<MessageId> {
+    // SAFETY: mutation happens only on initialization.
+    #[allow(static_mut_refs)]
+    PROXY_CONNECTION
+        .get()
+        .ok_or(HookError::CannotGetProxyConnection)?
+        .make_request_no_response(request)
+        .map_err(Into::into)
 }
