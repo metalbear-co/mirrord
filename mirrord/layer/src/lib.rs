@@ -17,7 +17,7 @@
 //! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
 //! remote context.
 //!
-//! Check out the [Introduction](https://metalbear.co/mirrord/docs/overview/introduction/) guide to learn
+//! Check out the [Introduction](https://metalbear.com/mirrord/docs/overview/introduction/) guide to learn
 //! more about mirrord.
 //!
 //! ## How it works
@@ -62,7 +62,7 @@
 //!
 //! The functions we intercept are controlled via the `mirrord-config` crate, check its
 //! documentation for more details, or
-//! [Configuration](https://metalbear.co/mirrord/docs/reference/configuration/) for usage information.
+//! [Configuration](https://metalbear.com/mirrord/docs/reference/configuration/) for usage information.
 
 extern crate alloc;
 extern crate core;
@@ -556,11 +556,11 @@ fn sip_only_layer_start(
         readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
     };
     let debugger_ports = DebuggerPorts::from_env();
-    let setup = LayerSetup::new(config, debugger_ports, true);
+    let layer_setup = LayerSetup::new(config, debugger_ports, true);
 
-    SETUP.set(setup).expect("SETUP set failed");
+    SETUP.set(layer_setup).expect("SETUP set failed");
 
-    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -651,7 +651,7 @@ fn enable_hooks(state: &LayerSetup) {
     }
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, state) };
     }
 
     #[cfg(all(

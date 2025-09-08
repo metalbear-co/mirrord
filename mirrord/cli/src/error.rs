@@ -30,9 +30,9 @@ const GENERAL_HELP: &str = r#"
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.com/slack and request help in #mirrord-help
 
->> Or email us at hi@metalbear.co
+>> Or email us at hi@metalbear.com
 
 "#;
 
@@ -40,9 +40,9 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.com/slack and request help in #mirrord-help
 
->> Or email us at hi@metalbear.co
+>> Or email us at hi@metalbear.com
 
 "#;
 
@@ -325,7 +325,7 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -344,17 +344,17 @@ pub(crate) enum CliError {
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
-    Please remember that some features are supported only when using mirrord operator (https://metalbear.co/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
+    Please remember that some features are supported only when using mirrord operator (https://metalbear.com/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]
     #[diagnostic(help(
-        "If the problem refers to mirrord operator license, visit https://app.metalbear.co to manage or renew your license.{GENERAL_HELP}"
+        "If the problem refers to mirrord operator license, visit https://app.metalbear.com to manage or renew your license.{GENERAL_HELP}"
     ))]
     OperatorApiForbidden(OperatorOperation, String),
 
     #[error(
-        "mirrord operator license expired. Visit https://app.metalbear.co to renew your license"
+        "mirrord operator license expired. Visit https://app.metalbear.com to renew your license"
     )]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorLicenseExpired,
@@ -376,7 +376,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.co/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
@@ -446,6 +446,9 @@ pub(crate) enum CliError {
 
     #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
     OperatorCopyTargetFailed { message: Option<String> },
+
+    #[error("operator operation timed out: {}", operation)]
+    OperatorOperationTimeout { operation: String },
 }
 
 impl CliError {
@@ -528,6 +531,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CopiedTargetFailed { message } => {
                 Self::OperatorCopyTargetFailed { message }
             }
+            OperatorApiError::OperationTimeout { operation } => Self::OperatorOperationTimeout {
+                operation: operation.to_string(),
+            },
         }
     }
 }
