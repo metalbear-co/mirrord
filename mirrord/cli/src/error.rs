@@ -1,5 +1,7 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+#[cfg(target_os = "windows")]
+use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
@@ -21,10 +23,6 @@ use crate::{
     port_forward::PortForwardError,
     profile::ProfileError,
 };
-
-#[cfg(target_os = "windows")]
-use ::windows::core as windows_core;
-
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 

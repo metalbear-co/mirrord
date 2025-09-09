@@ -132,7 +132,8 @@ impl<'a> UnixHostnameResolver<'a> {
         // Read the hostname content
         let read_request = ReadFileRequest {
             remote_fd: fd,
-            buffer_size: 256, // Should be enough for a hostname
+            // Should be enough for a hostname
+            buffer_size: 256,
         };
 
         let read_response = match proxy.make_request_with_response(read_request) {

@@ -442,7 +442,8 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                     use std::net::ToSocketAddrs;
                     match (name.as_str(), *port).to_socket_addrs() {
                         Ok(addresses) => addresses.map(|addr| addr.ip()).collect(),
-                        Err(_) => vec![], // No records found
+                        // No records found
+                        Err(_) => vec![],
                     }
                 };
 

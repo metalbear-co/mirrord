@@ -50,7 +50,8 @@ pub static MANAGED_ADDRINFO: LazyLock<Mutex<std::collections::HashMap<usize, Man
 pub const MAX_COMPUTERNAME_LENGTH: usize = 15;
 
 /// Reasonable buffer limit for hostname functions to prevent abuse
-pub const REASONABLE_BUFFER_LIMIT: usize = 16 * 8; // Allow for longer DNS names
+///  // Allow for longer DNS names
+pub const REASONABLE_BUFFER_LIMIT: usize = 16 * 8;
 
 /// NetBIOS name cache to avoid repeatedly reading Samba config
 static NETBIOS_NAME_CACHE: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
@@ -257,12 +258,14 @@ where
                 *nSize = (hostname_with_null.len() - 1) as u32;
             }
             tracing::debug!("{} returning DNS hostname: {}", function_name, dns_name);
-            return 1; // TRUE - Success
+            // TRUE - Success
+            return 1;
         } else if hostname_with_null.len() <= u32::MAX as usize {
             unsafe {
                 *nSize = (hostname_with_null.len() - 1) as u32;
             }
-            return 0; // FALSE - Buffer too small
+            // FALSE - Buffer too small
+            return 0;
         }
     }
 
@@ -309,12 +312,14 @@ where
                 *nSize = (dns_utf16.len() - 1) as u32;
             }
             tracing::debug!("{} returning DNS hostname: {}", function_name, dns_name);
-            return 1; // TRUE - Success
+            // TRUE - Success
+            return 1;
         } else if dns_utf16.len() <= u32::MAX as usize {
             unsafe {
                 *nSize = (dns_utf16.len() - 1) as u32;
             }
-            return 0; // FALSE - Buffer too small
+            // FALSE - Buffer too small
+            return 0;
         }
     }
 

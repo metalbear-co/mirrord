@@ -161,7 +161,8 @@ type WSASocketWType = unsafe extern "system" fn(
     af: i32,
     socket_type: i32,
     protocol: i32,
-    lpProtocolInfo: *mut u16, // LPWSAPROTOCOL_INFOW
+    // LPWSAPROTOCOL_INFOW
+    lpProtocolInfo: *mut u16,
     g: u32,
     dwFlags: u32,
 ) -> SOCKET;
@@ -563,7 +564,8 @@ unsafe extern "system" fn getsockname_detour(
                         "getsockname_detour -> returned mirrord bound address: {}",
                         bound_addr
                     );
-                    return 0; // Success
+                    // Success
+                    return 0;
                 }
                 Err(error_code) => {
                     tracing::debug!(
@@ -580,7 +582,8 @@ unsafe extern "system" fn getsockname_detour(
         match unsafe { addr_to_return.to_sockaddr_checked(name, namelen) } {
             Ok(()) => {
                 tracing::trace!("getsockname_detour -> returned mirrord local address");
-                return 0; // Success
+                // Success
+                return 0;
             }
             Err(e) => {
                 tracing::debug!(
@@ -618,7 +621,8 @@ unsafe extern "system" fn getpeername_detour(
         match unsafe { remote_addr.to_sockaddr_checked(name, namelen) } {
             Ok(()) => {
                 tracing::trace!("getpeername_detour -> returned mirrord remote address");
-                return 0; // Success
+                // Success
+                return 0;
             }
             Err(e) => {
                 tracing::debug!(
@@ -1228,7 +1232,8 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
                     "gethostname: returning remote hostname: '{}'",
                     remote_hostname
                 );
-                return 0; // Success
+                // Success
+                return 0;
             }
             _ => {
                 tracing::error!("gethostname: no remote hostname available");
@@ -1296,7 +1301,8 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
         unsafe {
             SetLastError(ERROR_INVALID_PARAMETER);
         }
-        return 0; // FALSE
+        // FALSE
+        return 0;
     }
 
     // Handle invalid name_type (ComputerNameMax and beyond)
@@ -1304,7 +1310,8 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
         unsafe {
             SetLastError(ERROR_INVALID_PARAMETER);
         }
-        return 0; // FALSE
+        // FALSE
+        return 0;
     }
 
     // For hostname-related types that Python uses, try to return our remote hostname
@@ -1341,7 +1348,8 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
         };
 
         let dns_bytes = hostname_to_return.as_bytes();
-        let required_size = dns_bytes.len(); // Size without null terminator
+        // Size without null terminator
+        let required_size = dns_bytes.len();
         let current_buffer_size = unsafe { *nSize } as usize;
 
         tracing::debug!(
@@ -1356,7 +1364,8 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
         if current_buffer_size <= required_size {
             // Buffer too small - set required size and return ERROR_MORE_DATA
             unsafe {
-                *nSize = (required_size + 1) as u32; // Include null terminator in required size
+                // Include null terminator in required size
+                *nSize = (required_size + 1) as u32;
             }
             tracing::debug!(
                 "GetComputerNameExA: buffer too small for name_type {}, need {} chars, have {}",
@@ -1367,7 +1376,8 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
             unsafe {
                 SetLastError(ERROR_MORE_DATA);
             }
-            return 0; // FALSE
+            // FALSE
+            return 0;
         }
 
         // Buffer is large enough - copy the hostname
@@ -1380,7 +1390,8 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
                 );
                 // Add null terminator - safe because we verified buffer size above
                 *(lpBuffer.add(dns_bytes.len())) = 0;
-                *nSize = required_size as u32; // Set actual length (excluding null terminator)
+                // Set actual length (excluding null terminator)
+                *nSize = required_size as u32;
             }
             tracing::debug!(
                 "GetComputerNameExA: returning remote hostname for name_type {}: '{}' ({} chars)",
@@ -1388,13 +1399,15 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
                 hostname_to_return,
                 required_size
             );
-            return 1; // TRUE - Success
+            // TRUE - Success
+            return 1;
         } else {
             // Invalid buffer pointer
             unsafe {
                 SetLastError(ERROR_INVALID_PARAMETER);
             }
-            return 0; // FALSE
+            // FALSE
+            return 0;
         }
     }
 
@@ -1411,7 +1424,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
     lpBuffer: *mut u16,
     nSize: *mut u32,
 ) -> i32 {
-    const ERROR_MORE_DATA: u32 = 234; // 0x000000EA
+    // 0x000000EA
+    const ERROR_MORE_DATA: u32 = 234;
     const ERROR_INVALID_PARAMETER: u32 = 87;
 
     // Validate input parameters first
@@ -1419,7 +1433,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
         unsafe {
             SetLastError(ERROR_INVALID_PARAMETER);
         }
-        return 0; // FALSE
+        // FALSE
+        return 0;
     }
 
     // Handle valid name types (0-7)
@@ -1463,7 +1478,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
             if current_buffer_size <= required_size {
                 // Buffer too small - set required size and return ERROR_MORE_DATA
                 unsafe {
-                    *nSize = (required_size + 1) as u32; // Include null terminator
+                    // Include null terminator
+                    *nSize = (required_size + 1) as u32;
                 }
                 tracing::debug!(
                     "GetComputerNameExW: buffer too small, need {} chars, have {}",
@@ -1471,7 +1487,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
                     current_buffer_size
                 );
                 unsafe { SetLastError(ERROR_MORE_DATA) };
-                return 0; // FALSE
+                // FALSE
+                return 0;
             }
 
             // Buffer is large enough - copy the hostname
@@ -1480,7 +1497,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
                     std::ptr::copy_nonoverlapping(name_utf16.as_ptr(), lpBuffer, name_utf16.len());
                     // Add UTF-16 null terminator - safe because we verified buffer size above
                     *(lpBuffer.add(name_utf16.len())) = 0;
-                    *nSize = name_utf16.len() as u32; // Set actual length (excluding null terminator)
+                    // Set actual length (excluding null terminator)
+                    *nSize = name_utf16.len() as u32;
                 }
                 tracing::debug!(
                     "GetComputerNameExW: returning remote hostname for type {}: '{}' ({} chars)",
@@ -1488,13 +1506,15 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
                     result_name,
                     name_utf16.len()
                 );
-                return 1; // TRUE - Success
+                // TRUE - Success
+                return 1;
             } else {
                 // Invalid buffer pointer
                 unsafe {
                     SetLastError(ERROR_INVALID_PARAMETER);
                 }
-                return 0; // FALSE
+                // FALSE
+                return 0;
             }
         }
 
@@ -1660,7 +1680,8 @@ unsafe extern "system" fn getaddrinfow_detour(
                 .lock()
                 .expect("MANAGED_ADDRINFO lock failed")
                 .insert(result_ptr as usize, ManagedAddrInfoAny::W(managed_result));
-            return 0; // Success
+            // Success
+            return 0;
         }
         Err(e) => {
             tracing::warn!(

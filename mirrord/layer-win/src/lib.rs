@@ -77,7 +77,8 @@ fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
     // Create Windows-specific process info
     let process_info = mirrord_intproxy_protocol::ProcessInfo {
         pid: unsafe { GetCurrentProcessId() as i32 },
-        parent_pid: 0, // We don't need parent PID for Windows layer
+        // We don't need parent PID for Windows layer
+        parent_pid: 0,
         name: std::env::current_exe()
             .ok()
             .and_then(|path| path.file_name()?.to_str().map(String::from))

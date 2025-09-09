@@ -164,20 +164,23 @@ pub unsafe fn socketaddr_to_windows_sockaddr(
     namelen: *mut INT,
 ) -> Result<(), i32> {
     if name.is_null() || namelen.is_null() {
-        return Err(10014); // WSAEFAULT
+        // WSAEFAULT
+        return Err(10014);
     }
 
     // Additional safety check for namelen dereference
     let name_len_value = unsafe { *namelen };
     if name_len_value < 0 {
-        return Err(10014); // WSAEFAULT - invalid length
+        // WSAEFAULT - invalid length
+        return Err(10014);
     }
 
     match addr {
         SocketAddr::V4(addr_v4) => {
             let size = std::mem::size_of::<SOCKADDR_IN>() as INT;
             if name_len_value < size {
-                return Err(10014); // WSAEFAULT - buffer too small
+                // WSAEFAULT - buffer too small
+                return Err(10014);
             }
 
             let mut sockaddr_in: SOCKADDR_IN = unsafe { std::mem::zeroed() };
@@ -201,7 +204,8 @@ pub unsafe fn socketaddr_to_windows_sockaddr(
         SocketAddr::V6(addr_v6) => {
             let size = std::mem::size_of::<SOCKADDR_IN6>() as INT;
             if name_len_value < size {
-                return Err(10014); // WSAEFAULT - buffer too small
+                // WSAEFAULT - buffer too small
+                return Err(10014);
             }
 
             let mut sockaddr_in6: SOCKADDR_IN6 = unsafe { std::mem::zeroed() };
@@ -688,7 +692,8 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
 
                     unsafe {
                         (*sockaddr_in_ptr).sin_family = AF_INET as u16;
-                        (*sockaddr_in_ptr).sin_port = 0; // Port not available in LookupRecord
+                        // Port not available in LookupRecord
+                        (*sockaddr_in_ptr).sin_port = 0;
                         *(*sockaddr_in_ptr).sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
                         ptr::write_bytes((*sockaddr_in_ptr).sin_zero.as_mut_ptr(), 0, 8);
                     }
@@ -705,7 +710,8 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
 
                     unsafe {
                         (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;
-                        (*sockaddr_in6_ptr).sin6_port = 0; // Port not available in LookupRecord
+                        // Port not available in LookupRecord
+                        (*sockaddr_in6_ptr).sin6_port = 0;
                         (*sockaddr_in6_ptr).sin6_flowinfo = 0;
                         *(*sockaddr_in6_ptr).sin6_addr.u.Byte_mut() = ipv6.octets();
                         // Note: sin6_scope_id field may not be available in this Windows API

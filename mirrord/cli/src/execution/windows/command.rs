@@ -7,8 +7,6 @@ use std::{
     ptr,
 };
 
-use str_win::string_to_u16_buffer;
-
 use ::windows::{
     Win32::{
         Foundation::{
@@ -23,6 +21,7 @@ use ::windows::{
     },
     core::{self as windows_core, PCWSTR, PWSTR},
 };
+use str_win::string_to_u16_buffer;
 
 use crate::{
     error::{ProcessExecError, ProcessExecResult},
@@ -107,24 +106,30 @@ impl WindowsCommand {
     fn new_pipes_for_stdio(
         stdio: Option<Stdio>,
         should_inherit_read: bool,
-        should_inherit_write: bool
+        should_inherit_write: bool,
     ) -> ProcessExecResult<(HANDLE, HANDLE)> {
         match stdio {
             Some(_) => match Self::new_annonymous_pipe() {
                 Ok((read_pipe_handle, write_pipe_handle)) => unsafe {
                     // set handle inheritance according to arguments
                     if !should_inherit_read {
-                        SetHandleInformation(read_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
+                        SetHandleInformation(
+                            read_pipe_handle,
+                            HANDLE_FLAG_INHERIT.0,
+                            HANDLE_FLAGS(0),
+                        )?;
                     }
                     if !should_inherit_write {
-                        SetHandleInformation(write_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
+                        SetHandleInformation(
+                            write_pipe_handle,
+                            HANDLE_FLAG_INHERIT.0,
+                            HANDLE_FLAGS(0),
+                        )?;
                     }
                     Ok((read_pipe_handle, write_pipe_handle))
-                }
-                Err(e) => {
-                    Err(ProcessExecError::PipeError(e).into())
-                }
-            }
+                },
+                Err(e) => Err(ProcessExecError::PipeError(e).into()),
+            },
             // stdio not specified - dont fail, just return invalid handles silently
             None => Ok((INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)),
         }
@@ -150,16 +155,12 @@ impl WindowsCommand {
             hStdInput: stdin_pipe_rd,
             hStdOutput: stdout_pipe_wr,
             hStdError: stdout_pipe_wr,
-            dwFlags: STARTF_USESTDHANDLES, // use std___ handles
+            dwFlags: STARTF_USESTDHANDLES,
             ..Default::default()
         };
 
-        let program: Vec<u16> = {
-            let raw_program = OsStr::new(self.command.get_program());
-            let mut val = raw_program.encode_wide().collect::<Vec<u16>>();
-            val.push(0u16);
-            val
-        };
+        let program: Vec<u16> =
+            string_to_u16_buffer(self.command.get_program().to_string_lossy().as_ref());
         let args: String = self
             .command
             .get_args()
@@ -181,17 +182,17 @@ impl WindowsCommand {
         };
         let mut process_info = Win32Threading::PROCESS_INFORMATION::default();
 
-        let (child_stdin, child_stdout, child_stderr); 
+        let (child_stdin, child_stdout, child_stderr);
         unsafe {
             Win32Threading::CreateProcessW(
-                PCWSTR(program.as_ptr()),               // ApplicationName
-                Some(PWSTR(wide_cmdline.as_mut_ptr())), // CommandLine
-                Some(ptr::null()),                      // ProcessAttributes
-                Some(ptr::null()),                      // ThreadAttributes
-                true,                                   // InheritHandles
+                PCWSTR(program.as_ptr()),
+                Some(PWSTR(wide_cmdline.as_mut_ptr())),
+                Some(ptr::null()),
+                Some(ptr::null()),
+                true,
                 creation_flags,
-                Some(environment_block.as_ptr() as *const _), // lpEnvironment
-                PCWSTR::null(),                         // CurrentDirectory
+                Some(environment_block.as_ptr() as *const _),
+                PCWSTR::null(),
                 &startup_info,
                 &mut process_info,
             )?;

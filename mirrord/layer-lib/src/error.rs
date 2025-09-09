@@ -36,7 +36,8 @@ mod ignore_codes {
         winapi::um::winsock2::WSAEINPROGRESS as i32,
         winapi::um::winsock2::WSAEAFNOSUPPORT as i32,
         winapi::um::winsock2::WSAEADDRINUSE as i32,
-        winapi::um::winsock2::WSAEACCES as i32, // Using EACCES as equivalent to EPERM
+        // Using EACCES as equivalent to EPERM
+        winapi::um::winsock2::WSAEACCES as i32,
     ];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or

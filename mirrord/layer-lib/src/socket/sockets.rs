@@ -13,8 +13,9 @@ use winapi::um::winsock2::SOCKET;
 use super::{SocketKind, SocketState, UserSocket};
 
 // Platform-specific socket descriptors
+// RawFd
 #[cfg(unix)]
-pub type SocketDescriptor = i32; // RawFd
+pub type SocketDescriptor = i32;
 
 #[cfg(windows)]
 pub type SocketDescriptor = SOCKET;

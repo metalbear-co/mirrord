@@ -54,7 +54,8 @@ impl WSABufferData {
             // SAFETY: We've verified that wsabuf_array is not null and i is within bounds
             let wsabuf = unsafe { &*wsabuf_array.add(i as usize) };
             if wsabuf.buf.is_null() {
-                return None; // Invalid buffer
+                // Invalid buffer
+                return None;
             }
 
             let buf_ptr = wsabuf.buf as *const u8;
@@ -64,7 +65,8 @@ impl WSABufferData {
             if total_length.saturating_add(buf_len as usize)
                 > total_length.wrapping_add(buf_len as usize)
             {
-                return None; // Would overflow
+                // Would overflow
+                return None;
             }
 
             buffers.push((buf_ptr, buf_len));
@@ -179,8 +181,10 @@ pub fn check_address_reachability(remote_addr: &SocketAddress, socket: SOCKET) -
         return SOCKET_ERROR;
     };
 
-    let mut node_buffer = [0u16; 256]; // Buffer for hostname
-    let mut service_buffer = [0u16; 32]; // Buffer for service/port
+    // Buffer for hostname
+    let mut node_buffer = [0u16; 256];
+    // Buffer for service/port
+    let mut service_buffer = [0u16; 32];
 
     let result = unsafe {
         winapi::um::ws2tcpip::GetNameInfoW(

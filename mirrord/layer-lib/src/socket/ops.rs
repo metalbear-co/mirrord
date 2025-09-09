@@ -610,7 +610,8 @@ mod tests {
 
     #[test]
     fn test_connect_result_failure() {
-        let result = ConnectResult::new(-1, Some(1)); // Generic error code
+        // Generic error code
+        let result = ConnectResult::new(-1, Some(1));
         assert!(result.is_failure());
         assert_eq!(result.result(), -1);
         assert_eq!(result.error(), Some(1));

@@ -10,7 +10,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
-    ConnectionId, FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
+    FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
     dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::SocketAddress,

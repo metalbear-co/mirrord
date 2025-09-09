@@ -30,8 +30,8 @@ pub fn proxy_bind(
     // For mirrord, we typically bind to the requested address locally first
     // The actual proxy behavior for incoming traffic is handled during listen
     // This creates the bound state that can later transition to listening
-
-    let bound_addr = requested_addr; // In the future, this could be modified by proxy config
+    // In the future, this could be modified by proxy config
+    let bound_addr = requested_addr;
 
     // Create the bound state
     let bound = Bound {

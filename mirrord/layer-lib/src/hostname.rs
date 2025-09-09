@@ -215,7 +215,8 @@ pub fn parse_samba_netbios_name(config: &str) -> Option<String> {
                 "netbios name" => {
                     if !value.is_empty() {
                         netbios_name = Some(value.to_uppercase());
-                        break; // netbios name takes precedence
+                        // netbios name takes precedence
+                        break;
                     }
                 }
                 "workgroup" => {

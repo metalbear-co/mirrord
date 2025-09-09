@@ -1,4 +1,4 @@
-use std::{error::Error, ffi::OsString};
+use std::ffi::OsString;
 
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 

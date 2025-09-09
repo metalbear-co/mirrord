@@ -24,7 +24,7 @@ impl From<HandleWrapper> for File {
 #[derive(Debug)]
 pub struct WindowsProcess {
     pub process_info: Win32Threading::PROCESS_INFORMATION,
-    // pub stdin: File,
+    pub stdin: File,
     pub stdout: File,
     pub stderr: File,
 }
@@ -43,10 +43,10 @@ impl WindowsProcess {
             File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
         );
 
-        // let mut stdin = std::mem::replace(
-        //     &mut self.stdin,
-        //     File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
-        // );
+        let mut stdin = std::mem::replace(
+            &mut self.stdin,
+            File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
+        );
 
         let stdout_handle = tokio::task::spawn_blocking(move || {
             let mut buffer = [0; 4096];
@@ -55,7 +55,8 @@ impl WindowsProcess {
             loop {
                 match stdout.read(&mut buffer) {
                     Ok(0) => {
-                        break; // EOF
+                        // EOF
+                        break;
                     }
                     Ok(n) => {
                         all_output.extend_from_slice(&buffer[..n]);
@@ -94,26 +95,25 @@ impl WindowsProcess {
             }
         });
 
-        // temporarily disable stdin as it causes hang on cleanup
         // Spawn a task to copy stdin
-        // let stdin_handle = tokio::task::spawn_blocking(move || {
-        //     let mut buffer = [0; 4096];
-        //     loop {
-        //         match stdin.read(&mut buffer) {
-        //             Ok(0) => {
-        //                 break; // EOF
-        //             }
-        //             Ok(n) => {
-        //                 if let Err(_) = io::stdin().read_exact(&mut buffer[..n]) {
-        //                     break;
-        //                 }
-        //             }
-        //             Err(_) => {
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // });
+        let stdin_handle = tokio::task::spawn_blocking(move || {
+            let mut buffer = [0; 4096];
+            loop {
+                match stdin.read(&mut buffer) {
+                    Ok(0) => {
+                        break; // EOF
+                    }
+                    Ok(n) => {
+                        if let Err(_) = io::stdin().read_exact(&mut buffer[..n]) {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+        });
 
         // Wait for the process to complete asynchronously
         let exit_code = tokio::task::spawn_blocking({
@@ -145,7 +145,7 @@ impl WindowsProcess {
         let _ = tokio::time::timeout(Duration::from_secs(10), async {
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;
-            // let _ = stdin_handle.await;
+            let _ = stdin_handle.await;
         })
         .await;
 
