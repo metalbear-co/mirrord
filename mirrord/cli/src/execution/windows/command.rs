@@ -3,11 +3,11 @@ use std::{
     error::Error,
     ffi::OsStr,
     fs::File,
-    iter::once,
-    os::windows::ffi::OsStrExt,
     process::{Command, Stdio},
     ptr,
 };
+
+use str_win::string_to_u16_buffer;
 
 use ::windows::{
     Win32::{
@@ -167,11 +167,11 @@ impl WindowsCommand {
             .collect::<Vec<String>>()
             .join(" ");
 
-        let mut wide_cmdline: Vec<u16> = OsStr::new(&args).encode_wide().chain(once(0)).collect();
+        let mut wide_cmdline: Vec<u16> = string_to_u16_buffer(&args);
 
-        // todo!(take care of env_clear and self.envs empty situation)
+        // Always use explicit environment block to match Unix execve behavior
+        // The environment in self.envs is already complete (prepared by main.rs)
         let environment_block = self.envs.to_windows_env_block();
-        let lp_environment = environment_block.as_ptr() as *const _;
 
         let creation_flags = {
             let mut cf = Win32Threading::PROCESS_CREATION_FLAGS::default();
@@ -181,7 +181,7 @@ impl WindowsCommand {
         };
         let mut process_info = Win32Threading::PROCESS_INFORMATION::default();
 
-        let (child_stdin, child_stdout, child_stderr);
+        let (child_stdin, child_stdout, child_stderr); 
         unsafe {
             Win32Threading::CreateProcessW(
                 PCWSTR(program.as_ptr()),               // ApplicationName
@@ -190,8 +190,8 @@ impl WindowsCommand {
                 Some(ptr::null()),                      // ThreadAttributes
                 true,                                   // InheritHandles
                 creation_flags,
-                Some(lp_environment),
-                PCWSTR::null(), // CurrentDirectory
+                Some(environment_block.as_ptr() as *const _), // lpEnvironment
+                PCWSTR::null(),                         // CurrentDirectory
                 &startup_info,
                 &mut process_info,
             )?;
