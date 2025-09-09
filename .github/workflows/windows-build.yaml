@@ -196,10 +196,6 @@ jobs:
       run:
         shell: pwsh
 
-    env:
-      LAYER_DLL:   target\x86_64-pc-windows-msvc\debug\layer_win.dll
-      MIRRORD_EXE: target\x86_64-pc-windows-msvc\debug\mirrord.exe
-
     steps:
       - name: Checkout PR 3536 (merge ref)
         uses: actions/checkout@v4
@@ -211,16 +207,22 @@ jobs:
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      - name: Build layer-win (DLL)
-        run: cargo build -p layer-win --target x86_64-pc-windows-msvc
-
-      # <-- Set MIRRORD_LAYER_FILE to the *absolute* DLL path
-      - name: Set MIRRORD_LAYER_FILE (absolute path)
+      # Find the mirrord crate folder so the relative path works the same as your local build
+      - name: Locate mirrord crate folder
         run: |
-          $dll = Join-Path $env:GITHUB_WORKSPACE '${{ env.LAYER_DLL }}'
-          if (-not (Test-Path $dll)) { throw "Expected DLL not found at $dll" }
-          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "MIRRORD_LAYER_FILE=$dll"
+          $toml = Get-ChildItem -Recurse -Filter Cargo.toml -File |
+            Where-Object { Select-String -Path $_.FullName -Pattern '^\s*name\s*=\s*"mirrord"\s*$' -SimpleMatch -Quiet } |
+            Select-Object -First 1
+          if (-not $toml) { throw "Could not find Cargo.toml for package 'mirrord'." }
+          $dir = Split-Path $toml.FullName
+          "MIRRORD_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "mirrord crate dir: $dir"
 
-      - name: Build mirrord (EXE)
-        run: cargo build -p mirrord --target x86_64-pc-windows-msvc
+      # 2) $env:MIRRORD_LAYER_FILE = "../target/x86_64-pc-windows-msvc/debug/layer_win.dll";
+      # 3) cargo build -p mirrord --target x86_64-pc-windows-msvc
+      - name: Build mirrord (with MIRRORD_LAYER_FILE)
+        run: |
+          Set-Location "$env:MIRRORD_DIR"
+          $env:MIRRORD_LAYER_FILE = "..\target\x86_64-pc-windows-msvc\debug\layer_win.dll"
+          Write-Host "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE"
+          cargo build -p mirrord --target x86_64-pc-windows-msvc
