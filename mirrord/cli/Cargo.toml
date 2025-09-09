@@ -68,6 +68,9 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+mirrord-str-win = { path = "../str-win" }
+
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource"] }
 base64.workspace = true

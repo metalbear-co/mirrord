@@ -24,10 +24,13 @@ use ::windows::{
     core::{self as windows_core, PCWSTR, PWSTR},
 };
 
-use crate::execution::windows::{
-    env_vars::EnvMap,
-    injection::WindowsProcessSuspendedExtInject,
-    process::{HandleWrapper, WindowsProcess, WindowsProcessExtSuspended},
+use crate::{
+    error::{ProcessExecError, ProcessExecResult},
+    execution::windows::{
+        env_vars::EnvMap,
+        injection::WindowsProcessSuspendedExtInject,
+        process::{HandleWrapper, WindowsProcess, WindowsProcessExtSuspended},
+    },
 };
 
 #[derive(Debug)]
@@ -79,10 +82,7 @@ impl WindowsCommand {
         self
     }
 
-    fn new_annonymous_pipe(
-        should_inherit_read: bool,
-        should_inherit_write: bool,
-    ) -> Result<(HANDLE, HANDLE), windows_core::Error> {
+    fn new_annonymous_pipe() -> Result<(HANDLE, HANDLE), windows_core::Error> {
         let mut read_pipe_handle = HANDLE::default();
         let mut write_pipe_handle = HANDLE::default();
 
@@ -100,16 +100,34 @@ impl WindowsCommand {
                 Some(sa_ptr),
                 0,
             )?;
-
-            if !should_inherit_read {
-                SetHandleInformation(read_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
-            }
-
-            if !should_inherit_write {
-                SetHandleInformation(write_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
-            }
         }
         Ok((read_pipe_handle, write_pipe_handle))
+    }
+
+    fn new_pipes_for_stdio(
+        stdio: Option<Stdio>,
+        should_inherit_read: bool,
+        should_inherit_write: bool
+    ) -> ProcessExecResult<(HANDLE, HANDLE)> {
+        match stdio {
+            Some(_) => match Self::new_annonymous_pipe() {
+                Ok((read_pipe_handle, write_pipe_handle)) => unsafe {
+                    // set handle inheritance according to arguments
+                    if !should_inherit_read {
+                        SetHandleInformation(read_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
+                    }
+                    if !should_inherit_write {
+                        SetHandleInformation(write_pipe_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
+                    }
+                    Ok((read_pipe_handle, write_pipe_handle))
+                }
+                Err(e) => {
+                    Err(ProcessExecError::PipeError(e).into())
+                }
+            }
+            // stdio not specified - dont fail, just return invalid handles silently
+            None => Ok((INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)),
+        }
     }
 
     pub fn inject_and_spawn(self, dll_path: String) -> Result<WindowsProcess, Box<dyn Error>> {
@@ -119,39 +137,13 @@ impl WindowsCommand {
         Ok(child)
     }
 
-    pub fn spawn_suspend(self) -> std::io::Result<WindowsProcess>
+    pub fn spawn_suspend(self) -> ProcessExecResult<WindowsProcess>
     where
         WindowsProcess: WindowsProcessExtSuspended,
     {
-        let (stdin_pipe_rd, stdin_pipe_wr) = {
-            if let Some(_) = self.stdin {
-                // Ensure the write handle to the pipe for STDIN is not inherited.
-                Self::new_annonymous_pipe(true, false)
-                    .expect("failed to open pipe for child process stdin")
-            } else {
-                (INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)
-            }
-        };
-
-        let (stdout_pipe_rd, stdout_pipe_wr) = {
-            if let Some(_) = self.stdout {
-                // Ensure the read handle to the pipe for STDOUT is not inherited.
-                Self::new_annonymous_pipe(false, true)
-                    .expect("failed to open pipe for child process stdout")
-            } else {
-                (INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)
-            }
-        };
-
-        let (stderr_pipe_rd, stderr_pipe_wr) = {
-            if let Some(_) = self.stderr {
-                // Ensure the read handle to the pipe for STDERR is not inherited.
-                Self::new_annonymous_pipe(false, true)
-                    .expect("failed to open pipe for child process stderr")
-            } else {
-                (INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)
-            }
-        };
+        let (stdin_pipe_rd, stdin_pipe_wr) = Self::new_pipes_for_stdio(self.stdin, true, false)?;
+        let (stdout_pipe_rd, stdout_pipe_wr) = Self::new_pipes_for_stdio(self.stdout, false, true)?;
+        let (stderr_pipe_rd, stderr_pipe_wr) = Self::new_pipes_for_stdio(self.stderr, false, true)?;
 
         let startup_info = Win32Threading::STARTUPINFOW {
             cb: std::mem::size_of::<Win32Threading::STARTUPINFOW>() as u32,

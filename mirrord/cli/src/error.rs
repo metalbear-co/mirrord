@@ -22,6 +22,10 @@ use crate::{
     profile::ProfileError,
 };
 
+#[cfg(target_os = "windows")]
+use ::windows::core as windows_core;
+
+
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
 const GENERAL_HELP: &str = r#"
@@ -214,7 +218,6 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
     InitialAgentCommFailed(String),
 
-    #[allow(dead_code)]
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     #[diagnostic(help(
         "Please open an issue on our GitHub repository with binary information:
@@ -243,7 +246,6 @@ pub(crate) enum CliError {
     ))]
     RosettaMissing(String),
 
-    #[allow(dead_code)]
     #[error("Failed to execute binary `{0}` with args {1:?}, env {2:?}")]
     #[diagnostic(help("MIRRORD_LAYER_FILE env var is missing"))]
     LayerFilePathMissing(String, Vec<String>, Vec<(String, String)>),
@@ -420,7 +422,6 @@ pub(crate) enum CliError {
     #[error("A null byte was found when trying to execute process: {0}")]
     ExecNulError(#[from] NulError),
 
-    #[allow(dead_code)]
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
 
@@ -450,6 +451,20 @@ pub(crate) enum CliError {
     #[error("operator operation timed out: {}", operation)]
     OperatorOperationTimeout { operation: String },
 }
+
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum ProcessExecError {
+    #[error("Executed process pid was not found: {0}")]
+    ProcessNotFound(u32, String),
+
+    #[error("Failed to inject DLL \"{0}\" into pid {1}: {2}")]
+    InjectionFailed(String, u32, String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Pipe Error: {0}")]
+    PipeError(#[from] windows_core::Error),
+}
+pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
 
 impl CliError {
     /// Here we give more meaning to some errors, instead of just letting them pass as

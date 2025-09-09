@@ -643,17 +643,6 @@ impl std::fmt::Debug for ManagedAddrInfoAny {
     }
 }
 
-impl ManagedAddrInfoAny {
-    /// Get the raw pointer as usize for comparison
-    #[allow(dead_code)]
-    pub fn as_usize(&self) -> usize {
-        match self {
-            ManagedAddrInfoAny::A(info) => info.ptr as usize,
-            ManagedAddrInfoAny::W(info) => info.ptr as usize,
-        }
-    }
-}
-
 impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
     /// Create a new managed ADDRINFO from a raw pointer
     ///
@@ -666,15 +655,6 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
     /// Get the raw pointer (for returning to Windows API)
     pub fn as_ptr(&self) -> *mut T {
         self.ptr
-    }
-
-    /// Release ownership of the pointer (caller becomes responsible for cleanup)
-    #[allow(dead_code)]
-    pub fn release(mut self) -> *mut T {
-        let ptr = self.ptr;
-        self.ptr = std::ptr::null_mut();
-        std::mem::forget(self);
-        ptr
     }
 }
 
