@@ -1,12 +1,16 @@
-use std::{collections::VecDeque, error::Report, ops::RangeInclusive};
+use std::{
+    collections::{HashMap, VecDeque},
+    error::Report,
+    ops::RangeInclusive,
+};
 
 use futures::StreamExt;
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, LogMessage, RequestId,
+    ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
+        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, MirrorType, NewTcpConnectionV1,
         NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
@@ -15,6 +19,7 @@ use tokio_stream::StreamMap;
 use crate::{
     AgentError,
     error::AgentResult,
+    http::filter::HttpFilter,
     incoming::{IncomingStream, IncomingStreamItem, MirrorHandle, MirroredTraffic},
     sniffer::api::TcpSnifferApi,
     util::protocol_version::ClientProtocolVersion,
@@ -31,6 +36,7 @@ pub enum TcpMirrorApi {
         protocol_version: ClientProtocolVersion,
         connection_ids_iter: RangeInclusive<ConnectionId>,
         queued_messages: VecDeque<DaemonTcp>,
+        port_filters: HashMap<Port, HttpFilter>,
     },
     /// Wrapper over a [`TcpSnifferApi`].
     ///
@@ -60,6 +66,7 @@ impl TcpMirrorApi {
             protocol_version,
             connection_ids_iter: 0..=ConnectionId::MAX,
             queued_messages: Default::default(),
+            port_filters: Default::default(),
         }
     }
 
@@ -76,23 +83,50 @@ impl TcpMirrorApi {
                 mirror_handle,
                 incoming_streams,
                 queued_messages,
+                port_filters,
                 ..
             } => match message {
                 LayerTcp::ConnectionUnsubscribe(id) => {
                     incoming_streams.remove(&id);
                 }
 
-                LayerTcp::PortSubscribe(port) => {
+                LayerTcp::PortSubscribe(mirror_type) => {
+                    let port = mirror_type.get_port();
+                    let filter = match mirror_type {
+                        MirrorType::All(_) => None,
+                        MirrorType::FilteredHttp(_, filter) => Some(
+                            HttpFilter::try_from(&mirrord_protocol::tcp::HttpFilter::Header(
+                                filter,
+                            ))
+                            .map_err(AgentError::InvalidHttpFilter)?,
+                        ),
+                        MirrorType::FilteredHttpEx(_, filter) => Some(
+                            HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?,
+                        ),
+                    };
+
+                    if let Some(filter) = filter {
+                        port_filters.insert(port, filter);
+                    }
+
                     mirror_handle.mirror(port).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
 
                 LayerTcp::PortUnsubscribe(port) => {
+                    port_filters.remove(&port);
                     mirror_handle.stop_mirror(port);
                 }
             },
-
-            Self::Sniffer { api, .. } => {
+            Self::Sniffer {
+                api,
+                queued_message,
+            } => {
+                if let LayerTcp::PortSubscribe(mirror_type) = &message {
+                    if !matches!(mirror_type, MirrorType::All(_)) {
+                        return Ok(());
+                    }
+                }
                 api.handle_client_message(message).await?;
             }
         }
@@ -108,6 +142,7 @@ impl TcpMirrorApi {
                 protocol_version,
                 connection_ids_iter,
                 queued_messages,
+                port_filters,
             } => {
                 if let Some(message) = queued_messages.pop_front() {
                     return Ok(DaemonMessage::Tcp(message));
@@ -156,6 +191,12 @@ impl TcpMirrorApi {
 
                     Some(traffic) = mirror_handle.next() => match traffic? {
                         MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                            if port_filters.contains_key(&tcp.info.original_destination.port()) {
+                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(
+                                    "TCP traffic skipped due to HTTP filter on this port".to_string()
+                                )));
+                            }
+
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                             let connection = NewTcpConnectionV1 {
                                 connection_id: id,
@@ -169,11 +210,9 @@ impl TcpMirrorApi {
                                 transport: tcp
                                     .info
                                     .tls_connector
-                                    .map(|tls| {
-                                        IncomingTrafficTransportType::Tls {
-                                            alpn_protocol: tls.alpn_protocol().map(From::from),
-                                            server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                                        }
+                                    .map(|tls| IncomingTrafficTransportType::Tls {
+                                        alpn_protocol: tls.alpn_protocol().map(From::from),
+                                        server_name: tls.server_name().map(|s| s.to_str().into_owned()),
                                     })
                                     .unwrap_or(IncomingTrafficTransportType::Tcp),
                             };
@@ -186,7 +225,13 @@ impl TcpMirrorApi {
                                 return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                                     "A TLS connection was not mirrored due to mirrord-protocol version requirement: {}",
                                     &*MODE_AGNOSTIC_HTTP_REQUESTS,
-                                ))))
+                                ))));
+                            }
+
+                            if port_filters.contains_key(&tcp.info.original_destination.port()) {
+                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(
+                                    "TCP traffic skipped due to HTTP filter on this port".to_string()
+                                )));
                             }
 
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
@@ -202,7 +247,17 @@ impl TcpMirrorApi {
                             DaemonTcp::NewConnectionV1(message)
                         }
 
-                        MirroredTraffic::Http(http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                        MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                           if let Some(filter) = port_filters.get(&http.info.original_destination.port()) {
+                                if !filter.matches(http.parts_mut()) {
+                                    return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                        "HTTP request filtered out: {} {}",
+                                        http.parts().method,
+                                        http.parts().uri
+                                    ))));
+                                }
+                            }
+
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                             incoming_streams.insert(id, http.stream);
 
@@ -213,12 +268,14 @@ impl TcpMirrorApi {
                                     source: http.info.peer_addr,
                                     destination: http.info.original_destination,
                                 },
-                                transport: http.info.tls_connector.map(|tls| {
-                                    IncomingTrafficTransportType::Tls {
+                                transport: http
+                                    .info
+                                    .tls_connector
+                                    .map(|tls| IncomingTrafficTransportType::Tls {
                                         alpn_protocol: tls.alpn_protocol().map(From::from),
                                         server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                                    }
-                                }).unwrap_or(IncomingTrafficTransportType::Tcp),
+                                    })
+                                    .unwrap_or(IncomingTrafficTransportType::Tcp),
                                 request: InternalHttpRequest {
                                     method: http.request_head.method,
                                     uri: http.request_head.uri,
@@ -228,7 +285,7 @@ impl TcpMirrorApi {
                                         frames: http.request_head.body_head,
                                         is_last: http.request_head.body_finished,
                                     },
-                                }
+                                },
                             };
                             DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(message))
                         }

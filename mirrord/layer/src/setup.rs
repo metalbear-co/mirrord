@@ -19,7 +19,7 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpFilter, HttpMethodFilter, StealType},
+    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
 };
 use regex::RegexSet;
 
@@ -212,6 +212,14 @@ pub struct StealHttpSettings {
     /// Ports to filter HTTP on.
     pub ports: HashSet<Port>,
 }
+/// Settings for handling HTTP with the `mirror` feature.
+#[derive(Debug)]
+pub struct MirrorHttpSettings {
+    /// The HTTP filter to use.
+    pub filter: HttpFilter,
+    /// Ports to filter HTTP on.
+    pub ports: HashSet<Port>,
+}
 
 /// Operation mode for the `incoming` feature.
 #[derive(Debug)]
@@ -219,6 +227,10 @@ pub enum IncomingMode {
     /// The agent sends data to both the user application and the remote target.
     /// Data coming from the layer is discarded.
     Mirror,
+    /// The agent sends data to both the user application and the remote target,
+    /// but only HTTP traffic matching the filter.
+    /// Data coming from the layer is discarded.
+    MirrorFiltered(MirrorHttpSettings),
     /// The agent sends data only to the user application.
     /// Data coming from the layer is sent to the agent.
     Steal(StealHttpSettings),
@@ -231,6 +243,20 @@ impl IncomingMode {
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
     fn new(config: &mut IncomingConfig) -> Self {
         if !config.is_steal() {
+            if config.http_filter.is_filter_set() {
+                let ports = config
+                    .http_filter
+                    .ports
+                    .get_or_insert_default()
+                    .iter()
+                    .copied()
+                    .collect();
+
+                let filter = Self::parse_http_filter(&config.http_filter);
+
+                return Self::MirrorFiltered(MirrorHttpSettings { filter, ports });
+            }
+
             return Self::Mirror;
         }
 
@@ -312,6 +338,68 @@ impl IncomingMode {
         Self::Steal(StealHttpSettings { filter, ports })
     }
 
+    fn parse_http_filter(http_filter_config: &HttpFilterConfig) -> HttpFilter {
+        match http_filter_config {
+            HttpFilterConfig {
+                path_filter: Some(path),
+                header_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Path(Filter::new(path.into()).expect("invalid filter expression")),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: Some(header),
+                method_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Header(Filter::new(header.into()).expect("invalid filter expression")),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: Some(method),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Method(
+                HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+            ),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                all_of: Some(filters),
+                any_of: None,
+                ports: _ports,
+            } => Self::make_composite_filter(true, filters),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: Some(filters),
+                ports: _ports,
+            } => Self::make_composite_filter(false, filters),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Header(Filter::new(".*".to_string()).unwrap()),
+
+            _ => panic!("multiple HTTP filters specified, this is a bug"),
+        }
+    }
+
     fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
         let filters = filters
             .iter()
@@ -333,16 +421,26 @@ impl IncomingMode {
 
     /// Returns [`PortSubscription`] request to be used for the given port.
     pub fn subscription(&self, port: Port) -> PortSubscription {
-        let Self::Steal(steal) = self else {
-            return PortSubscription::Mirror(port);
-        };
-
-        let steal_type = match &steal.filter {
-            _ if !steal.ports.contains(&port) => StealType::All(port),
-            StealHttpFilter::None => StealType::All(port),
-            StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
-        };
-
-        PortSubscription::Steal(steal_type)
+        match self {
+            Self::Mirror => PortSubscription::Mirror(MirrorType::All(port)),
+            Self::MirrorFiltered(settings) => {
+                if settings.ports.contains(&port) {
+                    let mirror_type = MirrorType::FilteredHttpEx(port, settings.filter.clone());
+                    PortSubscription::Mirror(mirror_type)
+                } else {
+                    PortSubscription::Mirror(MirrorType::All(port))
+                }
+            }
+            Self::Steal(steal) => {
+                let steal_type = match &steal.filter {
+                    _ if !steal.ports.contains(&port) => StealType::All(port),
+                    StealHttpFilter::None => StealType::All(port),
+                    StealHttpFilter::Filter(filter) => {
+                        StealType::FilteredHttpEx(port, filter.clone())
+                    }
+                };
+                PortSubscription::Steal(steal_type)
+            }
+        }
     }
 }

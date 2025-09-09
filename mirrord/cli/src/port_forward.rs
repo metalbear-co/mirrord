@@ -1041,7 +1041,7 @@ impl IncomingMode {
     /// Returns [`PortSubscription`] request to be used for the given port.
     fn subscription(&self, port: Port) -> PortSubscription {
         let Self::Steal(steal) = self else {
-            return PortSubscription::Mirror(port);
+            return PortSubscription::Mirror(mirrord_protocol::tcp::MirrorType::All(port));
         };
 
         let steal_type = match &steal.filter {

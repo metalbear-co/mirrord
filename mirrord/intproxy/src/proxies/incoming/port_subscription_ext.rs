@@ -31,7 +31,7 @@ pub trait PortSubscriptionExt {
 impl PortSubscriptionExt for PortSubscription {
     fn port(&self) -> Port {
         match self {
-            Self::Mirror(port) => *port,
+            Self::Mirror(mirror_type) => mirror_type.get_port(),
             Self::Steal(steal_type) => get_port(steal_type),
         }
     }
@@ -39,7 +39,9 @@ impl PortSubscriptionExt for PortSubscription {
     /// [`LayerTcp::PortSubscribe`] or [`LayerTcpSteal::PortSubscribe`].
     fn agent_subscribe(&self) -> ClientMessage {
         match self {
-            Self::Mirror(port) => ClientMessage::Tcp(LayerTcp::PortSubscribe(*port)),
+            Self::Mirror(mirror_type) => {
+                ClientMessage::Tcp(LayerTcp::PortSubscribe(mirror_type.clone()))
+            }
             Self::Steal(steal_type) => {
                 ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type.clone()))
             }
@@ -49,7 +51,9 @@ impl PortSubscriptionExt for PortSubscription {
     /// [`LayerTcp::PortUnsubscribe`] or [`LayerTcpSteal::PortUnsubscribe`].
     fn wrap_agent_unsubscribe(&self) -> ClientMessage {
         match self {
-            Self::Mirror(port) => ClientMessage::Tcp(LayerTcp::PortUnsubscribe(*port)),
+            Self::Mirror(mirror_type) => {
+                ClientMessage::Tcp(LayerTcp::PortUnsubscribe(mirror_type.get_port()))
+            }
             Self::Steal(steal_type) => {
                 ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(get_port(steal_type)))
             }

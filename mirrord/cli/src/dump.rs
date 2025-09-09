@@ -12,7 +12,7 @@ use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, DaemonTcp, HttpRequestMetadata, IncomingTrafficTransportType,
-        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, NewTcpConnectionV1,
+        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, MirrorType, NewTcpConnectionV1,
         NewTcpConnectionV2, TcpData,
     },
 };
@@ -153,7 +153,7 @@ impl DumpSession {
             .await?;
 
         for port in &self.ports {
-            let message = ClientMessage::Tcp(LayerTcp::PortSubscribe(*port));
+            let message = ClientMessage::Tcp(LayerTcp::PortSubscribe(MirrorType::All(*port)));
             self.connection.sender.send(message).await?;
             info!("Issued subscription to port {} for mirroring", port);
         }

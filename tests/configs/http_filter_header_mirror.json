@@ -1,0 +1,12 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "mode": "mirror",
+                "http_filter": {
+                    "header_filter": "x-filter: yes"
+                }
+            }
+        }
+    }
+}
