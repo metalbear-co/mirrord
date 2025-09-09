@@ -23,7 +23,6 @@ use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
-    retry::RetryKube,
     api::{
         container::{
             ContainerApi, ContainerParams,
@@ -35,6 +34,7 @@ use crate::{
         runtime::{RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
+    retry::RetryKube,
 };
 
 #[cfg(feature = "portforward")]
