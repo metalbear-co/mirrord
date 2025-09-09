@@ -3,7 +3,7 @@
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     ClientMessage, Port,
-    tcp::{LayerTcp, LayerTcpSteal, StealType},
+    tcp::{LayerTcp, LayerTcpSteal, MirrorType, StealType},
 };
 
 /// Retrieves subscribed port from the given [`StealType`].
@@ -36,12 +36,18 @@ impl PortSubscriptionExt for PortSubscription {
         }
     }
 
-    /// [`LayerTcp::PortSubscribe`] or [`LayerTcpSteal::PortSubscribe`].
+    /// [`LayerTcp::PortSubscribe`], [`LayerTcp::PortSubscribeFilteredHttp`], or
+    /// [`LayerTcpSteal::PortSubscribe`].
     fn agent_subscribe(&self) -> ClientMessage {
         match self {
-            Self::Mirror(mirror_type) => {
-                ClientMessage::Tcp(LayerTcp::PortSubscribe(mirror_type.clone()))
-            }
+            Self::Mirror(mirror_type) => match mirror_type {
+                MirrorType::FilteredHttp(port, filter) => {
+                    ClientMessage::Tcp(LayerTcp::PortSubscribeFilteredHttp(*port, filter.clone()))
+                }
+                MirrorType::All(_) => {
+                    ClientMessage::Tcp(LayerTcp::PortSubscribe(mirror_type.get_port()))
+                }
+            },
             Self::Steal(steal_type) => {
                 ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type.clone()))
             }

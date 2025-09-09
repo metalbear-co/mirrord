@@ -170,9 +170,17 @@ impl TcpSnifferApi {
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> AgentResult<()> {
         match message {
-            LayerTcp::PortSubscribe(mirror_type) => {
+            LayerTcp::PortSubscribe(port) => {
                 let (tx, rx) = oneshot::channel();
-                self.send_command(SnifferCommandInner::Subscribe(mirror_type.get_port(), tx))
+                self.send_command(SnifferCommandInner::Subscribe(port, tx))
+                    .await?;
+                self.subscriptions_in_progress.push(rx);
+                Ok(())
+            }
+
+            LayerTcp::PortSubscribeFilteredHttp(port, _) => {
+                let (tx, rx) = oneshot::channel();
+                self.send_command(SnifferCommandInner::Subscribe(port, tx))
                     .await?;
                 self.subscriptions_in_progress.push(rx);
                 Ok(())

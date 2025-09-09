@@ -10,7 +10,7 @@ use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, MirrorType, NewTcpConnectionV1,
+        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
         NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
@@ -89,43 +89,28 @@ impl TcpMirrorApi {
                 LayerTcp::ConnectionUnsubscribe(id) => {
                     incoming_streams.remove(&id);
                 }
-
-                LayerTcp::PortSubscribe(mirror_type) => {
-                    let port = mirror_type.get_port();
-                    let filter = match mirror_type {
-                        MirrorType::All(_) => None,
-                        MirrorType::FilteredHttp(_, filter) => Some(
-                            HttpFilter::try_from(&mirrord_protocol::tcp::HttpFilter::Header(
-                                filter,
-                            ))
-                            .map_err(AgentError::InvalidHttpFilter)?,
-                        ),
-                        MirrorType::FilteredHttpEx(_, filter) => Some(
-                            HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?,
-                        ),
-                    };
-
-                    if let Some(filter) = filter {
-                        port_filters.insert(port, filter);
-                    }
+                LayerTcp::PortSubscribe(port) => {
+                    mirror_handle.mirror(port).await?;
+                    queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
+                }
+                LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
+                    // Convert from protocol HttpFilter to agent HttpFilter
+                    let agent_filter =
+                        HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
+                    port_filters.insert(port, agent_filter);
 
                     mirror_handle.mirror(port).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
-
                 LayerTcp::PortUnsubscribe(port) => {
                     port_filters.remove(&port);
                     mirror_handle.stop_mirror(port);
                 }
             },
-            Self::Sniffer {
-                api,
-                queued_message,
-            } => {
-                if let LayerTcp::PortSubscribe(mirror_type) = &message {
-                    if !matches!(mirror_type, MirrorType::All(_)) {
-                        return Ok(());
-                    }
+            Self::Sniffer { api, .. } => {
+                // Sniffer mode doesn't support HTTP filtering, so ignore filtered subscriptions
+                if let LayerTcp::PortSubscribeFilteredHttp(_, _) = &message {
+                    return Ok(());
                 }
                 api.handle_client_message(message).await?;
             }

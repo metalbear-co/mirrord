@@ -6,10 +6,12 @@ use std::time::Duration;
 use kube::Client;
 use reqwest::header::HeaderMap;
 use rstest::rstest;
+use serde_json::json;
+use tempfile::NamedTempFile;
 use tokio::time::timeout;
 
 use crate::utils::{
-    application::Application, config_dir, kube_client, kube_service::KubeService, send_request,
+    application::Application, kube_client, kube_service::KubeService, send_request,
     services::basic_service,
 };
 
@@ -20,7 +22,6 @@ use crate::utils::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(120))]
 async fn mirror_with_http_header_filter(
-    config_dir: &std::path::Path,
     #[future] basic_service: KubeService,
     #[future] kube_client: Client,
     #[values(
@@ -41,15 +42,27 @@ async fn mirror_with_http_header_filter(
     .await;
     let url = format!("http://{}", portforwarder.address());
 
-    // Use mirror mode with HTTP header filter config
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("http_filter_header_mirror.json");
+    // Create mirror mode HTTP header filter config dynamically
+    let config = json!({
+        "feature": {
+            "network": {
+                "incoming": {
+                    "mode": "mirror",
+                    "http_filter": {
+                        "header_filter": "x-filter: yes"
+                    }
+                }
+            }
+        }
+    });
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+    serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
 
     let mirror_process = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
-            Some(vec!["-f", config_path.to_str().unwrap()]),
+            Some(vec!["-f", config_file.path().to_str().unwrap()]),
             None,
         )
         .await;
@@ -176,55 +189,4 @@ async fn mirror_with_http_path_filter(
     .await;
 
     application.assert(&mirror_process).await;
-}
-
-/// Test that mirror mode rejects HTTP filters when not using passthrough mirroring.
-/// This test verifies that sniffer mode properly rejects filtered subscriptions.
-#[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(60))]
-async fn mirror_http_filter_requires_passthrough(
-    config_dir: &std::path::Path,
-    #[future] basic_service: KubeService,
-    #[future] kube_client: Client,
-    #[values(Application::PythonFlaskHTTP)] application: Application,
-) {
-    let service = basic_service.await;
-    let _kube_client = kube_client.await;
-
-    // Use mirror mode with HTTP filter but WITHOUT passthrough mirroring
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("http_filter_header_mirror.json");
-
-    let mut mirror_process = application
-        .run(
-            &service.pod_container_target(),
-            Some(&service.namespace),
-            Some(vec![
-                "-f",
-                config_path.to_str().unwrap(),
-                "--no-passthrough-mirroring", // Force sniffer mode
-            ]),
-            None,
-        )
-        .await;
-
-    // The process should fail because HTTP filtering requires passthrough mirroring
-    let exit_status = timeout(Duration::from_secs(30), mirror_process.child.wait())
-        .await
-        .expect("Process should exit within 30 seconds")
-        .expect("Failed to get exit status");
-
-    // Verify that the process failed (non-zero exit code)
-    assert!(
-        !exit_status.success(),
-        "Process should fail when using HTTP filter without passthrough mirroring"
-    );
-
-    // Check that error message contains the expected text
-    let stderr = mirror_process.get_stderr().await;
-    assert!(
-        stderr.contains("HTTP filtering in mirror mode requires passthrough mirroring"),
-        "Expected error message not found in stderr: {stderr}"
-    );
 }

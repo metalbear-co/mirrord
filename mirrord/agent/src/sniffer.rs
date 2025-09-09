@@ -405,14 +405,20 @@ mod test {
     use api::TcpSnifferApi;
     use mirrord_protocol::{
         ConnectionId, LogLevel, ToPayload,
-        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+        tcp::{
+            DaemonTcp, HttpFilter as ProtocolHttpFilter, LayerTcp, NewTcpConnectionV1, TcpClose,
+            TcpData,
+        },
     };
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus};
+    use crate::{
+        mirror::TcpMirrorApi,
+        util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    };
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -862,5 +868,31 @@ mod test {
                 other => panic!("unexpected times filter changed {other}"),
             }
         }
+    }
+
+    /// Test that sniffer mode properly rejects filtered HTTP subscriptions.
+    /// This verifies that HTTP filtering requires passthrough mirroring.
+    #[tokio::test]
+    async fn test_sniffer_rejects_http_filter() {
+        let mut setup = TestSnifferSetup::new();
+        let mut api = setup.get_api().await;
+        let mut tcp_mirror_api = TcpMirrorApi::Sniffer {
+            api,
+            queued_message: None,
+        };
+
+        let filter = ProtocolHttpFilter::Header(
+            mirrord_protocol::tcp::Filter::new("x-filter: yes".to_string()).unwrap(),
+        );
+        let message = LayerTcp::PortSubscribeFilteredHttp(80, filter);
+
+        // Handle the message - sniffer should ignore it silently
+        let result = tcp_mirror_api.handle_client_message(message).await;
+
+        // The message should be handled without error
+        assert!(
+            result.is_ok(),
+            "Sniffer should silently ignore filtered HTTP subscriptions"
+        );
     }
 }

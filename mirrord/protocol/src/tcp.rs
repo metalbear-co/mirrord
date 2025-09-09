@@ -65,7 +65,7 @@ pub struct TcpClose {
 pub enum LayerTcp {
     /// User is interested in mirroring traffic on this `Port`, so add it to the list of
     /// ports that the sniffer is filtering.
-    PortSubscribe(MirrorType),
+    PortSubscribe(Port),
 
     /// User is not interested in the connection with `ConnectionId` anymore.
     ///
@@ -78,6 +78,10 @@ pub enum LayerTcp {
     /// Removes this `Port` from the sniffer's filter, the traffic won't be cloned to mirrord
     /// anymore.
     PortUnsubscribe(Port),
+
+    /// User is interested in mirroring traffic on this `Port`, so add it to the list of
+    /// ports that the sniffer is filtering.
+    PortSubscribeFilteredHttp(Port, HttpFilter),
 }
 
 /// Messages related to Tcp handler from server.
@@ -321,18 +325,13 @@ impl StealType {
 pub enum MirrorType {
     /// Mirror all traffic to this port.
     All(Port),
-    /// Mirror HTTP traffic matching a given filter (header based). - REMOVE THIS WHEN BREAKING
-    /// PROTOCOL
-    FilteredHttp(Port, Filter),
     /// Mirror HTTP traffic matching a given filter - supporting more than once kind of filter
-    FilteredHttpEx(Port, HttpFilter),
+    FilteredHttp(Port, HttpFilter),
 }
 
 impl MirrorType {
     pub fn get_port(&self) -> Port {
-        let (MirrorType::All(port)
-        | MirrorType::FilteredHttpEx(port, ..)
-        | MirrorType::FilteredHttp(port, ..)) = self;
+        let (MirrorType::All(port) | MirrorType::FilteredHttp(port, ..)) = self;
         *port
     }
 }

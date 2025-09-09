@@ -271,13 +271,11 @@ mod tests {
 
     #[test]
     fn sanity_client_encode_decode() {
-        use crate::tcp::MirrorType;
-
         let mut client_codec = ClientCodec::default();
         let mut daemon_codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
 
-        let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(MirrorType::All(1)));
+        let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
 
         client_codec.encode(msg.clone(), &mut buf).unwrap();
 
