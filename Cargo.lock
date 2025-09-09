@@ -4705,7 +4705,6 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.16",
  "tokio",
- "tokio-retry",
  "tokio-tungstenite 0.24.0",
  "tower 0.5.2",
  "tracing",

@@ -18,6 +18,8 @@
 
 use std::sync::OnceLock;
 
+pub use kube;
+
 use crate::retry::RetryKube;
 
 pub mod api;
