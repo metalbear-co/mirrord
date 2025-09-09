@@ -13,6 +13,11 @@ jobs:
       run:
         shell: pwsh
 
+    env:
+      # Build output paths (adjust if you use Release)
+      LAYER_DLL: target\x86_64-pc-windows-msvc\debug\layer_win.dll
+      MIRRORD_EXE: target\x86_64-pc-windows-msvc\debug\mirrord.exe
+
     steps:
       - name: Checkout PR 3536 (merge ref)
         uses: actions/checkout@v4
@@ -20,25 +25,161 @@ jobs:
           ref: refs/pull/3536/merge
           fetch-depth: 1
 
-      # - name: Checkout branch mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
-      #   uses: actions/checkout@v4
-      #   with:
-      #     ref: mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
-
       - name: Add Rust MSVC target
-        run: |
-          rustup target add x86_64-pc-windows-msvc
+        run: rustup target add x86_64-pc-windows-msvc
 
       - name: Build layer-win (DLL)
-        run: |
-          cargo build -p layer-win --target x86_64-pc-windows-msvc
-
+        run: cargo build -p layer-win --target x86_64-pc-windows-msvc
 
       - name: Set MIRRORD_LAYER_FILE
         run: |
-          $env:MIRRORD_LAYER_FILE = "target\x86_64-pc-windows-msvc\debug\layer_win.dll"
+          $env:MIRRORD_LAYER_FILE = "${{ env.LAYER_DLL }}"
           "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build mirrord (EXE)
+        run: cargo build -p mirrord --target x86_64-pc-windows-msvc
+
+      # ---------- Signing prep: ensure SignTool is available ----------
+      - name: Locate or install Windows SDK (SignTool)
         run: |
-          cargo build -p mirrord --target x86_64-pc-windows-msvc
+          # Try to locate SignTool in Windows Kits
+          $sdkBin = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+
+          if (-not $sdkBin) {
+            Write-Host "Windows SDK not found; attempting install via winget..."
+            try {
+              winget source update | Out-Null
+              # Use the community source explicitly to avoid msstore prompts
+              $pkg = "Microsoft.WindowsSDK.10.0.26100"
+              winget install --source winget --exact --id $pkg --accept-package-agreements --accept-source-agreements
+            } catch {
+              Write-Error "Failed to install Windows SDK automatically. Install it on the runner and rerun."
+              exit 1
+            }
+            $sdkBin = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory |
+              Sort-Object Name -Descending | Select-Object -First 1
+          }
+
+          $signtool = Join-Path $sdkBin.FullName 'x64\signtool.exe'
+          if (-not (Test-Path $signtool)) {
+            throw "signtool.exe not found under $($sdkBin.FullName). Ensure Windows SDK is installed."
+          }
+
+          "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Using SignTool at $signtool"
+
+      # ---------- Signing prep: DigiCert smctl + KSP credentials ----------
+      - name: Prepare DigiCert (smctl + KSP)
+        env:
+          DIGICERT_API_KEY:              ${{ secrets.DIGICERT_API_KEY }}
+          DIGICERT_CLIENT_CERT_PFX_B64:  ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
+          DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
+        run: |
+          # Find smctl from typical install paths
+          $smctlCandidates = @(
+            "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+            "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
+          )
+          $smctl = $smctlCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $smctl) { throw "smctl.exe not found. Install DigiCert Signing Manager/KeyLocker Tools on this runner." }
+          Write-Host "Using smctl at $smctl"
+
+          # Recreate the client-auth P12 from secret
+          $p12Path = Join-Path $env:RUNNER_TEMP "digicert-client-auth.p12"
+          [IO.File]::WriteAllBytes($p12Path, [Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64))
+
+          # Required env vars for smctl
+          $env:SM_HOST = "https://clientauth.one.digicert.com"
+          $env:SM_CLIENT_CERT_FILE = $p12Path
+
+          # Save API key + P12 password in Windows Credential Manager
+          & $smctl credentials save $env:DIGICERT_API_KEY $env:DIGICERT_CLIENT_CERT_PASSWORD
+
+          # Register the KSP (safe to re-run). If already registered, it may print 0xC0000035, which is harmless.
+          try { & $smctl windows ksp register } catch { Write-Warning $_ }
+
+          # Optional: show tools mapping (won't fail the build if unmapped)
+          & $smctl healthcheck --tools || $true
+
+      # ---------- Fetch the public certificate for your keypair ----------
+      - name: Download signing certificate
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+        run: |
+          $smctl = @(
+            "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+            "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          $outDir = $env:RUNNER_TEMP
+          & $smctl certificate download --keypair-alias $env:DIGICERT_KEYPAIR_ALIAS --format cer --out $outDir
+
+          $cert = Get-ChildItem $outDir -Filter *.cer | Select-Object -First 1 | % FullName
+          if (-not $cert) { throw "Failed to download .cer for keypair alias $env:DIGICERT_KEYPAIR_ALIAS" }
+
+          "CODESIGN_CERT=$cert" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Downloaded signing certificate to $cert"
+
+      # ---------- Sign the DLL and EXE using SignTool + DigiCert KSP ----------
+      - name: Sign artifacts (DLL + EXE)
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+        run: |
+          $ts = "http://timestamp.digicert.com"
+          $signtool = "$env:SIGNTOOL"
+          $cert = "$env:CODESIGN_CERT"
+          $alias = "$env:DIGICERT_KEYPAIR_ALIAS"
+
+          & $signtool sign /fd SHA256 /tr $ts /td SHA256 `
+            /csp "DigiCert Signing Manager KSP" /kc "$alias" /f "$cert" `
+            "${{ env.LAYER_DLL }}"
+
+          & $signtool sign /fd SHA256 /tr $ts /td SHA256 `
+            /csp "DigiCert Signing Manager KSP" /kc "$alias" /f "$cert" `
+            "${{ env.MIRRORD_EXE }}"
+
+      - name: Verify signatures
+        run: |
+          & "$env:SIGNTOOL" verify /pa /all "${{ env.LAYER_DLL }}"
+          & "$env:SIGNTOOL" verify /pa /all "${{ env.MIRRORD_EXE }}"
+
+# name: Build PR 3536 (Windows, self-hosted, minimal)
+
+# on:
+#   workflow_dispatch:
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   build:
+#     runs-on: [self-hosted, Windows]
+#     defaults:
+#       run:
+#         shell: pwsh
+
+#     steps:
+#       - name: Checkout PR 3536 (merge ref)
+#         uses: actions/checkout@v4
+#         with:
+#           ref: refs/pull/3536/merge
+#           fetch-depth: 1
+
+#       - name: Add Rust MSVC target
+#         run: |
+#           rustup target add x86_64-pc-windows-msvc
+
+#       - name: Build layer-win (DLL)
+#         run: |
+#           cargo build -p layer-win --target x86_64-pc-windows-msvc
+
+
+#       - name: Set MIRRORD_LAYER_FILE
+#         run: |
+#           $env:MIRRORD_LAYER_FILE = "target\x86_64-pc-windows-msvc\debug\layer_win.dll"
+#           "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+#       - name: Build mirrord (EXE)
+#         run: |
+#           cargo build -p mirrord --target x86_64-pc-windows-msvc
