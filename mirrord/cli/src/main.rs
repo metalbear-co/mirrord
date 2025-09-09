@@ -273,7 +273,7 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, RetryKube};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
@@ -773,7 +773,6 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    // TODO(alex) [high]: 2nd fetch from cluster here.
     let (connection_info, connection) =
         create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
 

@@ -4609,7 +4609,6 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tower 0.5.2",
- "tower-http",
  "tracing",
 ]
 

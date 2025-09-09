@@ -11,8 +11,6 @@ pub async fn operator_installed(client: &Client) -> kube::Result<bool> {
         kind: MirrordOperatorCrd::kind(&()).into_owned(),
     };
 
-    // TODO(alex) [high]: Have to retry things here!
-
     match discovery::oneshot::pinned_kind(client, &gvk).await {
         Ok(..) => Ok(true),
         Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),

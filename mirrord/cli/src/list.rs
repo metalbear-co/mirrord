@@ -6,9 +6,10 @@ use kube::Client;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
-    RETRY_KUBE_OPERATIONS_POLICY, RetryKube,
+    RETRY_KUBE_OPERATIONS_POLICY,
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
+    retry::RetryKube,
 };
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;

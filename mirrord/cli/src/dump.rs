@@ -7,7 +7,7 @@ use std::{
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, RetryKube};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,

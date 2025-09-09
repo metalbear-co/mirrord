@@ -1,6 +1,6 @@
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, RetryKube};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{

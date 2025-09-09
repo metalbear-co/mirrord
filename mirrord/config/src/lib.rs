@@ -382,6 +382,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
 
+    /// ## startup_retry {#root-startup_retry}
     #[config(nested)]
     pub startup_retry: StartupRetryConfig,
 }
@@ -720,6 +721,27 @@ impl LayerConfig {
             );
         }
 
+        if self.startup_retry.min_ms > self.startup_retry.max_ms {
+            return Err(ConfigError::InvalidValue {
+                name: "startup_retry.min_ms",
+                provided: self.startup_retry.min_ms.to_string(),
+                error: format!(
+                    "the value of startup_retry.min_ms must be smaller than {}\
+                     the value of startup_retry.max_ms {}.",
+                    self.startup_retry.min_ms, self.startup_retry.max_ms
+                )
+                .into(),
+            });
+        }
+
+        if self.startup_retry.max_ms == 0 {
+            return Err(ConfigError::InvalidValue {
+                name: "startup_retry.max_ms",
+                provided: self.startup_retry.max_ms.to_string(),
+                error: "the value of startup_retry.max_ms has to be greater than 0.".into(),
+            });
+        }
+
         Ok(())
     }
 }
@@ -735,6 +757,7 @@ impl CollectAnalytics for &LayerConfig {
         (&self.agent).collect_analytics(analytics);
         (&self.feature).collect_analytics(analytics);
         (&self.experimental).collect_analytics(analytics);
+        (&self.startup_retry).collect_analytics(analytics);
     }
 }
 

@@ -10,7 +10,7 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, RetryKube};
+use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;

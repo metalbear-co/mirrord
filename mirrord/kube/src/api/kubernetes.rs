@@ -23,7 +23,7 @@ use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
 use crate::{
-    RetryKube,
+    retry::RetryKube,
     api::{
         container::{
             ContainerApi, ContainerParams,

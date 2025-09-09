@@ -1,7 +1,9 @@
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, RetryKube, api::kubernetes::create_kube_config};
+use mirrord_kube::{
+    RETRY_KUBE_OPERATIONS_POLICY, api::kubernetes::create_kube_config, retry::RetryKube,
+};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;

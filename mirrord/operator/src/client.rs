@@ -19,10 +19,10 @@ use mirrord_auth::{
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
-    RetryKube,
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
     resolved::ResolvedTarget,
+    retry::RetryKube,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
