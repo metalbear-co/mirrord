@@ -31,7 +31,7 @@ pub struct PatchedWorkloadRef {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchRequest {
-    pub owner: PatchRequestOwner,
+    pub owner: String,
     pub extra_inline_env: Vec<ExtraInlineEnv>,
     pub replicas: Option<i32>,
 }
@@ -42,10 +42,4 @@ pub struct ExtraInlineEnv {
     pub container: String,
     pub variable: String,
     pub value: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PatchRequestOwner {
-    pub operator_instance: Option<String>,
 }
