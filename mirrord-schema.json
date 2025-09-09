@@ -166,25 +166,16 @@
         }
       ]
     },
-    "startup_retries_interval_ms": {
-      "title": "startup_retries_interval_ms {#root-startup_retries_interval_ms}",
-      "description": "Sets the interval (in milliseconds) between mirrord startup retries during its startup, for cluster operations, such as searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent.\n\nIf you are having cluster connectivity issues when starting mirrord, setting this config and [`startup_retries_max_attempts`](#root-startup_retries_max_attempts) may help.",
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "startup_retries_max_attempts": {
-      "title": "startup_retries_max_attempts {#root-startup_retries_max_attempts}",
-      "description": "Sets the max amount of retries that mirrord will try to perform during its startup, for cluster operations, such as searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent.\n\nIf you are having cluster connectivity issues when starting mirrord, setting this config and [`startup_retries_interval_ms`](#root-startup_retries_interval_ms) may help.",
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "uint",
-      "minimum": 0.0
+    "startup_retry": {
+      "title": "startup_retry {#root-startup_retry}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StartupRetryFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "target": {
       "title": "target {#root-target}",
@@ -2138,6 +2129,43 @@
       "additionalProperties": {
         "$ref": "#/definitions/QueueFilter"
       }
+    },
+    "StartupRetryFileConfig": {
+      "description": "Controls how mirrord retries its initial cluster operations, such as: getting targets, connecting to the mirrord-operator, and so on.\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing [`max_attempts`](#startup_retry-max_attempts) and changing both [`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry some of its initial cluster operations more often.\n\n```json { \"startup_retry\": { \"min_ms\": 500, \"max_ms\": 5000, \"max_attempts\": 1, } } ```",
+      "type": "object",
+      "properties": {
+        "max_attempts": {
+          "title": "startup_retry.max_attempts {#startup_retry-max_attempts}",
+          "description": "Sets the max amount of retries that mirrord will try to perform during its startup for cluster operations, such as: searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent, etc.\n\nIf you want to **disable** mirrord startup retry, set this value to `0`.\n\nDefaults to `1` (retries each operation **once**).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_ms": {
+          "title": "startup_retry.max_ms {#startup_retry-max_ms}",
+          "description": "Sets the **max** interval (in milliseconds) between mirrord startup retries during its startup for cluster operations, such as: searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent, etc.\n\nDefaults to `5000` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "min_ms": {
+          "title": "startup_retry.min_ms {#startup_retry-min_ms}",
+          "description": "Sets the **min** interval (in milliseconds) between mirrord startup retries during its startup for cluster operations, such as: searching for the target pod, connecting to the mirrord-operator, creating the mirrord-agent, etc.\n\nDefaults to `500` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
     },
     "StatefulSetTarget": {
       "type": "object",

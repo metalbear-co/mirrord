@@ -2121,6 +2121,52 @@ Defaults to `{ "skip_sip": "git" }`
 When specified, the given value will replace the default list rather than
 being added to.
 
+## startup_retry {#root-startup_retry}
+
+Controls how mirrord retries its initial cluster operations, such as: getting targets,
+connecting to the mirrord-operator, and so on.
+
+If you're having cluster connectivity issues when **starting** mirrord, consider increasing
+[`max_attempts`](#startup_retry-max_attempts) and changing both
+[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry
+some of its initial cluster operations more often.
+
+```json
+{
+  "startup_retry": {
+    "min_ms": 500,
+    "max_ms": 5000,
+    "max_attempts": 1,
+  }
+}
+```
+
+## startup_retry.max_attempts {#startup_retry-max_attempts}
+
+Sets the max amount of retries that mirrord will try to perform during its startup for
+cluster operations, such as: searching for the target pod, connecting to the
+mirrord-operator, creating the mirrord-agent, etc.
+
+If you want to **disable** mirrord startup retry, set this value to `0`.
+
+Defaults to `1` (retries each operation **once**).
+
+## startup_retry.max_ms {#startup_retry-max_ms}
+
+Sets the **max** interval (in milliseconds) between mirrord startup retries during its
+startup for cluster operations, such as: searching for the target pod, connecting to
+the mirrord-operator, creating the mirrord-agent, etc.
+
+Defaults to `5000` milliseconds.
+
+## startup_retry.min_ms {#startup_retry-min_ms}
+
+Sets the **min** interval (in milliseconds) between mirrord startup retries during its
+startup for cluster operations, such as: searching for the target pod, connecting to
+the mirrord-operator, creating the mirrord-agent, etc.
+
+Defaults to `500` milliseconds.
+
 ## target {#root-target}
 
 Specifies the target and namespace to target.
