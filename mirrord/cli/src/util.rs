@@ -1,7 +1,7 @@
-use std::{io, io::Write, net::SocketAddr};
+use std::{io::{self, Write}, net::SocketAddr, process::exit};
 
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
-use nix::libc;
+use nix::{libc, unistd::{fork, ForkResult}};
 use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
 
@@ -50,6 +50,24 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
             redirect_fd_to_dev_null(fd);
         }
         Ok(())
+    }
+}
+
+
+/// "Reparent" this process to init by forking and then exiting on the
+/// parent. The child process will get reparented to init.
+///
+/// # Safety
+///
+/// Since this function calls `nix::unistd::fork`, the safety section
+/// from that function applies. Namely, we can only call it in a
+/// single-threaded context.
+pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
+    unsafe {
+        match fork()? {
+            ForkResult::Parent { .. } => exit(0),
+            ForkResult::Child => Ok(())
+        }
     }
 }
 
