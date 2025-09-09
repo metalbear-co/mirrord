@@ -204,25 +204,34 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      # 1) rustup target add x86_64-pc-windows-msvc
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      # Find the mirrord crate folder so the relative path works the same as your local build
-      - name: Locate mirrord crate folder
+      # Find which *package* contains the bin target named "mirrord"
+      - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
         run: |
-          $toml = Get-ChildItem -Recurse -Filter Cargo.toml -File |
-            Where-Object { Select-String -Path $_.FullName -Pattern '^\s*name\s*=\s*"mirrord"\s*$' -SimpleMatch -Quiet } |
-            Select-Object -First 1
-          if (-not $toml) { throw "Could not find Cargo.toml for package 'mirrord'." }
-          $dir = Split-Path $toml.FullName
-          "MIRRORD_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "mirrord crate dir: $dir"
+          # Find the package that defines a binary target named 'mirrord'
+          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object {
+            $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
+          } | Select-Object -First 1
 
-      # 2) $env:MIRRORD_LAYER_FILE = "../target/x86_64-pc-windows-msvc/debug/layer_win.dll";
-      # 3) cargo build -p mirrord --target x86_64-pc-windows-msvc
-      - name: Build mirrord (with MIRRORD_LAYER_FILE)
-        run: |
-          Set-Location "$env:MIRRORD_DIR"
-          $env:MIRRORD_LAYER_FILE = "..\target\x86_64-pc-windows-msvc\debug\layer_win.dll"
-          Write-Host "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE"
-          cargo build -p mirrord --target x86_64-pc-windows-msvc
+          if (-not $pkg) {
+            $names = ($meta.packages | ForEach-Object name) -join ', '
+            throw "No bin target named 'mirrord' found. Workspace packages: $names"
+          }
+
+          # Save the package name for the next step
+          "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Will build bin 'mirrord' from package: $($pkg.name)"
+
+          # Set MIRRORD_LAYER_FILE to an *absolute* path in this workspace
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "MIRRORD_LAYER_FILE=$dll"
+
+      # 2) cargo build (just like your local command, but robust to package naming)
+      - name: Build mirrord
+        run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
+
