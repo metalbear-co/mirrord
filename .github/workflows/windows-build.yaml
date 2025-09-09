@@ -166,20 +166,21 @@ jobs:
           ref: refs/pull/3536/merge
           fetch-depth: 1
 
+      # - name: Checkout branch mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
+      #   uses: actions/checkout@v4
+      #   with:
+      #     ref: mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
+
       - name: Add Rust MSVC target
         run: |
           rustup target add x86_64-pc-windows-msvc
-
       - name: Build layer-win (DLL)
         run: |
           cargo build -p layer-win --target x86_64-pc-windows-msvc
-
-
       - name: Set MIRRORD_LAYER_FILE
         run: |
           $env:MIRRORD_LAYER_FILE = "target\x86_64-pc-windows-msvc\debug\layer_win.dll"
           "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE" | Out-File -FilePath $env:GITHUB_ENV -Append
-
       - name: Build mirrord (EXE)
         run: |
           cargo build -p mirrord --target x86_64-pc-windows-msvc
