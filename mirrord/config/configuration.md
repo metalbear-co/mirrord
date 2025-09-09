@@ -855,6 +855,75 @@ A list of configurations for database branches.
 }
 ```
 
+Configuration for a database branch.
+
+Example:
+
+```json
+{
+  "id": "my-branch-db",
+  "name": "my-database-name",
+  "ttl_secs": 120,
+  "type": "mysql",
+  "version": "8.0",
+  "connection": {
+    "url": {
+      "type": "env",
+      "variable": "DB_CONNECTION_URL"
+    }
+  }
+}
+```
+
+### feature.db_branches.type {#feature-db_branches-type}
+
+Currently MySQL is the only supported database type.
+
+### feature.db_branches.connection {#feature-db_branches-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Example:
+
+A single complete connection URL stored in an environment variable accessible from
+the target pod template.
+
+```json
+{
+  "url": {
+    "type": "env",
+    "variable": "DB_CONNECTION_URL"
+  }
+}
+```
+
+### feature.db_branches.id {#feature-db_branches-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+### feature.db_branches.name {#feature-db_branches-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+### feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+### feature.db_branches.version {#feature-db_branches-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
 ## feature.env {#feature-env}
 
 Allows the user to set or override the local process' environment variables with the ones
@@ -1847,6 +1916,8 @@ will be used, and your local application will not receive any messages from that
   }
 }
 ```
+
+More queue types might be added in the future.
 
 ## internal_proxy {#root-internal_proxy}
 
