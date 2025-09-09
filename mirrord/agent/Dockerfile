@@ -49,12 +49,6 @@ RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.to
 RUN cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
-# Test stage - run unit tests
-FROM builder AS test
-RUN echo "=== Running agent unit tests ===" && \
-    cargo +nightly-2025-08-01 test --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) -- --nocapture || \
-    echo "Tests completed"
-
 FROM ghcr.io/metalbear-co/ci-agent-runtime:latest
 COPY --from=builder /mirrord-agent /
 
