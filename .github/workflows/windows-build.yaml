@@ -144,6 +144,43 @@
 #           & "$env:SIGNTOOL" verify /pa /all "${{ env.LAYER_DLL }}"
 #           & "$env:SIGNTOOL" verify /pa /all "${{ env.MIRRORD_EXE }}"
 
+# name: Build PR 3536 (Windows, self-hosted, minimal)
+
+# on:
+#   workflow_dispatch:
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   build:
+#     runs-on: [self-hosted, Windows]
+#     defaults:
+#       run:
+#         shell: pwsh
+
+#     steps:
+#       - name: Checkout PR 3536 (merge ref)
+#         uses: actions/checkout@v4
+#         with:
+#           ref: refs/pull/3536/merge
+#           fetch-depth: 1
+
+#       - name: Add Rust MSVC target
+#         run: |
+#           rustup target add x86_64-pc-windows-msvc
+#       - name: Build layer-win (DLL)
+#         run: |
+#           cargo build -p layer-win --target x86_64-pc-windows-msvc
+#       - name: Set MIRRORD_LAYER_FILE
+#         run: |
+#           $env:MIRRORD_LAYER_FILE = "target\x86_64-pc-windows-msvc\debug\layer_win.dll"
+#           "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE" | Out-File -FilePath $env:GITHUB_ENV -Append
+#       - name: Build mirrord (EXE)
+#         run: |
+#           cargo build -p mirrord --target x86_64-pc-windows-msvc
+
+
 name: Build PR 3536 (Windows, self-hosted, minimal)
 
 on:
@@ -159,28 +196,31 @@ jobs:
       run:
         shell: pwsh
 
+    env:
+      LAYER_DLL:   target\x86_64-pc-windows-msvc\debug\layer_win.dll
+      MIRRORD_EXE: target\x86_64-pc-windows-msvc\debug\mirrord.exe
+
     steps:
       - name: Checkout PR 3536 (merge ref)
         uses: actions/checkout@v4
         with:
           ref: refs/pull/3536/merge
-          fetch-depth: 1
-
-      # - name: Checkout branch mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
-      #   uses: actions/checkout@v4
-      #   with:
-      #     ref: mbe-1406+1402-mirrord-layer-incoming-traffic-hooks
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Add Rust MSVC target
-        run: |
-          rustup target add x86_64-pc-windows-msvc
+        run: rustup target add x86_64-pc-windows-msvc
+
       - name: Build layer-win (DLL)
+        run: cargo build -p layer-win --target x86_64-pc-windows-msvc
+
+      # <-- Set MIRRORD_LAYER_FILE to the *absolute* DLL path
+      - name: Set MIRRORD_LAYER_FILE (absolute path)
         run: |
-          cargo build -p layer-win --target x86_64-pc-windows-msvc
-      - name: Set MIRRORD_LAYER_FILE
-        run: |
-          $env:MIRRORD_LAYER_FILE = "target\x86_64-pc-windows-msvc\debug\layer_win.dll"
-          "MIRRORD_LAYER_FILE=$env:MIRRORD_LAYER_FILE" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $dll = Join-Path $env:GITHUB_WORKSPACE '${{ env.LAYER_DLL }}'
+          if (-not (Test-Path $dll)) { throw "Expected DLL not found at $dll" }
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "MIRRORD_LAYER_FILE=$dll"
+
       - name: Build mirrord (EXE)
-        run: |
-          cargo build -p mirrord --target x86_64-pc-windows-msvc
+        run: cargo build -p mirrord --target x86_64-pc-windows-msvc
