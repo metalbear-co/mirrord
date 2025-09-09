@@ -23,9 +23,11 @@ macro_rules! apply_hook {
                 $crate::process::get_export($dll, $fn) as _,
                 $detour as _,
             )?)
-            .or(Err($crate::error::Error::FailedApplyingAPIHook(
-                $fn.into(),
-                $dll.into(),
-            )))
+            .or(Err(
+                mirrord_layer_lib::error::LayerError::FailedApplyingAPIHook(
+                    $fn.into(),
+                    $dll.into(),
+                ),
+            ))
     };
 }

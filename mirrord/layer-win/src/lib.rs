@@ -22,7 +22,6 @@ use winapi::{
 use crate::hooks::initialize_hooks;
 
 mod console;
-pub mod error;
 mod hooks;
 mod macros;
 pub mod process;

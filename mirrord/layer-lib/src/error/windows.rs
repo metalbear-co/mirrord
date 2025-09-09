@@ -1,8 +1,10 @@
 //! Module responsible for handling Windows errors.
+#![cfg(target_os = "windows")]
 
 use std::fmt::{Debug, Display};
 
 use str_win::u16_buffer_to_string;
+use thiserror::Error;
 use winapi::{
     shared::ntdef::{MAKELANGID, SUBLANG_ENGLISH_US},
     um::{
@@ -11,6 +13,16 @@ use winapi::{
         winnt::LANG_ENGLISH,
     },
 };
+
+#[derive(Error, Debug)]
+pub enum ConsoleError {
+    #[error("Failed to allocate console: {0}")]
+    FailedAllocatingConsole(WindowsError),
+
+    #[error("Failed to redirect standard handles: {0}")]
+    FailedRedirectingStdHandles(WindowsError),
+}
+pub type ConsoleResult<T> = Result<T, ConsoleError>;
 
 pub struct WindowsError {
     /// Usually returned by [`winapi::umm::errhandlingapi::GetLastError`].

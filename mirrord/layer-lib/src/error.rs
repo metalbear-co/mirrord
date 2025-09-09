@@ -3,7 +3,16 @@
 //! This module provides error types that can be shared between the Unix layer and Windows
 //! layer-win, along with platform-specific conversions to native error codes.
 
-use std::{env::VarError, io, net::SocketAddr, str::ParseBoolError, sync::PoisonError};
+#[cfg(target_os = "windows")]
+pub mod windows;
+
+use std::{
+    env::VarError,
+    io,
+    net::{AddrParseError, SocketAddr},
+    str::ParseBoolError,
+    sync::PoisonError,
+};
 
 #[cfg(unix)]
 use libc::{DIR, FILE, c_char, hostent};
@@ -16,6 +25,9 @@ use mirrord_sip::SipError;
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
+
+#[cfg(target_os = "windows")]
+use crate::error::windows::ConsoleError;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -316,6 +328,24 @@ pub enum LayerError {
     #[cfg(target_os = "macos")]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
+
+    #[error("Failed applying hook for function {0}, dll {1}")]
+    FailedApplyingAPIHook(String, String),
+
+    #[error("Environment variable for intproxy address is missing: {0}")]
+    MissingEnvIntProxyAddr(VarError),
+    #[error("Intproxy address malformed: {0}")]
+    MalformedIntProxyAddr(AddrParseError),
+
+    #[error("Proxy connection failed: {0}")]
+    ProxyConnectionFailed(#[from] ProxyError),
+
+    #[error("Global {0} already initialized")]
+    GlobalAlreadyInitialized(&'static str),
+
+    #[cfg(target_os = "windows")]
+    #[error("Console failure")]
+    WindowsConsoleError(#[from] ConsoleError),
 }
 
 impl From<SerializationError> for LayerError {
@@ -348,7 +378,7 @@ impl From<frida_gum::Error> for LayerError {
     }
 }
 
-pub type Result<T, E = LayerError> = std::result::Result<T, E>;
+pub type LayerResult<T, E = LayerError> = std::result::Result<T, E>;
 pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
 pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
 

@@ -171,7 +171,7 @@ impl WindowsProcessExtSuspended for WindowsProcess {
         unsafe {
             // ResumeThread: If the function fails, the return value is (DWORD) -1
             if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread)
-                == (-1i32 as u32)
+                == u32::MAX
             {
                 return Err(windows::core::Error::from_win32());
             }

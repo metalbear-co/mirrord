@@ -7,7 +7,10 @@ use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, util::read_resolved_config};
 use mirrord_intproxy_protocol::ProcessInfo;
 use proxy_connection::{PROXY_CONNECTION, ProxyConnection};
 
-use crate::common::setup::LayerSetup;
+use crate::{
+    common::setup::LayerSetup,
+    error::{LayerError, LayerResult},
+};
 
 /// Global layer setup instance, shared across the layer
 static LAYER_SETUP: OnceLock<LayerSetup> = OnceLock::new();
@@ -20,18 +23,15 @@ static LAYER_SETUP: OnceLock<LayerSetup> = OnceLock::new();
 /// - Creates the layer setup
 /// - Establishes the proxy connection
 /// - Stores the setup for later use
-pub fn initialize_proxy_connection(
-    process_info: ProcessInfo,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn initialize_proxy_connection(process_info: ProcessInfo) -> LayerResult<()> {
     // Read proxy address from environment
     let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-        .map_err(|_| "Missing MIRRORD_LAYER_INTPROXY_ADDR environment variable")?
+        .map_err(LayerError::MissingEnvIntProxyAddr)?
         .parse::<SocketAddr>()
-        .map_err(|e| format!("Invalid proxy address: {}", e))?;
+        .map_err(LayerError::MalformedIntProxyAddr)?;
 
     // Read and process mirrord configuration
-    let config = read_resolved_config()
-        .map_err(|e| format!("Failed to read mirrord configuration: {}", e))?;
+    let config = read_resolved_config().map_err(LayerError::Config)?;
 
     // Create layer setup
     let setup = LayerSetup::new(config);
@@ -47,17 +47,17 @@ pub fn initialize_proxy_connection(
 
     // Establish proxy connection
     let new_connection = ProxyConnection::new(address, session, timeout)
-        .map_err(|e| format!("Failed to create proxy connection: {}", e))?;
+        .map_err(LayerError::ProxyConnectionFailed)?;
 
     // Store the proxy connection
     PROXY_CONNECTION
         .set(new_connection)
-        .map_err(|_| "Proxy connection already initialized")?;
+        .map_err(|_| LayerError::GlobalAlreadyInitialized("ProxyConnection"))?;
 
     // Store the setup in the global static
     LAYER_SETUP
         .set(setup)
-        .map_err(|_| "Setup already initialized")?;
+        .map_err(|_| LayerError::GlobalAlreadyInitialized("LayerSetup"))?;
 
     Ok(())
 }
