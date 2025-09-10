@@ -4,6 +4,7 @@ use ignore_codes::*;
 #[cfg(not(target_os = "windows"))]
 use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
+use mirrord_layer_lib::graceful_exit;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -14,7 +15,6 @@ use thiserror::Error;
 use tracing::{error, info};
 
 use crate::proxy_connection::ProxyError;
-use mirrord_layer_lib::graceful_exit;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
