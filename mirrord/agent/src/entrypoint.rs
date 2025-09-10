@@ -168,8 +168,6 @@ impl State {
         self.container.as_ref().map(ContainerHandle::pid)
     }
 
-    // TODO(alex) [2]: Then we come over here, all the tasks have already started, and are running
-    // in the background.
     pub async fn serve_client_connection(
         self,
         stream: TcpStream,
@@ -391,7 +389,7 @@ impl ClientConnectionHandler {
     /// Starts a loop that handles client connection and state.
     ///
     /// Breaks upon receiver/sender drop.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::INFO, skip(self), ret, err)]
     async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
             select! {
@@ -639,8 +637,6 @@ pub async fn notify_client_about_dirty_iptables(
 /// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
-    trace!("start_agent -> Starting agent with args: {args:?}");
-
     // Prepares a TCP listener for accepting client connections.
     let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
         let (socket, ip) = if ipv6 {
@@ -859,17 +855,22 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ..
     } = bg_tasks;
 
-    let _ = tokio::join!(
-        sniffer.wait().inspect_err(|error| {
-            error!(%error, "start_agent -> Sniffer task failed");
-        }),
-        stealer.wait().inspect_err(|error| {
-            error!(%error, "start_agent -> Stealer task failed");
-        }),
-        dns.wait().inspect_err(|error| {
-            error!(%error, "start_agent -> DNS task failed");
-        }),
-    );
+    let _ = timeout(Duration::from_secs(5), async {
+        tracing::info!("CLOSING AGENT!");
+        tokio::join!(
+            sniffer.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> Sniffer task failed");
+            }),
+            stealer.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> Stealer task failed");
+            }),
+            dns.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> DNS task failed");
+            }),
+        )
+    })
+    .await
+    .inspect_err(|fail| tracing::error!("{fail}"));
 
     trace!("start_agent -> Agent shutdown");
 
