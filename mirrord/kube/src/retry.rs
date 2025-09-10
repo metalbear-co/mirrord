@@ -1,3 +1,7 @@
+//! Implementation of our [`RetryKube`] [`Policy`] for retrying [`kube`] api requests using
+//! [`tower::retry::RetryLayer`].
+//!
+//! It's being used only for retrying [`kube::Client`] requests during mirrord startup.
 use std::time::Duration;
 
 use http::{Request, StatusCode};
