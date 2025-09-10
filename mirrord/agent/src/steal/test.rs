@@ -25,7 +25,7 @@ use crate::{
         test::{DummyConnectionTx, DummyRedirector},
         tls::test::SimpleStore,
     },
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus, LocalRuntime},
 };
 
 mod utils;
@@ -457,7 +457,9 @@ impl TestSetup {
         let (stealer_tx, stealer_rx) = mpsc::channel(8);
         let stealer_task = TcpStealerTask::new(stealer_rx, handle);
         tokio::spawn(redirector.run());
-        let stealer_status = BgTaskRuntime::Local
+
+        let local_bg_task_runtime = BgTaskRuntime::Local(LocalRuntime::new().await.unwrap());
+        let stealer_status = local_bg_task_runtime
             .spawn(stealer_task.run(CancellationToken::new()))
             .into_status("stealer");
 

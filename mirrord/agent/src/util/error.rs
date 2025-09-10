@@ -6,7 +6,7 @@ use crate::namespace::NamespaceError;
 
 /// Errors that can occur when creating a [`RemoteRuntime`](super::remote_runtime::RemoteRuntime).
 #[derive(Error, Debug)]
-pub enum RemoteRuntimeError {
+pub enum AgentRuntimeError {
     #[error("failed to spawn runtime thread: {0}")]
     ThreadSpawnError(#[source] io::Error),
     #[error(transparent)]

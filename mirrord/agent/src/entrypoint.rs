@@ -49,7 +49,7 @@ use crate::{
     util::{
         ClientId,
         protocol_version::ClientProtocolVersion,
-        remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
+        remote_runtime::{BgTaskRuntime, BgTaskStatus, LocalRuntime, RemoteRuntime, RuntimeSpawn},
     },
 };
 
@@ -138,7 +138,7 @@ impl State {
             Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
                 RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
             ),
-            None | Some(..) => BgTaskRuntime::Local,
+            None | Some(..) => BgTaskRuntime::Local(LocalRuntime::new().await?),
         };
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
@@ -168,6 +168,8 @@ impl State {
         self.container.as_ref().map(ContainerHandle::pid)
     }
 
+    // TODO(alex) [2]: Then we come over here, all the tasks have already started, and are running
+    // in the background.
     pub async fn serve_client_connection(
         self,
         stream: TcpStream,
@@ -802,6 +804,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         Err(AgentError::TestError)?
     }
 
+    // TODO(alex) [high]: Create a simple `BackgroundTask` that never finishes, I think I can
+    // trigger an exit after everything is set up, and have this task block the shutdown procedure.
+    //
+    // TODO(alex) [1]: How is it possible for the agent to linger, if we exit on idle?
+    // Ah, the agent can only linger before someone is connected, this is a sort of
+    // "wait until someone connects, nobody? then die".
     let idle_ttl = Duration::from_secs(envs::IDDLE_TTL.from_env_or_default());
     loop {
         let exit_idle =

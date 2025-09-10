@@ -412,7 +412,7 @@ mod test {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus};
+    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus, LocalRuntime};
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -436,7 +436,7 @@ mod test {
             self.times_filter_changed.load(Ordering::Relaxed)
         }
 
-        fn new() -> Self {
+        async fn new() -> Self {
             let (packet_tx, packet_rx) = mpsc::channel(128);
             let (command_tx, command_rx) = mpsc::channel(16);
             let times_filter_changed = Arc::new(AtomicUsize::default());
@@ -453,7 +453,8 @@ mod test {
                 clients_closed: Default::default(),
             };
 
-            let task_status = BgTaskRuntime::Local
+            let local_bg_task_runtime = BgTaskRuntime::Local(LocalRuntime::new().await.unwrap());
+            let task_status = local_bg_task_runtime
                 .spawn(sniffer.start(CancellationToken::new()))
                 .into_status("TcpSnifferTask");
 
@@ -470,7 +471,7 @@ mod test {
     /// Simulates two sniffed connections, only one matching client's subscription.
     #[tokio::test]
     async fn one_client() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
         api.handle_client_message(LayerTcp::PortSubscribe(80))
@@ -564,7 +565,7 @@ mod test {
     /// test does some sleeping to give the sniffer time to process.
     #[tokio::test]
     async fn filter_replace() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
 
         let mut api_1 = setup.get_api().await;
         let mut api_2 = setup.get_api().await;
@@ -643,7 +644,7 @@ mod test {
     /// connection being closed.
     #[tokio::test]
     async fn client_lagging_on_data() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
         api.handle_client_message(LayerTcp::PortSubscribe(80))
@@ -729,7 +730,7 @@ mod test {
     /// enough. Client should miss new connections.
     #[tokio::test]
     async fn client_lagging_on_new_connections() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
         api.handle_client_message(LayerTcp::PortSubscribe(80))
@@ -829,7 +830,7 @@ mod test {
     #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_client_closed() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
 
         let mut api = setup.get_api().await;
 

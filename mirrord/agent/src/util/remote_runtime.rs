@@ -25,12 +25,42 @@ use futures::{
     future::{BoxFuture, Shared},
 };
 use tokio::sync::{mpsc, oneshot};
+use tracing::Level;
 
-use super::error::{BgTaskPanicked, RemoteRuntimeError};
+use super::error::{AgentRuntimeError, BgTaskPanicked};
 use crate::{
     error::AgentError,
     namespace::{self, NamespaceType},
 };
+
+pub trait RuntimeSpawn {
+    fn future_tx(&self) -> mpsc::Sender<BoxFuture<'static, ()>>;
+
+    /// Spawns the given future on this remote runtime.
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    fn spawn<F>(&self, future: F) -> BgTask<F::Output>
+    where
+        F: 'static + Future + Send,
+        F::Output: 'static + Send,
+    {
+        let (result_tx, result_rx) = oneshot::channel();
+
+        let future = async move {
+            let result = future.await;
+            let _ = result_tx.send(result);
+        }
+        .boxed();
+
+        let future_tx = self.future_tx().clone();
+        tokio::spawn(async move {
+            let _ = future_tx.send(future).await;
+        });
+
+        BgTask {
+            future_result: result_rx,
+        }
+    }
+}
 
 /// A cloneable handle to a remote [`tokio::runtime::Runtime`] that runs in its own thread.
 ///
@@ -43,33 +73,38 @@ pub struct RemoteRuntime {
     future_tx: mpsc::Sender<BoxFuture<'static, ()>>,
 }
 
-impl RemoteRuntime {
-    /// Creates a new remote runtime.
-    ///
-    /// This runtime's thread will enter the specified namespace of the target.
-    pub async fn new_in_namespace(
-        target_pid: u64,
-        namespace_type: NamespaceType,
-    ) -> Result<Self, RemoteRuntimeError> {
+#[derive(Clone)]
+pub struct LocalRuntime {
+    future_tx: mpsc::Sender<BoxFuture<'static, ()>>,
+}
+
+impl RuntimeSpawn for RemoteRuntime {
+    fn future_tx(&self) -> mpsc::Sender<BoxFuture<'static, ()>> {
+        self.future_tx.clone()
+    }
+}
+
+impl RuntimeSpawn for LocalRuntime {
+    fn future_tx(&self) -> mpsc::Sender<BoxFuture<'static, ()>> {
+        self.future_tx.clone()
+    }
+}
+
+impl LocalRuntime {
+    #[tracing::instrument(level = Level::INFO, err)]
+    pub async fn new() -> Result<Self, AgentRuntimeError> {
         let (future_tx, mut future_rx) = mpsc::channel(16);
         let (result_tx, result_rx) = oneshot::channel();
-        let thread_name = format!("remote-{target_pid}-{namespace_type}-runtime-thread");
+        let thread_name = format!("local-runtime-thread");
         let thread_logic = move || {
-            if let Err(error) = namespace::set_namespace(target_pid, namespace_type) {
-                let _ = result_tx.send(Err(error.into()));
-                return;
-            }
-
             let rt_result = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
-                .thread_name(format!(
-                    "remote-{target_pid}-{namespace_type}-runtime-worker"
-                ))
+                .thread_name(format!("local-runtime-worker"))
                 .build();
             let rt = match rt_result {
                 Ok(rt) => rt,
                 Err(error) => {
-                    let _ = result_tx.send(Err(RemoteRuntimeError::TokioRuntimeError(error)));
+                    let _ = result_tx.send(Err(AgentRuntimeError::TokioRuntimeError(error)));
                     return;
                 }
             };
@@ -88,7 +123,62 @@ impl RemoteRuntime {
         thread::Builder::new()
             .name(thread_name)
             .spawn(thread_logic)
-            .map_err(RemoteRuntimeError::ThreadSpawnError)?;
+            .map_err(AgentRuntimeError::ThreadSpawnError)?;
+
+        match result_rx.await {
+            Ok(Ok(())) => Ok(Self { future_tx }),
+            Ok(Err(error)) => Err(error),
+            Err(..) => Err(AgentRuntimeError::Panicked),
+        }
+    }
+}
+
+impl RemoteRuntime {
+    /// Creates a new remote runtime.
+    ///
+    /// This runtime's thread will enter the specified namespace of the target.
+    pub async fn new_in_namespace(
+        target_pid: u64,
+        namespace_type: NamespaceType,
+    ) -> Result<Self, AgentRuntimeError> {
+        let (future_tx, mut future_rx) = mpsc::channel(16);
+        let (result_tx, result_rx) = oneshot::channel();
+        let thread_name = format!("remote-{target_pid}-{namespace_type}-runtime-thread");
+        let thread_logic = move || {
+            if let Err(error) = namespace::set_namespace(target_pid, namespace_type) {
+                let _ = result_tx.send(Err(error.into()));
+                return;
+            }
+
+            let rt_result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .thread_name(format!(
+                    "remote-{target_pid}-{namespace_type}-runtime-worker"
+                ))
+                .build();
+            let rt = match rt_result {
+                Ok(rt) => rt,
+                Err(error) => {
+                    let _ = result_tx.send(Err(AgentRuntimeError::TokioRuntimeError(error)));
+                    return;
+                }
+            };
+
+            if result_tx.send(Ok(())).is_err() {
+                return;
+            }
+
+            rt.block_on(async move {
+                while let Some(future) = future_rx.recv().await {
+                    tokio::spawn(future);
+                }
+            });
+        };
+
+        thread::Builder::new()
+            .name(thread_name)
+            .spawn(thread_logic)
+            .map_err(AgentRuntimeError::ThreadSpawnError)?;
 
         match result_rx.await {
             Ok(Ok(())) => Ok(Self {
@@ -96,31 +186,7 @@ impl RemoteRuntime {
                 future_tx,
             }),
             Ok(Err(error)) => Err(error),
-            Err(..) => Err(RemoteRuntimeError::Panicked),
-        }
-    }
-
-    /// Spawns the given future on this remote runtime.
-    pub fn spawn<F>(&self, future: F) -> BgTask<F::Output>
-    where
-        F: 'static + Future + Send,
-        F::Output: 'static + Send,
-    {
-        let (result_tx, result_rx) = oneshot::channel();
-
-        let future = async move {
-            let result = future.await;
-            let _ = result_tx.send(result);
-        }
-        .boxed();
-
-        let future_tx = self.future_tx.clone();
-        tokio::spawn(async move {
-            let _ = future_tx.send(future).await;
-        });
-
-        BgTask {
-            future_result: result_rx,
+            Err(..) => Err(AgentRuntimeError::Panicked),
         }
     }
 
@@ -273,7 +339,7 @@ pub enum BgTaskRuntime {
     /// Remote runtime, which runs in the target's namespace.
     Remote(RemoteRuntime),
     /// Local runtime ([`tokio::runtime::Handle::current`]).
-    Local,
+    Local(LocalRuntime),
 }
 
 impl BgTaskRuntime {
@@ -285,18 +351,7 @@ impl BgTaskRuntime {
     {
         match self {
             Self::Remote(remote_runtime) => remote_runtime.spawn(future),
-            Self::Local => {
-                let (result_tx, result_rx) = oneshot::channel();
-
-                tokio::spawn(async move {
-                    let result = future.await;
-                    let _ = result_tx.send(result);
-                });
-
-                BgTask {
-                    future_result: result_rx,
-                }
-            }
+            Self::Local(local_runtime) => local_runtime.spawn(future),
         }
     }
 
@@ -305,7 +360,7 @@ impl BgTaskRuntime {
     pub fn target_pid(&self) -> Option<u64> {
         match self {
             Self::Remote(remote_runtime) => Some(remote_runtime.target_pid()),
-            Self::Local => None,
+            Self::Local(..) => None,
         }
     }
 }
