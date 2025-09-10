@@ -53,17 +53,17 @@ impl ProxyConnection {
 
         let mut responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
-        let ProxyToLayerMessage::NewSession(layer_id) = &response else {
-            return Err(ProxyError::UnexpectedResponse(response));
-        };
-
-        Ok(Self {
-            sender: Mutex::new(sender),
-            responses: Mutex::new(responses),
-            next_message_id: AtomicU64::new(1),
-            layer_id: layer_id.clone(),
-            proxy_addr,
-        })
+        if let ProxyToLayerMessage::NewSession(layer_id) = &response {
+            Ok(Self {
+                sender: Mutex::new(sender),
+                responses: Mutex::new(responses),
+                next_message_id: AtomicU64::new(1),
+                layer_id: *layer_id,
+                proxy_addr,
+            })
+        } else {
+            Err(ProxyError::UnexpectedResponse(response))
+        }
     }
 
     fn next_message_id(&self) -> MessageId {

@@ -34,3 +34,4 @@ nix.workspace = true
 [target.'cfg(windows)'.dependencies]
 str-win = { path = "../str-win" }
 winapi.workspace = true
+windows.workspace = true

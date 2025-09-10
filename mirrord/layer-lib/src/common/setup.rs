@@ -27,10 +27,7 @@ impl LayerSetup {
     /// Initialize the layer setup from configuration
     pub fn new(config: LayerConfig) -> Self {
         debug!("Creating LayerSetup for mirrord layer");
-        // debugbreak winapi
-        // unsafe { winapi::um::debugapi::DebugBreak(); }
 
-        println!("{:?}", config.feature.network.outgoing);
         let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
         let dns_selector = DnsSelector::new(&config.feature.network.dns);
 

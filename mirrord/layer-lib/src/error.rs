@@ -15,7 +15,10 @@ use std::{
 };
 
 #[cfg(unix)]
-use libc::{DIR, FILE, c_char, hostent};
+use libc::{
+    DIR, EACCES, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL,
+    EIO, EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
+};
 use mirrord_config::config::ConfigError;
 use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
 use mirrord_protocol::{ResponseError, SerializationError};
@@ -25,9 +28,18 @@ use mirrord_sip::SipError;
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
+#[cfg(windows)]
+use winapi::{
+    shared::winerror::{ERROR_DIRECTORY, ERROR_FILE_NOT_FOUND, ERROR_IO_DEVICE},
+    um::winsock2::{
+        WSAEADDRINUSE, WSAEAFNOSUPPORT, WSAEBADF, WSAEFAULT, WSAEINVAL, WSAENETUNREACH, WSAENOBUFS,
+        WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN,
+    },
+};
 
 #[cfg(target_os = "windows")]
 use crate::error::windows::ConsoleError;
+use crate::graceful_exit;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -411,94 +423,406 @@ impl From<HookError> for i64 {
                 return -1;
             }
             HookError::ProxyError(ref err) => {
-                let reason = match err {
+                match err {
                     ProxyError::ProxyFailure(err) => {
-                        format!("Proxy encountered an error: {err}")
+                        graceful_exit!("Proxy encountered an error: {err}")
                     }
-                    err => format!("Proxy error, connectivity issue or a bug: {err}"),
+                    err => {
+                        graceful_exit!("Proxy error, connectivity issue or a bug: {err}")
+                    }
                 };
-                // For cross-platform compatibility, we can't use graceful_exit! macro here
-                // Instead, just log and continue with error mapping
-                error!("Proxy error: {reason}");
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
         let errno = match fail {
-            HookError::Null(_) => platform_errors::EINVAL,
-            HookError::TryFromInt(_) => platform_errors::EINVAL,
-            HookError::CannotGetProxyConnection => platform_errors::EINVAL,
-            HookError::ProxyError(_) => platform_errors::EINVAL,
-            HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(platform_errors::EIO),
-            HookError::LockError => platform_errors::EINVAL,
-            HookError::BincodeEncode(_) => platform_errors::EINVAL,
+            HookError::Null(_) => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::TryFromInt(_) => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::CannotGetProxyConnection => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::ProxyError(_) => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::IO(io_fail) => {
+                #[cfg(unix)]
+                {
+                    io_fail.raw_os_error().unwrap_or(EIO)
+                }
+                #[cfg(windows)]
+                {
+                    io_fail.raw_os_error().unwrap_or(ERROR_IO_DEVICE as i32)
+                }
+            }
+            HookError::LockError => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::BincodeEncode(_) => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
             HookError::ResponseError(response_fail) => match response_fail {
-                ResponseError::IdsExhausted(_) => platform_errors::ENOMEM,
-                ResponseError::OpenLocal => platform_errors::ENOENT,
-                ResponseError::NotFound(_) => platform_errors::ENOENT,
-                ResponseError::NotDirectory(_) => platform_errors::ENOTDIR,
-                ResponseError::NotFile(_) => platform_errors::EISDIR,
+                ResponseError::IdsExhausted(_) => {
+                    #[cfg(unix)]
+                    {
+                        ENOMEM
+                    }
+                    #[cfg(windows)]
+                    {
+                        WSAENOBUFS as i32
+                    }
+                }
+                ResponseError::OpenLocal => {
+                    #[cfg(unix)]
+                    {
+                        ENOENT
+                    }
+                    #[cfg(windows)]
+                    {
+                        ERROR_FILE_NOT_FOUND as i32
+                    }
+                }
+                ResponseError::NotFound(_) => {
+                    #[cfg(unix)]
+                    {
+                        ENOENT
+                    }
+                    #[cfg(windows)]
+                    {
+                        ERROR_FILE_NOT_FOUND as i32
+                    }
+                }
+                ResponseError::NotDirectory(_) => {
+                    #[cfg(unix)]
+                    {
+                        ENOTDIR
+                    }
+                    #[cfg(windows)]
+                    {
+                        ERROR_DIRECTORY as i32
+                    }
+                }
+                ResponseError::NotFile(_) => {
+                    #[cfg(unix)]
+                    {
+                        EISDIR
+                    }
+                    #[cfg(windows)]
+                    {
+                        ERROR_DIRECTORY as i32
+                    }
+                }
                 ResponseError::RemoteIO(io_fail) => {
-                    io_fail.raw_os_error.unwrap_or(platform_errors::EIO)
+                    #[cfg(unix)]
+                    {
+                        io_fail.raw_os_error.unwrap_or(EIO)
+                    }
+                    #[cfg(windows)]
+                    {
+                        io_fail.raw_os_error.unwrap_or(ERROR_IO_DEVICE as i32)
+                    }
                 }
                 ResponseError::Remote(remote) => match remote {
                     // So far only encountered when trying to make requests from golang.
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => {
-                        platform_errors::ENETUNREACH
+                        #[cfg(unix)]
+                        {
+                            ENETUNREACH
+                        }
+                        #[cfg(windows)]
+                        {
+                            WSAENETUNREACH as i32
+                        }
                     }
-                    _ => platform_errors::EINVAL,
+                    _ => {
+                        #[cfg(unix)]
+                        {
+                            EINVAL
+                        }
+                        #[cfg(windows)]
+                        {
+                            WSAEINVAL as i32
+                        }
+                    }
                 },
                 ResponseError::DnsLookup(dns_fail) => {
                     return match dns_fail.kind {
                         mirrord_protocol::ResolveErrorKindInternal::Timeout => {
-                            platform_errors::EAI_AGAIN
+                            #[cfg(unix)]
+                            {
+                                EAI_AGAIN
+                            }
+                            #[cfg(windows)]
+                            {
+                                WSATRY_AGAIN as i32
+                            }
                         }
                         // prevents an infinite loop that used to happen in some apps, don't know if
                         // this is the correct mapping.
                         mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
-                            platform_errors::EAI_NONAME
+                            #[cfg(unix)]
+                            {
+                                EAI_NONAME
+                            }
+                            #[cfg(windows)]
+                            {
+                                WSAHOST_NOT_FOUND as i32
+                            }
                         }
-                        _ => platform_errors::EAI_FAIL,
-                        // TODO: Add more error kinds, next time we break protocol compatibility.
+                        _ => {
+                            #[cfg(unix)]
+                            {
+                                EAI_FAIL
+                            }
+                            #[cfg(windows)]
+                            {
+                                WSANO_RECOVERY as i32
+                            }
+                        } // TODO: Add more error kinds, next time we break protocol compatibility.
                     } as _;
                 }
                 // for listen, EINVAL means "socket is already connected."
                 // Will not happen, because this ResponseError is not return from any hook, so it
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
                 // this could be changed by waiting for the Subscribed response from agent.
-                ResponseError::PortAlreadyStolen(_port) => platform_errors::EINVAL,
-                ResponseError::NotImplemented => platform_errors::EINVAL,
-                ResponseError::StripPrefix(_) => platform_errors::EINVAL,
+                ResponseError::PortAlreadyStolen(_port) => {
+                    #[cfg(unix)]
+                    {
+                        EINVAL
+                    }
+                    #[cfg(windows)]
+                    {
+                        WSAEINVAL as i32
+                    }
+                }
+                ResponseError::NotImplemented => {
+                    #[cfg(unix)]
+                    {
+                        EINVAL
+                    }
+                    #[cfg(windows)]
+                    {
+                        WSAEINVAL as i32
+                    }
+                }
+                ResponseError::StripPrefix(_) => {
+                    #[cfg(unix)]
+                    {
+                        EINVAL
+                    }
+                    #[cfg(windows)]
+                    {
+                        WSAEINVAL as i32
+                    }
+                }
                 ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. } => {
-                    // For cross-platform compatibility, we can't use graceful_exit! macro here
-                    error!("Operation forbidden by policy");
-                    platform_errors::EACCES
+                    graceful_exit!("Operation forbidden by policy");
                 }
             },
-            HookError::DNSNoName => platform_errors::EFAULT,
-            HookError::Utf8(_) => platform_errors::EINVAL,
-            HookError::NullPointer => platform_errors::EINVAL,
+            HookError::DNSNoName => {
+                #[cfg(unix)]
+                {
+                    EFAULT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEFAULT as i32
+                }
+            }
+            HookError::Utf8(_) => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::NullPointer => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
             HookError::LocalFileCreation(_, err) => err,
             #[cfg(target_os = "macos")]
-            HookError::FailedSipPatch(_) => platform_errors::EACCES,
-            HookError::SocketUnsuportedIpv6 => platform_errors::EAFNOSUPPORT,
-            HookError::UnsupportedSocketType => platform_errors::EAFNOSUPPORT,
-            HookError::BadPointer => platform_errors::EFAULT,
-            HookError::AddressAlreadyBound(_) => platform_errors::EADDRINUSE,
-            HookError::FileNotFound => platform_errors::ENOENT,
+            HookError::FailedSipPatch(_) => EACCES,
+            HookError::SocketUnsuportedIpv6 => {
+                #[cfg(unix)]
+                {
+                    EAFNOSUPPORT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEAFNOSUPPORT as i32
+                }
+            }
+            HookError::UnsupportedSocketType => {
+                #[cfg(unix)]
+                {
+                    EAFNOSUPPORT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEAFNOSUPPORT as i32
+                }
+            }
+            HookError::BadPointer => {
+                #[cfg(unix)]
+                {
+                    EFAULT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEFAULT as i32
+                }
+            }
+            HookError::AddressAlreadyBound(_) => {
+                #[cfg(unix)]
+                {
+                    EADDRINUSE
+                }
+                #[cfg(windows)]
+                {
+                    WSAEADDRINUSE as i32
+                }
+            }
+            HookError::FileNotFound => {
+                #[cfg(unix)]
+                {
+                    ENOENT
+                }
+                #[cfg(windows)]
+                {
+                    ERROR_FILE_NOT_FOUND as i32
+                }
+            }
             #[cfg(target_os = "linux")]
-            HookError::BadDescriptor => platform_errors::EBADF,
+            HookError::BadDescriptor => EBADF,
             #[cfg(target_os = "linux")]
-            HookError::BadFlag => platform_errors::EINVAL,
+            HookError::BadFlag => EINVAL,
             #[cfg(target_os = "linux")]
-            HookError::EmptyPath => platform_errors::ENOENT,
-            HookError::InvalidBindAddressForDomain => platform_errors::EINVAL,
-            HookError::SocketNotFound(_) => platform_errors::EBADF,
-            HookError::ManagedSocketNotFound(_) => platform_errors::EBADF,
-            HookError::ConnectError(_) => platform_errors::EFAULT,
-            HookError::AddrInfoError(_) => platform_errors::EFAULT,
-            HookError::SendToError(_) => platform_errors::EFAULT,
-            HookError::HostnameResolveError(_) => platform_errors::EFAULT,
+            HookError::EmptyPath => ENOENT,
+            HookError::InvalidBindAddressForDomain => {
+                #[cfg(unix)]
+                {
+                    EINVAL
+                }
+                #[cfg(windows)]
+                {
+                    WSAEINVAL as i32
+                }
+            }
+            HookError::SocketNotFound(_) => {
+                #[cfg(unix)]
+                {
+                    EBADF
+                }
+                #[cfg(windows)]
+                {
+                    WSAEBADF as i32
+                }
+            }
+            HookError::ManagedSocketNotFound(_) => {
+                #[cfg(unix)]
+                {
+                    EBADF
+                }
+                #[cfg(windows)]
+                {
+                    WSAEBADF as i32
+                }
+            }
+            HookError::ConnectError(_) => {
+                #[cfg(unix)]
+                {
+                    EFAULT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEFAULT as i32
+                }
+            }
+            HookError::AddrInfoError(_) => {
+                #[cfg(unix)]
+                {
+                    EFAULT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEFAULT as i32
+                }
+            }
+            HookError::SendToError(_) => {
+                #[cfg(unix)]
+                {
+                    EFAULT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEFAULT as i32
+                }
+            }
+            HookError::HostnameResolveError(_) => {
+                #[cfg(unix)]
+                {
+                    EFAULT
+                }
+                #[cfg(windows)]
+                {
+                    WSAEFAULT as i32
+                }
+            }
         };
 
         // Set platform-specific error
@@ -569,51 +893,4 @@ impl From<HookError> for *mut hostent {
     fn from(_fail: HookError) -> Self {
         ptr::null_mut()
     }
-}
-
-// Platform-specific error constants
-#[cfg(unix)]
-mod platform_errors {
-    pub const EINVAL: i32 = libc::EINVAL;
-    pub const ENOENT: i32 = libc::ENOENT;
-    pub const ENOTDIR: i32 = libc::ENOTDIR;
-    pub const EISDIR: i32 = libc::EISDIR;
-    pub const EIO: i32 = libc::EIO;
-    pub const ENOMEM: i32 = libc::ENOMEM;
-    pub const ENETUNREACH: i32 = libc::ENETUNREACH;
-    pub const EFAULT: i32 = libc::EFAULT;
-    pub const EAFNOSUPPORT: i32 = libc::EAFNOSUPPORT;
-    pub const EADDRINUSE: i32 = libc::EADDRINUSE;
-    pub const EBADF: i32 = libc::EBADF;
-    pub const EACCES: i32 = libc::EACCES;
-    pub const EAI_AGAIN: i32 = libc::EAI_AGAIN;
-    pub const EAI_NONAME: i32 = libc::EAI_NONAME;
-    pub const EAI_FAIL: i32 = libc::EAI_FAIL;
-}
-
-#[cfg(windows)]
-mod platform_errors {
-    use winapi::{
-        shared::winerror::{ERROR_DIRECTORY, ERROR_FILE_NOT_FOUND, ERROR_IO_DEVICE},
-        um::winsock2::{
-            WSAEACCES, WSAEADDRINUSE, WSAEAFNOSUPPORT, WSAEBADF, WSAEFAULT, WSAEINVAL,
-            WSAENETUNREACH, WSAENOBUFS, WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN,
-        },
-    };
-
-    pub const EINVAL: i32 = WSAEINVAL as i32;
-    pub const ENOENT: i32 = ERROR_FILE_NOT_FOUND as i32;
-    pub const ENOTDIR: i32 = ERROR_DIRECTORY as i32;
-    pub const EISDIR: i32 = ERROR_DIRECTORY as i32;
-    pub const EIO: i32 = ERROR_IO_DEVICE as i32;
-    pub const ENOMEM: i32 = WSAENOBUFS as i32;
-    pub const ENETUNREACH: i32 = WSAENETUNREACH as i32;
-    pub const EFAULT: i32 = WSAEFAULT as i32;
-    pub const EAFNOSUPPORT: i32 = WSAEAFNOSUPPORT as i32;
-    pub const EADDRINUSE: i32 = WSAEADDRINUSE as i32;
-    pub const EBADF: i32 = WSAEBADF as i32;
-    pub const EACCES: i32 = WSAEACCES as i32;
-    pub const EAI_AGAIN: i32 = WSATRY_AGAIN as i32;
-    pub const EAI_NONAME: i32 = WSAHOST_NOT_FOUND as i32;
-    pub const EAI_FAIL: i32 = WSANO_RECOVERY as i32;
 }

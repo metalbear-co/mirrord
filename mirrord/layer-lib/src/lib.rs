@@ -4,6 +4,7 @@ pub mod common;
 pub mod dns_selector;
 pub mod error;
 pub mod hostname;
+pub mod macros;
 pub mod socket;
 
 /// Unix-specific hostname resolver implementation.
