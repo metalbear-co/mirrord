@@ -45,9 +45,25 @@ pub enum MirrordClusterSessionAgentPhase {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionAgentError {
+    #[serde(skip_serializing_if = Option::is_none)]
+    pub code: Option<i32>,
+
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionAgent {
+    #[serde(skip_serializing_if = Option::is_none)]
     pub connection_info: Option<AgentKubernetesConnectInfo>,
+
+    #[serde(skip_serializing_if = Option::is_none)]
+    pub error: Option<SessionAgentError>,
+
+    #[serde(default)]
     pub phase: MirrordClusterSessionAgentPhase,
+
     pub target: SessionTarget,
 }
 
