@@ -54,7 +54,7 @@ struct FoundTargets {
 
     /// Current lookup namespace.
     ///
-    /// Taken from [`LayerConfig::target`], defaults to [`Client`]'s default namespace.
+    /// Taken from [`LayerConfig::target`], defaults to [`kube::Client`]'s default namespace.
     current_namespace: String,
 
     /// Available lookup namespaces.
