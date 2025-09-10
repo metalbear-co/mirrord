@@ -1,22 +1,7 @@
 use kube::CustomResource;
 use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de, ser};
-
-fn serialize_config_hash<S>(hash: &u64, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: ser::Serializer,
-{
-    format!("{hash:x}").serialize(serializer)
-}
-
-fn deserialize_config_hash<'de, D>(d: D) -> Result<u64, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let str_value = String::deserialize(d)?;
-    u64::from_str_radix(&str_value, 16).map_err(de::Error::custom)
-}
+use serde::{Deserialize, Serialize};
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -43,46 +28,27 @@ pub struct MirrordClusterSessionSpec {
 pub struct MirrordClusterSessionStatus {
     /// List of registed agents
     #[serde(default)]
-    pub agents: Vec<MirrordClusterSessionAgentInfo>,
+    pub agents: Vec<MirrordClusterSessionAgent>,
+}
+
+#[derive(Clone, Debug, Deserialize, Default, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum MirrordClusterSessionAgentPhase {
+    #[default]
+    Pending,
+
+    Created,
+
+    Running,
+
+    Terminating,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordClusterSessionAgentInfo {
-    #[serde(
-        deserialize_with = "deserialize_config_hash",
-        serialize_with = "serialize_config_hash"
-    )]
-    pub config_hash: u64,
-
-    pub ephemeral: bool,
-
-    pub name: String,
-    pub namespace: String,
-
-    pub port: u16,
-
+pub struct MirrordClusterSessionAgent {
+    pub connection_info: Option<AgentKubernetesConnectInfo>,
+    pub phase: MirrordClusterSessionAgentPhase,
     pub target: SessionTarget,
-}
-
-impl From<MirrordClusterSessionAgentInfo> for AgentKubernetesConnectInfo {
-    fn from(session_agent: MirrordClusterSessionAgentInfo) -> Self {
-        AgentKubernetesConnectInfo {
-            agent_port: session_agent.port,
-            pod_name: session_agent.name,
-            pod_namespace: session_agent.namespace,
-        }
-    }
-}
-
-impl From<&MirrordClusterSessionAgentInfo> for AgentKubernetesConnectInfo {
-    fn from(session_agent: &MirrordClusterSessionAgentInfo) -> Self {
-        AgentKubernetesConnectInfo {
-            agent_port: session_agent.port,
-            pod_name: session_agent.name.clone(),
-            pod_namespace: session_agent.namespace.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -138,8 +104,7 @@ mod tests {
 
     #[test]
     fn correct_serde_for_connection_info() {
-        let info = MirrordClusterSessionAgentInfo {
-            config_hash: 1337,
+        let info = MirrordClusterSessionAgent {
             ephemeral: false,
             name: "my-pod".into(),
             namespace: "my-namespace".into(),
