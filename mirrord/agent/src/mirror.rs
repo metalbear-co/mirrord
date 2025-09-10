@@ -6,7 +6,7 @@ use std::{
 
 use futures::StreamExt;
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
+    ConnectionId, DaemonMessage, LogMessage, Port, RequestId, ResponseError,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
@@ -84,6 +84,7 @@ impl TcpMirrorApi {
                 incoming_streams,
                 queued_messages,
                 port_filters,
+                protocol_version,
                 ..
             } => match message {
                 LayerTcp::ConnectionUnsubscribe(id) => {
@@ -106,16 +107,10 @@ impl TcpMirrorApi {
                         queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                     } else {
                         // For older clients, reject filtered HTTP subscriptions in mirror mode
-                        // TODO: Maybe we need to handle this with the samel ogic as PortSubscribe
+                        // TODO: Maybe we need to handle this with the same logic as PortSubscribe
                         // for older versions?
-                        tracing::warn!(
-                            port = %port,
-                            protocol_version = %protocol_version.version,
-                            "HTTP filtering in mirror mode requires protocol version >= 1.21.0"
-                        );
                         queued_messages.push_back(DaemonTcp::SubscribeResult(Err(
-                            "HTTP filtering in mirror mode requires protocol version >= 1.21.0"
-                                .into(),
+                            ResponseError::NotImplemented,
                         )));
                     }
                 }
@@ -251,16 +246,14 @@ impl TcpMirrorApi {
 
                         MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                             // Check HTTP filter if one exists for this port
-                            if let Some(filter) = port_filters.get(&http.info.original_destination.port()) {
-                                if !filter.matches(http.parts_mut()) {
-                                    // Request doesn't match filter - don't mirror it to the layer
-                                    // The original request will still be passed through to its destination
-                                    return Ok(DaemonMessage::LogMessage(LogMessage::debug(format!(
-                                        "HTTP request filtered out from mirror: {} {}",
-                                        http.parts().method,
-                                        http.parts().uri
-                                    ))));
-                                }
+                            if let Some(filter) = port_filters.get(&http.info.original_destination.port()) &&  !filter.matches(http.parts_mut()) {
+                                // Request doesn't match filter - don't mirror it to the layer
+                                // The original request will still be passed through to its destination
+                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                    "HTTP request filtered out from mirror: {} {}",
+                                    http.parts().method,
+                                    http.parts().uri
+                                ))));
                             }
 
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
