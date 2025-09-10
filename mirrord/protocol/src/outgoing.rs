@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     fmt::{Display, Formatter},
     io,
-    io::ErrorKind,
     net::SocketAddr as StdIpSocketAddr,
     path::PathBuf,
 };
@@ -115,7 +114,7 @@ impl TryFrom<SocketAddress> for OsSockAddr {
             SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
             #[cfg(target_os = "windows")]
             _ => Err(Self::Error::new(
-                ErrorKind::InvalidInput,
+                io::ErrorKind::InvalidInput,
                 SerializationError::SocketAddress,
             )),
         }
