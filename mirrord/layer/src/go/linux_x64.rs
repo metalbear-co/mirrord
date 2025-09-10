@@ -574,34 +574,26 @@ fn post_go1_23(hook_manager: &mut HookManager) {
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
 pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &ExperimentalConfig) {
-    if let Some(version_symbol) =
-        hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")
-    {
-        // Version str is `go1.xx` - take only last 4 characters.
-        let version = unsafe {
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                version_symbol.0.add(2) as *const u8,
-                4,
-            ))
-        };
-        let version_parsed: f32 = version.parse().unwrap();
-        if version_parsed >= 1.23 {
-            trace!("found version >= 1.23");
-            post_go1_23(hook_manager);
-        } else if version_parsed >= 1.19 {
-            trace!("found version >= 1.19");
-            post_go1_19(hook_manager);
-        } else {
-            trace!("found version < 1.19");
-            pre_go1_19(hook_manager);
-        }
+    let Some(version) = super::get_go_runtime_version(hook_manager) else {
+        return;
+    };
 
-        if experimental.vfork_emulation {
-            hook_symbol!(
-                hook_manager,
-                "syscall.rawVforkSyscall.abi0",
-                raw_vfork_detour
-            );
-        }
+    if version >= 1.23 {
+        trace!("found version >= 1.23");
+        post_go1_23(hook_manager);
+    } else if version >= 1.19 {
+        trace!("found version >= 1.19");
+        post_go1_19(hook_manager);
+    } else {
+        trace!("found version < 1.19");
+        pre_go1_19(hook_manager);
+    }
+
+    if experimental.vfork_emulation {
+        hook_symbol!(
+            hook_manager,
+            "syscall.rawVforkSyscall.abi0",
+            raw_vfork_detour
+        );
     }
 }
