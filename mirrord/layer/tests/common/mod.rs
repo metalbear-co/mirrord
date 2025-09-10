@@ -900,7 +900,6 @@ pub enum Application {
     Go23Issue2988,
     NodeMakeConnections,
     NodeIssue3456,
-    IntproxyChild,
 }
 
 impl Application {
@@ -1083,7 +1082,6 @@ impl Application {
             ),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
-            Application::IntproxyChild => String::from("tests/apps/intproxy_child/out.c_test_app"),
             Application::Go23Open { .. } => String::from("tests/apps/open_go/23.go_test_app"),
             Application::DynamicApp(exe, _) => exe.clone(),
             Application::Go23Issue2988 => String::from("tests/apps/issue2988/23.go_test_app"),
@@ -1221,8 +1219,7 @@ impl Application {
             | Application::RustRebind0
             | Application::RustIssue2438
             | Application::RustIssue3248
-            | Application::Go23Issue2988
-            | Application::IntproxyChild => vec![],
+            | Application::Go23Issue2988 => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1321,8 +1318,7 @@ impl Application {
             | Application::Go23Open { .. }
             | Application::DynamicApp(..)
             | Application::Go23Issue2988
-            | Application::NodeMakeConnections
-            | Application::IntproxyChild => unimplemented!("shouldn't get here"),
+            | Application::NodeMakeConnections => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
         }
