@@ -10,8 +10,8 @@ use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
-        NewTcpConnectionV2, TcpClose, TcpData,
+        InternalHttpRequest, LayerTcp, MIRROR_HTTP_FILTER_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
+        NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
 use tokio_stream::StreamMap;
@@ -90,17 +90,34 @@ impl TcpMirrorApi {
                     incoming_streams.remove(&id);
                 }
                 LayerTcp::PortSubscribe(port) => {
+                    tracing::debug!(port = %port, "Received PortSubscribe (no filter)");
                     mirror_handle.mirror(port).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
                 LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
-                    // Convert from protocol HttpFilter to agent HttpFilter
-                    let agent_filter =
-                        HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
-                    port_filters.insert(port, agent_filter);
+                    if protocol_version.matches(&MIRROR_HTTP_FILTER_VERSION) {
+                        tracing::debug!(port = %port, filter = %filter, "Received PortSubscribeFilteredHttp");
+                        // Convert from protocol HttpFilter to agent HttpFilter
+                        let agent_filter =
+                            HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
+                        port_filters.insert(port, agent_filter);
 
-                    mirror_handle.mirror(port).await?;
-                    queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
+                        mirror_handle.mirror(port).await?;
+                        queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
+                    } else {
+                        // For older clients, reject filtered HTTP subscriptions in mirror mode
+                        // TODO: Maybe we need to handle this with the samel ogic as PortSubscribe
+                        // for older versions?
+                        tracing::warn!(
+                            port = %port,
+                            protocol_version = %protocol_version.version,
+                            "HTTP filtering in mirror mode requires protocol version >= 1.21.0"
+                        );
+                        queued_messages.push_back(DaemonTcp::SubscribeResult(Err(
+                            "HTTP filtering in mirror mode requires protocol version >= 1.21.0"
+                                .into(),
+                        )));
+                    }
                 }
                 LayerTcp::PortUnsubscribe(port) => {
                     port_filters.remove(&port);
@@ -233,12 +250,17 @@ impl TcpMirrorApi {
                         }
 
                         MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                            if let Some(filter) = port_filters.get(&http.info.original_destination.port()) && !filter.matches(http.parts_mut()) {
-                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                    "HTTP request filtered out: {} {}",
-                                    http.parts().method,
-                                    http.parts().uri
-                                ))));
+                            // Check HTTP filter if one exists for this port
+                            if let Some(filter) = port_filters.get(&http.info.original_destination.port()) {
+                                if !filter.matches(http.parts_mut()) {
+                                    // Request doesn't match filter - don't mirror it to the layer
+                                    // The original request will still be passed through to its destination
+                                    return Ok(DaemonMessage::LogMessage(LogMessage::debug(format!(
+                                        "HTTP request filtered out from mirror: {} {}",
+                                        http.parts().method,
+                                        http.parts().uri
+                                    ))));
+                                }
                             }
 
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
