@@ -24,25 +24,11 @@ jobs:
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      # - name: Locate & build mirrord_layer_win (DLL)
-      #   shell: pwsh
-      #   run: |
-      #     $dllName = 'mirrord_layer_win'
-      #     # Find the Cargo.toml whose [lib] name == mirrord_layer_win
-      #     $cand = Get-ChildItem -Recurse -Filter Cargo.toml -File | Where-Object {
-      #       (Select-String -Path $_.FullName -Pattern '^\s*\[lib\]' -SimpleMatch -Quiet) -and
-      #       (Select-String -Path $_.FullName -Pattern '^\s*name\s*=\s*"' + [regex]::Escape($dllName) + '"\s*$' -SimpleMatch -Quiet)
-      #     } | Select-Object -First 1
-      #     if (-not $cand) { throw "No Cargo.toml with [lib] name='$dllName' found." }
-
-      #     Write-Host "Building DLL crate at: $($cand.FullName)"
-      #     cargo build --manifest-path "$($cand.FullName)" --target x86_64-pc-windows-msvc
 
 
       - name: Build mirrod-layer-win (DLL)
         run: |
-          cargo build -p mirrod-layer-win --target x86_64-pc-windows-msvc
-
+          cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
       # Find which *package* contains the bin target named "mirrord"
       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
         run: |
