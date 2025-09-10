@@ -263,23 +263,14 @@ jobs:
           try { & $smctl windows ksp register } catch { Write-Warning $_ }
 
       # --- Locate SignTool (Windows SDK) and set artifact paths ---
-      - name: Locate SignTool + set artifact paths
+      - name: Export SignTool path (pinned)
+        shell: pwsh
         run: |
-          # Find latest SDK bin
-          $sdkDir = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-          $signtool = $null
-          if ($sdkDir) {
-            $candidate = Join-Path $sdkDir.FullName 'x64\signtool.exe'
-            if (Test-Path $candidate) { $signtool = $candidate }
-          }
-          if (-not $signtool) {
-            $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
-            if ($cmd) { $signtool = $cmd.Source }
-          }
-          if (-not $signtool) { throw "signtool.exe not found. Install the Windows 10/11 SDK on the runner." }
+          $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
+          if (-not (Test-Path $signtool)) { throw "SignTool not found at $signtool" }
           "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "SignTool: $signtool"
+          Write-Host "Using SignTool at $signtool"
+
 
           # Absolute paths to your freshly built artifacts (Debug)
           $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
@@ -288,6 +279,32 @@ jobs:
           if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # - name: Locate SignTool + set artifact paths
+      #   run: |
+      #     # Find latest SDK bin
+      #     $sdkDir = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
+      #       Sort-Object Name -Descending | Select-Object -First 1
+      #     $signtool = $null
+      #     if ($sdkDir) {
+      #       $candidate = Join-Path $sdkDir.FullName 'x64\signtool.exe'
+      #       if (Test-Path $candidate) { $signtool = $candidate }
+      #     }
+      #     if (-not $signtool) {
+      #       $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+      #       if ($cmd) { $signtool = $cmd.Source }
+      #     }
+      #     if (-not $signtool) { throw "signtool.exe not found. Install the Windows 10/11 SDK on the runner." }
+      #     "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
+      #     Write-Host "SignTool: $signtool"
+
+      #     # Absolute paths to your freshly built artifacts (Debug)
+      #     $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+      #     $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
+      #     if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
+      #     if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
+      #     "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+      #     "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # --- Sign DLL + EXE with DigiCert KeyLocker ---
       - name: Sign artifacts (DLL + EXE)
