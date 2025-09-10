@@ -179,8 +179,6 @@
 #       - name: Build mirrord (EXE)
 #         run: |
 #           cargo build -p mirrord --target x86_64-pc-windows-msvc
-
-
 name: Build PR 3536 (Windows, self-hosted, minimal)
 
 on:
@@ -204,48 +202,102 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      # Ensure Rust is available even if the service PATH doesn't include it
+      - name: Ensure Rust toolchain (if cargo/rustup missing)
+        run: |
+          $cargo = Get-Command cargo.exe -ErrorAction SilentlyContinue
+          if (-not $cargo) {
+            $env:CARGO_HOME  = "$env:RUNNER_TEMP\.cargo"
+            $env:RUSTUP_HOME = "$env:RUNNER_TEMP\.rustup"
+            $installer = "$env:RUNNER_TEMP\rustup-init.exe"
+            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile $installer
+            & $installer -y --default-host x86_64-pc-windows-msvc --profile minimal
+            $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
+          }
+          rustup --version
+          cargo --version
+
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      # Find which *package* contains the bin target named "mirrord"
+      # ---- Build the DLL that outputs layer_win.dll (robust manifest search) ----
+      - name: Locate & build layer_win (DLL)
+        run: |
+          $dllName = 'layer_win'
+          # Prefer [lib] name match
+          $cand = Get-ChildItem -Recurse -Filter Cargo.toml -File | Where-Object {
+            (Select-String -Path $_.FullName -Pattern '^\s*\[lib\]' -SimpleMatch -Quiet) -and
+            (Select-String -Path $_.FullName -Pattern '^\s*name\s*=\s*"' + [regex]::Escape($dllName) + '"\s*$' -SimpleMatch -Quiet)
+          } | Select-Object -First 1
+          if (-not $cand) {
+            # Fallback: package name that maps to layer_win (hyphen → underscore)
+            foreach ($toml in (Get-ChildItem -Recurse -Filter Cargo.toml -File)) {
+              $nameLine = Select-String -Path $toml.FullName -Pattern '^\s*name\s*=\s*"(.*)"\s*$' | Select-Object -First 1
+              if ($nameLine) {
+                $pkg = $nameLine.Matches[0].Groups[1].Value
+                if (($pkg -replace '-', '_') -eq $dllName) { $cand = $toml; break }
+              }
+            }
+          }
+          if (-not $cand) { throw "Could not find a crate that builds layer_win.dll." }
+          Write-Host "Building DLL crate at: $($cand.FullName)"
+          cargo build --manifest-path "$($cand.FullName)" --target x86_64-pc-windows-msvc
+
+      # ---- Find which package contains bin target "mirrord"; set MIRRORD_LAYER_FILE ----
       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
         run: |
-          # Find the package that defines a binary target named 'mirrord'
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg = $meta.packages | Where-Object {
             $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
           } | Select-Object -First 1
-
           if (-not $pkg) {
             $names = ($meta.packages | ForEach-Object name) -join ', '
             throw "No bin target named 'mirrord' found. Workspace packages: $names"
           }
-
-          # Save the package name for the next step
           "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          # Absolute path to the built DLL (Debug)
+          $dllAbs = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          "MIRRORD_LAYER_FILE=$dllAbs" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Will build bin 'mirrord' from package: $($pkg.name)"
+          Write-Host "MIRRORD_LAYER_FILE=$dllAbs"
 
-          # Set MIRRORD_LAYER_FILE to an *absolute* path in this workspace
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
-          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "MIRRORD_LAYER_FILE=$dll"
-
-      - name: Build mirrord
+      - name: Build mirrord (bin)
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      # --- Prepare DigiCert (smctl + creds) ---
+      # ---- Export SignTool path and verify artifacts exist ----
+      - name: Export SignTool path + verify artifacts
+        run: |
+          # Pin to the path you confirmed exists
+          $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
+          if (-not (Test-Path $signtool)) {
+            # Fallback search if SDK version changes
+            $found = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if ($found) { $signtool = $found.FullName }
+          }
+          if (-not (Test-Path $signtool)) { throw "SignTool not found." }
+          "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Using SignTool at $signtool"
+
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
+          if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
+          if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
+          "MIRRORD_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # ---- DigiCert: prepare smctl credentials (requires tools installed on the VM) ----
       - name: Prepare DigiCert (smctl + creds)
         env:
           DIGICERT_API_KEY:              ${{ secrets.DIGICERT_API_KEY }}
           DIGICERT_CLIENT_CERT_PFX_B64:  ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
           DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
         run: |
-          # Locate smctl
           $smctl = @(
             "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
             "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $smctl) { throw "smctl.exe not found. Install DigiCert Signing Manager/KeyLocker Tools on this runner." }
+          if (-not $smctl) { throw "smctl.exe not found. Install DigiCert Signing Manager/KeyLocker Tools on this runner (once)." }
           Write-Host "Using smctl at: $smctl"
 
           # Recreate client-auth .p12 from secret
@@ -256,76 +308,42 @@ jobs:
           $env:SM_HOST = "https://clientauth.one.digicert.com"
           $env:SM_CLIENT_CERT_FILE = $p12
 
-          # Store creds in Windows Credential Manager
+          # Store creds in Windows Credential Manager and (re)register KSP
           & $smctl credentials save $env:DIGICERT_API_KEY $env:DIGICERT_CLIENT_CERT_PASSWORD
-
-          # Register the KSP (safe to re-run)
           try { & $smctl windows ksp register } catch { Write-Warning $_ }
 
-      # --- Locate SignTool (Windows SDK) and set artifact paths ---
-      - name: Export SignTool path (pinned)
-        shell: pwsh
+      # (Optional) Download public certificate for embedding (not strictly required with /csp+/kc)
+      - name: Download signing certificate (optional)
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
-          $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
-          if (-not (Test-Path $signtool)) { throw "SignTool not found at $signtool" }
-          "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Using SignTool at $signtool"
+          $smctl = @(
+            "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+            "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $outDir = $env:RUNNER_TEMP
+          & $smctl certificate download --keypair-alias $env:DIGICERT_KEYPAIR_ALIAS --format cer --out $outDir
+          $cert = Get-ChildItem $outDir -Filter *.cer | Select-Object -First 1 | % FullName
+          if ($cert) {
+            "CODESIGN_CERT=$cert" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Using .cer: $cert"
+          } else {
+            Write-Host "No .cer found (signing will still work with KSP alias)."
+          }
 
-
-          # Absolute paths to your freshly built artifacts (Debug)
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
-          if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
-          if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
-          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      # - name: Locate SignTool + set artifact paths
-      #   run: |
-      #     # Find latest SDK bin
-      #     $sdkDir = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
-      #       Sort-Object Name -Descending | Select-Object -First 1
-      #     $signtool = $null
-      #     if ($sdkDir) {
-      #       $candidate = Join-Path $sdkDir.FullName 'x64\signtool.exe'
-      #       if (Test-Path $candidate) { $signtool = $candidate }
-      #     }
-      #     if (-not $signtool) {
-      #       $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
-      #       if ($cmd) { $signtool = $cmd.Source }
-      #     }
-      #     if (-not $signtool) { throw "signtool.exe not found. Install the Windows 10/11 SDK on the runner." }
-      #     "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
-      #     Write-Host "SignTool: $signtool"
-
-      #     # Absolute paths to your freshly built artifacts (Debug)
-      #     $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
-      #     $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
-      #     if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
-      #     if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
-      #     "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-      #     "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      # --- Sign DLL + EXE with DigiCert KeyLocker ---
+      # ---- Sign DLL + EXE via DigiCert KSP (HSM) ----
       - name: Sign artifacts (DLL + EXE)
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
           $ts = "http://timestamp.digicert.com"
-          $signtool = "$env:SIGNTOOL"
-          $alias = "$env:DIGICERT_KEYPAIR_ALIAS"
+          $args = @('/fd','SHA256','/td','SHA256','/tr',$ts,'/csp','DigiCert Signing Manager KSP','/kc',"$env:DIGICERT_KEYPAIR_ALIAS")
+          if ($env:CODESIGN_CERT) { $args += @('/f',"$env:CODESIGN_CERT") }
+          & "$env:SIGNTOOL" sign @args "$env:MIRRORD_LAYER_FILE"
+          & "$env:SIGNTOOL" sign @args "$env:MIRRORD_EXE"
 
-          # Sign using DigiCert KSP + key alias (no PFX on disk; key stays in HSM)
-          & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
-            /csp "DigiCert Signing Manager KSP" /kc "$alias" `
-            "$env:MIRRORD_LAYER_FILE"
-
-          & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
-            /csp "DigiCert Signing Manager KSP" /kc "$alias" `
-            "$env:MIRRORD_EXE"
-
-      # --- Verify signatures ---
       - name: Verify signatures
         run: |
           & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_LAYER_FILE"
           & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_EXE"
+
