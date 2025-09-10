@@ -1055,7 +1055,7 @@ impl IncomingMode {
             }
         };
 
-        return PortSubscription::Mirror(mirror_type);
+        PortSubscription::Mirror(mirror_type)
     }
 }
 

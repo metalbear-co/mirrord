@@ -96,9 +96,9 @@ impl Subscription {
     /// Rejects this subscription with the given `reason`.
     /// Returns messages to be sent to the layers.
     /// Returns [`Err`] if this subscription was already confirmed.
-    fn reject(self, reason: ResponseError) -> Result<Vec<ToLayer>, Self> {
+    fn reject(self, reason: ResponseError) -> Result<Vec<ToLayer>, Box<Self>> {
         if self.confirmed {
-            return Err(self);
+            return Err(Box::new(self));
         }
 
         let responses = self
@@ -259,7 +259,7 @@ impl SubscriptionsManager {
                 match subscription.reject(ResponseError::PortAlreadyStolen(port)) {
                     Ok(responses) => Ok(responses),
                     Err(subscription) => {
-                        self.subscriptions.insert(port, subscription);
+                        self.subscriptions.insert(port, *subscription);
                         Ok(vec![])
                     }
                 }
