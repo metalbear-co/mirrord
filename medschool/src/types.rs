@@ -36,7 +36,7 @@ pub struct PartialType<'a> {
 #[derive(Debug, Clone)]
 pub struct PartialField<'a> {
     /// The name of the field, e.g. `{foo}: String`.
-    pub ident: Cow<'a, str>,
+    pub ident: Option<Cow<'a, str>>,
 
     /// The type of the field, e.g. `foo: {String}`.
     ///
@@ -75,11 +75,11 @@ impl TryFrom<syn::Field> for PartialField<'_> {
         }
         .ok_or(())?;
 
-        let ident = field.ident.as_ref().ok_or(())?.to_string();
+        let ident = field.ident.as_ref().map(|i| i.to_string().into());
         Ok(Self {
-            ident: ident.into(),
+            ident,
             ty: type_ident.to_string().into(),
-            docs: docs_from_attributes(field.attrs).ok_or(())?,
+            docs: docs_from_attributes(field.attrs).unwrap_or_default(),
         })
     }
 }
@@ -121,7 +121,7 @@ impl Ord for PartialField<'_> {
 impl<'a> From<PartialField<'a>> for PartialType<'a> {
     fn from(value: PartialField<'a>) -> Self {
         Self {
-            ident: value.ident,
+            ident: value.ident.unwrap_or_default(),
             docs: value.docs,
             fields: Default::default(),
         }
@@ -154,10 +154,10 @@ impl Display for PartialType<'_> {
         let docs = self.docs.last().cloned().unwrap_or_default();
         formatter.write_str(&docs)?;
 
-        self.fields.iter().try_for_each(|field| {
-            formatter.write_str(&field.ident)?;
-            Ok(())
-        })?;
+        for field in &self.fields {
+            formatter.write_str(field.ident.as_deref().unwrap_or("unnamed"))?;
+        }
+
         Ok(())
     }
 }
