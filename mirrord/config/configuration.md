@@ -2123,47 +2123,46 @@ being added to.
 
 ## startup_retry {#root-startup_retry}
 
-Controls how mirrord retries its initial cluster operations, such as: getting targets,
-connecting to the mirrord-operator, and so on.
+Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.
+for resolving the target or connecting to the mirrord Operator).
 
 If you're having cluster connectivity issues when **starting** mirrord, consider increasing
-[`max_attempts`](#startup_retry-max_attempts) and changing both
+[`max_retries`](#startup_retry-max_retries) and changing both
 [`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry
-some of its initial cluster operations more often.
+some of its initial Kubernetes API requests.
 
 ```json
 {
   "startup_retry": {
     "min_ms": 500,
     "max_ms": 5000,
-    "max_attempts": 1,
+    "max_retries": 2,
   }
 }
 ```
 
-## startup_retry.max_attempts {#startup_retry-max_attempts}
-
-Sets the max amount of retries that mirrord will try to perform during its startup for
-cluster operations, such as: searching for the target pod, connecting to the
-mirrord-operator, creating the mirrord-agent, etc.
-
-If you want to **disable** mirrord startup retry, set this value to `0`.
-
-Defaults to `1` (retries each operation **once**).
-
 ## startup_retry.max_ms {#startup_retry-max_ms}
 
-Sets the **max** interval (in milliseconds) between mirrord startup retries during its
-startup for cluster operations, such as: searching for the target pod, connecting to
-the mirrord-operator, creating the mirrord-agent, etc.
+Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by
+mirrord during startup (e.g. for resolving the target or connecting to the mirrord
+Operator).
 
 Defaults to `5000` milliseconds.
 
+## startup_retry.max_retries {#startup_retry-max_retries}
+
+Sets the max amount of retries for Kubernetes API requests made by mirrord during startup
+(e.g. for resolving the target or connecting to the mirrord Operator).
+
+If you want to **disable** request retries, set this value to `0`.
+
+Defaults to `2`.
+
 ## startup_retry.min_ms {#startup_retry-min_ms}
 
-Sets the **min** interval (in milliseconds) between mirrord startup retries during its
-startup for cluster operations, such as: searching for the target pod, connecting to
-the mirrord-operator, creating the mirrord-agent, etc.
+Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by
+mirrord during startup (e.g. for resolving the target or connecting to the mirrord
+Operator).
 
 Defaults to `500` milliseconds.
 
