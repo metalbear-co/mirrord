@@ -225,7 +225,7 @@ pub async fn apply_profile_if_configured<P: Progress>(
     }
 }
 
-#[tracing::instrument(level = Level::INFO, err)]
+#[tracing::instrument(level = Level::TRACE, err)]
 async fn fetch_profile(
     config: &LayerConfig,
     profile_identifier: &ProfileIdentifier,

@@ -82,8 +82,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-# kube = { git = "https://github.com/metalbear-co/kube.git", rev = "c095706801fd0fc287e82bcbc314b458097fe9e1", default-features = false, features = [
-kube = { git = "https://github.com/metalbear-co/kube.git", rev = "c146a9c424fb248b428cea1c0def3aac019fb5e9" , default-features = false, features = [
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "842a9e2ef0fe8bc62c25106c763a0a2f800ff6e5", default-features = false, features = [
     "runtime",
     "derive",
     "client",

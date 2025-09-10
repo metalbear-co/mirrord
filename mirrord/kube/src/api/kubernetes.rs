@@ -337,7 +337,7 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
-#[tracing::instrument(level = Level::INFO, skip(kubeconfig), ret, err)]
+#[tracing::instrument(level = Level::TRACE, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
