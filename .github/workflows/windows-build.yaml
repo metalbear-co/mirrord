@@ -107,23 +107,52 @@ jobs:
           "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # --- (Recommended) Download public cert so SignTool can select the matching key ---
-      - name: Download signing certificate (.cer)
+      - name: Get certificate (download or certsync fallback)
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         shell: pwsh
         run: |
-          $smctl = @(
-            "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $smctl) { throw "smctl.exe not found for certificate download." }
+          $alias = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
+          if (-not $alias) { throw "DIGICERT_KEYPAIR_ALIAS is empty." }
+
+          $smctl = "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe"
+          if (-not (Test-Path $smctl)) { throw "smctl.exe not found at $smctl" }
 
           $outDir = $env:RUNNER_TEMP
-          & $smctl certificate download --keypair-alias $env:DIGICERT_KEYPAIR_ALIAS --format cer --out $outDir
-          $cert = Get-ChildItem $outDir -Filter *.cer | Select-Object -First 1
-          if (-not $cert) { throw "No .cer downloaded for alias $env:DIGICERT_KEYPAIR_ALIAS" }
+          $certPath = Join-Path $outDir ("cert_{0}.cer" -f ($alias -replace '\D',''))
+          if (Test-Path $certPath) { Remove-Item $certPath -Force }
 
-          "CODESIGN_CERT=$($cert.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Downloaded certificate: $($cert.FullName)"
+          Write-Host "Attempting .cer download for alias '$alias'..."
+          & $smctl certificate download --keypair-alias $alias --format cer --out $outDir
+          $rc = $LASTEXITCODE
+          $downloaded = Get-ChildItem $outDir -Filter *.cer -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if ($rc -eq 0 -and $downloaded) {
+            "CODESIGN_CERT=$($downloaded.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "SIGN_MODE=file" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Downloaded certificate: $($downloaded.FullName)"
+            return
+          }
+
+          Write-Warning "smctl returned $rc or no .cer file; falling back to certsync + /sha1 signing."
+
+          # Fallback: sync the cert into the Windows certificate store
+          & $smctl windows certsync --keypair-alias $alias
+          if ($LASTEXITCODE -ne 0) { throw "certsync failed for alias '$alias'." }
+
+          # Pick most recent Code Signing cert with a private key
+          $candidates = Get-ChildItem Cert:\CurrentUser\My |
+            Where-Object {
+              $_.HasPrivateKey -and
+              ($_.EnhancedKeyUsageList | ForEach-Object FriendlyName) -contains 'Code Signing'
+            } | Sort-Object NotBefore -Descending
+
+          $cert = $candidates | Select-Object -First 1
+          if (-not $cert) { throw "No code-signing certificate found in CurrentUser\My after certsync." }
+
+          "CODESIGN_SHA1=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SIGN_MODE=sha1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Using store cert thumbprint: $($cert.Thumbprint)"
 
       # --- Sign DLL + EXE with DigiCert KeyLocker ---
       - name: Sign artifacts (DLL + EXE)
