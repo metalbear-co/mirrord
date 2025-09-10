@@ -326,7 +326,7 @@ impl SubscriptionsManager {
 #[cfg(test)]
 mod test {
     use mirrord_intproxy_protocol::PortSubscription;
-    use mirrord_protocol::tcp::LayerTcp;
+    use mirrord_protocol::tcp::{LayerTcp, MirrorType};
 
     use super::*;
 
@@ -342,7 +342,7 @@ mod test {
             0,
             PortSubscribe {
                 listening_on: listener_1,
-                subscription: PortSubscription::Mirror(80),
+                subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
         );
         assert!(
@@ -360,7 +360,7 @@ mod test {
             1,
             PortSubscribe {
                 listening_on: listener_2,
-                subscription: PortSubscription::Mirror(80),
+                subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
         );
         assert!(response.is_none(), "{response:?}");
@@ -421,7 +421,7 @@ mod test {
             0,
             PortSubscribe {
                 listening_on,
-                subscription: PortSubscription::Mirror(80),
+                subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
         );
         assert!(
@@ -487,7 +487,7 @@ mod test {
             0,
             PortSubscribe {
                 listening_on,
-                subscription: PortSubscription::Mirror(80),
+                subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
         );
         assert!(
