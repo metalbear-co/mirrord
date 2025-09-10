@@ -217,7 +217,7 @@ impl IncomingMode {
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
     fn new(config: &mut IncomingConfig) -> Self {
         if !config.is_steal() {
-            if config.http_filter.is_filter_set() {
+            if config.http_filter.is_filter_set() || config.http_filter.method_filter.is_some() {
                 let ports = config
                     .http_filter
                     .ports
@@ -236,6 +236,14 @@ impl IncomingMode {
 
             return Self {
                 steal: false,
+                http_settings: None,
+            };
+        }
+
+        // Only create HttpSettings if there are actual filters configured
+        if !config.http_filter.is_filter_set() && config.http_filter.method_filter.is_none() {
+            return Self {
+                steal: true,
                 http_settings: None,
             };
         }
@@ -306,16 +314,7 @@ impl IncomingMode {
                 ports: _ports,
             } => Self::make_composite_filter(false, filters),
 
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => Self::make_composite_filter(false, &[]),
-
-            _ => panic!("multiple HTTP filters specified, this is a bug"),
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
         }
     }
 

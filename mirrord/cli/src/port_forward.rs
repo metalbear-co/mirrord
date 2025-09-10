@@ -933,6 +933,14 @@ impl IncomingMode {
             };
         }
 
+        // Only create HttpSettings if there are actual filters configured
+        if !config.http_filter.is_filter_set() && config.http_filter.method_filter.is_none() {
+            return Self {
+                steal: true,
+                http_settings: None,
+            };
+        }
+
         let ports = config
             .http_filter
             .ports
@@ -992,16 +1000,7 @@ impl IncomingMode {
                 ports: _ports,
             } => Self::make_composite_filter(false, filters),
 
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => Self::make_composite_filter(false, &[]),
-
-            _ => panic!("multiple HTTP filters specified, this is a bug"),
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
         };
 
         Self {
