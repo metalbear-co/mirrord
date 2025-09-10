@@ -8,7 +8,6 @@ use reqwest::header::HeaderMap;
 use rstest::rstest;
 use serde_json::json;
 use tempfile::NamedTempFile;
-use tokio::time::timeout;
 
 use crate::utils::{
     application::Application, kube_client, kube_service::KubeService, send_request,
