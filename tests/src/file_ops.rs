@@ -16,7 +16,7 @@ mod file_ops_tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        application::file_ops::FileOps,
+        application::{file_ops::FileOps, GoVersion},
         kube_client,
         kube_service::KubeService,
         run_command::run_exec_with_target,
@@ -67,14 +67,16 @@ mod file_ops_tests {
         basic_service: KubeService,
     ) {
         let service = basic_service.await;
-        let python_command = vec![
+        let python_command = [
             "python3",
             "-B",
             "-m",
             "unittest",
             "-f",
             "python-e2e/files_ro.py",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
 
         let mut process = run_exec_with_target(
             python_command,
@@ -100,14 +102,16 @@ mod file_ops_tests {
         basic_service: KubeService,
     ) {
         let service = basic_service.await;
-        let python_command = vec![
+        let python_command = [
             "python3",
             "-B",
             "-m",
             "unittest",
             "-f",
             "python-e2e/files_unlink.py",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
 
         // use mirrord config file to specify remote and local directories, as well as mapping
         let config = serde_json::json!({
@@ -150,7 +154,9 @@ mod file_ops_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_exists(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
+        let bash_command = ["bash", "bash-e2e/file.sh", "exists"]
+            .map(String::from)
+            .to_vec();
         let mut process = run_exec_with_target(
             bash_command,
             &service.pod_container_target(),
@@ -174,7 +180,9 @@ mod file_ops_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_read(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
+        let bash_command = ["bash", "bash-e2e/file.sh", "read"]
+            .map(String::from)
+            .to_vec();
         let mut process = run_exec_with_target(
             bash_command,
             &service.pod_container_target(),
@@ -195,7 +203,9 @@ mod file_ops_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_write(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
+        let bash_command = ["bash", "bash-e2e/file.sh", "write"]
+            .map(String::from)
+            .to_vec();
         let args = vec!["--rw"];
         let mut process = run_exec_with_target(
             bash_command,
@@ -222,10 +232,10 @@ mod file_ops_tests {
         #[future]
         #[notrace]
         basic_service: KubeService,
-        #[values(FileOps::GoDir21, FileOps::GoDir22, FileOps::GoDir23)] ops: FileOps,
+        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
     ) {
         let service = basic_service.await;
-        let command = ops.command();
+        let command = FileOps::GoDir(go_version).command();
 
         let mut args = Vec::new();
 
@@ -294,7 +304,7 @@ mod file_ops_tests {
         #[future] go_statfs_service: KubeService,
         #[future] kube_client: Client,
     ) {
-        let app = FileOps::GoStatfs;
+        let app = FileOps::GoStatfs(GoVersion::GO_1_25);
         let service = go_statfs_service.await;
         let client = kube_client.await;
         let command = app.command();
