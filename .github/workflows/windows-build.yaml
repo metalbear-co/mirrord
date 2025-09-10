@@ -204,7 +204,6 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # 1) rustup target add x86_64-pc-windows-msvc
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
@@ -231,7 +230,85 @@ jobs:
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "MIRRORD_LAYER_FILE=$dll"
 
-      # 2) cargo build (just like your local command, but robust to package naming)
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
+      # --- Prepare DigiCert (smctl + creds) ---
+      - name: Prepare DigiCert (smctl + creds)
+        env:
+          DIGICERT_API_KEY:              ${{ secrets.DIGICERT_API_KEY }}
+          DIGICERT_CLIENT_CERT_PFX_B64:  ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
+          DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
+        run: |
+          # Locate smctl
+          $smctl = @(
+            "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+            "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $smctl) { throw "smctl.exe not found. Install DigiCert Signing Manager/KeyLocker Tools on this runner." }
+          Write-Host "Using smctl at: $smctl"
+
+          # Recreate client-auth .p12 from secret
+          $p12 = Join-Path $env:RUNNER_TEMP "digicert-client-auth.p12"
+          [IO.File]::WriteAllBytes($p12, [Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64))
+
+          # Required env for smctl
+          $env:SM_HOST = "https://clientauth.one.digicert.com"
+          $env:SM_CLIENT_CERT_FILE = $p12
+
+          # Store creds in Windows Credential Manager
+          & $smctl credentials save $env:DIGICERT_API_KEY $env:DIGICERT_CLIENT_CERT_PASSWORD
+
+          # Register the KSP (safe to re-run)
+          try { & $smctl windows ksp register } catch { Write-Warning $_ }
+
+      # --- Locate SignTool (Windows SDK) and set artifact paths ---
+      - name: Locate SignTool + set artifact paths
+        run: |
+          # Find latest SDK bin
+          $sdkDir = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $signtool = $null
+          if ($sdkDir) {
+            $candidate = Join-Path $sdkDir.FullName 'x64\signtool.exe'
+            if (Test-Path $candidate) { $signtool = $candidate }
+          }
+          if (-not $signtool) {
+            $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($cmd) { $signtool = $cmd.Source }
+          }
+          if (-not $signtool) { throw "signtool.exe not found. Install the Windows 10/11 SDK on the runner." }
+          "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "SignTool: $signtool"
+
+          # Absolute paths to your freshly built artifacts (Debug)
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
+          if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
+          if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # --- Sign DLL + EXE with DigiCert KeyLocker ---
+      - name: Sign artifacts (DLL + EXE)
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+        run: |
+          $ts = "http://timestamp.digicert.com"
+          $signtool = "$env:SIGNTOOL"
+          $alias = "$env:DIGICERT_KEYPAIR_ALIAS"
+
+          # Sign using DigiCert KSP + key alias (no PFX on disk; key stays in HSM)
+          & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
+            /csp "DigiCert Signing Manager KSP" /kc "$alias" `
+            "$env:MIRRORD_LAYER_FILE"
+
+          & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
+            /csp "DigiCert Signing Manager KSP" /kc "$alias" `
+            "$env:MIRRORD_EXE"
+
+      # --- Verify signatures ---
+      - name: Verify signatures
+        run: |
+          & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_LAYER_FILE"
+          & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_EXE"
