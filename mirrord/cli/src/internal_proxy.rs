@@ -34,7 +34,7 @@ use crate::{
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     user_data::UserData,
-    util::{create_listen_socket, detach_io, reparent_to_init},
+    util::{create_listen_socket, detach_io},
 };
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
@@ -117,8 +117,6 @@ pub(crate) async fn proxy(
     if container_mode.not() {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
-
-    unsafe { reparent_to_init() }.map_err(InternalProxyError::ReparentToInit)?;
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
