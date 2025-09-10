@@ -875,7 +875,7 @@ mod test {
     #[tokio::test]
     async fn test_sniffer_rejects_http_filter() {
         let mut setup = TestSnifferSetup::new();
-        let mut api = setup.get_api().await;
+        let api = setup.get_api().await;
         let mut tcp_mirror_api = TcpMirrorApi::Sniffer {
             api,
             queued_message: None,

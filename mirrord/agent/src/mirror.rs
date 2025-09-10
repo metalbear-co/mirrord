@@ -233,14 +233,12 @@ impl TcpMirrorApi {
                         }
 
                         MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                           if let Some(filter) = port_filters.get(&http.info.original_destination.port()) {
-                                if !filter.matches(http.parts_mut()) {
-                                    return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                        "HTTP request filtered out: {} {}",
-                                        http.parts().method,
-                                        http.parts().uri
-                                    ))));
-                                }
+                            if let Some(filter) = port_filters.get(&http.info.original_destination.port()) && !filter.matches(http.parts_mut()) {
+                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                    "HTTP request filtered out: {} {}",
+                                    http.parts().method,
+                                    http.parts().uri
+                                ))));
                             }
 
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
