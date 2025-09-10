@@ -16,15 +16,9 @@
 //! Turn this feature on if you want to connect to agent pods from outside the cluster with port
 //! forwarding.
 
-use std::sync::OnceLock;
-
 pub use kube;
-
-use crate::retry::RetryKube;
 
 pub mod api;
 pub mod error;
 pub mod resolved;
 pub mod retry;
-
-pub static RETRY_KUBE_OPERATIONS_POLICY: OnceLock<RetryKube> = OnceLock::new();

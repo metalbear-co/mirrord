@@ -10,7 +10,6 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;
@@ -18,7 +17,6 @@ use tokio::process::Command;
 use tracing::Level;
 
 use crate::{
-    CliError,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
     error::{CliResult, ContainerError},
@@ -227,10 +225,6 @@ pub async fn container_command(
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
 
-    let retry_startup_kube_ops = RetryKube::try_from(&config.startup_retry)
-        .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
-    RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
-
     adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
 
     let (runtime_command, _execution_info, _tls_setup) =
@@ -288,10 +282,6 @@ pub async fn container_ext_command(
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
         create_config_and_analytics(&mut progress, cfg_context, watch, user_data).await?;
-
-    let retry_startup_kube_ops = RetryKube::try_from(&config.startup_retry)
-        .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
-    RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()

@@ -273,7 +273,6 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
@@ -648,10 +647,6 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
-    let retry_startup_kube_ops = RetryKube::try_from(&config.startup_retry)
-        .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
-    RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
-
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
@@ -895,10 +890,6 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
-
-                let retry_startup_kube_ops = RetryKube::try_from(&config.startup_retry)
-                    .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
-                RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
 
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?

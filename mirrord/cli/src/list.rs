@@ -2,11 +2,10 @@ use std::{sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
-use kube::Client;
+use kube::client::ClientBuilder;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
-    RETRY_KUBE_OPERATIONS_POLICY,
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
     retry::RetryKube,
@@ -14,6 +13,7 @@ use mirrord_kube::{
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{CliError, CliResult, Format, ListTargetArgs, util};
@@ -71,19 +71,26 @@ impl FoundTargets {
     /// If `rich_output` is set:
     /// 1. returned [`FoundTargets`] will contain info about namespaces available in the cluster;
     /// 2. only deployment, rollout, and pod targets will be fetched.
-    #[tracing::instrument(level = Level::DEBUG, skip(config), name = "resolve_targets", err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(layer_config), name = "resolve_targets", err)]
     async fn resolve(
-        config: LayerConfig,
+        layer_config: LayerConfig,
         rich_output: bool,
         target_types: Option<Vec<TargetType>>,
     ) -> CliResult<Self> {
         let client = create_kube_config(
-            config.accept_invalid_certificates,
-            config.kubeconfig.clone(),
-            config.kube_context.clone(),
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig.clone(),
+            layer_config.kube_context.clone(),
         )
         .await
-        .and_then(|config| Client::try_from(config).map_err(From::from))
+        .and_then(|config| {
+            Ok(ClientBuilder::try_from(config.clone())?
+                .with_layer(&BufferLayer::new(1024))
+                .with_layer(&RetryLayer::new(RetryKube::try_from(
+                    &layer_config.startup_retry,
+                )?))
+                .build())
+        })
         .map_err(|error| {
             CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
         })?;
@@ -91,12 +98,14 @@ impl FoundTargets {
         let start = Instant::now();
         let mut reporter = NullReporter::default();
         let progress = mirrord_progress::NullProgress {};
-        let operator_api = if config.operator != Some(false)
-            && let Some(api) = OperatorApi::try_new(&config, &mut reporter, &progress).await?
+        let operator_api = if layer_config.operator != Some(false)
+            && let Some(api) = OperatorApi::try_new(&layer_config, &mut reporter, &progress).await?
         {
             tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
 
-            let api = api.prepare_client_cert(&mut reporter, &progress).await;
+            let api = api
+                .prepare_client_cert(&mut reporter, &progress, &layer_config)
+                .await;
 
             api.inspect_cert_error(
                 |error| tracing::error!(%error, "failed to prepare client certificate"),
@@ -109,18 +118,18 @@ impl FoundTargets {
 
         let seeker = KubeResourceSeeker {
             client: &client,
-            namespace: config
+            namespace: layer_config
                 .target
                 .namespace
                 .as_deref()
                 .unwrap_or(client.default_namespace()),
-            copy_target: config.feature.copy_target.enabled,
+            copy_target: layer_config.feature.copy_target.enabled,
         };
 
         let (targets, namespaces) = tokio::try_join!(
             async {
                 let paths = match (operator_api, target_types) {
-                    (None, _) if config.operator == Some(true) => {
+                    (None, _) if layer_config.operator == Some(true) => {
                         Err(CliError::OperatorNotInstalled)
                     }
 
@@ -184,7 +193,7 @@ impl FoundTargets {
             }
         )?;
 
-        let current_namespace = config
+        let current_namespace = layer_config
             .target
             .namespace
             .as_deref()
@@ -240,10 +249,6 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
 
     let mut layer_config = LayerConfig::resolve(&mut cfg_config)?;
-
-    let retry_startup_kube_ops = RetryKube::try_from(&layer_config.startup_retry)
-        .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
-    RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
 
     if let Some(namespace) = args.namespace {
         layer_config.target.namespace.replace(namespace);

@@ -284,6 +284,7 @@ impl OperatorApi<NoClientCert> {
         self,
         reporter: &mut R,
         progress: &P,
+        layer_config: &LayerConfig,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
@@ -311,10 +312,16 @@ impl OperatorApi<NoClientCert> {
             config
                 .headers
                 .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
             let client = progress
-                .suspend(|| Client::try_from(config))
+                .suspend(|| ClientBuilder::try_from(config))
                 .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?;
+                .map_err(OperatorApiError::CreateKubeClient)?
+                .with_layer(&BufferLayer::new(1024))
+                .with_layer(&RetryLayer::new(RetryKube::try_from(
+                    &layer_config.startup_retry,
+                )?))
+                .build();
 
             (client, certificate)
         };
@@ -1123,9 +1130,14 @@ impl OperatorApi<PreparedClientCert> {
             .headers
             .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
 
-        let client = Client::try_from(config)
+        let client = ClientBuilder::try_from(config)
             .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &layer_config.startup_retry,
+            )?))
+            .build();
 
         let (tx, rx) = Self::connect_target(&client, &session).await?;
 

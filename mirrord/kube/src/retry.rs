@@ -39,14 +39,14 @@ pub struct RetryKube {
     /// We call [`ExponentialBackoff::next_backoff`] to get the sleep time for the next retry.
     backoff: ExponentialBackoff,
 
-    /// Keeps track of how many retries, so we can stop when we reach `max_attempts`.
+    /// Keeps track of how many retries, so we can stop when we reach `max_retries`.
     current_attempt: u32,
 
     /// Limits the amount of retries.
     ///
     /// If this is set to `0`, then we don't retry (the request is made once, but if it fails we
     /// don't retry it).
-    max_attempts: u32,
+    max_retries: u32,
 }
 
 impl TryFrom<&StartupRetryConfig> for RetryKube {
@@ -56,7 +56,7 @@ impl TryFrom<&StartupRetryConfig> for RetryKube {
         StartupRetryConfig {
             min_ms,
             max_ms,
-            max_attempts,
+            max_retries,
         }: &StartupRetryConfig,
     ) -> Result<Self, Self::Error> {
         let backoff = ExponentialBackoffMaker::new(
@@ -70,7 +70,7 @@ impl TryFrom<&StartupRetryConfig> for RetryKube {
         Ok(Self {
             backoff,
             current_attempt: 0,
-            max_attempts: *max_attempts,
+            max_retries: *max_retries,
         })
     }
 }
@@ -80,7 +80,7 @@ impl Default for RetryKube {
         let retry_config = StartupRetryConfig {
             min_ms: 500,
             max_ms: 5000,
-            max_attempts: 2,
+            max_retries: 2,
         };
 
         Self::try_from(&retry_config).expect("Default values should be valid!")
@@ -103,7 +103,7 @@ impl<Res> Policy<http::Request<Body>, http::Response<Res>, BoxError> for RetryKu
                     StatusCode::TOO_MANY_REQUESTS
                         | StatusCode::SERVICE_UNAVAILABLE
                         | StatusCode::GATEWAY_TIMEOUT
-                ) && self.current_attempt < self.max_attempts =>
+                ) && self.current_attempt < self.max_retries =>
             {
                 self.current_attempt += 1;
                 Some(self.backoff.next_backoff())

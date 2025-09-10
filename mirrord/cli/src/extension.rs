@@ -1,11 +1,9 @@
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::{RETRY_KUBE_OPERATIONS_POLICY, retry::RetryKube};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
-    CliError, CliResult, config::ExtensionExecArgs, execution::MirrordExecution,
-    user_data::UserData,
+    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, user_data::UserData,
 };
 
 /// Actually facilitate execution after all preparations were complete
@@ -50,11 +48,6 @@ pub(crate) async fn extension_exec(
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", args.target);
 
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
-
-    let retry_startup_kube_ops = RetryKube::try_from(&config.startup_retry)
-        .map_err(|fail| CliError::InvalidBackoff(fail.to_string()))?;
-    RETRY_KUBE_OPERATIONS_POLICY.get_or_init(|| retry_startup_kube_ops);
-
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(

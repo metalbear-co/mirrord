@@ -3,19 +3,20 @@
 
 use std::{fmt::Display, str::FromStr};
 
-use kube::{Api, Client};
+use kube::{Api, client::ClientBuilder};
 use miette::Diagnostic;
 use mirrord_config::{
     LayerConfig,
     feature::{FeatureConfig, network::incoming::IncomingMode},
     util::VecOrSingle,
 };
-use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
+use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError, retry::RetryKube};
 use mirrord_operator::crd::profile::{
     FeatureAdjustment, FeatureChange, MirrordClusterProfile, MirrordProfile,
 };
 use mirrord_progress::Progress;
 use thiserror::Error;
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::CliError;
@@ -227,17 +228,23 @@ pub async fn apply_profile_if_configured<P: Progress>(
 
 #[tracing::instrument(level = Level::TRACE, err)]
 async fn fetch_profile(
-    config: &LayerConfig,
+    layer_config: &LayerConfig,
     profile_identifier: &ProfileIdentifier,
 ) -> Result<ProfileFetchResult, KubeApiError> {
-    let client: Client = create_kube_config(
-        config.accept_invalid_certificates,
-        config.kubeconfig.as_deref(),
-        config.kube_context.clone(),
+    let config = create_kube_config(
+        layer_config.accept_invalid_certificates,
+        layer_config.kubeconfig.as_deref(),
+        layer_config.kube_context.clone(),
     )
-    .await?
-    .try_into()
-    .map_err(KubeApiError::from)?;
+    .await?;
+
+    let client = ClientBuilder::try_from(config)
+        .map_err(KubeApiError::from)?
+        .with_layer(&BufferLayer::new(1024))
+        .with_layer(&RetryLayer::new(RetryKube::try_from(
+            &layer_config.startup_retry,
+        )?))
+        .build();
 
     match profile_identifier {
         ProfileIdentifier::Cluster(profile) => {

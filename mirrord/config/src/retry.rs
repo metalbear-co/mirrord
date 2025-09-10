@@ -9,7 +9,7 @@ use crate::config::source::MirrordConfigSource;
 /// connecting to the mirrord-operator, and so on.
 ///
 /// If you're having cluster connectivity issues when **starting** mirrord, consider increasing
-/// [`max_attempts`](#startup_retry-max_attempts) and changing both
+/// [`max_retries`](#startup_retry-max_retries) and changing both
 /// [`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry
 /// some of its initial cluster operations more often.
 ///
@@ -18,7 +18,7 @@ use crate::config::source::MirrordConfigSource;
 ///   "startup_retry": {
 ///     "min_ms": 500,
 ///     "max_ms": 5000,
-///     "max_attempts": 1,
+///     "max_retries": 2,
 ///   }
 /// }
 /// ```
@@ -46,7 +46,7 @@ pub struct StartupRetryConfig {
     #[config(default = 5000)]
     pub max_ms: u64,
 
-    /// ## startup_retry.max_attempts {#startup_retry-max_attempts}
+    /// ## startup_retry.max_retries {#startup_retry-max_retries}
     ///
     /// Sets the max amount of retries that mirrord will try to perform during its startup for
     /// cluster operations, such as: searching for the target pod, connecting to the
@@ -54,15 +54,15 @@ pub struct StartupRetryConfig {
     ///
     /// If you want to **disable** mirrord startup retry, set this value to `0`.
     ///
-    /// Defaults to `1` (retries each operation **once**).
-    #[config(default = 1)]
-    pub max_attempts: u32,
+    /// Defaults to `2` (retries each operation **twice**).
+    #[config(default = 2)]
+    pub max_retries: u32,
 }
 
 impl CollectAnalytics for &StartupRetryConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("min_ms", self.min_ms);
         analytics.add("max_ms", self.max_ms);
-        analytics.add("max_attempts", self.max_attempts);
+        analytics.add("max_attempts", self.max_retries);
     }
 }
