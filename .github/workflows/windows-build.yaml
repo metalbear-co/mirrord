@@ -1,114 +1,3 @@
-# name: Build PR 3536 (Windows, self-hosted, minimal)
-
-# on:
-#   workflow_dispatch:
-
-# permissions:
-#   contents: read
-
-# jobs:
-#   build:
-#     runs-on: [self-hosted, Windows]
-#     defaults:
-#       run:
-#         shell: pwsh
-
-#     steps:
-#       - name: Checkout PR 3536 (merge ref)
-#         uses: actions/checkout@v4
-#         with:
-#           ref: refs/pull/3536/merge
-#           fetch-depth: 0
-#           submodules: recursive
-
-#       - name: Add Rust MSVC target
-#         run: rustup target add x86_64-pc-windows-msvc
-
-#       # Find which *package* contains the bin target named "mirrord"
-#       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
-#         run: |
-#           # Find the package that defines a binary target named 'mirrord'
-#           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-#           $pkg = $meta.packages | Where-Object {
-#             $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
-#           } | Select-Object -First 1
-#           if (-not $pkg) {
-#             $names = ($meta.packages | ForEach-Object name) -join ', '
-#             throw "No bin target named 'mirrord' found. Workspace packages: $names"
-#           }
-#           # Save the package name for the next step
-#           "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
-#           Write-Host "Will build bin 'mirrord' from package: $($pkg.name)"
-#           # Set MIRRORD_LAYER_FILE to an *absolute* path in this workspace
-#           $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
-#           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-#           Write-Host "MIRRORD_LAYER_FILE=$dll"
-#       - name: Build mirrord
-#         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
-
-#       # --- Prepare DigiCert (smctl + creds) ---
-#       - name: Prepare DigiCert (smctl + creds)
-#         env:
-#           DIGICERT_API_KEY:              ${{ secrets.DIGICERT_API_KEY }}
-#           DIGICERT_CLIENT_CERT_PFX_B64:  ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
-#           DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
-#         run: |
-#           # Locate smctl
-#           $smctl = @(
-#             "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
-#             "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
-#           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-#           if (-not $smctl) { throw "smctl.exe not found. Install DigiCert Signing Manager/KeyLocker Tools on this runner." }
-#           Write-Host "Using smctl at: $smctl"
-#           # Recreate client-auth .p12 from secret
-#           $p12 = Join-Path $env:RUNNER_TEMP "digicert-client-auth.p12"
-#           [IO.File]::WriteAllBytes($p12, [Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64))
-#           # Required env for smctl
-#           $env:SM_HOST = "https://clientauth.one.digicert.com"
-#           $env:SM_CLIENT_CERT_FILE = $p12
-#           # Store creds in Windows Credential Manager
-#           & $smctl credentials save $env:DIGICERT_API_KEY $env:DIGICERT_CLIENT_CERT_PASSWORD
-#           # Register the KSP (safe to re-run)
-#           try { & $smctl windows ksp register } catch { Write-Warning $_ }
-#       # --- Locate SignTool (Windows SDK) and set artifact paths ---
-#       - name: Export SignTool path (pinned)
-#         shell: pwsh
-#         run: |
-#           $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
-#           if (-not (Test-Path $signtool)) { throw "SignTool not found at $signtool" }
-#           "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
-#           Write-Host "Using SignTool at $signtool"
-#           # Absolute paths to your freshly built artifacts (Debug)
-#           $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
-#           $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
-#           if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
-#           if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
-#           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-#           "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
-
-#       # --- Sign DLL + EXE with DigiCert KeyLocker ---
-#       - name: Sign artifacts (DLL + EXE)
-#         env:
-#           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
-#         run: |
-#           $ts = "http://timestamp.digicert.com"
-#           $signtool = "$env:SIGNTOOL"
-#           $alias = "$env:DIGICERT_KEYPAIR_ALIAS"
-#           # Sign using DigiCert KSP + key alias (no PFX on disk; key stays in HSM)
-#           & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
-#             /csp "DigiCert Signing Manager KSP" /kc "$alias" `
-#             "$env:MIRRORD_LAYER_FILE"
-#           & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
-#             /csp "DigiCert Signing Manager KSP" /kc "$alias" `
-#             "$env:MIRRORD_EXE"
-#       # --- Verify signatures ---
-#       - name: Verify signatures
-#         run: |
-#           & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_LAYER_FILE"
-#           & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_EXE"
-
-#THIS ONE IS WORKING
-
 name: Build PR 3536 (Windows, self-hosted, minimal)
 
 on:
@@ -132,9 +21,12 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # 1) rustup target add x86_64-pc-windows-msvc
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
+
+      - name: Build layer-win (DLL)
+        run: |
+          cargo build -p layer-win --target x86_64-pc-windows-msvc
 
       # Find which *package* contains the bin target named "mirrord"
       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
@@ -155,6 +47,66 @@ jobs:
           $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "MIRRORD_LAYER_FILE=$dll"
-      # 2) cargo build (just like your local command, but robust to package naming)
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
+
+      # --- Prepare DigiCert (smctl + creds) ---
+      - name: Prepare DigiCert (smctl + creds)
+        env:
+          DIGICERT_API_KEY:              ${{ secrets.DIGICERT_API_KEY }}
+          DIGICERT_CLIENT_CERT_PFX_B64:  ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
+          DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
+        run: |
+          # Locate smctl
+          $smctl = @(
+            "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe",
+            "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $smctl) { throw "smctl.exe not found. Install DigiCert Signing Manager/KeyLocker Tools on this runner." }
+          Write-Host "Using smctl at: $smctl"
+          # Recreate client-auth .p12 from secret
+          $p12 = Join-Path $env:RUNNER_TEMP "digicert-client-auth.p12"
+          [IO.File]::WriteAllBytes($p12, [Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64))
+          # Required env for smctl
+          $env:SM_HOST = "https://clientauth.one.digicert.com"
+          $env:SM_CLIENT_CERT_FILE = $p12
+          # Store creds in Windows Credential Manager
+          & $smctl credentials save $env:DIGICERT_API_KEY $env:DIGICERT_CLIENT_CERT_PASSWORD
+          # Register the KSP (safe to re-run)
+          try { & $smctl windows ksp register } catch { Write-Warning $_ }
+      # --- Locate SignTool (Windows SDK) and set artifact paths ---
+      - name: Export SignTool path (pinned)
+        shell: pwsh
+        run: |
+          $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
+          if (-not (Test-Path $signtool)) { throw "SignTool not found at $signtool" }
+          "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Using SignTool at $signtool"
+          # Absolute paths to your freshly built artifacts (Debug)
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
+          if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
+          if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # --- Sign DLL + EXE with DigiCert KeyLocker ---
+      - name: Sign artifacts (DLL + EXE)
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+        run: |
+          $ts = "http://timestamp.digicert.com"
+          $signtool = "$env:SIGNTOOL"
+          $alias = "$env:DIGICERT_KEYPAIR_ALIAS"
+          # Sign using DigiCert KSP + key alias (no PFX on disk; key stays in HSM)
+          & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
+            /csp "DigiCert Signing Manager KSP" /kc "$alias" `
+            "$env:MIRRORD_LAYER_FILE"
+          & $signtool sign /fd SHA256 /td SHA256 /tr $ts `
+            /csp "DigiCert Signing Manager KSP" /kc "$alias" `
+            "$env:MIRRORD_EXE"
+      # --- Verify signatures ---
+      - name: Verify signatures
+        run: |
+          & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_LAYER_FILE"
+          & "$env:SIGNTOOL" verify /pa /all "$env:MIRRORD_EXE"
