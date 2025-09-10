@@ -110,11 +110,12 @@ jobs:
           Write-Host "`nKeypairs visible to this user:"
           & $smctl keypair list
 
-      # Try to get the .cer; if that fails, fallback to certsync + /sha1
-      - name: Get certificate (download .cer, fallback to certsync)
+      # Download the public cert, compute its thumbprint, certsync the alias, then sign by /sha1
+      - name: Prepare certificate (download → thumbprint → certsync)
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
+          $ErrorActionPreference = "Stop"
           $smctl = "$env:SMCTL"
           $alias = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
           if (-not $alias) { throw "DIGICERT_KEYPAIR_ALIAS is empty." }
@@ -122,104 +123,51 @@ jobs:
           $outDir = $env:RUNNER_TEMP
           Remove-Item (Join-Path $outDir '*.cer') -Force -ErrorAction SilentlyContinue
 
-          Write-Host "Attempting .cer download for alias '$alias'..."
+          Write-Host "Downloading .cer for alias '$alias'..."
           & $smctl certificate download --keypair-alias $alias --format cer --out $outDir
           $rc = $LASTEXITCODE
-          $cert = Get-ChildItem $outDir -Filter *.cer -ErrorAction SilentlyContinue | Select-Object -First 1
-
-          if ($cert) {
-            "CODESIGN_CERT=$($cert.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "Downloaded certificate: $($cert.FullName) (smctl rc=$rc)"
-          } else {
-            Write-Warning "No .cer written (smctl rc=$rc). Falling back to certsync → /sha1."
+          $cer = Get-ChildItem $outDir -Filter *.cer -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $cer) {
+            throw "No .cer downloaded for alias '$alias' (smctl rc=$rc). Make sure the certificate is Issued and linked to this KeyLocker key."
           }
 
-          # If we don't have a file, or if you prefer to always ensure store linkage, do certsync:
-          if (-not $cert) {
-            & $smctl windows certsync --keypair-alias $alias
-            if ($LASTEXITCODE -ne 0) { throw "certsync failed for alias '$alias'." }
-          }
+          # Compute thumbprint from the downloaded file
+          $x = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($cer.FullName)
+          $thumb = ($x.Thumbprint -replace '\s','').ToUpper()
+          "CODESIGN_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Certificate thumbprint (from file): $thumb (smctl rc=$rc)"
 
-          # Optional: extract a DigiCert KSP-backed thumbprint for fallback signing
-          $dump = certutil -store -user My | Out-String
-          $blocks = $dump -split "(?m)^================ Certificate [0-9]+ ================"
-          $kspSha1 = $null
-          foreach ($b in $blocks) {
-            if ($b -match 'Provider = DigiCert Signing Manager KSP') {
-              if ($b -match 'Cert Hash\(sha1\):\s*([A-F0-9 ]+)') {
-                $kspSha1 = ($Matches[1] -replace '\s','').ToUpper()
-                break
-              }
-            }
-          }
-          if ($kspSha1) {
-            "CODESIGN_SHA1=$kspSha1" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "KSP-backed thumbprint discovered: $kspSha1"
-          } else {
-            Write-Host "No KSP-backed thumbprint discovered yet (may still be fine if file mode works)."
-          }
+          # Sync that alias into CurrentUser\My for THIS service account
+          Write-Host "Running certsync for alias '$alias'..."
+          & $smctl windows certsync --keypair-alias $alias
+          if ($LASTEXITCODE -ne 0) { throw "certsync failed for alias '$alias'." }
 
-      # Sign using file-mode first (/csp+/kc+/f). If it fails, fallback to /sha1 (store mode).
-      - name: Sign artifacts (DLL + EXE) with fallback
+          # Ensure the exact thumbprint is now present in CurrentUser\My
+          $storeCert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { ($_.Thumbprint -replace '\s','').ToUpper() -eq $thumb } | Select-Object -First 1
+          if (-not $storeCert) {
+            Start-Sleep -Seconds 2
+            $storeCert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { ($_.Thumbprint -replace '\s','').ToUpper() -eq $thumb } | Select-Object -First 1
+          }
+          if (-not $storeCert) {
+            Write-Host "CurrentUser\My contents (for diagnostics):"
+            Get-ChildItem Cert:\CurrentUser\My | Select-Object Subject, Thumbprint, NotAfter
+            throw "Thumbprint $thumb not found in CurrentUser\My after certsync. Check signer assignment, creds, and division access."
+          }
+          Write-Host "Thumbprint present in store."
+
+      - name: Sign artifacts (DLL + EXE) via /sha1
         env:
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+          CODESIGN_THUMBPRINT: ${{ env.CODESIGN_THUMBPRINT }}
         run: |
           $ts = "http://timestamp.digicert.com"
-          $signtool = "$env:SIGNTOOL"
-          $alias = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
-          $dll = "$env:MIRRORD_LAYER_FILE"
-          $exe = "$env:MIRRORD_EXE"
+          $sha1 = "$env:CODESIGN_THUMBPRINT"
+          if (-not $sha1) { throw "CODESIGN_THUMBPRINT missing." }
 
-          function Sign-FileMode {
-            param($path)
-            $args = @('/fd','SHA256','/td','SHA256','/tr',$ts,
-                      '/csp','DigiCert Signing Manager KSP',
-                      '/kc',"$alias",
-                      '/f', "$env:CODESIGN_CERT")
-            & "$signtool" sign @args "$path"
-            return $LASTEXITCODE
-          }
+          & "$env:SIGNTOOL" sign /fd SHA256 /td SHA256 /tr $ts /sha1 $sha1 "$env:MIRRORD_LAYER_FILE"
+          if ($LASTEXITCODE -ne 0) { throw "Signing DLL failed with /sha1 $sha1." }
 
-          function Get-KspBackedThumbprint {
-            $dump = certutil -store -user My | Out-String
-            $blocks = $dump -split "(?m)^================ Certificate [0-9]+ ================"
-            foreach ($b in $blocks) {
-              if ($b -match 'Provider = DigiCert Signing Manager KSP') {
-                if ($b -match 'Cert Hash\(sha1\):\s*([A-F0-9 ]+)') {
-                  return (($Matches[1] -replace '\s','').ToUpper())
-                }
-              }
-            }
-            return $null
-          }
-
-          $fileModeUsable = ($env:CODESIGN_CERT -and (Test-Path "$env:CODESIGN_CERT"))
-          if ($fileModeUsable) {
-            Write-Host "Signing (file mode) with alias '$alias' and cert '$env:CODESIGN_CERT'..."
-            $rc1 = Sign-FileMode $dll
-            $rc2 = if ($rc1 -eq 0) { Sign-FileMode $exe } else { $rc1 }
-
-            if ($rc1 -eq 0 -and $rc2 -eq 0) { Write-Host "File mode signing OK."; exit 0 }
-            Write-Warning "File mode signing failed (rc1=$rc1 rc2=$rc2). Falling back to store mode (/sha1)..."
-          } else {
-            Write-Host "No CODESIGN_CERT file present; using store mode (/sha1)."
-          }
-
-          # Ensure cert is synced for this alias before /sha1
-          $smctl = "$env:SMCTL"
-          & $smctl windows certsync --keypair-alias "$alias" | Out-Null
-
-          $sha1 = if ($env:CODESIGN_SHA1) { "$env:CODESIGN_SHA1" } else { Get-KspBackedThumbprint }
-          if (-not $sha1) { throw "No DigiCert KSP-backed certificate found in CurrentUser\My for /sha1 signing." }
-
-          & "$signtool" sign /fd SHA256 /td SHA256 /tr $ts /sha1 $sha1 "$dll"
-          $rc3 = $LASTEXITCODE
-          & "$signtool" sign /fd SHA256 /td SHA256 /tr $ts /sha1 $sha1 "$exe"
-          $rc4 = $LASTEXITCODE
-
-          if ($rc3 -ne 0 -or $rc4 -ne 0) {
-            throw "Store mode signing failed (rc3=$rc3 rc4=$rc4). Check alias, signer assignment, creds, and KSP registration."
-          }
+          & "$env:SIGNTOOL" sign /fd SHA256 /td SHA256 /tr $ts /sha1 $sha1 "$env:MIRRORD_EXE"
+          if ($LASTEXITCODE -ne 0) { throw "Signing EXE failed with /sha1 $sha1." }
 
       - name: Verify signatures
         run: |
