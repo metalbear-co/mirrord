@@ -24,11 +24,11 @@ jobs:
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      - name: Locate & build layer_win (DLL)
+      - name: Locate & build mirrord_layer_win (DLL)
         shell: pwsh
         run: |
-          $dllName = 'layer_win'
-          # Find the Cargo.toml whose [lib] name == layer_win
+          $dllName = 'mirrord_layer_win'
+          # Find the Cargo.toml whose [lib] name == mirrord_layer_win
           $cand = Get-ChildItem -Recurse -Filter Cargo.toml -File | Where-Object {
             (Select-String -Path $_.FullName -Pattern '^\s*\[lib\]' -SimpleMatch -Quiet) -and
             (Select-String -Path $_.FullName -Pattern '^\s*name\s*=\s*"' + [regex]::Escape($dllName) + '"\s*$' -SimpleMatch -Quiet)
@@ -39,9 +39,9 @@ jobs:
           cargo build --manifest-path "$($cand.FullName)" --target x86_64-pc-windows-msvc
 
 
-      # - name: Build layer-win (DLL)
+      # - name: Build mirrod-layer-win (DLL)
       #   run: |
-      #     cargo build -p layer-win --target x86_64-pc-windows-msvc
+      #     cargo build -p mirrod-layer-win --target x86_64-pc-windows-msvc
 
       # Find which *package* contains the bin target named "mirrord"
       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
@@ -59,7 +59,7 @@ jobs:
           "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Will build bin 'mirrord' from package: $($pkg.name)"
           # Set MIRRORD_LAYER_FILE to an *absolute* path in this workspace
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "MIRRORD_LAYER_FILE=$dll"
       - name: Build mirrord
@@ -98,7 +98,7 @@ jobs:
           "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Using SignTool at $signtool"
           # Absolute paths to your freshly built artifacts (Debug)
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
           $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
           if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
           if (-not (Test-Path $exe)) { throw "EXE not found at $exe" }
