@@ -1034,14 +1034,26 @@ impl IncomingMode {
         if self.steal {
             let steal_type = match &self.http_settings {
                 None => StealType::All(port),
-                Some(settings) => StealType::FilteredHttpEx(port, settings.filter.clone()),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        StealType::FilteredHttpEx(port, settings.filter.clone())
+                    } else {
+                        StealType::All(port)
+                    }
+                }
             };
             return PortSubscription::Steal(steal_type);
         }
 
         let mirror_type = match &self.http_settings {
             None => MirrorType::All(port),
-            Some(settings) => MirrorType::FilteredHttp(port, settings.filter.clone()),
+            Some(settings) => {
+                if settings.ports.contains(&port) {
+                    MirrorType::FilteredHttp(port, settings.filter.clone())
+                } else {
+                    MirrorType::All(port)
+                }
+            }
         };
 
         return PortSubscription::Mirror(mirror_type);
