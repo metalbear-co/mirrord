@@ -726,7 +726,7 @@ impl LayerConfig {
                 name: "startup_retry.min_ms",
                 provided: self.startup_retry.min_ms.to_string(),
                 error: format!(
-                    "the value of startup_retry.min_ms must be smaller than {}\
+                    "the value of startup_retry.min_ms `{}` cannot be greater than \
                      the value of startup_retry.max_ms {}.",
                     self.startup_retry.min_ms, self.startup_retry.max_ms
                 )
