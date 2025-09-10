@@ -2,16 +2,16 @@
 
 use std::{
     ffi::c_void,
-    mem::MaybeUninit,
+    mem::{ManuallyDrop, MaybeUninit},
     path::PathBuf,
     sync::OnceLock,
 };
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_protocol::file::{
-    OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
+    CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest
 };
-use phnt::ffi::{FILE_INFORMATION_CLASS, FS_INFORMATION_CLASS, PFILE_BASIC_INFORMATION};
+use phnt::ffi::{FILE_INFORMATION_CLASS, FS_INFORMATION_CLASS, PFILE_BASIC_INFORMATION, _IO_STATUS_BLOCK};
 use str_win::u16_buffer_to_string;
 use winapi::{
     shared::{
@@ -22,20 +22,19 @@ use winapi::{
         ntstatus::{STATUS_OBJECT_PATH_NOT_FOUND, STATUS_SUCCESS},
     },
     um::{
-        fileapi::BY_HANDLE_FILE_INFORMATION,
         minwinbase::SYSTEMTIME,
         sysinfoapi::GetSystemTime,
         timezoneapi::SystemTimeToFileTime,
         winbase::FILE_TYPE_DISK,
-        winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_ATTRIBUTE_READONLY, FILE_WRITE_DATA},
+        winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_WRITE_DATA},
     },
 };
 
 use crate::{
     apply_hook,
-    common::make_proxy_request_with_response,
+    common::{make_proxy_request_no_response, make_proxy_request_with_response},
     hooks::files::{
-        managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
+        managed_handle::{try_insert_handle, HandleContext, MANAGED_HANDLES},
         util::remove_root_dir_from_path,
     },
 };
@@ -46,9 +45,12 @@ pub mod util;
 fn read_object_attributes_name(object_attributes: POBJECT_ATTRIBUTES) -> String {
     unsafe {
         let name_ustr = (*object_attributes).ObjectName;
-        let name_raw =
-            &*std::ptr::slice_from_raw_parts((*name_ustr).Buffer, (*name_ustr).Length as _);
-        u16_buffer_to_string(name_raw)
+
+        let buf = (*name_ustr).Buffer;
+        let len = (*name_ustr).Length;
+
+        let name = &*std::ptr::slice_from_raw_parts(buf, len as _);
+        u16_buffer_to_string(name)
     }
 }
 
@@ -106,6 +108,11 @@ unsafe extern "system" fn nt_create_file_hook(
 
         // This is usually the case when a Linux path is provided.
         if ret == STATUS_OBJECT_PATH_NOT_FOUND {
+            // If no pointer for file handle, return.
+            if file_handle.is_null() {
+                return ret;
+            }
+
             // Try to get path.
             let linux_path = remove_root_dir_from_path(name);
 
@@ -162,7 +169,7 @@ unsafe extern "system" fn nt_create_file_hook(
                 }
             };
 
-            if managed_handle.is_some() && !file_handle.is_null() {
+            if managed_handle.is_some() {
                 // Write managed handle at the provided pointer
                 *file_handle = managed_handle.unwrap();
                 println!(
@@ -183,7 +190,7 @@ type NtReadFileType = unsafe extern "system" fn(
     HANDLE,
     *mut c_void,
     PVOID,
-    *mut c_void,
+    *mut _IO_STATUS_BLOCK,
     PVOID,
     ULONG,
     PLARGE_INTEGER,
@@ -196,7 +203,7 @@ unsafe extern "system" fn nt_read_file_hook(
     event: HANDLE,
     apc_routine: *mut c_void,
     apc_context: PVOID,
-    io_status_block: *mut c_void,
+    io_status_block: *mut _IO_STATUS_BLOCK,
     buffer: PVOID,
     length: ULONG,
     byte_offset: PLARGE_INTEGER,
@@ -206,10 +213,12 @@ unsafe extern "system" fn nt_read_file_hook(
         if let Ok(handles) = MANAGED_HANDLES.try_read() {
             if let Some(handle_context) = handles.get(&file) {
                 if buffer.is_null() {
+                    // TODO(gabriela): test and check return
                     return -1;
                 }
 
                 if length == 0 {
+                    // TODO(gabriela): test and check return
                     return -1;
                 }
 
@@ -219,6 +228,7 @@ unsafe extern "system" fn nt_read_file_hook(
                 });
 
                 if req.is_err() {
+                    // TODO(gabriela): test and check return
                     return -1;
                 }
 
@@ -226,15 +236,27 @@ unsafe extern "system" fn nt_read_file_hook(
 
                 match req {
                     Ok(res) => {
+                        //if length <= res.bytes.len() {
+                        //    // TODO(gabriela): test this scenario, check IRP and return without hooks
+                        //    // and replicate.
+                        //}
+
+                        // Copy the remote received buffer to the provided buffer, as far as we can.
                         std::ptr::copy(
                             res.bytes.as_ptr(),
-                            *(buffer as *mut *mut _) as _,
+                            buffer as _,
                             res.bytes.len(),
                         );
+
+                        // We get this information over IRP normally, so need to replicate the structure in usermode
+                        (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+                        (*io_status_block).Information = res.bytes.len() as u64;
+
                         return STATUS_SUCCESS;
                     }
                     Err(e) => {
                         eprintln!("{:?}", e);
+                        // TODO(gabriela): come up with an adequate return.
                         return -1;
                     }
                 }
@@ -320,7 +342,7 @@ unsafe extern "system" fn nt_set_information_file_hook(
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read() {
             if handles.contains_key(&file) {
-                // TODO
+                // TODO(gabriela)
                 return STATUS_SUCCESS;
             }
         }
@@ -368,17 +390,17 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
         if let Ok(handles) = MANAGED_HANDLES.try_read() {
             // TODO(gabriela): this checks the info for **file**, not **folder**!!! Please fix.
             if let Some(handle_context) = handles.get(&file) {
-                let mut info: BY_HANDLE_FILE_INFORMATION = MaybeUninit::zeroed().assume_init();
-                info.dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+                //let mut info: BY_HANDLE_FILE_INFORMATION = MaybeUninit::zeroed().assume_init();
+                //info.dwFileAttributes = FILE_ATTRIBUTE_READONLY;
 
-                // TODO(gabriela): explain, fix return
-                if length != 0x18 {
-                    return -1;
-                }
+                //// TODO(gabriela): explain, fix return
+                //if length != 0x18 {
+                //    return -1;
+                //}
 
-                info.ftCreationTime = handle_context.creation_time.clone();
-                info.ftLastAccessTime = handle_context.creation_time.clone();
-                info.ftLastWriteTime = handle_context.creation_time.clone();
+                //info.ftCreationTime = handle_context.creation_time.clone();
+                //info.ftLastAccessTime = handle_context.creation_time.clone();
+                //info.ftLastWriteTime = handle_context.creation_time.clone();
 
                 return STATUS_SUCCESS;
             }
@@ -408,32 +430,32 @@ unsafe extern "system" fn nt_query_information_file_hook(
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read() {
             if let Some(handle_context) = handles.get(&file) {
-                let mut info: BY_HANDLE_FILE_INFORMATION = MaybeUninit::zeroed().assume_init();
-                info.dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+                //let mut info: BY_HANDLE_FILE_INFORMATION = MaybeUninit::zeroed().assume_init();
+                //info.dwFileAttributes = FILE_ATTRIBUTE_READONLY;
 
-                // TODO(gabriela): explain, improve return
-                if length != 0x68 {
-                    return -1;
-                }
+                //// TODO(gabriela): explain, improve return
+                //if length != 0x68 {
+                //    return -1;
+                //}
 
-                // TODO(gabriela): this is wrong, fix! fstat?
-                info.ftCreationTime = handle_context.creation_time.clone();
-                info.ftLastAccessTime = handle_context.creation_time.clone();
-                info.ftLastWriteTime = handle_context.creation_time.clone();
+                //// TODO(gabriela): this is wrong, fix! fstat?
+                //info.ftCreationTime = handle_context.creation_time.clone();
+                //info.ftLastAccessTime = handle_context.creation_time.clone();
+                //info.ftLastWriteTime = handle_context.creation_time.clone();
 
-                // TODO(gabriela): I know nothing about NTFS and don't wish to either
-                // but I should figure this out
-                info.nNumberOfLinks = 0;
-                info.nFileIndexLow = 0;
-                info.nFileIndexLow = 1;
+                //// TODO(gabriela): I know nothing about NTFS and don't wish to either
+                //// but I should figure this out
+                //info.nNumberOfLinks = 0;
+                //info.nFileIndexLow = 0;
+                //info.nFileIndexLow = 1;
 
-                // TODO(gabriela): get actual bounds!
-                info.nFileSizeLow = 1000;
-                info.nFileSizeHigh = 0;
+                //// TODO(gabriela): get actual bounds!
+                //info.nFileSizeLow = 1000;
+                //info.nFileSizeHigh = 0;
 
-                // TODO(gabriela): this is just wrong but python doesn't complain
-                // anyway what the hell do we put here? idk
-                info.dwVolumeSerialNumber = 1;
+                //// TODO(gabriela): this is just wrong but python doesn't complain
+                //// anyway what the hell do we put here? idk
+                //info.dwVolumeSerialNumber = 1;
 
                 return STATUS_SUCCESS;
             }
@@ -455,7 +477,16 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write() {
-            if handles.contains_key(&handle) {
+            if let Some(handle_context) = handles.get(&handle) {
+                let req = make_proxy_request_no_response(CloseFileRequest {
+                    fd: handle_context.fd
+                });
+                
+                if req.is_err() {
+                    // TODO(gabriela): investigate correct handling
+                    return -1;
+                }
+
                 handles.remove_entry(&handle);
                 return STATUS_SUCCESS;
             }
@@ -473,7 +504,7 @@ unsafe extern "system" fn get_file_type_hook(handle: HANDLE) -> DWORD {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read() {
             if handles.contains_key(&handle) {
-                // TODO(gabriela): come back to this again, get rid of kernelbase hooks
+                // TODO(gabriela): come back to this again, remove this hook
                 return FILE_TYPE_DISK;
             }
         }

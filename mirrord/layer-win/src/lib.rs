@@ -17,7 +17,6 @@ use winapi::{
     um::{
         debugapi::DebugBreak,
         processthreadsapi::GetCurrentProcessId,
-        wincon::{ATTACH_PARENT_PROCESS, AttachConsole},
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };

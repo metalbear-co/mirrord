@@ -13,9 +13,9 @@ class FileOpsTest(unittest.TestCase):
         Check that we can't open the file for writing because it opens it locally and it doesn't exist
         then make sure we can still read it remotely.
         """
-        file = open("/app/test.txt", "r")
-        file1 = open("/app/test.txt", "r")
-        file2 = open("/app/test.txt", "r")
+        with open("/app/test.txt", "r") as f:
+            #f.seek(0)
+            self.assertEqual(f.readline(), TEXT)
 
 
 if __name__ == "__main__":
