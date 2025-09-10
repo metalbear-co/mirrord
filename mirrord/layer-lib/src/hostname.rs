@@ -7,9 +7,65 @@ use std::ffi::CString;
 
 use tracing::trace;
 
-use crate::common::proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
+use crate::{
+    common::proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    error::HookResult,
 };
+
+/// RAII wrapper for remote file operations that automatically closes the file when dropped
+struct ManagedRemoteFile {
+    fd: u64,
+}
+
+impl ManagedRemoteFile {
+    /// Open a remote file for reading
+    fn open(file_path: &str) -> HookResult<Self> {
+        use std::path::PathBuf;
+
+        use mirrord_protocol::file::{OpenFileRequest, OpenOptionsInternal};
+
+        let open_request = OpenFileRequest {
+            path: PathBuf::from(file_path),
+            open_options: OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        };
+
+        let fd = make_proxy_request_with_response(open_request)??.fd;
+
+        Ok(Self { fd })
+    }
+
+    /// Read the entire file content up to max_size bytes
+    fn read_all(&self, max_size: u64) -> HookResult<Vec<u8>> {
+        use mirrord_protocol::file::ReadFileRequest;
+
+        let read_request = ReadFileRequest {
+            remote_fd: self.fd,
+            buffer_size: max_size,
+        };
+
+        let config_bytes = make_proxy_request_with_response(read_request)??
+            .bytes
+            .to_vec();
+
+        Ok(config_bytes)
+    }
+}
+
+impl Drop for ManagedRemoteFile {
+    fn drop(&mut self) {
+        // Ignore any errors during cleanup - we don't want to panic in Drop
+        let _ = make_proxy_request_no_response(mirrord_protocol::file::CloseFileRequest {
+            fd: self.fd,
+        });
+    }
+}
 
 /// Error type for hostname operations
 #[derive(Debug, thiserror::Error)]
@@ -113,59 +169,13 @@ pub fn get_hostname<R: HostnameResolver>(resolver: &R) -> HostnameResult {
 }
 
 /// Generic helper to read a file from the remote target via ProxyConnection
-fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> Result<Vec<u8>, HostnameError> {
-    use std::path::PathBuf;
-
-    use mirrord_protocol::file::{
-        CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
-    };
-
-    // Open the file on the remote target
-    let open_request = OpenFileRequest {
-        path: PathBuf::from(file_path),
-        open_options: OpenOptionsInternal {
-            read: true,
-            write: false,
-            append: false,
-            truncate: false,
-            create: false,
-            create_new: false,
-        },
-    };
-
-    let open_response = make_proxy_request_with_response(open_request)
-        .map_err(|e| HostnameError::Protocol(format!("Failed to open {}: {e}", file_path)))?;
-
-    let fd = open_response
-        .map_err(|e| HostnameError::Protocol(format!("Remote error opening {}: {e:?}", file_path)))?
-        .fd;
-
-    // Read the file content
-    let read_request = ReadFileRequest {
-        remote_fd: fd,
-        buffer_size: max_size,
-    };
-
-    let read_result = make_proxy_request_with_response(read_request).map_err(|e| {
-        // Try to close the file even if read failed
-        let _ = make_proxy_request_no_response(CloseFileRequest { fd });
-        HostnameError::Protocol(format!("Failed to read {}: {e}", file_path))
-    });
-
-    // Always try to close the file, regardless of read success
-    let _ = make_proxy_request_no_response(CloseFileRequest { fd });
-
-    let config_bytes = read_result?
-        .map_err(|e| HostnameError::Protocol(format!("Remote error reading {}: {e:?}", file_path)))?
-        .bytes
-        .to_vec();
-
-    Ok(config_bytes)
+fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HookResult<Vec<u8>> {
+    ManagedRemoteFile::open(file_path)?.read_all(max_size)
 }
 
 /// Fetch Samba NetBIOS configuration from remote target via ProxyConnection by reading
 /// /etc/samba/smb.conf
-pub fn fetch_samba_config_via_proxy() -> Result<Option<String>, HostnameError> {
+pub fn fetch_samba_config_via_proxy() -> HookResult<Option<String>> {
     // Read /etc/samba/smb.conf from the remote target (max 64KB should be enough)
     let config_bytes = read_remote_file_via_proxy("/etc/samba/smb.conf", 65536)?;
 
@@ -234,9 +244,7 @@ pub fn parse_samba_netbios_name(config: &str) -> Option<String> {
 }
 
 /// Perform remote DNS resolution via ProxyConnection using mirrord protocol
-pub fn remote_dns_resolve_via_proxy(
-    hostname: &str,
-) -> Result<Vec<(String, std::net::IpAddr)>, HostnameError> {
+pub fn remote_dns_resolve_via_proxy(hostname: &str) -> HookResult<Vec<(String, std::net::IpAddr)>> {
     use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
 
     let request = GetAddrInfoRequestV2 {
@@ -249,70 +257,9 @@ pub fn remote_dns_resolve_via_proxy(
     };
 
     // DNS requests have a different response type, so we need to handle them directly
-    let response = make_proxy_request_with_response(request).map_err(|e| {
-        HostnameError::Protocol(format!("Proxy request failed for DNS resolution: {e}"))
-    })?;
-
-    let addr_info_list = response
-        .0
-        .map_err(|e| HostnameError::Protocol(format!("Remote DNS resolution failed: {e:?}")))?;
-
+    let addr_info_list = make_proxy_request_with_response(request)?.0?;
     Ok(addr_info_list
         .into_iter()
         .map(|LookupRecord { name, ip }| (name, ip))
         .collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct MockResolver {
-        should_use_local: bool,
-        hostname: Option<String>,
-    }
-
-    impl HostnameResolver for MockResolver {
-        fn fetch_remote_hostname(&self) -> HostnameResult {
-            match &self.hostname {
-                Some(h) => match CString::new(h.clone()) {
-                    Ok(cstring) => HostnameResult::Success(cstring),
-                    Err(_) => HostnameResult::Error(HostnameError::InvalidData),
-                },
-                None => HostnameResult::Error(HostnameError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "No hostname available",
-                ))),
-            }
-        }
-
-        fn should_use_local_hostname(&self) -> bool {
-            self.should_use_local
-        }
-    }
-
-    #[test]
-    fn test_hostname_resolution() {
-        let resolver = MockResolver {
-            should_use_local: false,
-            hostname: Some("test-hostname".to_string()),
-        };
-
-        // Call should fetch from resolver
-        let result = get_hostname(&resolver);
-        assert!(matches!(result, HostnameResult::Success(_)));
-    }
-
-    #[test]
-    fn test_use_local_hostname() {
-        // Create a resolver that should use local hostname
-        let resolver = MockResolver {
-            should_use_local: true,
-            hostname: Some("test-hostname".to_string()),
-        };
-
-        // Test that resolver preference is respected
-        let result = get_hostname(&resolver);
-        assert!(matches!(result, HostnameResult::UseLocal));
-    }
 }

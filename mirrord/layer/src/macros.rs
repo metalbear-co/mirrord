@@ -9,10 +9,6 @@
 //! - [`hook_symbol!`]
 //!
 //! Used to hook go symbols.
-//!
-//! - [`graceful_exit!`](`macro@crate::graceful_exit`)
-//!
-//! Exits the process with a nice message.
 
 /// Replaces the `$func` [`libc`] function, with the equivalent hook `$detour_function`, by calling
 /// `HookManager::hook_export_or_any`.
@@ -156,59 +152,6 @@ macro_rules! hook_symbol {
             }
             Err(err) => {
                 trace!("hook {:?} in main module failed with err {err:?}", $func);
-            }
-        }
-    };
-}
-
-/// Kills the process and prints a helpful error message to the user.
-///
-/// ## Parameters
-///
-/// - `$arg`: messages to print, supports [`println!`] style arguments.
-///
-/// ## Examples
-///
-/// - Exiting on IO failure:
-///
-/// ```rust, no_run
-/// if let Err(fail) = File::open("nothing.txt") {
-///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
-/// }
-/// ```
-#[cfg(not(target_os = "windows"))]
-#[macro_export]
-macro_rules! graceful_exit {
-    ($($arg:tt)+) => {{
-        eprintln!($($arg)+);
-        graceful_exit!()
-    }};
-    () => {
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(std::process::id() as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        )
-        .expect("unable to graceful exit")
-    };
-}
-
-#[cfg(target_os = "windows")]
-use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
-
-#[cfg(target_os = "windows")]
-#[macro_export]
-macro_rules! graceful_exit {
-    ($($arg:tt)+) => {{
-        eprintln!($($arg)+);
-        graceful_exit!()
-    }};
-    () => {
-        unsafe {
-            let success = TerminateProcess(GetCurrentProcess(), 1).as_bool();
-            if success {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
             }
         }
     };

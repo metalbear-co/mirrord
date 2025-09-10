@@ -13,7 +13,8 @@ use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::{graceful_exit, proxy_connection::ProxyError};
+use crate::proxy_connection::ProxyError;
+use mirrord_layer_lib::graceful_exit;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.

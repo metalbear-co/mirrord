@@ -17,10 +17,9 @@ use mirrord_layer_lib::{
         layer_setup,
         proxy_connection::{PROXY_CONNECTION, make_proxy_request_with_response},
     },
-    error::{AddrInfoError, HookResult, HostnameResolveError},
+    error::{AddrInfoError, HookResult},
     hostname::{
-        HostnameError, HostnameResult, fetch_samba_config_via_proxy, get_hostname,
-        remote_dns_resolve_via_proxy,
+        HostnameResult, fetch_samba_config_via_proxy, get_hostname, remote_dns_resolve_via_proxy,
     },
     socket::dns::update_dns_reverse_mapping,
     unix::UnixHostnameResolver,
@@ -85,7 +84,7 @@ pub fn get_remote_netbios_name() -> Option<String> {
 }
 
 /// Read and parse /etc/samba/smb.conf for NetBIOS name configuration
-fn read_samba_config() -> Result<Option<String>, HostnameResolveError> {
+fn read_samba_config() -> HookResult<Option<String>> {
     tracing::debug!("Reading remote /etc/samba/smb.conf for NetBIOS name");
 
     match fetch_samba_config_via_proxy() {
@@ -93,16 +92,12 @@ fn read_samba_config() -> Result<Option<String>, HostnameResolveError> {
             tracing::debug!("Parsed NetBIOS name from Samba config: {:?}", netbios_name);
             Ok(netbios_name)
         }
-        Err(HostnameError::Protocol(_msg)) => Err(HostnameResolveError::RemoteFileError {
-            path: "/etc/samba/smb.conf".to_string(),
-            error: "Remote file operation failed",
-        }),
-        Err(_) => Err(HostnameResolveError::ProxyConnectionUnavailable),
+        Err(e) => Err(e.into()),
     }
 }
 
 /// Resolve hostname remotely through mirrord agent (similar to Unix layer's remote_getaddrinfo)
-pub fn remote_dns_resolve(hostname: &str) -> Result<Vec<(String, IpAddr)>, HostnameResolveError> {
+pub fn remote_dns_resolve(hostname: &str) -> HookResult<Vec<(String, IpAddr)>> {
     tracing::debug!("Performing remote DNS resolution for: {}", hostname);
 
     match remote_dns_resolve_via_proxy(hostname) {
@@ -113,11 +108,7 @@ pub fn remote_dns_resolve(hostname: &str) -> Result<Vec<(String, IpAddr)>, Hostn
             }
             Ok(results)
         }
-        Err(HostnameError::Protocol(_msg)) => Err(HostnameResolveError::DnsResolutionFailed {
-            hostname: hostname.to_string(),
-            details: "Remote DNS resolution failed",
-        }),
-        Err(_) => Err(HostnameResolveError::ProxyConnectionUnavailable),
+        Err(e) => Err(e.into()),
     }
 }
 

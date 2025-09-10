@@ -2,10 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
-use std::{
-    sync::Mutex,
-    thread::{self, JoinHandle},
-};
+use std::thread;
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::MIRRORD_LAYER_WAIT_FOR_DEBUGGER;
@@ -28,7 +25,6 @@ pub mod process;
 mod socket;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
-static INIT_THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
     unsafe {
@@ -109,15 +105,10 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     }
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
-    let handle = thread::spawn(|| {
+    let _ = thread::spawn(|| {
         mirrord_start().expect("Failed call to mirrord_start");
         println!("mirrord-layer-win fully initialized!");
     });
-
-    // Store the thread handle for cleanup
-    if let Ok(mut thread_handle) = INIT_THREAD_HANDLE.lock() {
-        *thread_handle = Some(handle);
-    }
 
     TRUE
 }
@@ -129,7 +120,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    // Release detour guard - use unwrap_or to avoid panicking during detach
+    // Release detour guard
     if let Err(e) = release_detour_guard() {
         eprintln!(
             "Warning: Failed releasing detour guard during DLL detach: {}",

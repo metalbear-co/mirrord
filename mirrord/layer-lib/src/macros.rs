@@ -1,35 +1,42 @@
 //! Cross-platform macros for layer-lib.
+//! Macros used by mirrord-layer-lib
+//!
+//! ## Macros
+//!
+//! - [`graceful_exit!`](`macro@crate::graceful_exit`)
+//!
+//! Exits the process with a nice message.
 
-/// Cross-platform graceful exit macro.
+/// Kills the process and prints a helpful error message to the user.
 ///
-/// Exits the current process gracefully by sending a SIGKILL signal on Unix platforms
-/// or calling TerminateProcess on Windows.
+/// ## Parameters
+///
+/// - `$arg`: messages to print, supports [`println!`] style arguments.
 ///
 /// ## Examples
 ///
+/// - Exiting on IO failure:
+///
 /// ```rust, no_run
-/// graceful_exit!("mirrord encountered a critical error: {}", error_message);
+/// if let Err(fail) = File::open("nothing.txt") {
+///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
+/// }
 /// ```
 #[cfg(not(target_os = "windows"))]
 #[macro_export]
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
+        graceful_exit!()
+    }};
+    () => {
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGKILL,
         )
         .expect("unable to graceful exit");
         unreachable!()
-    }};
-    () => {{
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(std::process::id() as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        )
-        .expect("unable to graceful exit");
-        unreachable!()
-    }};
+    };
 }
 
 #[cfg(target_os = "windows")]
@@ -37,20 +44,12 @@ macro_rules! graceful_exit {
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
-        unsafe {
-            winapi::um::processthreadsapi::TerminateProcess(
-                winapi::um::processthreadsapi::GetCurrentProcess(),
-                1
-            );
-        }
-        unreachable!()
+        graceful_exit!()
     }};
     () => {{
         unsafe {
-            winapi::um::processthreadsapi::TerminateProcess(
-                winapi::um::processthreadsapi::GetCurrentProcess(),
-                1
-            );
+            use winapi::um::processthreadsapi::{GetCurrentProcess, TerminateProcess};
+            let _ = TerminateProcess(GetCurrentProcess(), 1);
         }
         unreachable!()
     }};
