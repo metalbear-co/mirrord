@@ -21,9 +21,11 @@ use std::{
 use exec;
 #[cfg(unix)]
 use libc::{
-    DIR, EACCES, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL,
-    EIO, EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
+    DIR, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL, EIO,
+    EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
 };
+#[cfg(target_os = "macos")]
+use libc::EACCES;
 use mirrord_config::config::ConfigError;
 use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
 use mirrord_protocol::{ResponseError, SerializationError};
