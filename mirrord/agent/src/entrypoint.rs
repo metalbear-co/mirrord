@@ -852,7 +852,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ..
     } = bg_tasks;
 
-    let _ = timeout(Duration::from_secs(5), async {
+    let _ = timeout(Duration::from_secs(args.exit_timeout.unwrap_or(5)), async {
         tokio::join!(
             sniffer.wait().inspect_err(|error| {
                 error!(%error, "start_agent -> Sniffer task failed");
