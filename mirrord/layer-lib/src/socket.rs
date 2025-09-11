@@ -201,7 +201,7 @@ impl UserSocket {
             ..
         } = self
         {
-            use crate::common::make_proxy_request_no_response;
+            use crate::common::proxy_connection::make_proxy_request_no_response;
             let _ = make_proxy_request_no_response(PortUnsubscribe {
                 port: bound.requested_address.port(),
                 listening_on: bound.address,
