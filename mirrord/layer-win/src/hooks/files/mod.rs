@@ -9,9 +9,12 @@ use std::{
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_protocol::file::{
-    CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest
+    CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
-use phnt::ffi::{FILE_INFORMATION_CLASS, FS_INFORMATION_CLASS, PFILE_BASIC_INFORMATION, _IO_STATUS_BLOCK};
+use phnt::ffi::{
+    _IO_STATUS_BLOCK, FILE_INFORMATION_CLASS, FILE_USE_FILE_POINTER_POSITION, FS_INFORMATION_CLASS,
+    PFILE_BASIC_INFORMATION,
+};
 use str_win::u16_buffer_to_string;
 use winapi::{
     shared::{
@@ -19,14 +22,18 @@ use winapi::{
         ntdef::{
             HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID, ULONG,
         },
-        ntstatus::{STATUS_OBJECT_PATH_NOT_FOUND, STATUS_SUCCESS},
+        ntstatus::{
+            STATUS_ACCESS_VIOLATION, STATUS_OBJECT_PATH_NOT_FOUND, STATUS_SUCCESS,
+            STATUS_UNEXPECTED_NETWORK_ERROR,
+        },
+        winerror::ERROR_NO_MORE_ITEMS,
     },
     um::{
         minwinbase::SYSTEMTIME,
         sysinfoapi::GetSystemTime,
         timezoneapi::SystemTimeToFileTime,
         winbase::FILE_TYPE_DISK,
-        winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_WRITE_DATA},
+        winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_WRITE_DATA, GENERIC_WRITE},
     },
 };
 
@@ -34,7 +41,7 @@ use crate::{
     apply_hook,
     common::{make_proxy_request_no_response, make_proxy_request_with_response},
     hooks::files::{
-        managed_handle::{try_insert_handle, HandleContext, MANAGED_HANDLES},
+        managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
         util::remove_root_dir_from_path,
     },
 };
@@ -110,7 +117,9 @@ unsafe extern "system" fn nt_create_file_hook(
         if ret == STATUS_OBJECT_PATH_NOT_FOUND {
             // If no pointer for file handle, return.
             if file_handle.is_null() {
-                return ret;
+                // TODO(gabriela): implement VirtQuery to check if the vprot and stuff
+                // is proper, the Nt* apis do this too.
+                return STATUS_ACCESS_VIOLATION;
             }
 
             // Try to get path.
@@ -121,9 +130,12 @@ unsafe extern "system" fn nt_create_file_hook(
                 return ret;
             }
             let linux_path = linux_path.unwrap();
-            if desired_access & (FILE_WRITE_DATA | FILE_APPEND_DATA) != 0 {
-                println!("WARNING: currently unsupported creating file for r/w");
-                return ret;
+            if desired_access & (FILE_WRITE_DATA) != 0
+                || desired_access & (FILE_APPEND_DATA) != 0
+                || desired_access & (GENERIC_WRITE) != 0
+            {
+                // TODO(gabriela): edit when supported!
+                return STATUS_OBJECT_PATH_NOT_FOUND;
             }
 
             // Get open options.
@@ -141,7 +153,7 @@ unsafe extern "system" fn nt_create_file_hook(
             // Try to get request.
             if req.is_err() {
                 eprintln!("WARNING: request for open file failed!");
-                return ret;
+                return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
             let req = req.unwrap();
 
@@ -177,6 +189,14 @@ unsafe extern "system" fn nt_create_file_hook(
                     managed_handle.unwrap()
                 );
                 return STATUS_SUCCESS;
+            } else {
+                // File could not be obtained for reasons, even if the
+                // network operation succeeded.
+
+                // TODO(gabriela): try to map some common errors to [`NTSTATUS`]-es
+                // to facillitate future bug investigations
+
+                return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
 
@@ -213,46 +233,70 @@ unsafe extern "system" fn nt_read_file_hook(
         if let Ok(handles) = MANAGED_HANDLES.try_read() {
             if let Some(handle_context) = handles.get(&file) {
                 if buffer.is_null() {
-                    // TODO(gabriela): test and check return
-                    return -1;
+                    // TODO(gabriela): VirtQuery buffer
+                    return STATUS_ACCESS_VIOLATION;
                 }
 
-                if length == 0 {
-                    // TODO(gabriela): test and check return
-                    return -1;
-                }
-
+                // If we ever succesfully receive the request response, the buffer
+                // we receive can never be bigger than `length`.
                 let req = make_proxy_request_with_response(ReadFileRequest {
                     remote_fd: handle_context.fd,
                     buffer_size: length as _,
                 });
 
                 if req.is_err() {
-                    // TODO(gabriela): test and check return
-                    return -1;
+                    return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
 
                 let req = req.unwrap();
 
                 match req {
                     Ok(res) => {
-                        //if length <= res.bytes.len() {
-                        //    // TODO(gabriela): test this scenario, check IRP and return without hooks
-                        //    // and replicate.
-                        //}
+                        // If the response's buffer is finally 0, then we finished reading.
+                        if res.bytes.len() == 0 {
+                            (*io_status_block).__bindgen_anon_1.Status =
+                                ManuallyDrop::new(STATUS_SUCCESS);
+                            (*io_status_block).Information = 0;
 
-                        // Copy the remote received buffer to the provided buffer, as far as we can.
-                        std::ptr::copy(
-                            res.bytes.as_ptr(),
-                            buffer as _,
-                            res.bytes.len(),
-                        );
+                            return STATUS_SUCCESS;
+                        }
 
-                        // We get this information over IRP normally, so need to replicate the structure in usermode
-                        (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
-                        (*io_status_block).Information = res.bytes.len() as u64;
+                        let mut read_from_start = false;
+                        // `byte_offset`, if NULL, should be current file offset.
+                        // there's also the scenario of FILE_USE_FILE_POINTER_POSITION for LowPart
+                        // and -1 for HighPart.
+                        // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntwritefile
+                        // https://github.com/reactos/reactos/blob/0b18dfe92434b030515e0836a5390d8d463915c5/ntoskrnl/io/iomgr/iofunc.c#L2870-L2877
+                        if byte_offset.is_null()
+                            || ((*byte_offset).u().LowPart == FILE_USE_FILE_POINTER_POSITION
+                                && (*byte_offset).u().HighPart == -1)
+                        {
+                            read_from_start = true;
+                        }
 
-                        return STATUS_SUCCESS;
+                        // Calculate target length for copy.
+                        // TODO(gabriela): make sure the contiguous memory pages are all fine using
+                        // VirtQuery, otherwise return
+                        // STATUS_ACCCESS_VIOLATION.
+                        let len = usize::min(res.bytes.len(), length as _);
+
+                        // Otherwise, copy the remote received buffer (relative to
+                        // fd cursor) to the provided buffer, as far as we can.
+                        std::ptr::copy(res.bytes.as_ptr(), buffer as _, len);
+
+                        // We get this information over IRP normally, so need to replicate the
+                        // structure in usermode
+                        (*io_status_block).__bindgen_anon_1.Status =
+                            ManuallyDrop::new(STATUS_SUCCESS);
+                        (*io_status_block).Information = len as _;
+
+                        // Finished reading?
+                        if res.bytes.len() < length as _ {
+                            return STATUS_SUCCESS;
+                        }
+
+                        // There's still some to read, and Windows returns this.
+                        return ERROR_NO_MORE_ITEMS as NTSTATUS;
                     }
                     Err(e) => {
                         eprintln!("{:?}", e);
@@ -275,8 +319,6 @@ unsafe extern "system" fn nt_read_file_hook(
             byte_offset,
             key,
         );
-
-        println!("read_file_hook: buf:{:8p} len:{} -> {ret}", buffer, length);
 
         ret
     }
@@ -479,15 +521,17 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write() {
             if let Some(handle_context) = handles.get(&handle) {
                 let req = make_proxy_request_no_response(CloseFileRequest {
-                    fd: handle_context.fd
+                    fd: handle_context.fd,
                 });
-                
+
+                // Remove entry regardless of following response.
+                handles.remove_entry(&handle);
+
                 if req.is_err() {
-                    // TODO(gabriela): investigate correct handling
-                    return -1;
+                    // Valid [`NTSTATUS`] to facillitate investigations later.
+                    return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
 
-                handles.remove_entry(&handle);
                 return STATUS_SUCCESS;
             }
         }
