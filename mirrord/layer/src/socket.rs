@@ -4,11 +4,10 @@ use std::net::{SocketAddr, ToSocketAddrs};
 
 #[cfg(not(target_os = "windows"))]
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 // Re-export shared types from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{
     Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketKind, SocketState,
-    UserSocket, dns::get_hostname_for_ip, is_ignored_port,
+    UserSocket, is_ignored_port,
 };
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
@@ -29,6 +28,8 @@ mod apple_dnsinfo;
 pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
+#[cfg(not(target_os = "windows"))]
+pub(crate) mod outgoing_selector;
 
 /// Stores the [`UserSocket`]s created by the user.
 ///
