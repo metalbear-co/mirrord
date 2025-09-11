@@ -467,14 +467,14 @@ mod traffic_tests {
         let expected_str = {
             #[cfg(target_os = "windows")]
             {
-                format!("Can I pass the test please?\n")
+                "Can I pass the test please?\n"
             }
             #[cfg(not(target_os = "windows"))]
             {
-                format!("Can I pass the test please?")
+                "Can I pass the test please?"
             }
         };
-        assert_eq!(&buf[..amt], expected_str.as_bytes()); // Sure you can.
+        assert_eq!(buf.get(..amt).unwrap_or(&[]), expected_str.as_bytes()); // Sure you can.
 
         let res = process.wait().await;
         assert!(res.success());
