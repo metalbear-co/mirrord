@@ -244,6 +244,7 @@ pub(crate) enum CliError {
     ))]
     RosettaMissing(String),
 
+    #[cfg(target_os = "windows")]
     #[error("Failed to execute binary `{0}` with args {1:?}, env {2:?}")]
     #[diagnostic(help("MIRRORD_LAYER_FILE env var is missing"))]
     LayerFilePathMissing(String, Vec<String>, Vec<(String, String)>),
@@ -451,6 +452,7 @@ pub(crate) enum CliError {
 }
 
 #[derive(Debug, Error, Diagnostic)]
+#[allow(dead_code)]
 pub(crate) enum ProcessExecError {
     #[error("Executed process pid was not found: {0}")]
     ProcessNotFound(u32, String),
@@ -462,6 +464,7 @@ pub(crate) enum ProcessExecError {
     #[error("Pipe Error: {0}")]
     PipeError(#[from] windows_core::Error),
 }
+#[allow(dead_code)]
 pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
 
 impl CliError {

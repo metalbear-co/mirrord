@@ -439,8 +439,8 @@ where
     .await
 }
 
-fn process_which(binary: &String) -> Result<std::path::PathBuf, CliError> {
-    which(&binary).map_err(|error| CliError::BinaryWhichError(binary.clone(), error.to_string()))
+fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -766,7 +766,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
     result?;
 
-    let execution_result = Box::pin(async move {
+    Box::pin(async move {
         let res = exec_process(
             config,
             config_file_path.as_deref(),
@@ -782,9 +782,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
         }
         res
     })
-    .await;
-
-    execution_result
+    .await
 }
 
 async fn port_forward(
