@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 #![allow(static_mut_refs)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
