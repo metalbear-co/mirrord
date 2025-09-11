@@ -21,8 +21,8 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # Ensure Rust exists for the service account (idempotent)
-      - name: Ensure Rust toolchain (if missing)
+      # Rust bootstrap (idempotent for service account)
+      - name: Ensure Rust toolchain
         run: |
           $cargo = Get-Command cargo.exe -ErrorAction SilentlyContinue
           if (-not $cargo) {
@@ -39,11 +39,9 @@ jobs:
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      # Build the Windows layer DLL (your crate/package name)
       - name: Build mirrord-layer-win (DLL)
         run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
 
-      # Find which package contains the bin target "mirrord" and set MIRRORD_LAYER_FILE path
       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
         run: |
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
@@ -58,14 +56,12 @@ jobs:
 
           $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-
           Write-Host "Will build bin 'mirrord' from package: $($pkg.name)"
           Write-Host "MIRRORD_LAYER_FILE=$dll"
 
       - name: Build mirrord (EXE)
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      # Locate SignTool and verify artifacts exist
       - name: Export SignTool path + verify artifacts
         run: |
           $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
@@ -86,45 +82,48 @@ jobs:
           Write-Host "DLL: $dll"
           Write-Host "EXE: $exe"
 
-      # Prepare DigiCert creds (overwrite each run) and register KSP
-      - name: Prepare DigiCert creds (smctl + KSP)
+      # DigiCert prep: smctl path, services, creds, KSP registration
+      - name: Prepare DigiCert (smctl + services + creds + KSP)
         env:
           DIGICERT_API_KEY:              ${{ secrets.DIGICERT_API_KEY }}
           DIGICERT_CLIENT_CERT_PFX_B64:  ${{ secrets.DIGICERT_CLIENT_CERT_PFX_B64 }}
           DIGICERT_CLIENT_CERT_PASSWORD: ${{ secrets.DIGICERT_CLIENT_CERT_PASSWORD }}
         run: |
-          # Prefer your installed Keylocker Tools path; fall back if needed
           $smctl = @(
             "C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe",
             "C:\Program Files\DigiCert\DigiCert KeyLocker Tools\smctl.exe",
             "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools\smctl.exe"
           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $smctl) { throw "smctl.exe not found. Ensure Keylocker Windows Clients are installed." }
-
+          if (-not $smctl) { throw "smctl.exe not found. Install Keylocker Windows Clients." }
           "SMCTL=$smctl" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Using smctl at: $smctl"
 
-          # Rehydrate client-auth .p12
+          # Make sure DigiCert services are up (names vary; start anything under 'DigiCert*')
+          Get-Service -Name 'DigiCert*' -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.Status -ne 'Running') { Start-Service $_.Name }
+          }
+          Get-Service -Name 'DigiCert*' -ErrorAction SilentlyContinue | Format-Table -AutoSize
+
+          # Rehydrate client-auth .p12 and save creds for THIS account
           $p12 = Join-Path $env:RUNNER_TEMP "client-auth.p12"
           [IO.File]::WriteAllBytes($p12, [Convert]::FromBase64String($env:DIGICERT_CLIENT_CERT_PFX_B64))
-
-          # Required env for smctl
           $env:SM_HOST = "https://clientauth.one.digicert.com"
           $env:SM_CLIENT_CERT_FILE = $p12
 
-          # Ensure this account uses the intended creds
           & $smctl credentials clear 2>$null
           & $smctl credentials save $env:DIGICERT_API_KEY $env:DIGICERT_CLIENT_CERT_PASSWORD
 
-          # Register KSP (idempotent)
-          try { & $smctl windows ksp register } catch { Write-Warning $_ }
+          # Register KSP and verify provider exists
+          & $smctl windows ksp register
+          $prov = (certutil -csplist | Select-String -Pattern 'DigiCert.*KSP' -SimpleMatch:$false | Out-String).Trim()
+          if (-not $prov) { throw "DigiCert KSP not registered/visible (certutil -csplist). Check install/permissions." }
+          Write-Host "KSP present:`n$prov"
 
-          # Useful visibility:
           Write-Host "`nKeypairs visible to this user:"
           & $smctl keypair list
 
-      # Certsync the alias, parse the SHA1 from smctl output, and detect which store it landed in
-      - name: Certsync alias → export CODESIGN_SHA1 (+ store scope)
+      # Certsync alias → detect where cert landed; also attempt PEM→CER for file-mode signing
+      - name: Certsync + detect store + export thumbprint and CER
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
@@ -134,78 +133,125 @@ jobs:
           if (-not (Test-Path $smctl)) { throw "smctl.exe not found at $smctl" }
           if (-not $alias) { throw "DIGICERT_KEYPAIR_ALIAS is empty." }
 
-          # Run certsync and capture stdout
-          $raw = & $smctl windows certsync --keypair-alias $alias 2>&1 | Tee-Object -Variable lines
+          # Certsync (prints alias + SHA1); capture output
+          $lines = & $smctl windows certsync --keypair-alias $alias 2>&1 | Tee-Object -Variable _buf
           if ($LASTEXITCODE -ne 0) {
-            $msg = ($lines | Out-String)
-            throw "certsync failed for alias '$alias'. Output:`n$msg"
+            throw ("certsync failed for alias '{0}'. Output:`n{1}" -f $alias, ($lines | Out-String))
           }
-
-          # Try to parse "SHA1 Fingerprint: <hex>"
           $txt = ($lines | Out-String)
           $sha1 = $null
           if ($txt -match 'SHA1\s*Fingerprint:\s*([A-Fa-f0-9]+)') {
             $sha1 = $matches[1].ToUpper()
           }
 
-          if (-not $sha1) {
-            # Fallback: search CurrentUser\My for newest Code Signing with private key
-            $now = Get-Date
-            $pick = Get-ChildItem Cert:\CurrentUser\My | Where-Object {
-              $_.HasPrivateKey -and $_.NotAfter -gt $now -and
-              (($_.EnhancedKeyUsageList | ForEach-Object FriendlyName) -contains 'Code Signing')
-            } | Sort-Object NotBefore -Descending | Select-Object -First 1
-            if ($pick) { $sha1 = ($pick.Thumbprint -replace '\s','').ToUpper() }
+          # Where did it land?
+          $inUser = $false; $inMachine = $false
+          if ($sha1) {
+            $inUser = ($null -ne (Get-ChildItem Cert:\CurrentUser\My -ErrorAction SilentlyContinue |
+                     Where-Object { ($_.Thumbprint -replace '\s','').ToUpper() -eq $sha1 } | Select-Object -First 1))
+            if (-not $inUser) {
+              $inMachine = ($null -ne (Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
+                         Where-Object { ($_.Thumbprint -replace '\s','').ToUpper() -eq $sha1 } | Select-Object -First 1))
+            }
           }
 
           if (-not $sha1) {
-            Write-Host "`nCurrentUser\My (diagnostics):"
-            Get-ChildItem Cert:\CurrentUser\My | Select-Object Subject, Thumbprint, NotAfter
+            Write-Host "`nCurrentUser\My:"
+            Get-ChildItem Cert:\CurrentUser\My | Select Subject,Thumbprint,NotAfter
+            Write-Host "`nLocalMachine\My:"
+            Get-ChildItem Cert:\LocalMachine\My | Select Subject,Thumbprint,NotAfter
             throw "Could not determine cert thumbprint after certsync."
           }
 
-          # Determine if the cert is in CurrentUser or LocalMachine
-          $inUser = Get-ChildItem Cert:\CurrentUser\My -ErrorAction SilentlyContinue |
-            Where-Object { ($_.Thumbprint -replace '\s','').ToUpper() -eq $sha1 } |
-            Select-Object -First 1
-          $inMachine = $null
-          if (-not $inUser) {
-            $inMachine = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
-              Where-Object { ($_.Thumbprint -replace '\s','').ToUpper() -eq $sha1 } |
-              Select-Object -First 1
-          }
-
           if ($inUser) {
-            "CODESIGN_SHA1=$sha1"     | Out-File -FilePath $env:GITHUB_ENV -Append
-            "CODESIGN_STORE_SCOPE=U"  | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "Using user-store cert (CurrentUser\My): $sha1"
+            "CODESIGN_SHA1=$sha1"    | Out-File -FilePath $env:GITHUB_ENV -Append
+            "CODESIGN_STORE_SCOPE=U" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Using User store (CurrentUser\\My): $sha1"
           } elseif ($inMachine) {
-            "CODESIGN_SHA1=$sha1"     | Out-File -FilePath $env:GITHUB_ENV -Append
-            "CODESIGN_STORE_SCOPE=M"  | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "Using machine-store cert (LocalMachine\My): $sha1"
+            "CODESIGN_SHA1=$sha1"    | Out-File -FilePath $env:GITHUB_ENV -Append
+            "CODESIGN_STORE_SCOPE=M" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Using Machine store (LocalMachine\\My): $sha1"
           } else {
             Write-Host "`nCurrentUser\My:"
-            Get-ChildItem Cert:\CurrentUser\My | Select-Object Subject, Thumbprint, NotAfter
+            Get-ChildItem Cert:\CurrentUser\My | Select Subject,Thumbprint,NotAfter
             Write-Host "`nLocalMachine\My:"
-            Get-ChildItem Cert:\LocalMachine\My | Select-Object Subject, Thumbprint, NotAfter
-            throw "Thumbprint $sha1 not found in either CurrentUser\My or LocalMachine\My."
+            Get-ChildItem Cert:\LocalMachine\My | Select Subject,Thumbprint,NotAfter
+            throw "Thumbprint $sha1 not found in either store."
           }
 
-      # Sign using /sha1; add /sm if it’s in machine store
-      - name: Sign artifacts (DLL + EXE)
+          # Try to also prepare a .CER for file-mode signing (PEM→CER)
+          $outDir = $env:RUNNER_TEMP
+          Remove-Item (Join-Path $outDir 'cert_*.*') -Force -ErrorAction SilentlyContinue
+          & $smctl certificate download --keypair-alias $alias --format pem --out $outDir
+          $pem = Get-ChildItem $outDir -Filter *.pem -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($pem) {
+            $cerPath = [System.IO.Path]::ChangeExtension($pem.FullName, '.cer')
+            certutil -decode $pem.FullName $cerPath | Out-Null
+            if (Test-Path $cerPath) {
+              "CODESIGN_CERT=$cerPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+              Write-Host "Prepared CER for file-mode signing: $cerPath"
+            } else {
+              Write-Warning "PEM→CER conversion failed; will rely on /sha1"
+            }
+          } else {
+            Write-Warning "PEM download failed or not found; will rely on /sha1"
+          }
+
+      # Try file-mode first, then fallback to store-mode (/sha1); add /sm if machine store
+      - name: Sign artifacts (DLL + EXE) with robust fallback
+        env:
+          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ts = "http://timestamp.digicert.com"
-          $sha1 = "$env:CODESIGN_SHA1"
-          $scope = "$env:CODESIGN_STORE_SCOPE"
+          $signtool = "$env:SIGNTOOL"
+          $alias = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
+          $dll = "$env:MIRRORD_LAYER_FILE"
+          $exe = "$env:MIRRORD_EXE"
+          $ok = $false
 
-          if (-not $sha1) { throw "CODESIGN_SHA1 not set." }
+          function Try-FileMode {
+            param($path)
+            if (-not $env:CODESIGN_CERT) { return 87 } # ERROR_INVALID_PARAMETER
+            $args = @(
+              '/fd','SHA256','/td','SHA256','/tr',$ts,
+              '/csp','DigiCert Signing Manager KSP',
+              '/kc',"$alias",
+              '/f', "$env:CODESIGN_CERT"
+            )
+            & "$signtool" sign @args "$path"
+            return $LASTEXITCODE
+          }
 
-          $common = @('/fd','SHA256','/td','SHA256','/tr',$ts,'/sha1',$sha1)
-          if ($scope -eq 'M') { $common = @('/sm') + $common }  # /sm = LocalMachine store
+          Write-Host "=== Attempt 1: File-mode signing (/csp + /kc + /f) ==="
+          $rc1 = Try-FileMode $dll
+          $rc2 = if ($rc1 -eq 0) { Try-FileMode $exe } else { $rc1 }
+          if ($rc1 -eq 0 -and $rc2 -eq 0) { $ok = $true; Write-Host "File-mode signing succeeded." }
 
-          & "$env:SIGNTOOL" sign @common "$env:MIRRORD_LAYER_FILE"
-          & "$env:SIGNTOOL" sign @common "$env:MIRRORD_EXE"
+          if (-not $ok) {
+            Write-Warning ("File-mode signing failed (rc1={0} rc2={1}). Falling back to store-mode." -f $rc1,$rc2)
+
+            $sha1 = "$env:CODESIGN_SHA1"
+            $scope = "$env:CODESIGN_STORE_SCOPE"
+            if (-not $sha1) { throw "CODESIGN_SHA1 not set." }
+
+            $common = @('/fd','SHA256','/td','SHA256','/tr',$ts,'/sha1',$sha1)
+            if ($scope -eq 'M') { $common = @('/sm') + $common }
+
+            Write-Host "=== Attempt 2: Store-mode signing (/sha1{0}) ===" -f ($(if ($scope -eq 'M') { ' + /sm' } else { '' }))
+            & "$signtool" sign @common "$dll";  $rc3 = $LASTEXITCODE
+            & "$signtool" sign @common "$exe";  $rc4 = $LASTEXITCODE
+
+            if ($rc3 -eq 0 -and $rc4 -eq 0) { $ok = $true; Write-Host "Store-mode signing succeeded." }
+            else {
+              Write-Host "`nDiagnostics:"
+              certutil -store -user My | Select-String -Pattern 'Provider|Cert Hash|Subject' -Context 0,1
+              certutil -store -enterprise My | Out-Null
+              Write-Host "`nServices:"
+              Get-Service -Name 'DigiCert*' -ErrorAction SilentlyContinue | Format-Table -AutoSize
+              throw ("Signing failed (file rc={0}/{1}, store rc={2}/{3}). Check KSP presence, creds, signer access, and outbound connectivity." -f $rc1,$rc2,$rc3,$rc4)
+            }
+          }
 
       - name: Verify signatures
         run: |
