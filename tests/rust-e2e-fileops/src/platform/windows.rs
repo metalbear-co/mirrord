@@ -1,5 +1,3 @@
-#![cfg(target_os = "windows")]
-
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
@@ -26,7 +24,7 @@ pub fn pread() {
     // Seek to offset 1
     file.seek(SeekFrom::Start(1)).expect("Failed to seek");
 
-    file.read(&mut buffer).expect("Failed to read from file");
+    file.read_exact(&mut buffer).expect("Failed to read from file");
 }
 
 pub fn pwrite() {
