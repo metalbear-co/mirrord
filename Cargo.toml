@@ -5,7 +5,6 @@ members = [
     "mirrord/str-win",
     "mirrord/layer-lib",
     "mirrord/layer-win",
-    "tests/win",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
     "mirrord/layer/tests/apps/fileops",
