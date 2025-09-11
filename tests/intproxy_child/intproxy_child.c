@@ -1,4 +1,3 @@
-#include <asm-generic/errno-base.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/wait.h>
