@@ -62,10 +62,11 @@ jobs:
       - name: Build mirrord (EXE)
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      - name: Export SignTool path + verify artifacts
+      - name: Export SignTool path (pinned)
+        shell: pwsh
         run: |
           $signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
-          if (-not (Test-Path $signtool)) {
+          if (-not (Test-Path $signtool)) { 
             $found = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
               Sort-Object FullName -Descending | Select-Object -First 1
             if ($found) { $signtool = $found.FullName }
@@ -74,6 +75,12 @@ jobs:
           "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Using SignTool at $signtool"
 
+          # make sure smctl can invoke 'signtool' by name
+          $signdir = Split-Path $signtool -Parent
+          "PATH=$signdir;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Prepended to PATH: $signdir"
+
+          # Absolute artifact paths
           $dll = "$env:MIRRORD_LAYER_FILE"
           $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
           if (-not (Test-Path $dll)) { throw "DLL not found at $dll" }
@@ -81,6 +88,7 @@ jobs:
           "MIRRORD_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "DLL: $dll"
           Write-Host "EXE: $exe"
+
 
       # DigiCert prep: smctl path, services, creds, KSP registration
       - name: Prepare DigiCert (smctl + services + creds + KSP)
@@ -223,115 +231,80 @@ jobs:
           Write-Host "`nDiag exit codes => healthcheck:$hc  keypair list:$kp  certsync:$cs"
 
       # Try file-mode first, then fallback to store-mode (/sha1); add /sm if machine store
-      - name: Sign artifacts (full output, KSP-correct, self-verify)
+      - name: Sign artifacts (prefer smctl; full output; self-verify)
+        shell: pwsh
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $ts      = "http://timestamp.digicert.com"
-          $signtool= "$env:SIGNTOOL"
-          $alias   = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
-          $dll     = "$env:MIRRORD_LAYER_FILE"
-          $exe     = "$env:MIRRORD_EXE"
-          $ok      = $false
+          $ts    = 'http://timestamp.digicert.com'
+          $alias = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
+          $dll   = "$env:MIRRORD_LAYER_FILE"
+          $exe   = "$env:MIRRORD_EXE"
+          $ok    = $false
 
           function Is-Signed([string]$path) {
             $sig = Get-AuthenticodeSignature -FilePath $path
             return ($sig.Status -eq 'Valid' -or $sig.SignerCertificate)
           }
 
-          # Correct KSP name from your logs:
-          $kspName = 'DigiCert Software Trust Manager KSP'
+          Write-Host "=== C: smctl sign (best with KeyLocker policies) ==="
+          if (-not (Test-Path "$env:SMCTL")) { throw "smctl.exe not found at $env:SMCTL" }
 
-          Write-Host "=== Attempt A: File-mode (KSP + alias + downloaded .cer) ==="
-          if ($env:CODESIGN_CERT) {
-            Write-Host "`nA1 DLL:"
-            & "$signtool" sign /debug /fd SHA256 /td SHA256 /tr $ts `
-              /csp $kspName /kc "$alias" /f "$env:CODESIGN_CERT" "$dll"
-            $rcA1 = $LASTEXITCODE
-            if ($rcA1 -eq 0 -and -not (Is-Signed $dll)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$dll"; $rcA1 = 1 }
+          # smctl internally shells out to 'signtool' -> we already put it on PATH
+          & "$env:SMCTL" sign --keypair-alias "$alias" --input "$dll" --timestamp-url $ts --verbose; $rc1 = $LASTEXITCODE
+          if ($rc1 -eq 0 -and -not (Is-Signed $dll)) { Write-Host "`nVerify dump:"; & "$env:SIGNTOOL" verify /v /pa "$dll"; $rc1 = 1 }
 
-            Write-Host "`nA1 EXE:"
-            & "$signtool" sign /debug /fd SHA256 /td SHA256 /tr $ts `
-              /csp $kspName /kc "$alias" /f "$env:CODESIGN_CERT" "$exe"
-            $rcA2 = $LASTEXITCODE
-            if ($rcA2 -eq 0 -and -not (Is-Signed $exe)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$exe"; $rcA2 = 1 }
+          & "$env:SMCTL" sign --keypair-alias "$alias" --input "$exe" --timestamp-url $ts --verbose; $rc2 = $LASTEXITCODE
+          if ($rc2 -eq 0 -and -not (Is-Signed $exe)) { Write-Host "`nVerify dump:"; & "$env:SIGNTOOL" verify /v /pa "$exe"; $rc2 = 1 }
 
-            if ($rcA1 -eq 0 -and $rcA2 -eq 0) { $ok = $true; Write-Host "File-mode (with timestamp) succeeded." }
-            if (-not $ok) {
-              Write-Warning ("A1 failed (rc: DLL={0}, EXE={1}). Trying A2 without timestamp..." -f $rcA1,$rcA2)
+          if ($rc1 -eq 0 -and $rc2 -eq 0) { $ok = $true; Write-Host "smctl sign succeeded." }
 
-              Write-Host "`nA2 DLL (no TS):"
-              & "$signtool" sign /debug /fd SHA256 /td SHA256 `
-                /csp $kspName /kc "$alias" /f "$env:CODESIGN_CERT" "$dll"
-              $rcA3 = $LASTEXITCODE
-              if ($rcA3 -eq 0 -and -not (Is-Signed $dll)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$dll"; $rcA3 = 1 }
-
-              Write-Host "`nA2 EXE (no TS):"
-              & "$signtool" sign /debug /fd SHA256 /td SHA256 `
-                /csp $kspName /kc "$alias" /f "$env:CODESIGN_CERT" "$exe"
-              $rcA4 = $LASTEXITCODE
-              if ($rcA4 -eq 0 -and -not (Is-Signed $exe)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$exe"; $rcA4 = 1 }
-
-              if ($rcA3 -eq 0 -and $rcA4 -eq 0) { $ok = $true; Write-Host "File-mode (no timestamp) succeeded." }
-            }
-          } else {
-            Write-Warning "CODESIGN_CERT not set, skipping file-mode."
-          }
-
-          # Store-mode fallback (/sha1), using the thumbprint we exported earlier
+          # If smctl path fails (policy/approval aside), try direct signtool with both KSP names
           if (-not $ok) {
-            $sha1  = "$env:CODESIGN_SHA1"
-            $scope = "$env:CODESIGN_STORE_SCOPE"  # 'U' by default
-            if (-not $sha1) { throw "CODESIGN_SHA1 not set (certsync must export it)." }
+            $signtool = "$env:SIGNTOOL"
+            $providers = @(
+              'DigiCert Software Trust Manager KSP',
+              'DigiCert Signing Manager KSP'         # legacy name; present on your box
+            )
+            foreach ($ksp in $providers) {
+              Write-Host "`n=== A: file-mode via $ksp (with timestamp) ==="
+              & "$signtool" sign /debug /fd SHA256 /td SHA256 /tr $ts `
+                /csp $ksp /kc "$alias" /f "$env:CODESIGN_CERT" "$dll"; $a1 = $LASTEXITCODE
+              if ($a1 -eq 0 -and -not (Is-Signed $dll)) { & "$signtool" verify /v /pa "$dll"; $a1 = 1 }
 
-            $common = @('/debug','/fd','SHA256','/td','SHA256','/sha1',$sha1)
-            if ($scope -eq 'M') { $common = @('/sm') + $common }
+              & "$signtool" sign /debug /fd SHA256 /td SHA256 /tr $ts `
+                /csp $ksp /kc "$alias" /f "$env:CODESIGN_CERT" "$exe"; $a2 = $LASTEXITCODE
+              if ($a2 -eq 0 -and -not (Is-Signed $exe)) { & "$signtool" verify /v /pa "$exe"; $a2 = 1 }
 
-            Write-Host "`n=== Attempt B: Store-mode (with timestamp) ==="
-            & "$signtool" sign @($common + @('/tr',$ts,$dll)); $rcB1 = $LASTEXITCODE
-            if ($rcB1 -eq 0 -and -not (Is-Signed $dll)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$dll"; $rcB1 = 1 }
+              if ($a1 -eq 0 -and $a2 -eq 0) { $ok = $true; break }
 
-            & "$signtool" sign @($common + @('/tr',$ts,$exe)); $rcB2 = $LASTEXITCODE
-            if ($rcB2 -eq 0 -and -not (Is-Signed $exe)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$exe"; $rcB2 = 1 }
+              Write-Warning "File-mode via '$ksp' failed (DLL=$a1 EXE=$a2). Trying store-mode /sha1…"
+              $sha1  = "$env:CODESIGN_SHA1"
+              $scope = "$env:CODESIGN_STORE_SCOPE"  # 'U' or 'M'
+              if (-not $sha1) { throw "CODESIGN_SHA1 not set (certsync must export it)." }
+              $common = @('/debug','/fd','SHA256','/td','SHA256','/sha1',$sha1)
+              if ($scope -eq 'M') { $common = @('/sm') + $common }
 
-            if ($rcB1 -eq 0 -and $rcB2 -eq 0) { $ok = $true; Write-Host "Store-mode (with timestamp) succeeded." }
-            if (-not $ok) {
-              Write-Warning ("B (with TS) failed (rc: DLL={0}, EXE={1}). Trying B (no TS)..." -f $rcB1,$rcB2)
+              & "$signtool" sign @($common + @('/tr',$ts,$dll)); $b1 = $LASTEXITCODE
+              if ($b1 -eq 0 -and -not (Is-Signed $dll)) { & "$signtool" verify /v /pa "$dll"; $b1 = 1 }
+              & "$signtool" sign @($common + @('/tr',$ts,$exe)); $b2 = $LASTEXITCODE
+              if ($b2 -eq 0 -and -not (Is-Signed $exe)) { & "$signtool" verify /v /pa "$exe"; $b2 = 1 }
 
-              & "$signtool" sign @($common + @($dll)); $rcB3 = $LASTEXITCODE
-              if ($rcB3 -eq 0 -and -not (Is-Signed $dll)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$dll"; $rcB3 = 1 }
-
-              & "$signtool" sign @($common + @($exe)); $rcB4 = $LASTEXITCODE
-              if ($rcB4 -eq 0 -and -not (Is-Signed $exe)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$exe"; $rcB4 = 1 }
-
-              if ($rcB3 -eq 0 -and $rcB4 -eq 0) { $ok = $true; Write-Host "Store-mode (no timestamp) succeeded." }
+              if ($b1 -eq 0 -and $b2 -eq 0) { $ok = $true; break }
+              Write-Warning "Store-mode via '$ksp' failed (DLL=$b1 EXE=$b2)."
             }
-          }
-
-          # Final fallback: smctl sign (shows full output)
-          if (-not $ok) {
-            if (-not (Test-Path "$env:SMCTL")) { throw "smctl.exe not found at $env:SMCTL" }
-            Write-Host "`n=== Attempt C: smctl sign (alias) ==="
-            & "$env:SMCTL" sign --keypair-alias "$alias" --input "$dll" --verbose; $rcC1 = $LASTEXITCODE
-            if ($rcC1 -eq 0 -and -not (Is-Signed $dll)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$dll"; $rcC1 = 1 }
-            & "$env:SMCTL" sign --keypair-alias "$alias" --input "$exe" --verbose; $rcC2 = $LASTEXITCODE
-            if ($rcC2 -eq 0 -and -not (Is-Signed $exe)) { Write-Host "`nVerify dump:"; & "$signtool" verify /v /pa "$exe"; $rcC2 = 1 }
-            if ($rcC1 -eq 0 -and $rcC2 -eq 0) { $ok = $true; Write-Host "smctl sign succeeded." }
           }
 
           if (-not $ok) {
             Write-Host "`n=== FINAL DIAGNOSTICS ==="
-            Write-Host "`nProviders (should list '$kspName'):"
             certutil -csplist | findstr /I "DigiCert" || $true
-            Write-Host "`nCurrentUser\\My:"
             certutil -store -user My | findstr /I /C:"Provider" /C:"Cert Hash" /C:"Subject" || $true
-
-            throw "Signing failed in all modes. Use the logs above to pinpoint the cause."
+            throw "Signing failed. Now that 'smctl sign' can find signtool, check if your policy requires approvals or if the service account lacks permission to use this key."
           }
 
           Write-Host "✅ Signing complete and verified."
+
 
 
 
