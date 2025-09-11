@@ -24,7 +24,8 @@ pub fn pread() {
     // Seek to offset 1
     file.seek(SeekFrom::Start(1)).expect("Failed to seek");
 
-    file.read_exact(&mut buffer).expect("Failed to read from file");
+    file.read_exact(&mut buffer)
+        .expect("Failed to read from file");
 }
 
 pub fn pwrite() {
