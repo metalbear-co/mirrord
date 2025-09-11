@@ -198,7 +198,7 @@ jobs:
           }
 
       # Try file-mode first, then fallback to store-mode (/sha1); add /sm if machine store
-      - name: Sign artifacts (DLL + EXE) with robust fallback
+      - name: Sign artifacts (DLL + EXE) with KSP + fallbacks
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
         shell: pwsh
@@ -209,14 +209,13 @@ jobs:
           $alias = "$env:DIGICERT_KEYPAIR_ALIAS".Trim()
           $dll = "$env:MIRRORD_LAYER_FILE"
           $exe = "$env:MIRRORD_EXE"
-          $ok = $false
+          $ok  = $false
 
           function Invoke-FileModeSign([string]$path) {
-            if (-not $env:CODESIGN_CERT) { return 87 } # ERROR_INVALID_PARAMETER
+            if (-not $env:CODESIGN_CERT) { return 87 } # missing .cer
             $args = @(
-              '/debug',                    # extra diagnostics
-              '/fd','SHA256','/td','SHA256','/tr',$ts,
-              '/csp','DigiCert Signing Manager KSP',
+              '/debug','/fd','SHA256','/td','SHA256','/tr',$ts,
+              '/csp','DigiCert Software Trust Manager KSP',  # <-- NEW provider name
               '/kc',"$alias",
               '/f', "$env:CODESIGN_CERT",
               "$path"
@@ -227,41 +226,50 @@ jobs:
 
           function Invoke-StoreModeSign([string]$path, [string]$sha1, [string]$scope) {
             $common = @('/debug','/fd','SHA256','/td','SHA256','/tr',$ts,'/sha1',$sha1)
-            if ($scope -eq 'M') { $common = @('/sm') + $common }  # LocalMachine store
+            if ($scope -eq 'M') { $common = @('/sm') + $common }  # LocalMachine if ever needed
             $args = $common + @("$path")
             $null = & "$signtool" sign @args
             return [int]$LASTEXITCODE
           }
 
-          Write-Host "=== Attempt 1: File-mode signing (/csp + /kc + /f) ==="
+          Write-Host "=== Attempt 1: File-mode (/csp + /kc + /f) ==="
           $rc1 = Invoke-FileModeSign $dll
           $rc2 = if ($rc1 -eq 0) { Invoke-FileModeSign $exe } else { $rc1 }
-          if ($rc1 -eq 0 -and $rc2 -eq 0) { $ok = $true; Write-Host "File-mode signing succeeded." }
+          if ($rc1 -eq 0 -and $rc2 -eq 0) { $ok = $true; Write-Host "File-mode signing OK." }
 
           if (-not $ok) {
-            Write-Warning ("File-mode signing failed (rc1={0} rc2={1}). Falling back to store-mode." -f $rc1,$rc2)
-
+            Write-Warning ("File-mode failed (rc1={0} rc2={1}). Trying store-mode (/sha1)..." -f $rc1,$rc2)
             $sha1  = "$env:CODESIGN_SHA1"
-            $scope = "$env:CODESIGN_STORE_SCOPE"
+            $scope = "$env:CODESIGN_STORE_SCOPE"  # 'U' (user) by default
             if (-not $sha1) { throw "CODESIGN_SHA1 not set." }
-
-            Write-Host ( "=== Attempt 2: Store-mode signing (/sha1{0}) ===" -f ($(if ($scope -eq 'M') { ' + /sm' } else { '' })) )
 
             $rc3 = Invoke-StoreModeSign $dll $sha1 $scope
             $rc4 = Invoke-StoreModeSign $exe $sha1 $scope
-
-            if ($rc3 -eq 0 -and $rc4 -eq 0) {
-              $ok = $true
-              Write-Host "Store-mode signing succeeded."
-            }
-            else {
-              Write-Host "`nDiagnostics:"
-              certutil -store -user My | Select-String -Pattern 'Provider|Cert Hash|Subject' -Context 0,1
-              Write-Host "`nDigiCert services:"
-              Get-Service -Name 'DigiCert*' -ErrorAction SilentlyContinue | Format-Table -AutoSize
-              throw ("Signing failed (file rc={0}/{1}, store rc={2}/{3}). Check KSP presence, creds, signer access, and timestamp reachability." -f $rc1,$rc2,$rc3,$rc4)
-            }
+            if ($rc3 -eq 0 -and $rc4 -eq 0) { $ok = $true; Write-Host "Store-mode signing OK." }
           }
+
+          if (-not $ok) {
+            Write-Warning "Store-mode failed too. Trying smctl sign with keypair alias..."
+            $smctl = "$env:SMCTL"
+            if (-not (Test-Path $smctl)) { throw "smctl.exe not found at $smctl" }
+
+            # smctl will orchestrate SignTool for you using the alias (no /f or /sha1 needed)
+            $null = & $smctl sign --keypair-alias "$alias" --input "$dll"   --verbose
+            $rc5  = [int]$LASTEXITCODE
+            $null = & $smctl sign --keypair-alias "$alias" --input "$exe"   --verbose
+            $rc6  = [int]$LASTEXITCODE
+
+            if ($rc5 -eq 0 -and $rc6 -eq 0) { $ok = $true; Write-Host "smctl sign OK." }
+          }
+
+          if (-not $ok) {
+            Write-Host "`nDiagnostics:"
+            certutil -store -user My | Select-String -Pattern 'Provider|Cert Hash|Subject' -Context 0,1
+            Write-Host "`nDigiCert services:"
+            Get-Service -Name 'DigiCert*' -ErrorAction SilentlyContinue | Format-Table -AutoSize
+            throw "Signing failed in all modes. See diagnostics above."
+          }
+
 
 
       - name: Verify signatures
