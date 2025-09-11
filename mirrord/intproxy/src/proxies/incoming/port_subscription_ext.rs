@@ -44,14 +44,15 @@ impl PortSubscriptionExt for PortSubscription {
                 MirrorType::FilteredHttp(port, filter) => {
                     // Check if the agent supports filtered HTTP mirroring
                     if protocol_version
-                        .is_none_or(|version| MIRROR_HTTP_FILTER_VERSION.matches(version))
+                        .is_some_and(|version| MIRROR_HTTP_FILTER_VERSION.matches(version))
                     {
                         ClientMessage::Tcp(LayerTcp::PortSubscribeFilteredHttp(
                             *port,
                             filter.clone(),
                         ))
                     } else {
-                        // For older agents, fall back to regular mirroring without filter
+                        // For older agents or when protocol version is unknown, fall back to
+                        // regular mirroring without filter
                         ClientMessage::Tcp(LayerTcp::PortSubscribe(*port))
                     }
                 }
