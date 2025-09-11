@@ -27,8 +27,7 @@
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
-        graceful_exit!();
-        unreachable!()
+        graceful_exit!()
     }};
     () => {
         nix::sys::signal::kill(
@@ -36,7 +35,7 @@ macro_rules! graceful_exit {
             nix::sys::signal::Signal::SIGKILL,
         )
         .expect("unable to graceful exit");
-        unreachable!()
+        std::process::abort()
     };
 }
 

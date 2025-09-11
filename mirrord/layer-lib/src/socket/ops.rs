@@ -526,7 +526,7 @@ where
             "layer-lib send_to -> non-DNS destination (port {}), checking for DNS patch",
             destination.port()
         );
-        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination.into())?;
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         sendto_fn(
             sockfd,

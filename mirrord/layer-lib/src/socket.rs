@@ -407,12 +407,12 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
         resolver: &R,
     ) -> Result<bool, R::Error> {
         // Check protocol match
-        let protocol_matches = match (&self.protocol, protocol) {
-            (ProtocolFilter::Any, _) => true,
-            (ProtocolFilter::Tcp, NetProtocol::Stream) => true,
-            (ProtocolFilter::Udp, NetProtocol::Datagrams) => true,
-            _ => false,
-        };
+        let protocol_matches = matches!(
+            (&self.protocol, protocol),
+            (ProtocolFilter::Any, _)
+                | (ProtocolFilter::Tcp, NetProtocol::Stream)
+                | (ProtocolFilter::Udp, NetProtocol::Datagrams)
+        );
 
         if !protocol_matches {
             return Ok(false);
