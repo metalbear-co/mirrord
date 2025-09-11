@@ -18,6 +18,8 @@ use mirrord_config::feature::network::{
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
 use mirrord_intproxy_protocol::NetProtocol;
+#[cfg(unix)]
+use mirrord_intproxy_protocol::PortUnsubscribe;
 use mirrord_protocol::outgoing::SocketAddress;
 // Re-export ops module items
 pub use ops::{
@@ -188,6 +190,23 @@ impl UserSocket {
             self.state,
             SocketState::Bound(_) | SocketState::Listening(_)
         )
+    }
+
+    /// Inform internal proxy about closing a listening port.
+    #[cfg(unix)]
+    pub fn close(&self) {
+        if let Self {
+            state: SocketState::Listening(bound),
+            kind: SocketKind::Tcp(..),
+            ..
+        } = self
+        {
+            use crate::common::make_proxy_request_no_response;
+            let _ = make_proxy_request_no_response(PortUnsubscribe {
+                port: bound.requested_address.port(),
+                listening_on: bound.address,
+            });
+        }
     }
 }
 

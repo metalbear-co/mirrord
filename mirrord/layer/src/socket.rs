@@ -49,25 +49,6 @@ pub(crate) mod ops;
 // Re-export the unified SOCKETS from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS};
 
-// Unix-specific extensions for UserSocket
-impl UserSocket {
-    /// Inform internal proxy about closing a listening port.
-    #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
-    pub(crate) fn close(&self) {
-        if let Self {
-            state: SocketState::Listening(bound),
-            kind: SocketKind::Tcp(..),
-            ..
-        } = self
-        {
-            let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            });
-        }
-    }
-}
-
 // Unix-specific SocketKind conversion
 impl TryFrom<c_int> for SocketKind {
     type Error = Bypass;
@@ -129,64 +110,6 @@ impl DnsResolver for UnixDnsResolver {
 
     fn remote_dns_enabled(&self) -> bool {
         crate::setup().remote_dns_enabled()
-    }
-}
-
-// Unix-specific extensions for OutgoingSelector with DNS resolution
-impl OutgoingSelector {
-    /// Unix-specific get_connection_through with full DNS resolution
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
-    pub(crate) fn get_connection_through(
-        &self,
-        address: SocketAddr,
-        protocol: NetProtocol,
-    ) -> HookResult<ConnectionThrough> {
-        let resolver = UnixDnsResolver;
-
-        let result = self.get_connection_through_with_resolver(address, protocol, &resolver)?;
-
-        // Apply Unix-specific address resolution for local connections
-        match result {
-            ConnectionThrough::Local(addr) => {
-                Self::get_local_address_to_connect(addr).map(ConnectionThrough::Local)
-            }
-            ConnectionThrough::Remote(addr) => Ok(ConnectionThrough::Remote(addr)),
-        }
-    }
-
-    /// Helper function that looks into the [`REMOTE_DNS_REVERSE_MAPPING`] for `address`, so we can
-    /// retrieve the hostname and resolve it locally (when applicable).
-    ///
-    /// - `address`: the [`SocketAddr`] that was passed to `connect`;
-    ///
-    /// We only get here when the [`OutgoingSelector::Remote`] matched nothing, or when the
-    /// [`OutgoingSelector::Local`] matched on something.
-    ///
-    /// Returns 1 of 2 possibilities:
-    ///
-    /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
-    /// return the first result
-    /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as is;
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
-    fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
-        // Aviram: I think this whole function and logic is weird but I really need to get
-        // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
-        // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
-        // it)
-        if address.ip().is_loopback() {
-            return Ok(address);
-        }
-
-        let cached = get_hostname_for_ip(address.ip());
-        let Some(hostname) = cached else {
-            return Ok(address);
-        };
-
-        let _guard = DetourGuard::new();
-        (hostname, address.port())
-            .to_socket_addrs()?
-            .next()
-            .ok_or(HookError::DNSNoName)
     }
 }
 
