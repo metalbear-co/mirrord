@@ -23,7 +23,6 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-console = { path = "../console" }
 mirrord-config = { path = "../config" }
-str-win = { path = "../str-win" }
 
 # Used for internal error type set-up
 thiserror.workspace = true 
@@ -37,8 +36,10 @@ tracing-subscriber.workspace = true
 tokio.workspace = true
 bincode.workspace = true
 tokio-util.workspace = true
-winapi.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi.workspace = true
+str-win = { path = "../str-win" }
 minhook-detours-rs = "0.2.0"
 windows-strings = { version = "0.4" }
 
