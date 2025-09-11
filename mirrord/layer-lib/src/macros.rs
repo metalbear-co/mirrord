@@ -27,14 +27,16 @@
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
-        graceful_exit!()
+        graceful_exit!();
+        unreachable!()
     }};
     () => {
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGKILL,
         )
-        .expect("unable to graceful exit")
+        .expect("unable to graceful exit");
+        unreachable!()
     };
 }
 

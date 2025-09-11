@@ -500,11 +500,11 @@ where
     let user_socket_info = SOCKETS
         .lock()?
         .remove(&sockfd)
-        .ok_or(HookError::SocketNotFound(sockfd))?;
+        .ok_or(HookError::SocketNotFound(sockfd as usize))?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]
-    if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
+    if user_socket_info.domain == AF_UNIX
         && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
         return Err(HookError::UnsupportedSocketType);

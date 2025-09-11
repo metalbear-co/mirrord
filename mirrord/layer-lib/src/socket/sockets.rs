@@ -32,7 +32,6 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
         #[cfg(unix)]
         {
             use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
-            use bincode::Decode;
 
             std::env::var(SHARED_SOCKETS_ENV_VAR)
                 .ok()
