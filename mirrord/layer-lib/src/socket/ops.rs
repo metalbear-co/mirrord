@@ -54,7 +54,7 @@ macro_rules! connect_fn_def {
 #[cfg(windows)]
 pub type ConnectFn = connect_fn_def!("system");
 #[cfg(unix)]
-pub type ConnectFn = connect_fn_def!("c");
+pub type ConnectFn = connect_fn_def!("C");
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -333,39 +333,8 @@ pub fn prepare_outgoing_address(address: SocketAddr) -> SocketAddress {
 #[mirrord_layer_macro::instrument(
     level = "debug",
     ret,
-    skip(user_socket_info, proxy_request_fn, actual_connect_fn)
+    skip(user_socket_info, proxy_request_fn)
 )]
-pub fn connect_outgoing_with_call<P, F>(
-    sockfd: SocketDescriptor,
-    remote_address: SockAddr,
-    user_socket_info: Arc<UserSocket>,
-    protocol: NetProtocol,
-    proxy_request_fn: P,
-    actual_connect_fn: F,
-) -> HookResult<ConnectResult>
-where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
-{
-    let connect_fn = |sockfd: SocketDescriptor, addr: SockAddr| -> ConnectResult {
-        #[cfg(unix)]
-        let result = unsafe { actual_connect_fn(sockfd, addr.as_ptr(), addr.len()) };
-
-        #[cfg(windows)]
-        let result = actual_connect_fn(sockfd, addr);
-
-        ConnectResult::from(result)
-    };
-
-    connect_outgoing(
-        sockfd,
-        remote_address,
-        user_socket_info,
-        protocol,
-        proxy_request_fn,
-        connect_fn,
-    )
-}
 
 /// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
 /// only)

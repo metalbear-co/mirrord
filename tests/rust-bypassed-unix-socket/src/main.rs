@@ -1,3 +1,4 @@
+#![cfg(unix)]
 #![warn(clippy::indexing_slicing)]
 
 use std::env;

@@ -32,7 +32,7 @@ base64.workspace = true
 bincode.workspace = true
 ctor = "0.2"
 dotenvy.workspace = true
-frida-gum = { version = "0.17", features = ["auto-download", "std"] }
+frida-gum.workspace = true
 http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }

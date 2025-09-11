@@ -5,8 +5,6 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-#[cfg(unix)]
-use bincode::{Decode, Encode};
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
 
@@ -34,7 +32,7 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
         #[cfg(unix)]
         {
             use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
-            use bincode::{Decode, Encode};
+            use bincode::Decode;
 
             std::env::var(SHARED_SOCKETS_ENV_VAR)
                 .ok()

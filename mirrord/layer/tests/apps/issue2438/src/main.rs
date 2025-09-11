@@ -3,13 +3,13 @@
 //!    (socket **could** later be used for port subscription)
 //! 2. Socket is first bound to an address `0.0.0.0:80`, that goes through `bind` detour completely
 //!    (socket **could not** later be used for port subscription)
+#![cfg(unix)]
 
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     os::fd::{FromRawFd, IntoRawFd},
 };
-
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, SockaddrStorage};
 fn main() {
     let bind_addresses: [SocketAddr; 2] =

@@ -35,7 +35,6 @@ macro_rules! graceful_exit {
             nix::sys::signal::Signal::SIGKILL,
         )
         .expect("unable to graceful exit");
-        unreachable!()
     };
 }
 

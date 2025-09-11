@@ -1,3 +1,4 @@
+#![cfg(unix)]
 #![feature(vec_into_raw_parts)]
 #![warn(clippy::indexing_slicing)]
 

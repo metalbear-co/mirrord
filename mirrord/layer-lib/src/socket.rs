@@ -19,12 +19,10 @@ use mirrord_config::feature::network::{
 };
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::outgoing::SocketAddress;
-#[cfg(unix)]
-pub use ops::sendmsg;
 // Re-export ops module items
 pub use ops::{
     ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
-    connect_outgoing_with_call, create_outgoing_request, is_unix_address, prepare_outgoing_address,
+    create_outgoing_request, is_unix_address, prepare_outgoing_address,
     send_dns_patch, send_to, update_socket_connected_state,
 };
 use socket2::SockAddr;

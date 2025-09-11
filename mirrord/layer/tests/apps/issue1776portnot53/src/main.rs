@@ -1,10 +1,12 @@
+// remote when we support socket sendmsg
+#![cfg(unix)]
 use std::{
     alloc::{self, Layout},
     mem::{self, size_of},
     net::{SocketAddr, UdpSocket},
-    os::fd::AsRawFd,
 };
 
+use os::fd::AsRawFd;
 use libc::{c_void, iovec};
 use socket2::SockAddr;
 

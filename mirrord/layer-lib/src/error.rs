@@ -13,10 +13,11 @@ use std::{
     str::ParseBoolError,
     sync::PoisonError,
 };
-
+#[cfg(unix)]
+use std::ptr;
 #[cfg(unix)]
 use libc::{
-    DIR, EACCES, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL,
+    DIR, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL,
     EIO, EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
 };
 use mirrord_config::config::ConfigError;
