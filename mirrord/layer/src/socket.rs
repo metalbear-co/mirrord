@@ -51,7 +51,7 @@ pub(crate) mod outgoing_selector;
 pub(crate) use mirrord_layer_lib::socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS};
 
 /// Unix-specific DNS resolver implementation
-pub struct UnixDnsResolver;
+pub(crate) struct UnixDnsResolver;
 
 impl DnsResolver for UnixDnsResolver {
     type Error = HookError;
