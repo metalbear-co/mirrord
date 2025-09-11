@@ -11,7 +11,8 @@ pub fn fgets() {
     let mut file = File::open(FILE_PATH).expect("Failed to open file");
     let mut buffer = [0u8; 12];
 
-    file.read_exact(&mut buffer).expect("Failed to read from file");
+    file.read_exact(&mut buffer)
+        .expect("Failed to read from file");
 }
 
 pub fn pread() {

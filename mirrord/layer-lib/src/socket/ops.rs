@@ -461,9 +461,9 @@ fn send_dns_patch_impl(
     user_socket_info: Arc<UserSocket>,
     destination: SocketAddr,
 ) -> SocketResult<SockAddr> {
-    let mut sockets = SOCKETS.lock().map_err(|e| {
-        Box::new(HookError::from(std::io::Error::other(e.to_string())))
-    })?;
+    let mut sockets = SOCKETS
+        .lock()
+        .map_err(|e| Box::new(HookError::from(std::io::Error::other(e.to_string()))))?;
     // We want to keep holding this socket.
     sockets.insert(sockfd, user_socket_info);
 
@@ -582,9 +582,13 @@ where
         .remove(&sockfd)
         .ok_or(HookError::SocketNotFound({
             #[cfg(target_os = "windows")]
-            { sockfd }
+            {
+                sockfd 
+            }
             #[cfg(not(target_os = "windows"))]
-            { sockfd }
+            {
+                sockfd as usize
+            }
         }))?;
 
     // we don't support unix sockets which don't use `connect`
