@@ -19,6 +19,10 @@ use mirrord_intproxy_protocol::{
 
 use crate::error::{HookError, HookResult, ProxyError, ProxyResult};
 
+/// Efficient result type for internal proxy operations to reduce memory usage
+/// Converts to HookResult at API boundaries
+type ProxyConnResult<T> = Result<T, Box<HookError>>;
+
 /// Global proxy connection instance, shared across the layer
 pub static PROXY_CONNECTION: std::sync::OnceLock<ProxyConnection> = std::sync::OnceLock::new();
 
@@ -159,11 +163,27 @@ where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
 {
+    make_proxy_request_with_response_impl(request).map_err(Into::into)
+}
+
+/// Internal implementation using ProxyConnResult for memory efficiency
+fn make_proxy_request_with_response_impl<T>(request: T) -> ProxyConnResult<T::Response>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
+{
     PROXY_CONNECTION
         .get()
-        .ok_or(HookError::CannotGetProxyConnection)?
+        .ok_or_else(|| {
+            Box::new(HookError::ProxyError(ProxyError::IoFailed(
+                std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "Cannot get proxy connection",
+                ),
+            )))
+        })?
         .make_request_with_response(request)
-        .map_err(HookError::ProxyError)
+        .map_err(|e| Box::new(HookError::ProxyError(e)))
 }
 
 /// Generic helper function to proxy a request that might have a large response to mirrord intproxy.
@@ -171,11 +191,25 @@ where
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
+    make_proxy_request_no_response_impl(request).map_err(Into::into)
+}
+
+/// Internal implementation using ProxyConnResult for memory efficiency
+fn make_proxy_request_no_response_impl<T: IsLayerRequest + Debug>(
+    request: T,
+) -> ProxyConnResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
     PROXY_CONNECTION
         .get()
-        .ok_or(HookError::CannotGetProxyConnection)?
+        .ok_or_else(|| {
+            Box::new(HookError::ProxyError(ProxyError::IoFailed(
+                std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "Cannot get proxy connection",
+                ),
+            )))
+        })?
         .make_request_no_response(request)
-        .map_err(Into::into)
+        .map_err(|e| Box::new(HookError::ProxyError(e)))
 }

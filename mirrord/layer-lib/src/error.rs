@@ -391,6 +391,13 @@ impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for HookError
     }
 }
 
+/// Enables efficient error handling with boxed HookError for memory optimization
+impl From<Box<HookError>> for HookError {
+    fn from(boxed_error: Box<HookError>) -> Self {
+        *boxed_error
+    }
+}
+
 #[cfg(unix)]
 impl From<frida_gum::Error> for LayerError {
     fn from(err: frida_gum::Error) -> Self {

@@ -182,10 +182,13 @@ fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HookResult<Vec<
         let file = ManagedRemoteFile::open(file_path)?;
         file.read_all(max_size)
     })();
-    
-    result.map_err(|e| crate::error::HookError::IO(
-        std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to read file {}: {}", file_path, e))
-    ))
+
+    result.map_err(|e| {
+        crate::error::HookError::IO(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to read file {}: {}", file_path, e),
+        ))
+    })
 }
 
 /// Fetch Samba NetBIOS configuration from remote target via ProxyConnection by reading

@@ -20,6 +20,10 @@ use crate::{
     socket::{Connected, SOCKETS, SocketState, UserSocket},
 };
 
+/// Efficient result type for internal socket operations to reduce memory usage
+/// Converts to HookResult at API boundaries
+type SocketResult<T> = Result<T, Box<HookError>>;
+
 // Platform-specific socket descriptor type
 #[cfg(unix)]
 pub type SocketDescriptor = RawFd;
@@ -180,20 +184,45 @@ where
     P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
+    connect_outgoing_impl(
+        sockfd,
+        remote_address,
+        _user_socket_info,
+        protocol,
+        proxy_request_fn,
+        connect_fn,
+    )
+    .map_err(Into::into)
+}
+
+/// Internal implementation using SocketResult for memory efficiency
+fn connect_outgoing_impl<P, F>(
+    sockfd: SocketDescriptor,
+    remote_address: SockAddr,
+    _user_socket_info: Arc<UserSocket>,
+    protocol: NetProtocol,
+    proxy_request_fn: P,
+    connect_fn: F,
+) -> SocketResult<ConnectResult>
+where
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
+{
     // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
+    let remote_connection = |remote_addr: SockAddr| -> SocketResult<ConnectResult> {
         // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
+        let remote_address = SocketAddress::try_from(remote_addr.clone()).map_err(|e| {
+            Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
+                e.to_string(),
+            )))
+        })?;
 
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
         };
 
-        let response = match proxy_request_fn(request) {
-            Ok(response) => response,
-            Err(e) => return Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
-        };
+        let response = proxy_request_fn(request).map_err(|e| Box::new(e))?;
 
         let OutgoingConnectResponse {
             layer_address,
@@ -201,7 +230,7 @@ where
         } = response;
 
         // Connect to the interceptor socket that is listening.
-        call_connect_fn(
+        call_connect_fn_impl(
             connect_fn,
             sockfd,
             remote_addr,
@@ -230,7 +259,32 @@ pub fn call_connect_fn<F>(
 where
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
-    let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
+    call_connect_fn_impl(
+        connect_fn,
+        sockfd,
+        remote_addr,
+        in_cluster_address_opt,
+        layer_address_opt,
+    )
+    .map_err(Into::into)
+}
+
+/// Internal implementation using SocketResult for memory efficiency
+fn call_connect_fn_impl<F>(
+    connect_fn: F,
+    sockfd: SocketDescriptor,
+    remote_addr: SockAddr,
+    in_cluster_address_opt: Option<SocketAddress>,
+    layer_address_opt: Option<SocketAddress>,
+) -> SocketResult<ConnectResult>
+where
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
+{
+    let remote_address = SocketAddress::try_from(remote_addr.clone()).map_err(|e| {
+        Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
+            e.to_string(),
+        )))
+    })?;
     let (connect_result, connected) = match (
         layer_address_opt.clone(),
         in_cluster_address_opt.clone(),
@@ -241,14 +295,18 @@ where
                 remote_address, in_cluster_address, layer_address
             );
 
-            let layer_addr = SockAddr::try_from(layer_address.clone())?;
+            let layer_addr = SockAddr::try_from(layer_address.clone()).map_err(|e| {
+                Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
+                    e.to_string(),
+                )))
+            })?;
             let connect_result: ConnectResult = connect_fn(sockfd, layer_addr);
             if connect_result.is_failure() {
                 error!(
                     "connect -> Failed call to connect_fn with {:#?}",
                     connect_result,
                 );
-                return Err(std::io::Error::last_os_error().into());
+                return Err(Box::new(HookError::from(std::io::Error::last_os_error())));
             }
 
             (
@@ -263,11 +321,12 @@ where
         _ => {
             // both or none of layer_address and in_cluster_address must be provided
             if layer_address_opt.is_none() ^ in_cluster_address_opt.is_none() {
-                return Err(ConnectError::ParameterMissing(format!(
-                    "layer_address: {:?}, in_cluster_address: {:?}",
-                    layer_address_opt, in_cluster_address_opt
-                ))
-                .into());
+                return Err(Box::new(HookError::ConnectError(
+                    ConnectError::ParameterMissing(format!(
+                        "layer_address: {:?}, in_cluster_address: {:?}",
+                        layer_address_opt, in_cluster_address_opt
+                    )),
+                )));
             }
 
             debug!(
@@ -281,7 +340,7 @@ where
                     "connect -> Failed call to connect_fn with {:#?}",
                     connect_result,
                 );
-                return Err(std::io::Error::last_os_error().into());
+                return Err(Box::new(HookError::from(std::io::Error::last_os_error())));
             }
 
             (
@@ -393,7 +452,21 @@ pub fn send_dns_patch(
     user_socket_info: Arc<UserSocket>,
     destination: SocketAddr,
 ) -> HookResult<SockAddr> {
-    let mut sockets = SOCKETS.lock()?;
+    send_dns_patch_impl(sockfd, user_socket_info, destination).map_err(Into::into)
+}
+
+/// Internal implementation using SocketResult for memory efficiency
+fn send_dns_patch_impl(
+    sockfd: SocketDescriptor,
+    user_socket_info: Arc<UserSocket>,
+    destination: SocketAddr,
+) -> SocketResult<SockAddr> {
+    let mut sockets = SOCKETS.lock().map_err(|e| {
+        Box::new(HookError::from(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        )))
+    })?;
     // We want to keep holding this socket.
     sockets.insert(sockfd, user_socket_info);
 
@@ -432,7 +505,7 @@ pub fn send_dns_patch(
             }
             _ => None,
         })
-        .ok_or(HookError::ManagedSocketNotFound(destination))?;
+        .ok_or_else(|| Box::new(HookError::ManagedSocketNotFound(destination)))?;
 
     Ok(actual_destination.into())
 }
