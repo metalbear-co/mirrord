@@ -1,25 +1,14 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::net::{SocketAddr, ToSocketAddrs};
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
 
-use base64::prelude::*;
-use bincode::{Decode, Encode};
-use hooks::FN_FCNTL;
 #[cfg(not(target_os = "windows"))]
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_config::feature::network::{
-    filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
-    outgoing::{OutgoingConfig, OutgoingFilterConfig},
-};
 use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 // Re-export shared types from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{
-    Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketAddrExt, SocketKind,
-    SocketState, UserSocket,
-    dns::{REMOTE_DNS_REVERSE_MAPPING, get_hostname_for_ip, update_dns_reverse_mapping},
-    is_ignored_port,
+    Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketKind, SocketState,
+    UserSocket, dns::get_hostname_for_ip, is_ignored_port,
 };
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,

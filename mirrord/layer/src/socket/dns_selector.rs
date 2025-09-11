@@ -2,7 +2,6 @@
 //!
 //! Re-exports the shared DNS selector from layer-lib and provides Unix-specific extensions.
 
-use mirrord_config::feature::network::dns::DnsConfig;
 // Re-export shared DNS selector from layer-lib
 pub use mirrord_layer_lib::dns_selector::{CheckQueryResult, DnsSelector};
 use tracing::Level;

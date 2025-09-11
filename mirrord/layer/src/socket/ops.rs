@@ -1,7 +1,6 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
-    collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     ops::Not,
@@ -11,7 +10,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
