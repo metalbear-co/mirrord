@@ -9,10 +9,9 @@ pub fn fgets() {
     println!(">> test_fgets");
 
     let mut file = File::open(FILE_PATH).expect("Failed to open file");
-    let mut buffer = vec![0u8; 12];
+    let mut buffer = [0u8; 12];
 
-    file.read_exact(&mut buffer[..12])
-        .expect("Failed to read from file");
+    file.read_exact(&mut buffer).expect("Failed to read from file");
 }
 
 pub fn pread() {

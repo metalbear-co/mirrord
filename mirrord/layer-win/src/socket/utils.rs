@@ -551,7 +551,7 @@ impl WindowsAddrInfo for ADDRINFOW {
         // Convert UTF-8 string to UTF-16 wide string
         let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
         let layout = std::alloc::Layout::array::<u16>(wide.len())
-            .map_err(|e| AddrInfoError::LayoutError(e))?;
+            .map_err(AddrInfoError::LayoutError)?;
         let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
         if ptr.is_null() {
             return Err(AddrInfoError::NullPointer);

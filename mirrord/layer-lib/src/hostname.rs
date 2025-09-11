@@ -184,10 +184,10 @@ fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HookResult<Vec<
     })();
 
     result.map_err(|e| {
-        crate::error::HookError::IO(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to read file {}: {}", file_path, e),
-        ))
+        crate::error::HookError::IO(std::io::Error::other(format!(
+            "Failed to read file {}: {}",
+            file_path, e
+        )))
     })
 }
 

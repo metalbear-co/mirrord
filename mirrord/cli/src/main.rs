@@ -511,10 +511,11 @@ where
     // From CreateProcessW documentation:
     // lpApplicationName - This parameter must include the file name extension; no default extension
     // is assumed.
-    let binary_name = binary
-        .ends_with(".exe")
-        .then_some(binary.clone())
-        .unwrap_or_else(|| format!("{}.exe", binary));
+    let binary_name = if binary.ends_with(".exe") {
+        binary.clone()
+    } else {
+        format!("{}.exe", binary)
+    };
 
     let binary_path = process_which(&binary_name).map_err(|e| {
         error!("process_which failed: {:?}", e);

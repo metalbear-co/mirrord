@@ -1,5 +1,4 @@
 //! Module responsible for handling Windows errors.
-#![cfg(target_os = "windows")]
 
 use std::fmt::{Debug, Display};
 

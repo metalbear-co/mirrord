@@ -222,7 +222,7 @@ where
             protocol,
         };
 
-        let response = proxy_request_fn(request).map_err(|e| Box::new(e))?;
+        let response = proxy_request_fn(request).map_err(Box::new)?;
 
         let OutgoingConnectResponse {
             layer_address,
@@ -462,10 +462,7 @@ fn send_dns_patch_impl(
     destination: SocketAddr,
 ) -> SocketResult<SockAddr> {
     let mut sockets = SOCKETS.lock().map_err(|e| {
-        Box::new(HookError::from(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        )))
+        Box::new(HookError::from(std::io::Error::other(e.to_string())))
     })?;
     // We want to keep holding this socket.
     sockets.insert(sockfd, user_socket_info);
@@ -583,7 +580,12 @@ where
     let user_socket_info = SOCKETS
         .lock()?
         .remove(&sockfd)
-        .ok_or(HookError::SocketNotFound(sockfd as usize))?;
+        .ok_or(HookError::SocketNotFound({
+            #[cfg(target_os = "windows")]
+            { sockfd }
+            #[cfg(not(target_os = "windows"))]
+            { sockfd }
+        }))?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]

@@ -40,7 +40,7 @@ pub fn proxy_bind(
     };
 
     // Update socket state to bound using the unified SOCKETS
-    set_socket_state(socket, SocketState::Bound(bound.clone()));
+    set_socket_state(socket, SocketState::Bound(bound));
 
     tracing::info!(
         "proxy_bind -> socket {} successfully bound to {}",

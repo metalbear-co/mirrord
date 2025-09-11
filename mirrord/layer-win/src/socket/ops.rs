@@ -15,7 +15,6 @@ use mirrord_layer_lib::{
 };
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-use str_win;
 use winapi::{
     shared::{
         minwindef::INT,
@@ -189,7 +188,7 @@ pub fn check_address_reachability(remote_addr: &SocketAddress, socket: SOCKET) -
     let result = unsafe {
         winapi::um::ws2tcpip::GetNameInfoW(
             &sock_addr_raw as *const SOCKADDR,
-            sock_addr_len.try_into().unwrap(),
+            sock_addr_len,
             node_buffer.as_mut_ptr(),
             node_buffer.len() as u32,
             service_buffer.as_mut_ptr(),
@@ -258,10 +257,10 @@ where
 {
     let raw_remote_addr = SockAddr::from(remote_addr);
     let optional_ip_address = raw_remote_addr.as_socket();
-    if let Some(ip_address) = optional_ip_address {
-        if is_ignored_port(&ip_address) {
-            return Err(ConnectError::BypassPort(ip_address.port()).into());
-        }
+    if let Some(ip_address) = optional_ip_address
+        && is_ignored_port(&ip_address)
+    {
+        return Err(ConnectError::BypassPort(ip_address.port()).into());
     };
 
     // Determine the protocol based on the socket type

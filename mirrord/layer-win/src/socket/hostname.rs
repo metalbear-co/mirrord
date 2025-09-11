@@ -61,10 +61,10 @@ static NETBIOS_NAME_CACHE: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mu
 /// the configured NetBIOS name, which is more accurate than hostname truncation.
 pub fn get_remote_netbios_name() -> Option<String> {
     // Check cache first to avoid repeated file operations
-    if let Ok(cache) = NETBIOS_NAME_CACHE.lock() {
-        if cache.is_some() {
-            return cache.clone();
-        }
+    if let Ok(cache) = NETBIOS_NAME_CACHE.lock()
+        && cache.is_some()
+    {
+        return cache.clone();
     }
 
     let netbios_name = read_samba_config().unwrap_or_else(|e| {
@@ -92,7 +92,7 @@ fn read_samba_config() -> HookResult<Option<String>> {
             tracing::debug!("Parsed NetBIOS name from Samba config: {:?}", netbios_name);
             Ok(netbios_name)
         }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(e),
     }
 }
 
@@ -108,7 +108,7 @@ pub fn remote_dns_resolve(hostname: &str) -> HookResult<Vec<(String, IpAddr)>> {
             }
             Ok(results)
         }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(e),
     }
 }
 
@@ -146,16 +146,16 @@ pub fn get_hostname_for_name_type(name_type: u32) -> Option<String> {
     match name_type {
         ComputerNameNetBIOS | ComputerNamePhysicalNetBIOS => {
             // Try to get NetBIOS name from Samba configuration first
-            if let Some(netbios_name) = get_remote_netbios_name() {
-                if !netbios_name.is_empty() {
-                    let result = netbios_name.to_uppercase();
-                    tracing::debug!(
-                        "Got NetBIOS name from Samba config for name_type {}: '{}'",
-                        name_type,
-                        result
-                    );
-                    return Some(result);
-                }
+            if let Some(netbios_name) = get_remote_netbios_name()
+                && !netbios_name.is_empty()
+            {
+                let result = netbios_name.to_uppercase();
+                tracing::debug!(
+                    "Got NetBIOS name from Samba config for name_type {}: '{}'",
+                    name_type,
+                    result
+                );
+                return Some(result);
             }
 
             // Try regular hostname resolution for NetBIOS
@@ -481,7 +481,7 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
 
     let response = make_proxy_request_with_response(request)?;
     // Convert response back to Windows ADDRINFO structures using trait method
-    Ok(ManagedAddrInfo::<T>::try_from(response)?)
+    ManagedAddrInfo::<T>::try_from(response)
 }
 
 /// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.

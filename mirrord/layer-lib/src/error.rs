@@ -64,11 +64,11 @@ mod ignore_codes {
 
     #[cfg(windows)]
     const IGNORE_ERROR_CODES: [i32; 4] = [
-        winapi::um::winsock2::WSAEINPROGRESS as i32,
-        winapi::um::winsock2::WSAEAFNOSUPPORT as i32,
-        winapi::um::winsock2::WSAEADDRINUSE as i32,
+        winapi::um::winsock2::WSAEINPROGRESS,
+        winapi::um::winsock2::WSAEAFNOSUPPORT,
+        winapi::um::winsock2::WSAEADDRINUSE,
         // Using EACCES as equivalent to EPERM
-        winapi::um::winsock2::WSAEACCES as i32,
+        winapi::um::winsock2::WSAEACCES,
     ];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
@@ -462,7 +462,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::TryFromInt(_) => {
@@ -472,7 +472,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::CannotGetProxyConnection => {
@@ -482,7 +482,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::ProxyError(_) => {
@@ -492,7 +492,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::IO(io_fail) => {
@@ -512,7 +512,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::BincodeEncode(_) => {
@@ -522,7 +522,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::ResponseError(response_fail) => match response_fail {
@@ -533,7 +533,7 @@ impl From<HookError> for i64 {
                     }
                     #[cfg(windows)]
                     {
-                        WSAENOBUFS as i32
+                        WSAENOBUFS
                     }
                 }
                 ResponseError::OpenLocal => {
@@ -595,7 +595,7 @@ impl From<HookError> for i64 {
                         }
                         #[cfg(windows)]
                         {
-                            WSAENETUNREACH as i32
+                            WSAENETUNREACH
                         }
                     }
                     _ => {
@@ -605,7 +605,7 @@ impl From<HookError> for i64 {
                         }
                         #[cfg(windows)]
                         {
-                            WSAEINVAL as i32
+                            WSAEINVAL
                         }
                     }
                 },
@@ -618,7 +618,7 @@ impl From<HookError> for i64 {
                             }
                             #[cfg(windows)]
                             {
-                                WSATRY_AGAIN as i32
+                                WSATRY_AGAIN
                             }
                         }
                         // prevents an infinite loop that used to happen in some apps, don't know if
@@ -630,7 +630,7 @@ impl From<HookError> for i64 {
                             }
                             #[cfg(windows)]
                             {
-                                WSAHOST_NOT_FOUND as i32
+                                WSAHOST_NOT_FOUND
                             }
                         }
                         _ => {
@@ -640,7 +640,7 @@ impl From<HookError> for i64 {
                             }
                             #[cfg(windows)]
                             {
-                                WSANO_RECOVERY as i32
+                                WSANO_RECOVERY
                             }
                         } // TODO: Add more error kinds, next time we break protocol compatibility.
                     } as _;
@@ -656,7 +656,7 @@ impl From<HookError> for i64 {
                     }
                     #[cfg(windows)]
                     {
-                        WSAEINVAL as i32
+                        WSAEINVAL
                     }
                 }
                 ResponseError::NotImplemented => {
@@ -666,7 +666,7 @@ impl From<HookError> for i64 {
                     }
                     #[cfg(windows)]
                     {
-                        WSAEINVAL as i32
+                        WSAEINVAL
                     }
                 }
                 ResponseError::StripPrefix(_) => {
@@ -676,7 +676,7 @@ impl From<HookError> for i64 {
                     }
                     #[cfg(windows)]
                     {
-                        WSAEINVAL as i32
+                        WSAEINVAL
                     }
                 }
                 ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. } => {
@@ -690,7 +690,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEFAULT as i32
+                    WSAEFAULT
                 }
             }
             HookError::Utf8(_) => {
@@ -700,7 +700,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::NullPointer => {
@@ -710,7 +710,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::LocalFileCreation(_, err) => err,
@@ -723,7 +723,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEAFNOSUPPORT as i32
+                    WSAEAFNOSUPPORT
                 }
             }
             HookError::UnsupportedSocketType => {
@@ -733,7 +733,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEAFNOSUPPORT as i32
+                    WSAEAFNOSUPPORT
                 }
             }
             HookError::BadPointer => {
@@ -743,7 +743,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEFAULT as i32
+                    WSAEFAULT
                 }
             }
             HookError::AddressAlreadyBound(_) => {
@@ -753,7 +753,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEADDRINUSE as i32
+                    WSAEADDRINUSE
                 }
             }
             HookError::FileNotFound => {
@@ -779,7 +779,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEINVAL as i32
+                    WSAEINVAL
                 }
             }
             HookError::SocketNotFound(_) => {
@@ -789,7 +789,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEBADF as i32
+                    WSAEBADF
                 }
             }
             HookError::ManagedSocketNotFound(_) => {
@@ -799,7 +799,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEBADF as i32
+                    WSAEBADF
                 }
             }
             HookError::ConnectError(_) => {
@@ -809,7 +809,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEFAULT as i32
+                    WSAEFAULT
                 }
             }
             HookError::AddrInfoError(_) => {
@@ -819,7 +819,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEFAULT as i32
+                    WSAEFAULT
                 }
             }
             HookError::SendToError(_) => {
@@ -829,7 +829,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEFAULT as i32
+                    WSAEFAULT
                 }
             }
             HookError::HostnameResolveError(_) => {
@@ -839,7 +839,7 @@ impl From<HookError> for i64 {
                 }
                 #[cfg(windows)]
                 {
-                    WSAEFAULT as i32
+                    WSAEFAULT
                 }
             }
         };

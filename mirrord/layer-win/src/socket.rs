@@ -444,7 +444,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
 
     let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
-        let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len() as i32) };
+        let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
         log_connection_result(result, "connect_detour", addr);
         ConnectResult::from(result)
     };
@@ -472,8 +472,7 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
 
     // fallback to original
     let original = CONNECT_ORIGINAL.get().unwrap();
-    let result = unsafe { original(s, name, namelen) };
-    result
+    unsafe { original(s, name, namelen) }
 }
 
 /// Windows socket hook for accept
@@ -777,7 +776,7 @@ unsafe extern "system" fn wsa_connect_detour(
             original(
                 s,
                 addr.as_ptr() as *const _,
-                addr.len() as i32,
+                addr.len(),
                 lpCallerData,
                 lpCalleeData,
                 lpSQOS,
@@ -785,7 +784,7 @@ unsafe extern "system" fn wsa_connect_detour(
             )
         };
         log_connection_result(result, "wsa_connect_detour", addr);
-        return ConnectResult::from(result);
+        ConnectResult::from(result)
     };
 
     let raw_addr = SockAddr::from(
@@ -1117,7 +1116,7 @@ unsafe extern "system" fn wsa_send_to_detour(
             first_buf_ptr,
             first_buf_len as usize,
             dwFlags as i32,
-            raw_destination.into(),
+            raw_destination,
             wsa_sendto_fn,
             proxy_request_fn,
         ) {
@@ -1315,15 +1314,15 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
     }
 
     // For hostname-related types that Python uses, try to return our remote hostname
-    let should_intercept = match name_type {
+    let should_intercept = matches!(
+        name_type,
         ComputerNameDnsHostname
-        | ComputerNameDnsFullyQualified
-        | ComputerNamePhysicalDnsHostname
-        | ComputerNamePhysicalDnsFullyQualified
-        | ComputerNameNetBIOS
-        | ComputerNamePhysicalNetBIOS => true,
-        _ => false,
-    };
+            | ComputerNameDnsFullyQualified
+            | ComputerNamePhysicalDnsHostname
+            | ComputerNamePhysicalDnsFullyQualified
+            | ComputerNameNetBIOS
+            | ComputerNamePhysicalNetBIOS
+    );
 
     if should_intercept {
         // Get hostname using the centralized helper function
@@ -1565,15 +1564,15 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
                 tracing::debug!("gethostbyname: successfully resolved with fallback");
 
                 // Cache this mapping for future use with the unified cache (IP -> hostname)
-                if let Some(ip_str) = unsafe { extract_ip_from_hostent(result) } {
-                    if let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>() {
-                        update_dns_reverse_mapping(ip_addr, hostname_cstr.to_string());
-                        tracing::debug!(
-                            "gethostbyname: cached mapping {} -> {}",
-                            ip_addr,
-                            hostname_cstr
-                        );
-                    }
+                if let Some(ip_str) = unsafe { extract_ip_from_hostent(result) }
+                    && let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>()
+                {
+                    update_dns_reverse_mapping(ip_addr, hostname_cstr.to_string());
+                    tracing::debug!(
+                        "gethostbyname: cached mapping {} -> {}",
+                        ip_addr,
+                        hostname_cstr
+                    );
                 }
                 return result;
             }
@@ -1873,7 +1872,7 @@ unsafe extern "system" fn sendto_detour(
         buf as *const u8,
         len as usize,
         flags,
-        raw_destination.into(),
+        raw_destination,
         sendto_fn,
         proxy_request_fn,
     ) {

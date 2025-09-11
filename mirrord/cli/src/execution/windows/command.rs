@@ -128,7 +128,7 @@ impl WindowsCommand {
                     }
                     Ok((read_pipe_handle, write_pipe_handle))
                 },
-                Err(e) => Err(ProcessExecError::PipeError(e).into()),
+                Err(e) => Err(ProcessExecError::PipeError(e)),
             },
             // stdio not specified - dont fail, just return invalid handles silently
             None => Ok((INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE)),
@@ -211,7 +211,7 @@ impl WindowsCommand {
         };
 
         Ok(WindowsProcess {
-            process_info: process_info,
+            process_info,
             stdin: child_stdin,
             stdout: child_stdout,
             stderr: child_stderr,
