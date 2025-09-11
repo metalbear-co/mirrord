@@ -38,7 +38,7 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 .ok()
                 .and_then(|encoded| {
                     BASE64_URL_SAFE
-                        .decode(encoded.into_bytes())
+                        .decode(encoded.as_bytes())
                         .inspect_err(|error| {
                             tracing::warn!(
                                 ?error,

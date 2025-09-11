@@ -1,4 +1,4 @@
-use std::{io, net::SocketAddr, process::exit};
+use std::{io, net::SocketAddr};
 
 #[cfg(not(target_os = "windows"))]
 use io::Write;
@@ -70,7 +70,12 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
 /// This function forks the current process.
 /// If the current process uses multiple threads,
 /// it will be bound by [`signal-safety`](https://man7.org/linux/man-pages/man7/signal-safety.7.html) rules after returning from this function.
+#[cfg(unix)]
 pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
+    use std::process::exit;
+
+    use nix::unistd::{ForkResult, fork};
+
     unsafe {
         match fork()? {
             ForkResult::Parent { .. } => exit(0),

@@ -37,11 +37,13 @@ use tracing::{Level, debug, error, info, trace, warn};
 use crate::extract::extract_arm64;
 #[cfg(not(target_os = "windows"))]
 use crate::extract::extract_library;
+#[cfg(unix)]
+use crate::util::reparent_to_init;
 use crate::{
     CliResult,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
-    util::{get_user_git_branch, remove_proxy_env, reparent_to_init},
+    util::{get_user_git_branch, remove_proxy_env},
 };
 
 #[cfg(target_os = "windows")]
@@ -311,6 +313,7 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        #[cfg(unix)]
         unsafe {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
         }
