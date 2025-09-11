@@ -123,7 +123,6 @@ mod targetless_tests {
         drop(test_process);
     }
 
-
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "current_thread")]

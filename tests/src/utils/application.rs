@@ -47,7 +47,7 @@ pub enum Application {
     ///
     /// - `node-e2e/fspolicy/test_operator_fs_policy.mjs`
     NodeFsPolicy,
-	IntproxyChild
+    IntproxyChild,
 }
 
 impl Application {
@@ -102,7 +102,7 @@ impl Application {
             }
             Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
             Application::RustSqs => vec!["../target/debug/rust-sqs-printer"],
-			Application::IntproxyChild => vec!["intproxy_child/out.c_test_app"]
+            Application::IntproxyChild => vec!["intproxy_child/out.c_test_app"],
         }
     }
 

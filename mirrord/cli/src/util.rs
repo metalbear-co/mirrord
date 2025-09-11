@@ -1,7 +1,14 @@
-use std::{io::{self, Write}, net::SocketAddr, process::exit};
+use std::{
+    io::{self, Write},
+    net::SocketAddr,
+    process::exit,
+};
 
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
-use nix::{libc, unistd::{fork, ForkResult}};
+use nix::{
+    libc,
+    unistd::{ForkResult, fork},
+};
 use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
 
@@ -53,7 +60,6 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
     }
 }
 
-
 /// "Reparent" this process to init by forking and then exiting on the
 /// parent. The child process will get reparented to init.
 ///
@@ -66,7 +72,7 @@ pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
     unsafe {
         match fork()? {
             ForkResult::Parent { .. } => exit(0),
-            ForkResult::Child => Ok(())
+            ForkResult::Child => Ok(()),
         }
     }
 }
