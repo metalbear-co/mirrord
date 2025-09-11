@@ -27,16 +27,15 @@
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
-        graceful_exit!()
+        graceful_exit!();
     }};
-    () => {
-        nix::sys::signal::kill(
+    () => {{
+        let _ = nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGKILL,
-        )
-        .expect("unable to graceful exit");
-        std::process::abort()
-    };
+        );
+        std::process::abort();
+    }};
 }
 
 #[cfg(target_os = "windows")]
@@ -44,13 +43,13 @@ macro_rules! graceful_exit {
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
         eprintln!($($arg)+);
-        graceful_exit!()
+        graceful_exit!();
     }};
     () => {{
         unsafe {
             use winapi::um::processthreadsapi::{GetCurrentProcess, TerminateProcess};
             let _ = TerminateProcess(GetCurrentProcess(), 1);
         }
-        unreachable!()
+        std::process::abort();
     }};
 }
