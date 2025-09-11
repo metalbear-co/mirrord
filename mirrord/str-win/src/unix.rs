@@ -5,7 +5,7 @@ pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
     let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
 
     // Convert to string, handling invalid UTF-8 gracefully
-    String::from_utf8_lossy(&buffer[..len]).into_owned()
+    String::from_utf8_lossy(buffer.get(..len).unwrap_or(buffer)).into_owned()
 }
 
 pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
@@ -16,7 +16,9 @@ pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
 
     // Convert u16 slice to string by treating each u16 as a Unicode code point
     // This is a simplified approach - real UTF-16 would be more complex
-    buffer[..len]
+    buffer
+        .get(..len)
+        .unwrap_or(buffer)
         .iter()
         .filter_map(|&c| std::char::from_u32(c as u32))
         .collect()
@@ -36,18 +38,20 @@ pub fn u16_multi_buffer_to_strings<T: AsRef<[u16]>>(buffer: T) -> Vec<String> {
         if c == 0 {
             if start < i {
                 // Convert the substring to String
-                let substring: String = buffer[start..i]
-                    .iter()
-                    .filter_map(|&c| std::char::from_u32(c as u32))
-                    .collect();
-                if !substring.is_empty() {
-                    result.push(substring);
+                if let Some(slice) = buffer.get(start..i) {
+                    let substring: String = slice
+                        .iter()
+                        .filter_map(|&c| std::char::from_u32(c as u32))
+                        .collect();
+                    if !substring.is_empty() {
+                        result.push(substring);
+                    }
                 }
             }
             start = i + 1;
 
             // Check for double null terminator (end of MULTI_SZ)
-            if i + 1 < buffer.len() && buffer[i + 1] == 0 {
+            if buffer.get(i + 1).copied().unwrap_or(1) == 0 {
                 break;
             }
         }
