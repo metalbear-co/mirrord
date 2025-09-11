@@ -9,6 +9,8 @@ use crate::util::remote_runtime::RuntimeSpawn;
 
 #[derive(Clone)]
 pub struct LocalRuntime {
+    /// `Some(pid)` when we're running ephemeral, and `None` when running `targetless`.
+    target_pid: Option<u64>,
     future_tx: mpsc::Sender<BoxFuture<'static, ()>>,
 }
 
@@ -20,8 +22,8 @@ impl RuntimeSpawn for LocalRuntime {
 
 impl LocalRuntime {
     #[tracing::instrument(level = Level::INFO, err)]
-    pub async fn new(pid: Option<u64>) -> Result<Self, AgentRuntimeError> {
-        let pid = pid
+    pub async fn new(target_pid: Option<u64>) -> Result<Self, AgentRuntimeError> {
+        let pid = target_pid
             .map(|p| p.to_string())
             .unwrap_or_else(|| "no-pid".to_string());
 
@@ -58,9 +60,17 @@ impl LocalRuntime {
             .map_err(AgentRuntimeError::ThreadSpawnError)?;
 
         match result_rx.await {
-            Ok(Ok(())) => Ok(Self { future_tx }),
+            Ok(Ok(())) => Ok(Self {
+                target_pid,
+                future_tx,
+            }),
             Ok(Err(error)) => Err(error),
             Err(..) => Err(AgentRuntimeError::Panicked),
         }
+    }
+
+    /// Returns the target's PID.
+    pub fn target_pid(&self) -> Option<u64> {
+        self.target_pid
     }
 }

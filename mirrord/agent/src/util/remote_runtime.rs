@@ -307,7 +307,7 @@ impl BgTaskRuntime {
     pub fn target_pid(&self) -> Option<u64> {
         match self {
             Self::Remote(remote_runtime) => Some(remote_runtime.target_pid()),
-            Self::Local(..) => None,
+            Self::Local(local_runtime) => local_runtime.target_pid(),
         }
     }
 }
