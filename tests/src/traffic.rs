@@ -453,12 +453,10 @@ mod traffic_tests {
         .await;
 
         // Listen for UDP message directly from application.
-        const BUF_SIZE: usize = {
-            let mut buf_size = 27;
-            #[cfg(target_os = "windows")]
-            buf_size += 1;
-            buf_size
-        };
+        #[cfg(target_os = "windows")]
+        const BUF_SIZE: usize = 28;
+        #[cfg(not(target_os = "windows"))]
+        const BUF_SIZE: usize = 27;
 
         let mut buf = [0; BUF_SIZE];
         let amt = socket
@@ -467,11 +465,14 @@ mod traffic_tests {
         assert_eq!(amt, BUF_SIZE);
 
         let expected_str = {
-            #[allow(unused_assignments)]
-            let mut lf = "";
             #[cfg(target_os = "windows")]
-            lf = "\n";
-            format!("Can I pass the test please?{lf}")
+            {
+                format!("Can I pass the test please?\n")
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                format!("Can I pass the test please?")
+            }
         };
         assert_eq!(&buf[..amt], expected_str.as_bytes()); // Sure you can.
 
