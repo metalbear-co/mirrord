@@ -122,4 +122,16 @@ mod targetless_tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
         drop(test_process);
     }
+
+
+    #[cfg_attr(not(feature = "targetless"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    #[timeout(Duration::from_secs(120))]
+    pub async fn intproxy_child() {
+        let app = Application::IntproxyChild;
+        let mut process = app.run_targetless(None, None, None).await;
+        let res = process.wait().await;
+        assert!(res.success());
+    }
 }
