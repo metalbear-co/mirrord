@@ -330,11 +330,7 @@ pub fn prepare_outgoing_address(address: SocketAddr) -> SocketAddress {
 }
 
 /// Version of connect_outgoing that performs the actual connect call when needed
-#[mirrord_layer_macro::instrument(
-    level = "debug",
-    ret,
-    skip(user_socket_info, proxy_request_fn)
-)]
+#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info, proxy_request_fn))]
 
 /// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
 /// only)
