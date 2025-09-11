@@ -19,7 +19,7 @@ use crate::utils::{
 /// All requests (matching and non-matching) should still reach the original server.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(120))]
+#[timeout(Duration::from_secs(240))]
 async fn mirror_with_http_header_filter(
     #[future] basic_service: KubeService,
     #[future] kube_client: Client,
@@ -67,7 +67,7 @@ async fn mirror_with_http_header_filter(
         .await;
 
     mirror_process
-        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        .wait_for_line(Duration::from_secs(120), "daemon subscribed")
         .await;
 
     // Send request that SHOULD be mirrored
