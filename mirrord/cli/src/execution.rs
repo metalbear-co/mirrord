@@ -318,6 +318,8 @@ impl MirrordExecution {
         // and our immediate child promptly exits (which is what we
         // wait for here), reparenting our (now former) grandchild to
         // init.
+        // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html
+        // for reference.
         proxy_process.wait().await.unwrap();
 
         let intproxy_address: SocketAddr = BufReader::new(stdout)

@@ -60,14 +60,15 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
     }
 }
 
-/// "Reparent" this process to init by forking and then exiting on the
-/// parent. The child process will get reparented to init.
+/// "Reparent" this process to init by forking and then exiting in the
+/// parent. The child process will get reparented to init,
+/// and return from this function.
 ///
 /// # Safety
 ///
-/// Since this function calls `nix::unistd::fork`, the safety section
-/// from that function applies. Namely, we can only call it in a
-/// single-threaded context.
+/// This function forks the current process.
+/// If the current process uses multiple threads,
+/// it will be bound by [`signal-safety`](https://man7.org/linux/man-pages/man7/signal-safety.7.html) rules after returning from this function.
 pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
     unsafe {
         match fork()? {
