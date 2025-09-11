@@ -31,6 +31,7 @@ use super::error::{AgentRuntimeError, BgTaskPanicked};
 use crate::{
     error::AgentError,
     namespace::{self, NamespaceType},
+    util::local_runtime::LocalRuntime,
 };
 
 pub trait RuntimeSpawn {
@@ -73,63 +74,9 @@ pub struct RemoteRuntime {
     future_tx: mpsc::Sender<BoxFuture<'static, ()>>,
 }
 
-#[derive(Clone)]
-pub struct LocalRuntime {
-    future_tx: mpsc::Sender<BoxFuture<'static, ()>>,
-}
-
 impl RuntimeSpawn for RemoteRuntime {
     fn future_tx(&self) -> mpsc::Sender<BoxFuture<'static, ()>> {
         self.future_tx.clone()
-    }
-}
-
-impl RuntimeSpawn for LocalRuntime {
-    fn future_tx(&self) -> mpsc::Sender<BoxFuture<'static, ()>> {
-        self.future_tx.clone()
-    }
-}
-
-impl LocalRuntime {
-    #[tracing::instrument(level = Level::INFO, err)]
-    pub async fn new() -> Result<Self, AgentRuntimeError> {
-        let (future_tx, mut future_rx) = mpsc::channel(16);
-        let (result_tx, result_rx) = oneshot::channel();
-        let thread_name = format!("local-runtime-thread");
-        let thread_logic = move || {
-            let rt_result = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .thread_name(format!("local-runtime-worker"))
-                .build();
-            let rt = match rt_result {
-                Ok(rt) => rt,
-                Err(error) => {
-                    let _ = result_tx.send(Err(AgentRuntimeError::TokioRuntimeError(error)));
-                    return;
-                }
-            };
-
-            if result_tx.send(Ok(())).is_err() {
-                return;
-            }
-
-            rt.block_on(async move {
-                while let Some(future) = future_rx.recv().await {
-                    tokio::spawn(future);
-                }
-            });
-        };
-
-        thread::Builder::new()
-            .name(thread_name)
-            .spawn(thread_logic)
-            .map_err(AgentRuntimeError::ThreadSpawnError)?;
-
-        match result_rx.await {
-            Ok(Ok(())) => Ok(Self { future_tx }),
-            Ok(Err(error)) => Err(error),
-            Err(..) => Err(AgentRuntimeError::Panicked),
-        }
     }
 }
 

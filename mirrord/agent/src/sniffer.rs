@@ -412,7 +412,10 @@ mod test {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus, LocalRuntime};
+    use crate::util::{
+        local_runtime::LocalRuntime,
+        remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    };
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -453,7 +456,8 @@ mod test {
                 clients_closed: Default::default(),
             };
 
-            let local_bg_task_runtime = BgTaskRuntime::Local(LocalRuntime::new().await.unwrap());
+            let local_bg_task_runtime =
+                BgTaskRuntime::Local(LocalRuntime::new(None).await.unwrap());
             let task_status = local_bg_task_runtime
                 .spawn(sniffer.start(CancellationToken::new()))
                 .into_status("TcpSnifferTask");

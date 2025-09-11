@@ -48,8 +48,9 @@ use crate::{
     steal::{StealerCommand, TcpStealerApi},
     util::{
         ClientId,
+        local_runtime::LocalRuntime,
         protocol_version::ClientProtocolVersion,
-        remote_runtime::{BgTaskRuntime, BgTaskStatus, LocalRuntime, RemoteRuntime, RuntimeSpawn},
+        remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime, RuntimeSpawn},
     },
 };
 
@@ -91,6 +92,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
+    #[tracing::instrument(level = Level::INFO, err)]
     pub async fn new(args: &Args) -> AgentResult<State> {
         let tls_connector = args
             .operator_tls_cert_pem
@@ -135,10 +137,11 @@ impl State {
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
-            Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
-                RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
-            ),
-            None | Some(..) => BgTaskRuntime::Local(LocalRuntime::new().await?),
+            // Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
+            //     RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
+            // ),
+            Some(pid) => BgTaskRuntime::Local(LocalRuntime::new(Some(pid)).await?),
+            None => BgTaskRuntime::Local(LocalRuntime::new(None).await?),
         };
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
@@ -241,6 +244,7 @@ struct BackgroundTasks {
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
     mirror_handle: Option<MirrorHandle>,
+    never_stops: BackgroundTask<u32>,
 }
 
 struct ClientConnectionHandler {
@@ -726,6 +730,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
+    let never_stops = dummy::never_stops(&state.network_runtime).await;
+
     let passthrough_mirroring_enabled = envs::PASSTHROUGH_MIRRORING.from_env_or_default();
     let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
         setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
@@ -759,6 +765,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         stealer,
         dns,
         mirror_handle,
+        never_stops,
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -852,11 +859,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         sniffer,
         stealer,
         dns,
+        never_stops,
         ..
     } = bg_tasks;
 
     let _ = timeout(Duration::from_secs(5), async {
-        tracing::info!("CLOSING AGENT!");
         tokio::join!(
             sniffer.wait().inspect_err(|error| {
                 error!(%error, "start_agent -> Sniffer task failed");
@@ -865,6 +872,9 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 error!(%error, "start_agent -> Stealer task failed");
             }),
             dns.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> DNS task failed");
+            }),
+            never_stops.wait().inspect_err(|error| {
                 error!(%error, "start_agent -> DNS task failed");
             }),
         )
@@ -1052,5 +1062,39 @@ pub async fn main() -> AgentResult<()> {
         start_agent(args).await
     } else {
         start_iptable_guard(args).await
+    }
+}
+
+mod dummy {
+    use std::{io, time::Duration};
+
+    use tokio::{select, sync::mpsc};
+    use tracing::Level;
+
+    use crate::{
+        entrypoint::BackgroundTask,
+        util::remote_runtime::{BgTaskRuntime, IntoStatus},
+    };
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    pub(super) async fn never_stops(runtime: &BgTaskRuntime) -> BackgroundTask<u32> {
+        let (command_tx, mut command_rx) = mpsc::channel::<u32>(1000);
+        let s = runtime
+            .spawn(async move {
+                loop {
+                    select! {
+                        Some(_) = command_rx.recv() => {
+                            break;
+                        }
+                        else => {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    };
+                }
+                Ok::<_, io::Error>(())
+            })
+            .into_status("infinite");
+
+        BackgroundTask::Running(s, command_tx)
     }
 }
