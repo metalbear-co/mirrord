@@ -92,7 +92,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    #[tracing::instrument(level = Level::INFO, err)]
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub async fn new(args: &Args) -> AgentResult<State> {
         let tls_connector = args
             .operator_tls_cert_pem
@@ -392,7 +392,7 @@ impl ClientConnectionHandler {
     /// Starts a loop that handles client connection and state.
     ///
     /// Breaks upon receiver/sender drop.
-    #[tracing::instrument(level = Level::INFO, skip(self), ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
             select! {

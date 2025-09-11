@@ -34,7 +34,7 @@ use crate::{
     util::local_runtime::LocalRuntime,
 };
 
-pub trait RuntimeSpawn {
+pub(crate) trait RuntimeSpawn {
     fn future_tx(&self) -> mpsc::Sender<BoxFuture<'static, ()>>;
 
     /// Spawns the given future on this remote runtime.

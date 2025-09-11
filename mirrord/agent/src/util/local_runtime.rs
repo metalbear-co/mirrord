@@ -21,8 +21,8 @@ impl RuntimeSpawn for LocalRuntime {
 }
 
 impl LocalRuntime {
-    #[tracing::instrument(level = Level::INFO, err)]
-    pub async fn new(target_pid: Option<u64>) -> Result<Self, AgentRuntimeError> {
+    #[tracing::instrument(level = Level::TRACE, err)]
+    pub(crate) async fn new(target_pid: Option<u64>) -> Result<Self, AgentRuntimeError> {
         let pid = target_pid
             .map(|p| p.to_string())
             .unwrap_or_else(|| "no-pid".to_string());
@@ -70,7 +70,7 @@ impl LocalRuntime {
     }
 
     /// Returns the target's PID.
-    pub fn target_pid(&self) -> Option<u64> {
+    pub(super) fn target_pid(&self) -> Option<u64> {
         self.target_pid
     }
 }

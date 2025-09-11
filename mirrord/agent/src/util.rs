@@ -11,7 +11,7 @@ use futures::{FutureExt, future::BoxFuture};
 use tokio::sync::mpsc;
 
 pub mod error;
-pub mod local_runtime;
+pub(super) mod local_runtime;
 pub mod path_resolver;
 pub mod protocol_version;
 pub mod remote_runtime;
