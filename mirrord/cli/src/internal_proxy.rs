@@ -18,8 +18,6 @@ use std::{
 #[cfg(not(target_os = "windows"))]
 use std::{ops::Not, os::unix::ffi::OsStrExt};
 
-#[cfg(not(target_os = "windows"))]
-use create::util::detach_io;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
@@ -34,6 +32,8 @@ use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
 
+#[cfg(not(target_os = "windows"))]
+use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},

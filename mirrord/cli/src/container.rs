@@ -255,7 +255,7 @@ pub async fn container_command(
     #[cfg(not(target_os = "windows"))]
     if let Some(signal) = status.signal() {
         tracing::warn!("Container command was terminated by signal {signal}");
-        Ok(-1)
+        return Ok(-1);
     }
 
     Ok(status.code().unwrap_or_default())

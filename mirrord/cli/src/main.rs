@@ -244,6 +244,8 @@
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+#[cfg(not(target_os = "windows"))]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
