@@ -190,7 +190,9 @@ mod tests {
 
     #[test]
     fn test_environment_variable_hostname() {
-        std::env::set_var("MIRRORD_OVERRIDE_HOSTNAME", "test-hostname");
+        unsafe {
+            std::env::set_var("MIRRORD_OVERRIDE_HOSTNAME", "test-hostname");
+        }
 
         // Create a resolver without proxy connection to test env var fallback
         let resolver = UnixHostnameResolver {
@@ -204,12 +206,16 @@ mod tests {
             _ => panic!("Expected hostname from environment variable"),
         }
 
-        std::env::remove_var("MIRRORD_OVERRIDE_HOSTNAME");
+        unsafe {
+            std::env::remove_var("MIRRORD_OVERRIDE_HOSTNAME");
+        }
     }
 
     #[test]
     fn test_override_hostname() {
-        std::env::set_var("MIRRORD_OVERRIDE_HOSTNAME", "override-hostname");
+        unsafe {
+            std::env::set_var("MIRRORD_OVERRIDE_HOSTNAME", "override-hostname");
+        }
 
         // Create a resolver without proxy connection to test env var fallback
         let resolver = UnixHostnameResolver {
@@ -223,7 +229,9 @@ mod tests {
             _ => panic!("Expected hostname from override environment variable"),
         }
 
-        std::env::remove_var("MIRRORD_OVERRIDE_HOSTNAME");
+        unsafe {
+            std::env::remove_var("MIRRORD_OVERRIDE_HOSTNAME");
+        }
     }
 
     #[test]
