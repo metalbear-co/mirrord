@@ -176,7 +176,7 @@ pub enum FileResponse {
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -203,6 +203,42 @@ pub enum DaemonMessage {
     ///
     /// Holds the unique id of this ping.
     OperatorPing(u128),
+}
+
+// We use a custom Debug impl to redact the payload from
+// GetEnvVarsResponse
+impl core::fmt::Debug for DaemonMessage {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            DaemonMessage::Close(f0) => f.debug_tuple("Close").field(&f0).finish(),
+            DaemonMessage::Tcp(f0) => f.debug_tuple("Tcp").field(&f0).finish(),
+            DaemonMessage::TcpSteal(f0) => f.debug_tuple("TcpSteal").field(&f0).finish(),
+            DaemonMessage::TcpOutgoing(f0) => f.debug_tuple("TcpOutgoing").field(&f0).finish(),
+            DaemonMessage::UdpOutgoing(f0) => f.debug_tuple("UdpOutgoing").field(&f0).finish(),
+            DaemonMessage::LogMessage(f0) => f.debug_tuple("LogMessage").field(&f0).finish(),
+            DaemonMessage::File(f0) => f.debug_tuple("File").field(&f0).finish(),
+            DaemonMessage::Pong => f.write_str("Pong"),
+            DaemonMessage::GetEnvVarsResponse(f0) => {
+                let mut tuple = f.debug_tuple("GetEnvVarsResponse");
+                match f0 {
+                    // type inference should have figured this out
+                    Ok(_) => tuple.field(&Ok::<_, ResponseError>("<REDACTED>")),
+                    Err(_) => tuple.field(&f0),
+                }
+                .finish()
+            }
+            DaemonMessage::GetAddrInfoResponse(f0) => {
+                f.debug_tuple("GetAddrInfoResponse").field(&f0).finish()
+            }
+            DaemonMessage::PauseTarget(f0) => f.debug_tuple("PauseTarget").field(&f0).finish(),
+            DaemonMessage::SwitchProtocolVersionResponse(f0) => f
+                .debug_tuple("SwitchProtocolVersionResponse")
+                .field(&f0)
+                .finish(),
+            DaemonMessage::Vpn(f0) => f.debug_tuple("Vpn").field(&f0).finish(),
+            DaemonMessage::OperatorPing(f0) => f.debug_tuple("OperatorPing").field(&f0).finish(),
+        }
+    }
 }
 
 pub struct ProtocolCodec<I, O> {
