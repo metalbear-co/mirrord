@@ -16,10 +16,13 @@ use std::{
     sync::PoisonError,
 };
 
+// TODO: These imports need proper dependencies or should be moved to the layer crate
+#[cfg(target_os = "macos")]
+use exec;
 #[cfg(unix)]
 use libc::{
-    DIR, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL, EIO,
-    EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
+    DIR, EACCES, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL,
+    EIO, EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
 };
 use mirrord_config::config::ConfigError;
 use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
@@ -297,7 +300,7 @@ pub enum HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
+/// handling [`ProxyToLayerMessage`].
 #[derive(Error, Debug)]
 pub enum LayerError {
     #[error("mirrord-layer: `{0}`")]
@@ -340,6 +343,7 @@ pub enum LayerError {
     UnsupportedSocketType,
 
     #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
 
@@ -433,6 +437,10 @@ impl From<HookError> for i64 {
                         graceful_exit!("Proxy error, connectivity issue or a bug: {err}")
                     }
                 };
+            }
+            #[cfg(target_os = "macos")]
+            HookError::FailedSipPatch(_) => {
+                error!("SIP patch failed >> {fail:?}")
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };

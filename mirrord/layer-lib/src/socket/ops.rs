@@ -118,14 +118,24 @@ impl From<ConnectResult> for i32 {
 }
 
 // Platform-specific error handling
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn get_last_error() -> i32 {
     unsafe { *libc::__errno_location() }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn set_last_error(error: i32) {
     unsafe { *libc::__errno_location() = error };
+}
+
+#[cfg(target_os = "macos")]
+fn get_last_error() -> i32 {
+    unsafe { *libc::__error() }
+}
+
+#[cfg(target_os = "macos")]
+fn set_last_error(error: i32) {
+    unsafe { *libc::__error() = error };
 }
 
 #[cfg(windows)]
@@ -475,7 +485,7 @@ pub type SendtoFn = unsafe extern "system" fn(
 /// - `proxy_request_fn`: Function to make proxy requests
 ///
 /// ## Returns
-/// HookResult<isize>
+/// `HookResult<isize>`
 #[mirrord_layer_macro::instrument(
     level = "debug",
     ret,

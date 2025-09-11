@@ -37,10 +37,7 @@ fn string_to_u8() {
 
     let bytes = string_to_u8_buffer(str);
     assert_eq!(bytes.len(), 5);
-    assert_eq!(
-        bytes.as_slice(),
-        &['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8, 0u8]
-    );
+    assert_eq!(bytes.as_slice(), &[b'a', b'b', b'c', b'd', 0u8]);
 }
 
 #[test]
@@ -49,8 +46,5 @@ fn string_to_u16() {
 
     let bytes = string_to_u16_buffer(str);
     assert_eq!(bytes.len(), 5);
-    assert_eq!(
-        bytes.as_slice(),
-        &['a' as u16, 'b' as u16, 'c' as u16, 'd' as u16, 0]
-    );
+    assert_eq!(bytes.as_slice(), &[97u16, 98u16, 99u16, 100u16, 0]);
 }

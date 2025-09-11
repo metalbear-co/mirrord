@@ -33,6 +33,10 @@ libc.workspace = true
 nix.workspace = true
 frida-gum.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+mirrord-sip = { path = "../sip" }
+exec.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 str-win = { path = "../str-win" }
 winapi.workspace = true
