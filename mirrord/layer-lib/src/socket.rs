@@ -46,10 +46,10 @@ pub use crate::error::{ConnectError, HookResult};
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
     ///
-    /// Whenever the user calls [`getpeername`], this is the address we return to them.
+    /// Whenever the user calls `getpeername`, this is the address we return to them.
     ///
     /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
-    /// but use this address in the [`recvfrom`] handling of [`fill_address`].
+    /// but use this address in the `recvfrom` handling of [`fill_address`].
     pub remote_address: SocketAddress,
 
     /// Local address (pod-wise)

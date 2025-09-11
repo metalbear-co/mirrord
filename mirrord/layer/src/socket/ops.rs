@@ -904,7 +904,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// # Note
 ///
-/// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
+/// This function updates the reverse DNS mapping.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn remote_getaddrinfo(
     node: String,

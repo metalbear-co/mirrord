@@ -8,7 +8,7 @@ use std::{
 /// remote DNS resolution functions.
 ///
 /// Used by outgoing connection functions to retrieve the hostname from the address that the user
-/// called [`connect`] with, so we can resolve it locally when necessary.
+/// called `connect` with, so we can resolve it locally when necessary.
 ///
 /// This provides a unified DNS reverse mapping for both Unix and Windows layers:
 /// - Unix layer: Maps IP addresses to hostnames for connect operations
