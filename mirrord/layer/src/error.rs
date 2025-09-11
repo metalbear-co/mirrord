@@ -289,8 +289,9 @@ impl From<HookError> for i64 {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
                     );
-                    // graceful_exit! never returns, but compiler can't determine this
-                    unreachable!()
+                    // graceful_exit! calls std::process::abort() which never returns
+                    #[allow(unreachable_code)]
+                    libc::EINVAL
                 }
             },
             HookError::DNSNoName => libc::EFAULT,

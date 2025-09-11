@@ -841,7 +841,13 @@ pub(super) fn accept(
         layer_address: None,
     });
 
-    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+    let new_socket = UserSocket::new(
+        domain,
+        type_,
+        protocol,
+        state,
+        SocketKind::try_from(type_).map_err(|_| Bypass::Type(type_))?,
+    );
 
     fill_address(address, address_len, remote_source.into())?;
 

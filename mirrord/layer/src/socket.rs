@@ -3,7 +3,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 
 #[cfg(not(target_os = "windows"))]
-use libc::{c_int, sockaddr, socklen_t};
+use libc::{sockaddr, socklen_t};
 // Re-export shared types from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{
     Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketKind, SocketState,

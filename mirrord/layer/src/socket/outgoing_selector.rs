@@ -4,9 +4,8 @@
 
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_layer_lib::socket::{ConnectionThrough, OutgoingSelector};
-use mirrord_protocol::ResponseError;
 
-use crate::{setup, socket::UnixDnsResolver};
+use crate::{error::HookResult, socket::UnixDnsResolver};
 
 /// Get connection through using the Unix DNS resolver
 ///
@@ -15,9 +14,7 @@ pub fn get_connection_through(
     selector: &OutgoingSelector,
     address: std::net::SocketAddr,
     protocol: NetProtocol,
-) -> Result<ConnectionThrough, ResponseError> {
+) -> HookResult<ConnectionThrough> {
     let resolver = UnixDnsResolver;
-    selector
-        .get_connection_through_with_resolver(address, protocol, &resolver)
-        .map_err(|_| ResponseError::DnsLookup)
+    selector.get_connection_through_with_resolver(address, protocol, &resolver)
 }
