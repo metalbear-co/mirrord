@@ -8,13 +8,11 @@ use tracing::Level;
 
 use crate::detour::{Bypass, Detour};
 
-/// Unix-specific extensions for DnsSelector
-impl DnsSelector {
-    #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
-        match self.check_query_result(node, port) {
-            CheckQueryResult::Local => Detour::Bypass(Bypass::LocalDns),
-            CheckQueryResult::Remote => Detour::Success(()),
-        }
+/// Check DNS query using the Unix-specific behavior
+#[tracing::instrument(level = Level::DEBUG, ret)]
+pub fn check_query(selector: &DnsSelector, node: &str, port: u16) -> Detour<()> {
+    match selector.check_query_result(node, port) {
+        CheckQueryResult::Local => Detour::Bypass(Bypass::LocalDns),
+        CheckQueryResult::Remote => Detour::Success(()),
     }
 }

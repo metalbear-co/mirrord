@@ -12,7 +12,7 @@ pub use dns::{
 };
 // Cross-platform socket constants
 #[cfg(unix)]
-use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
+use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, c_int};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
@@ -123,6 +123,21 @@ impl From<SocketKind> for NetProtocol {
         match kind {
             SocketKind::Tcp(..) => Self::Stream,
             SocketKind::Udp(..) => Self::Datagrams,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl TryFrom<c_int> for SocketKind {
+    type Error = ();
+
+    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
+        if (type_ & SOCK_STREAM) > 0 {
+            Ok(SocketKind::Tcp(type_))
+        } else if (type_ & SOCK_DGRAM) > 0 {
+            Ok(SocketKind::Udp(type_))
+        } else {
+            Err(())
         }
     }
 }

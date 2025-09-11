@@ -1,25 +1,23 @@
 //! Unix-specific extensions for OutgoingSelector
 //!
-//! Provides convenience methods for the OutgoingSelector when running on Unix platforms.
+//! Provides convenience functions for the OutgoingSelector when running on Unix platforms.
 
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_layer_lib::socket::{ConnectionThrough, OutgoingSelector};
 use mirrord_protocol::ResponseError;
 
-use crate::{setup, socket::DnsResolver};
+use crate::{setup, socket::UnixDnsResolver};
 
-/// Unix-specific extensions for OutgoingSelector
-impl OutgoingSelector {
-    /// Get connection through using the global DNS resolver
-    ///
-    /// This is a convenience method that uses the global DNS resolver from the setup.
-    pub fn get_connection_through(
-        &self,
-        address: std::net::SocketAddr,
-        protocol: NetProtocol,
-    ) -> Result<ConnectionThrough, ResponseError> {
-        let resolver = setup().dns_resolver();
-        self.get_connection_through_with_resolver(address, protocol, resolver)
-            .map_err(|_| ResponseError::DnsLookup)
-    }
+/// Get connection through using the Unix DNS resolver
+///
+/// This is a convenience function that uses the Unix DNS resolver.
+pub fn get_connection_through(
+    selector: &OutgoingSelector,
+    address: std::net::SocketAddr,
+    protocol: NetProtocol,
+) -> Result<ConnectionThrough, ResponseError> {
+    let resolver = UnixDnsResolver;
+    selector
+        .get_connection_through_with_resolver(address, protocol, &resolver)
+        .map_err(|_| ResponseError::DnsLookup)
 }

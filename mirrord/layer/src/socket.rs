@@ -50,21 +50,6 @@ pub(crate) mod outgoing_selector;
 // Re-export the unified SOCKETS from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS};
 
-// Unix-specific SocketKind conversion
-impl TryFrom<c_int> for SocketKind {
-    type Error = Bypass;
-
-    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        if (type_ & libc::SOCK_STREAM) > 0 {
-            Ok(SocketKind::Tcp(type_))
-        } else if (type_ & libc::SOCK_DGRAM) > 0 {
-            Ok(SocketKind::Udp(type_))
-        } else {
-            Err(Bypass::Type(type_))
-        }
-    }
-}
-
 /// Unix-specific DNS resolver implementation
 pub struct UnixDnsResolver;
 

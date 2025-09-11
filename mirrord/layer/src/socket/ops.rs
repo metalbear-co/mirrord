@@ -35,7 +35,7 @@ use tracing::{error, trace};
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
-use super::{hooks::*, *};
+use super::{dns_selector, hooks::*, outgoing_selector, *};
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
@@ -117,7 +117,7 @@ impl From<ConnectResult> for i32 {
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = type_.try_into()?;
+    let socket_kind = SocketKind::try_from(type_).map_err(|_| Bypass::Type(type_))?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -529,10 +529,11 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
         // address, in a local connection context (or vice-versa), so we let `remote_connection`
         // handle this address trickery.
-        match crate::setup()
-            .outgoing_selector()
-            .get_connection_through(remote_address.as_socket()?, protocol)?
-        {
+        match outgoing_selector::get_connection_through(
+            crate::setup().outgoing_selector(),
+            remote_address.as_socket()?,
+            protocol,
+        )? {
             ConnectionThrough::Remote(addr) => {
                 let connect_result = remote_connection(SockAddr::from(addr))?;
                 Detour::Success(connect_result)
@@ -636,7 +637,7 @@ pub(super) fn connect(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_)?;
+            let kind = SocketKind::try_from(type_).map_err(|_| Bypass::Type(type_))?;
 
             Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
         }
@@ -986,7 +987,7 @@ pub(super) fn getaddrinfo(
         .unwrap_or(0);
 
     let setup = crate::setup();
-    setup.dns_selector().check_query(&node, service)?;
+    dns_selector::check_query(setup.dns_selector(), &node, service)?;
     let ipv6_enabled = setup.layer_config().feature.network.ipv6;
 
     let raw_hints = raw_hints
@@ -1112,7 +1113,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
         })?
         .into();
 
-    crate::setup().dns_selector().check_query(&name, 0)?;
+    dns_selector::check_query(crate::setup().dns_selector(), &name, 0)?;
 
     let hosts_and_ips = remote_getaddrinfo(name.clone(), 0, 0, 0, 0, 0)?;
 

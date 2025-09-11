@@ -289,7 +289,8 @@ impl From<HookError> for i64 {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
                     );
-                    libc::EINVAL
+                    // graceful_exit! never returns, but compiler can't determine this
+                    unreachable!()
                 }
             },
             HookError::DNSNoName => libc::EFAULT,
