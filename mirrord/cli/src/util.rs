@@ -1,11 +1,7 @@
+use std::{io, net::SocketAddr, process::exit};
+
 #[cfg(not(target_os = "windows"))]
 use io::Write;
-use std::{
-    io,
-    net::SocketAddr,
-    process::exit,
-};
-
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
 use nix::{
