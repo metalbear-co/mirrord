@@ -40,7 +40,7 @@ use crate::{
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     extract::extract_library,
-    util::{get_user_git_branch, remove_proxy_env},
+    util::{get_user_git_branch, remove_proxy_env, reparent_to_init},
 };
 
 /// Environment variable for saving the execution kind for analytics.
@@ -301,6 +301,10 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        unsafe {
+            proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
+        }
+
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
         })?;
@@ -309,6 +313,14 @@ impl MirrordExecution {
         let _stderr_guard = watch_stderr(stderr, progress).await;
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
+
+        // The pre_exec(reparent_to_init) causes the process to fork
+        // and our immediate child promptly exits (which is what we
+        // wait for here), reparenting our (now former) grandchild to
+        // init.
+        // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html
+        // for reference.
+        proxy_process.wait().await.unwrap();
 
         let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
