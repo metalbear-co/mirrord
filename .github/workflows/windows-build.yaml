@@ -201,6 +201,7 @@ jobs:
       - name: Sign artifacts (DLL + EXE) with robust fallback
         env:
           DIGICERT_KEYPAIR_ALIAS: ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $ts = "http://timestamp.digicert.com"
@@ -210,48 +211,58 @@ jobs:
           $exe = "$env:MIRRORD_EXE"
           $ok = $false
 
-          function Try-FileMode {
-            param($path)
+          function Invoke-FileModeSign([string]$path) {
             if (-not $env:CODESIGN_CERT) { return 87 } # ERROR_INVALID_PARAMETER
             $args = @(
+              '/debug',                    # extra diagnostics
               '/fd','SHA256','/td','SHA256','/tr',$ts,
               '/csp','DigiCert Signing Manager KSP',
               '/kc',"$alias",
-              '/f', "$env:CODESIGN_CERT"
+              '/f', "$env:CODESIGN_CERT",
+              "$path"
             )
-            & "$signtool" sign @args "$path"
-            return $LASTEXITCODE
+            $null = & "$signtool" sign @args
+            return [int]$LASTEXITCODE
+          }
+
+          function Invoke-StoreModeSign([string]$path, [string]$sha1, [string]$scope) {
+            $common = @('/debug','/fd','SHA256','/td','SHA256','/tr',$ts,'/sha1',$sha1)
+            if ($scope -eq 'M') { $common = @('/sm') + $common }  # LocalMachine store
+            $args = $common + @("$path")
+            $null = & "$signtool" sign @args
+            return [int]$LASTEXITCODE
           }
 
           Write-Host "=== Attempt 1: File-mode signing (/csp + /kc + /f) ==="
-          $rc1 = Try-FileMode $dll
-          $rc2 = if ($rc1 -eq 0) { Try-FileMode $exe } else { $rc1 }
+          $rc1 = Invoke-FileModeSign $dll
+          $rc2 = if ($rc1 -eq 0) { Invoke-FileModeSign $exe } else { $rc1 }
           if ($rc1 -eq 0 -and $rc2 -eq 0) { $ok = $true; Write-Host "File-mode signing succeeded." }
 
           if (-not $ok) {
             Write-Warning ("File-mode signing failed (rc1={0} rc2={1}). Falling back to store-mode." -f $rc1,$rc2)
 
-            $sha1 = "$env:CODESIGN_SHA1"
+            $sha1  = "$env:CODESIGN_SHA1"
             $scope = "$env:CODESIGN_STORE_SCOPE"
             if (-not $sha1) { throw "CODESIGN_SHA1 not set." }
 
-            $common = @('/fd','SHA256','/td','SHA256','/tr',$ts,'/sha1',$sha1)
-            if ($scope -eq 'M') { $common = @('/sm') + $common }
+            Write-Host ( "=== Attempt 2: Store-mode signing (/sha1{0}) ===" -f ($(if ($scope -eq 'M') { ' + /sm' } else { '' })) )
 
-            Write-Host "=== Attempt 2: Store-mode signing (/sha1{0}) ===" -f ($(if ($scope -eq 'M') { ' + /sm' } else { '' }))
-            & "$signtool" sign @common "$dll";  $rc3 = $LASTEXITCODE
-            & "$signtool" sign @common "$exe";  $rc4 = $LASTEXITCODE
+            $rc3 = Invoke-StoreModeSign $dll $sha1 $scope
+            $rc4 = Invoke-StoreModeSign $exe $sha1 $scope
 
-            if ($rc3 -eq 0 -and $rc4 -eq 0) { $ok = $true; Write-Host "Store-mode signing succeeded." }
+            if ($rc3 -eq 0 -and $rc4 -eq 0) {
+              $ok = $true
+              Write-Host "Store-mode signing succeeded."
+            }
             else {
               Write-Host "`nDiagnostics:"
               certutil -store -user My | Select-String -Pattern 'Provider|Cert Hash|Subject' -Context 0,1
-              certutil -store -enterprise My | Out-Null
-              Write-Host "`nServices:"
+              Write-Host "`nDigiCert services:"
               Get-Service -Name 'DigiCert*' -ErrorAction SilentlyContinue | Format-Table -AutoSize
-              throw ("Signing failed (file rc={0}/{1}, store rc={2}/{3}). Check KSP presence, creds, signer access, and outbound connectivity." -f $rc1,$rc2,$rc3,$rc4)
+              throw ("Signing failed (file rc={0}/{1}, store rc={2}/{3}). Check KSP presence, creds, signer access, and timestamp reachability." -f $rc1,$rc2,$rc3,$rc4)
             }
           }
+
 
       - name: Verify signatures
         run: |
