@@ -1,7 +1,7 @@
 #![cfg(test)]
 #![cfg(feature = "job")]
 
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration};
 
 use kube::Client;
 use reqwest::header::HeaderMap;
@@ -111,6 +111,26 @@ async fn mirror_with_http_header_filter(
         headers,
     )
     .await;
+
+    // Verify that only the expected number of requests were mirrored to the local app
+    // We sent 4 requests total, but only 2 should have been mirrored (those with x-filter: yes)
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let stdout = mirror_process.get_stdout().await;
+            let requests = stdout.lines().filter(|line| line.contains("GET") || line.contains("DELETE")).count();
+            match requests.cmp(&2) {
+                Ordering::Equal => break,
+                Ordering::Less => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                Ordering::Greater => {
+                    panic!("too many requests were received by the local app: {requests}. Expected exactly 2 (only filtered requests)")
+                }
+            }
+        }
+    })
+    .await
+    .expect("local mirroring app did not receive exactly the expected number of requests on time");
 
     application.assert(&mirror_process).await;
 }

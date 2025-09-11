@@ -3,7 +3,7 @@
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     ClientMessage, Port,
-    tcp::{LayerTcp, LayerTcpSteal, MirrorType, StealType},
+    tcp::{LayerTcp, LayerTcpSteal, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
 };
 
 /// Retrieves subscribed port from the given [`StealType`].
@@ -22,7 +22,7 @@ pub trait PortSubscriptionExt {
     fn port(&self) -> Port;
 
     /// Returns a subscribe request to be sent to the agent.
-    fn agent_subscribe(&self) -> ClientMessage;
+    fn agent_subscribe(&self, protocol_version: Option<&semver::Version>) -> ClientMessage;
 
     /// Returns an unsubscribe request to be sent to the agent.
     fn wrap_agent_unsubscribe(&self) -> ClientMessage;
@@ -38,11 +38,22 @@ impl PortSubscriptionExt for PortSubscription {
 
     /// [`LayerTcp::PortSubscribe`], [`LayerTcp::PortSubscribeFilteredHttp`], or
     /// [`LayerTcpSteal::PortSubscribe`].
-    fn agent_subscribe(&self) -> ClientMessage {
+    fn agent_subscribe(&self, protocol_version: Option<&semver::Version>) -> ClientMessage {
         match self {
             Self::Mirror(mirror_type) => match mirror_type {
                 MirrorType::FilteredHttp(port, filter) => {
-                    ClientMessage::Tcp(LayerTcp::PortSubscribeFilteredHttp(*port, filter.clone()))
+                    // Check if the agent supports filtered HTTP mirroring
+                    if protocol_version
+                        .is_none_or(|version| MIRROR_HTTP_FILTER_VERSION.matches(version))
+                    {
+                        ClientMessage::Tcp(LayerTcp::PortSubscribeFilteredHttp(
+                            *port,
+                            filter.clone(),
+                        ))
+                    } else {
+                        // For older agents, fall back to regular mirroring without filter
+                        ClientMessage::Tcp(LayerTcp::PortSubscribe(*port))
+                    }
                 }
                 MirrorType::All(_) => {
                     ClientMessage::Tcp(LayerTcp::PortSubscribe(mirror_type.get_port()))

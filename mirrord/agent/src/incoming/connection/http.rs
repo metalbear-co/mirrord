@@ -292,11 +292,6 @@ pub struct MirroredHttp {
 }
 
 impl MirroredHttp {
-    /// Returns a reference to the request parts
-    pub fn parts(&self) -> &request::Parts {
-        &self.parts
-    }
-
     /// Returns a mutable reference to the request parts
     pub fn parts_mut(&mut self) -> &mut request::Parts {
         &mut self.parts

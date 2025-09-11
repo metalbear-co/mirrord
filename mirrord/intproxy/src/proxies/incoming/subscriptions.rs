@@ -7,6 +7,7 @@ use mirrord_intproxy_protocol::{
     IncomingResponse, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
 };
 use mirrord_protocol::{BlockedAction, ClientMessage, Port, RemoteResult, ResponseError};
+use semver::Version;
 use tracing::Level;
 
 use super::{IncomingProxyError, port_subscription_ext::PortSubscriptionExt};
@@ -38,8 +39,11 @@ pub struct Subscription {
 impl Subscription {
     /// Creates a new subscription from the given [`Source`].
     /// Additionally returns a message to be sent to the agent.
-    fn new(source: Source) -> (Self, ClientMessage) {
-        let message = source.request.subscription.agent_subscribe();
+    fn new(source: Source, protocol_version: Option<&Version>) -> (Self, ClientMessage) {
+        let message = source
+            .request
+            .subscription
+            .agent_subscribe(protocol_version);
 
         (
             Self {
@@ -145,10 +149,13 @@ impl Subscription {
         }
     }
 
-    pub fn resubscribe_message(&mut self) -> ClientMessage {
+    pub fn resubscribe_message(&mut self, protocol_version: Option<&Version>) -> ClientMessage {
         self.confirmed = false;
 
-        self.active_source.request.subscription.agent_subscribe()
+        self.active_source
+            .request
+            .subscription
+            .agent_subscribe(protocol_version)
     }
 }
 
@@ -186,6 +193,7 @@ impl SubscriptionsManager {
         layer_id: LayerId,
         message_id: MessageId,
         request: PortSubscribe,
+        protocol_version: Option<&Version>,
     ) -> Option<ProxyMessage> {
         self.remote_ports.add(
             layer_id,
@@ -202,7 +210,7 @@ impl SubscriptionsManager {
         match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => e.get_mut().push_source(source).map(ProxyMessage::ToLayer),
             Entry::Vacant(e) => {
-                let (subscription, message) = Subscription::new(source);
+                let (subscription, message) = Subscription::new(source, protocol_version);
                 e.insert(subscription);
                 Some(ProxyMessage::ToAgent(message))
             }
@@ -344,6 +352,7 @@ mod test {
                 listening_on: listener_1,
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
+            None,
         );
         assert!(
             matches!(
@@ -362,6 +371,7 @@ mod test {
                 listening_on: listener_2,
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
+            None,
         );
         assert!(response.is_none(), "{response:?}");
 
@@ -423,6 +433,7 @@ mod test {
                 listening_on,
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
+            None,
         );
         assert!(
             matches!(
@@ -489,6 +500,7 @@ mod test {
                 listening_on,
                 subscription: PortSubscription::Mirror(MirrorType::All(80)),
             },
+            None,
         );
         assert!(
             matches!(
