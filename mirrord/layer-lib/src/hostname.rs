@@ -12,6 +12,9 @@ use crate::{
     error::HookResult,
 };
 
+/// Efficient result type for internal file operations
+type FileResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 /// RAII wrapper for remote file operations that automatically closes the file when dropped
 struct ManagedRemoteFile {
     fd: u64,
@@ -19,7 +22,7 @@ struct ManagedRemoteFile {
 
 impl ManagedRemoteFile {
     /// Open a remote file for reading
-    fn open(file_path: &str) -> HookResult<Self> {
+    fn open(file_path: &str) -> FileResult<Self> {
         use std::path::PathBuf;
 
         use mirrord_protocol::file::{OpenFileRequest, OpenOptionsInternal};
@@ -36,13 +39,16 @@ impl ManagedRemoteFile {
             },
         };
 
-        let fd = make_proxy_request_with_response(open_request)??.fd;
+        let fd = make_proxy_request_with_response(open_request)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+            .fd;
 
         Ok(Self { fd })
     }
 
     /// Read the entire file content up to max_size bytes
-    fn read_all(&self, max_size: u64) -> HookResult<Vec<u8>> {
+    fn read_all(&self, max_size: u64) -> FileResult<Vec<u8>> {
         use mirrord_protocol::file::ReadFileRequest;
 
         let read_request = ReadFileRequest {
@@ -50,7 +56,9 @@ impl ManagedRemoteFile {
             buffer_size: max_size,
         };
 
-        let config_bytes = make_proxy_request_with_response(read_request)??
+        let config_bytes = make_proxy_request_with_response(read_request)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
             .bytes
             .to_vec();
 
@@ -170,7 +178,14 @@ pub fn get_hostname<R: HostnameResolver>(resolver: &R) -> HostnameResult {
 
 /// Generic helper to read a file from the remote target via ProxyConnection
 fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HookResult<Vec<u8>> {
-    ManagedRemoteFile::open(file_path)?.read_all(max_size)
+    let result: FileResult<Vec<u8>> = (|| {
+        let file = ManagedRemoteFile::open(file_path)?;
+        file.read_all(max_size)
+    })();
+    
+    result.map_err(|e| crate::error::HookError::IO(
+        std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to read file {}: {}", file_path, e))
+    ))
 }
 
 /// Fetch Samba NetBIOS configuration from remote target via ProxyConnection by reading
