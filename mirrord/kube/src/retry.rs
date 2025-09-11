@@ -43,6 +43,9 @@ pub struct RetryKube {
     /// We call [`ExponentialBackoff::next_backoff`] to get the sleep time for the next retry.
     backoff: ExponentialBackoff,
 
+    /// Keeps track of how many retries, so we can stop when we reach `max_retries`.
+    current_attempt: u32,
+
     /// Limits the amount of retries.
     ///
     /// If this is set to `0`, then we don't retry (the request is made once, but if it fails we
@@ -70,6 +73,7 @@ impl TryFrom<&StartupRetryConfig> for RetryKube {
 
         Ok(Self {
             backoff,
+            current_attempt: 0,
             max_retries: *max_retries,
         })
     }
@@ -96,8 +100,6 @@ impl<Res> Policy<http::Request<Body>, http::Response<Res>, BoxError> for RetryKu
         req: &mut http::Request<Body>,
         result: &mut Result<http::Response<Res>, BoxError>,
     ) -> Option<Self::Future> {
-        let current_attempt = req.extensions().get::<u32>().copied().unwrap_or_default();
-
         match result {
             Ok(response)
                 if matches!(
@@ -105,8 +107,9 @@ impl<Res> Policy<http::Request<Body>, http::Response<Res>, BoxError> for RetryKu
                     StatusCode::TOO_MANY_REQUESTS
                         | StatusCode::SERVICE_UNAVAILABLE
                         | StatusCode::GATEWAY_TIMEOUT
-                ) && current_attempt <= self.max_retries =>
+                ) && self.current_attempt < self.max_retries =>
             {
+                self.current_attempt += 1;
                 Some(self.backoff.next_backoff())
             }
             _ => None,
@@ -115,16 +118,13 @@ impl<Res> Policy<http::Request<Body>, http::Response<Res>, BoxError> for RetryKu
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     fn clone_request(&mut self, req: &http::Request<Body>) -> Option<http::Request<Body>> {
-        let current_attempt = req.extensions().get::<u32>().copied().unwrap_or_default();
-
         let body = req.body().try_clone()?;
 
         let mut request = Request::builder()
             .method(req.method().clone())
             .uri(req.uri().clone())
             .version(req.version())
-            .extension(req.extensions().clone())
-            .extension(current_attempt + 1);
+            .extension(req.extensions().clone());
 
         if let Some(headers) = request.headers_mut() {
             headers.extend(req.headers().clone());
