@@ -583,7 +583,7 @@ where
         .ok_or(HookError::SocketNotFound({
             #[cfg(target_os = "windows")]
             {
-                sockfd 
+                sockfd
             }
             #[cfg(not(target_os = "windows"))]
             {
