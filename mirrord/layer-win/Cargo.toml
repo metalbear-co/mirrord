@@ -40,11 +40,11 @@ tokio-util.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi.workspace = true
 str-win = { path = "../str-win" }
-minhook-detours-rs = "0.2.0"
+minhook-detours-rs.workspace = true
 windows-strings = { version = "0.4" }
 
 # Used for handling all kind of error types in practice
-anyhow = "1.0.98" 
+anyhow.workspace = true 
 
 
 [lints]
