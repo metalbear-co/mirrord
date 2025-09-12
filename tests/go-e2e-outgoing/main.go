@@ -1,14 +1,11 @@
 package main
 
 import (
-	"C"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-)
-import (
 	"net"
+	"net/http"
 	"os"
 )
 

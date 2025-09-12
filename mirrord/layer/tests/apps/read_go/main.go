@@ -1,11 +1,10 @@
 package main
 
 import (
-	"C"
 	"fmt"
 	"os"
 	"os/signal"
-    "syscall"
+	"syscall"
 )
 
 const TEXT = "Pineapples."

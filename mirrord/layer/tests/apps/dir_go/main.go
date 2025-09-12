@@ -3,10 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-
-	"C"
+	"time"
 )
-import "time"
 
 func main() {
 	dir, err := os.ReadDir("/tmp/foo")
