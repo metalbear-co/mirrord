@@ -769,11 +769,11 @@ async fn faccessat_go(
 
     intproxy
         .expect_file_access(
-            PathBuf::from("/app/test.txt"), 
+            PathBuf::from("/app/test.txt"),
             #[cfg(not(target_os = "windows"))]
             O_RDWR as u8,
             #[cfg(target_os = "windows")]
-            0x3 // GENERIC_READ | GENERIC_WRITE equivalent
+            0x3, // GENERIC_READ | GENERIC_WRITE equivalent
         )
         .await;
 
