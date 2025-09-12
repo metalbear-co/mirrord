@@ -10,8 +10,8 @@ use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
-        NewTcpConnectionV2, TcpClose, TcpData,
+        InternalHttpRequest, LayerTcp, MIRROR_HTTP_FILTER_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
+        NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
 use tokio_stream::StreamMap;
@@ -179,7 +179,7 @@ impl TcpMirrorApi {
 
                         Some(traffic) = mirror_handle.next() => match traffic? {
                             MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                if port_filters.contains_key(&tcp.info.original_destination.port()) {
+                                if port_filters.contains_key(&tcp.info.original_destination.port()) && !protocol_version.matches(&MIRROR_HTTP_FILTER_VERSION) {
                                     return Ok(DaemonMessage::LogMessage(LogMessage::warn(
                                         "TCP traffic skipped due to HTTP filter on this port".to_string()
                                     )));
