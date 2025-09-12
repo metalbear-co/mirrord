@@ -117,6 +117,3 @@ impl<'a> Drop for HookManager<'a> {
         self.interceptor.end_transaction()
     }
 }
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) mod socket;

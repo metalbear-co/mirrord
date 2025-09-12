@@ -26,9 +26,10 @@ use crate::{
 #[cfg(target_os = "macos")]
 mod apple_dnsinfo;
 pub(crate) mod dns_selector;
+pub(super) mod hooks;
 // Re-export MANAGED_ADDRINFO for socket ops
 #[cfg(not(target_os = "windows"))]
-pub(crate) use crate::hooks::socket::MANAGED_ADDRINFO;
+pub(crate) use hooks::MANAGED_ADDRINFO;
 pub(crate) mod ops;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod outgoing_selector;
