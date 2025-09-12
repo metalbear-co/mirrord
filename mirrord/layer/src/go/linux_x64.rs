@@ -578,14 +578,14 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &Experi
         return;
     };
 
-    if version >= 1.23 {
-        trace!("found version >= 1.23");
+    tracing::trace!(version, "Detected Go");
+    if version >= 1.25 {
+        go_1_25::hook(hook_manager);
+    } else if version >= 1.23 {
         post_go1_23(hook_manager);
     } else if version >= 1.19 {
-        trace!("found version >= 1.19");
         post_go1_19(hook_manager);
     } else {
-        trace!("found version < 1.19");
         pre_go1_19(hook_manager);
     }
 
@@ -595,5 +595,84 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &Experi
             "syscall.rawVforkSyscall.abi0",
             raw_vfork_detour
         );
+    }
+}
+
+mod go_1_25 {
+    use std::arch::naked_asm;
+
+    use crate::{hooks::HookManager, macros::hook_symbol};
+
+    pub fn hook(hook_manager: &mut HookManager) {
+        hook_symbol!(
+            hook_manager,
+            "internal/runtime/syscall.Syscall6",
+            even_newer
+        );
+    }
+
+    /// Detour for `internal/runtime/syscall.Syscall6`.
+    #[unsafe(naked)]
+    unsafe extern "C" fn even_newer() {
+        naked_asm!(
+            "cmp rax, 60", // SYS_EXIT
+            "je 4f",
+            "cmp rax, 231", // SYS_EXIT_GROUP
+            "je 4f",
+            // Save rdi in r10
+            "mov r10, rdi",
+            // Save r9 in r11
+            "mov r11, r9",
+            // Save rax in r12
+            "mov r12, rax",
+            // Save rsi in r13
+            "mov r13, rsi",
+            // Save rcx in r15
+            "mov r15, rcx",
+            // Save stack
+            "mov rdx, rsp",
+            // For any case, store g there in case it isn't stored
+            "mov QWORD PTR fs:[0xfffffff8], r14",
+            "sub    rsp, 0x40",
+            "and    rsp, -0x10",
+            "mov    QWORD PTR [rsp+0x30], 0x0",
+            "mov    QWORD PTR [rsp+0x28], rdx",
+            // Call ABI handler
+            "mov QWORD PTR [rsp], r11",
+            "mov r9, r8",
+            "mov r8, r13",
+            "mov rsi, rbx",
+            "mov rdx, r15",
+            "mov rcx, r10",
+            "mov rdi, r12",
+            "call {c_abi_syscall6_handler}",
+            // Restore stack
+            "mov    rsi, QWORD PTR [rsp+0x28]",
+            "mov    rsp, rsi",
+            "cmp    rax, -0xfff",
+            "jbe    3f",
+            "neg    rax",
+            "mov    rcx, rax",
+            "mov    rax, -0x1",
+            "mov    rbx, 0x0",
+            "xorps  xmm15, xmm15",
+            "mov    r14, QWORD PTR fs:[0xfffffff8]",
+            "ret",
+            "3:",
+            // RAX already contains return value
+            "mov    rbx, 0x0",
+            "mov    rcx, 0x0",
+            "xorps  xmm15, xmm15",
+            "mov    r14, QWORD PTR fs:[0xfffffff8]",
+            "ret",
+            // just execute syscall instruction
+            // This is for SYS_EXIT and SYS_EXIT_GROUP only - we know for sure that it's safe to
+            // just let it happen. Running our code is an unnecessary risk due to
+            // switching between stacks. See issue https://github.com/metalbear-co/mirrord/issues/2988.
+            "4:",
+            "mov rdx, rdi",
+            "syscall",
+            c_abi_syscall6_handler = sym crate::go::c_abi_syscall6_handler,
+        )
     }
 }
