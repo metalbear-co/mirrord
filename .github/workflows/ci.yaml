@@ -73,6 +73,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}   # <-- ADDED
+      wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,6 +138,12 @@ jobs:
             scripts/**/*.ps1
             **/*.ps1
             .github/workflows/windows-build.yaml
+      - name: get wizard frontend changes
+        id: changed-wizard-frontend
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            wizard-frontend/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -156,7 +163,8 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-windows.outputs.any_changed }};           # <-- ADDED
           echo ${{ steps.changed-windows.outputs.all_changed_files }};     # <-- ADDED
-
+          echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
@@ -183,6 +191,40 @@ jobs:
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+
+  wizard-frontend-lint:
+    runs-on: ubuntu-24.04
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.wizard_frontend_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - run: npm run lint
+        working-directory: ./wizard-frontend
+
+  run-wizard-frontend:
+    runs-on: ubuntu-24.04
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.wizard_frontend_changed == 'true' || needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - run: npm run build
+        working-directory: ./wizard-frontend
+      - run: tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      - run: |
+          ./target/debug/mirrord wizard &
+          curl localhost:8080
+  
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
