@@ -79,7 +79,7 @@ pub struct HandleContext {
     pub write_time: FILETIME,
     /// Size of remote buffer, in bytes
     pub size: u64,
-    /// Cursor in file, updated by seek, or equivalent, and by linear ReadFile
+    /// File read cursor
     pub cursor: usize,
 }
 

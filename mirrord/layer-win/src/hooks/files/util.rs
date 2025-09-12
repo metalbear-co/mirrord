@@ -32,7 +32,7 @@ pub fn remove_root_dir_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
     path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
 
     // Skip root dir
-    let new_path: PathBuf = path.components().skip(1).collect();
+    let new_path: PathBuf = path.components().into_iter().skip(1).collect();
 
     // Turn to string, replace Windows slashes to Linux slashes for ease of use.
     Some(new_path.to_str()?.to_string().replace("\\", "/"))
@@ -63,11 +63,13 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
     }
 }
 
+/// Structure to work with [`SYSTEMTIME`]-s. Supports conversions as well.
 pub struct WindowsTime {
-    pub time: SYSTEMTIME,
+    time: SYSTEMTIME,
 }
 
 impl WindowsTime {
+    /// Get [`WindowsTime`] from current system time.
     pub fn current() -> Self {
         let mut time: SYSTEMTIME = unsafe { MaybeUninit::zeroed().assume_init() };
         unsafe { GetSystemTime(&mut time) };
@@ -75,10 +77,12 @@ impl WindowsTime {
         Self { time }
     }
 
+    /// Get current Windows time as [`SYSTEMTIME`].
     pub fn as_system_time(&self) -> SYSTEMTIME {
         self.time
     }
 
+    /// Get current Windows time as [`FILETIME`].
     pub fn as_file_time(&self) -> FILETIME {
         let mut fs_time: FILETIME = unsafe { MaybeUninit::zeroed().assume_init() };
         unsafe { SystemTimeToFileTime(&self.time, &mut fs_time) };
