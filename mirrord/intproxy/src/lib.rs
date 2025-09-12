@@ -545,7 +545,7 @@ impl IntProxy {
             DaemonMessage::GetEnvVarsResponse(res) => {
                 self.task_txs
                     .simple
-                    .send(SimpleProxyMessage::GetEnvRes(res))
+                    .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
             message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
