@@ -1,17 +1,4 @@
-// Unified socket collection/// **Warning**: Do not put logs in here! If you try logging stuff inside this initialization
-/// you're gonna have a bad time. The process hanging is the min you should expect, if you
-/// choose to ignore this warning.
-///
-/// - `MIRRORD_SHARED_SOCKETS`: Some sockets may have been initialized by a parent process through
-///   `execve` (or any `exec*`), and the spawned children may want to use those sockets. As
-///   memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets
-///   to child processes. The way we achieve this is by setting the `SHARED_SOCKETS_ENV_VAR` with
-///   a base64 URL-safe encoded version of our `SOCKETS`. The env var is set as
-///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
-///
-/// - `FD_CLOEXEC` behaviour: While rebuilding sockets from the env var, we also check if
-///   they're set with the cloexec flag, so that children processes don't end up using sockets that
-///   are exclusive for their parents. and Windows layers
+// Unified socket collection
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -43,15 +30,15 @@ pub const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 /// choose to ignore this warning.
 ///
 /// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process through
-///   `execve` (or any `exec*`), and the spawned children may want to use those sockets. As
-///   memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets
-///   to child processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with
-///   a base64 URL-safe encoded version of our [`SOCKETS`]. The env var is set as
+///   `execve` (or any `exec*`), and the spawned children may want to use those sockets. As memory
+///   is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets to child
+///   processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with a base64
+///   URL-safe encoded version of our [`SOCKETS`]. The env var is set as
 ///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
 ///
-/// - `FD_CLOEXEC` behaviour: While rebuilding sockets from the env var, we also check if
-///   they're set with the cloexec flag, so that children processes don't end up using sockets that
-///   are exclusive for their parents.
+/// - `FD_CLOEXEC` behaviour: While rebuilding sockets from the env var, we also check if they're
+///   set with the cloexec flag, so that children processes don't end up using sockets that are
+///   exclusive for their parents.
 ///
 /// For Unix: includes shared socket initialization from environment variables
 /// For Windows: starts with empty collection
