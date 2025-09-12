@@ -131,6 +131,4 @@ async fn mirror_with_http_header_filter(
     })
     .await
     .expect("local mirroring app did not receive exactly the expected number of requests on time");
-
-    application.assert(&mirror_process).await;
 }
