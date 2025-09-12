@@ -44,12 +44,13 @@ pub(crate) mod outgoing_selector;
 ///   [`libc::execve`] (or any `exec*`), and the spawned children may want to use those sockets. As
 ///   memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets
 ///   to child processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with
-///   an [`BASE64_URL_SAFE`] encoded version of our [`SOCKETS`]. The env var is set as
+///   a base64 URL-safe encoded version of our [`SOCKETS`]. The env var is set as
 ///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
 ///
 /// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
 ///   they're set with the cloexec flag, so that children processes don't end up using sockets that
 ///   are exclusive for their parents.
+
 /// Unix-specific DNS resolver implementation
 pub(crate) struct UnixDnsResolver;
 
