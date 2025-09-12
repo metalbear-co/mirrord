@@ -3,11 +3,13 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-#[cfg(not(target_os = "windows"))]
-use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::{env, fs};
-use std::{env::temp_dir, path::Path, time::Duration};
+use std::{
+    env::temp_dir,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 #[cfg(not(target_os = "windows"))]
 use libc::{O_RDWR, pid_t};
@@ -767,14 +769,13 @@ async fn faccessat_go(
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
+    #[cfg(not(target_os = "windows"))]
+    let access_mode = O_RDWR as u8;
+    #[cfg(target_os = "windows")]
+    let access_mode = 0x3; // GENERIC_READ | GENERIC_WRITE equivalent
+
     intproxy
-        .expect_file_access(
-            PathBuf::from("/app/test.txt"),
-            #[cfg(not(target_os = "windows"))]
-            O_RDWR as u8,
-            #[cfg(target_os = "windows")]
-            0x3, // GENERIC_READ | GENERIC_WRITE equivalent
-        )
+        .expect_file_access(PathBuf::from("/app/test.txt"), access_mode)
         .await;
 
     // Assert all clear
