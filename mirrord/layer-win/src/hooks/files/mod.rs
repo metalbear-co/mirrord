@@ -2,7 +2,7 @@
 
 use std::{
     ffi::c_void,
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::ManuallyDrop,
     path::PathBuf,
     sync::OnceLock,
 };
@@ -12,13 +12,12 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, FILE_INFORMATION_CLASS, FILE_USE_FILE_POINTER_POSITION, FS_INFORMATION_CLASS,
-    PFILE_BASIC_INFORMATION,
+    _IO_STATUS_BLOCK, FILE_INFORMATION_CLASS, FS_INFORMATION_CLASS, PFILE_BASIC_INFORMATION,
 };
 use str_win::u16_buffer_to_string;
 use winapi::{
     shared::{
-        minwindef::{DWORD, FILETIME},
+        minwindef::DWORD,
         ntdef::{
             HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID, ULONG,
         },
@@ -29,11 +28,10 @@ use winapi::{
         winerror::ERROR_NO_MORE_ITEMS,
     },
     um::{
-        minwinbase::SYSTEMTIME,
-        sysinfoapi::GetSystemTime,
-        timezoneapi::SystemTimeToFileTime,
         winbase::FILE_TYPE_DISK,
-        winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_WRITE_DATA, GENERIC_WRITE},
+        winnt::{
+            ACCESS_MASK, FILE_APPEND_DATA, FILE_WRITE_DATA, GENERIC_WRITE,
+        },
     },
 };
 
@@ -42,7 +40,7 @@ use crate::{
     common::{make_proxy_request_no_response, make_proxy_request_with_response},
     hooks::files::{
         managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
-        util::remove_root_dir_from_path,
+        util::{WindowsTime, remove_root_dir_from_path, try_xstat},
     },
 };
 
@@ -159,20 +157,31 @@ unsafe extern "system" fn nt_create_file_hook(
 
             let managed_handle = match req {
                 Ok(file) => {
-                    let mut system_time: SYSTEMTIME = MaybeUninit::zeroed().assume_init();
-                    GetSystemTime(&mut system_time as _);
-                    let mut creation_time: FILETIME = MaybeUninit::zeroed().assume_init();
-                    SystemTimeToFileTime(&system_time as _, &mut creation_time as _);
+                    // Run Xstat over fd to get necessary data.
+                    let xstat = try_xstat(file.fd);
+
+                    if xstat.is_none() {
+                        eprintln!("WARNING: request for xstat file failed!");
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
+                    let xstat = xstat.unwrap();
 
                     try_insert_handle(HandleContext {
+                        path: linux_path,
                         fd: file.fd,
                         desired_access,
                         file_attributes,
                         share_access,
                         create_disposition,
                         create_options,
-                        path: linux_path,
-                        creation_time,
+                        // Initialize following variables to current time. Update later.
+                        creation_time: WindowsTime::current().as_file_time(),
+                        access_time: WindowsTime::current().as_file_time(),
+                        write_time: WindowsTime::current().as_file_time(),
+                        // Xstat request contains the size of the remote file in this field,
+                        size: xstat.size,
+                        // Cursor is a detail to be maintained by reader, etc. Starts at 0.
+                        cursor: 0,
                     })
                 }
                 Err(e) => {
@@ -183,10 +192,10 @@ unsafe extern "system" fn nt_create_file_hook(
 
             if managed_handle.is_some() {
                 // Write managed handle at the provided pointer
-                *file_handle = managed_handle.unwrap();
+                *file_handle = *managed_handle.unwrap();
                 println!(
                     "Succesfully wrote managed handle! {:8p}",
-                    managed_handle.unwrap()
+                    *managed_handle.unwrap()
                 );
                 return STATUS_SUCCESS;
             } else {
@@ -230,85 +239,95 @@ unsafe extern "system" fn nt_read_file_hook(
     key: PULONG,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read() {
-            if let Some(handle_context) = handles.get(&file) {
-                if buffer.is_null() {
-                    // TODO(gabriela): VirtQuery buffer
-                    return STATUS_ACCESS_VIOLATION;
-                }
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+                && let Ok(mut handle_context) = managed_handle.clone().try_write() {
+                    if buffer.is_null() {
+                        // TODO(gabriela): VirtQuery buffer
+                        return STATUS_ACCESS_VIOLATION;
+                    }
 
-                // If we ever succesfully receive the request response, the buffer
-                // we receive can never be bigger than `length`.
-                let req = make_proxy_request_with_response(ReadFileRequest {
-                    remote_fd: handle_context.fd,
-                    buffer_size: length as _,
-                });
+                    // If we ever succesfully receive the request response, the buffer
+                    // we receive can never be bigger than `length`.
+                    let req = make_proxy_request_with_response(ReadFileRequest {
+                        remote_fd: handle_context.fd,
+                        buffer_size: length as _,
+                    });
 
-                if req.is_err() {
-                    return STATUS_UNEXPECTED_NETWORK_ERROR;
-                }
+                    if req.is_err() {
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
 
-                let req = req.unwrap();
+                    let req = req.unwrap();
 
-                match req {
-                    Ok(res) => {
-                        // If the response's buffer is finally 0, then we finished reading.
-                        if res.bytes.len() == 0 {
+                    match req {
+                        Ok(res) => {
+                            // Update last access time
+                            handle_context.access_time = WindowsTime::current().as_file_time();
+
+                            // If the response's buffer is finally 0, then we finished reading.
+                            if res.bytes.is_empty() {
+                                (*io_status_block).__bindgen_anon_1.Status =
+                                    ManuallyDrop::new(STATUS_SUCCESS);
+                                (*io_status_block).Information = 0;
+
+                                return STATUS_SUCCESS;
+                            }
+
+                            //let mut read_from_start = false;
+                            //// `byte_offset`, if NULL, should be current file offset.
+                            //// there's also the scenario of FILE_USE_FILE_POINTER_POSITION for
+                            //// LowPart and -1 for HighPart.
+                            //// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntwritefile
+                            //// https://github.com/reactos/reactos/blob/0b18dfe92434b030515e0836a5390d8d463915c5/ntoskrnl/io/iomgr/iofunc.c#L2870-L2877
+                            //if byte_offset.is_null()
+                            //    || ((*byte_offset).u().LowPart == FILE_USE_FILE_POINTER_POSITION
+                            //        && (*byte_offset).u().HighPart == -1)
+                            //{
+                            //    read_from_start = true;
+                            //}
+
+                            // Calculate target length for copy.
+                            // TODO(gabriela): make sure the contiguous memory pages are all fine
+                            // using VirtQuery, otherwise return
+                            // STATUS_ACCCESS_VIOLATION.
+                            let len = usize::min(res.bytes.len(), length as _);
+
+                            // Otherwise, copy the remote received buffer (relative to
+                            // fd cursor) to the provided buffer, as far as we can.
+                            std::ptr::copy(res.bytes.as_ptr(), buffer as _, len);
+
+                            // We get this information over IRP normally, so need to replicate the
+                            // structure in usermode
                             (*io_status_block).__bindgen_anon_1.Status =
                                 ManuallyDrop::new(STATUS_SUCCESS);
-                            (*io_status_block).Information = 0;
+                            (*io_status_block).Information = len as _;
 
-                            return STATUS_SUCCESS;
+                            // Update cursor
+                            if byte_offset.is_null() {
+                                handle_context.cursor += len;
+                            }
+
+                            // Finished reading?
+                            if res.bytes.len() < length as _ {
+                                return STATUS_SUCCESS;
+                            }
+
+                            // There's still some to read, and Windows returns this.
+                            return ERROR_NO_MORE_ITEMS as NTSTATUS;
                         }
-
-                        let mut read_from_start = false;
-                        // `byte_offset`, if NULL, should be current file offset.
-                        // there's also the scenario of FILE_USE_FILE_POINTER_POSITION for LowPart
-                        // and -1 for HighPart.
-                        // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntwritefile
-                        // https://github.com/reactos/reactos/blob/0b18dfe92434b030515e0836a5390d8d463915c5/ntoskrnl/io/iomgr/iofunc.c#L2870-L2877
-                        if byte_offset.is_null()
-                            || ((*byte_offset).u().LowPart == FILE_USE_FILE_POINTER_POSITION
-                                && (*byte_offset).u().HighPart == -1)
-                        {
-                            read_from_start = true;
+                        Err(e) => {
+                            eprintln!("{:?}", e);
+                            // TODO(gabriela): come up with an adequate return.
+                            return -1;
                         }
-
-                        // Calculate target length for copy.
-                        // TODO(gabriela): make sure the contiguous memory pages are all fine using
-                        // VirtQuery, otherwise return
-                        // STATUS_ACCCESS_VIOLATION.
-                        let len = usize::min(res.bytes.len(), length as _);
-
-                        // Otherwise, copy the remote received buffer (relative to
-                        // fd cursor) to the provided buffer, as far as we can.
-                        std::ptr::copy(res.bytes.as_ptr(), buffer as _, len);
-
-                        // We get this information over IRP normally, so need to replicate the
-                        // structure in usermode
-                        (*io_status_block).__bindgen_anon_1.Status =
-                            ManuallyDrop::new(STATUS_SUCCESS);
-                        (*io_status_block).Information = len as _;
-
-                        // Finished reading?
-                        if res.bytes.len() < length as _ {
-                            return STATUS_SUCCESS;
-                        }
-
-                        // There's still some to read, and Windows returns this.
-                        return ERROR_NO_MORE_ITEMS as NTSTATUS;
-                    }
-                    Err(e) => {
-                        eprintln!("{:?}", e);
-                        // TODO(gabriela): come up with an adequate return.
-                        return -1;
                     }
                 }
-            }
-        }
 
         let original = NT_READ_FILE_ORIGINAL.get().unwrap();
-        let ret = original(
+        
+
+        original(
             file,
             event,
             apc_routine,
@@ -318,9 +337,7 @@ unsafe extern "system" fn nt_read_file_hook(
             length,
             byte_offset,
             key,
-        );
-
-        ret
+        )
     }
 }
 
@@ -377,23 +394,36 @@ static NT_SET_INFORMATION_FILE_TYPE_ORIGINAL: OnceLock<&NtSetInformationFileType
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut c_void,
-    file_infromation: PVOID,
+    file_information: PVOID,
     length: ULONG,
     file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read() {
-            if handles.contains_key(&file) {
-                // TODO(gabriela)
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file) 
+                && let Ok(handle_context) = managed_handle.clone().try_write() {
+                // The possible values are documented at the following link:
+                // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryinformationfile
+                //match file_information_class {
+                //    // A FILE_BASIC_INFORMATION structure. The caller must have opened the file
+                // with the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
+                //    FILE_INFORMATION_CLASS::FileBasicInformation => {
+                //        if handle_context.desired_access & (FILE_READ_ATTRIBUTES) != 0 {
+                //            let out_ptr = file_information as *mut FILE_BASIC_INFORMATION;
+                //
+                //        }
+
+                //    },
+                //    _ => todo!()
+                //}
                 return STATUS_SUCCESS;
             }
-        }
 
         let original = NT_SET_INFORMATION_FILE_TYPE_ORIGINAL.get().unwrap();
         original(
             file,
             io_status_block,
-            file_infromation,
+            file_information,
             length,
             file_information_class,
         )
@@ -429,23 +459,9 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
     file_information_class: FS_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read() {
-            // TODO(gabriela): this checks the info for **file**, not **folder**!!! Please fix.
-            if let Some(handle_context) = handles.get(&file) {
-                //let mut info: BY_HANDLE_FILE_INFORMATION = MaybeUninit::zeroed().assume_init();
-                //info.dwFileAttributes = FILE_ATTRIBUTE_READONLY;
-
-                //// TODO(gabriela): explain, fix return
-                //if length != 0x18 {
-                //    return -1;
-                //}
-
-                //info.ftCreationTime = handle_context.creation_time.clone();
-                //info.ftLastAccessTime = handle_context.creation_time.clone();
-                //info.ftLastWriteTime = handle_context.creation_time.clone();
-
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file) {
                 return STATUS_SUCCESS;
-            }
         }
         let original = NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL.get().unwrap();
         original(
@@ -470,38 +486,11 @@ unsafe extern "system" fn nt_query_information_file_hook(
     file_information_class: FS_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read() {
-            if let Some(handle_context) = handles.get(&file) {
-                //let mut info: BY_HANDLE_FILE_INFORMATION = MaybeUninit::zeroed().assume_init();
-                //info.dwFileAttributes = FILE_ATTRIBUTE_READONLY;
-
-                //// TODO(gabriela): explain, improve return
-                //if length != 0x68 {
-                //    return -1;
-                //}
-
-                //// TODO(gabriela): this is wrong, fix! fstat?
-                //info.ftCreationTime = handle_context.creation_time.clone();
-                //info.ftLastAccessTime = handle_context.creation_time.clone();
-                //info.ftLastWriteTime = handle_context.creation_time.clone();
-
-                //// TODO(gabriela): I know nothing about NTFS and don't wish to either
-                //// but I should figure this out
-                //info.nNumberOfLinks = 0;
-                //info.nFileIndexLow = 0;
-                //info.nFileIndexLow = 1;
-
-                //// TODO(gabriela): get actual bounds!
-                //info.nFileSizeLow = 1000;
-                //info.nFileSizeHigh = 0;
-
-                //// TODO(gabriela): this is just wrong but python doesn't complain
-                //// anyway what the hell do we put here? idk
-                //info.dwVolumeSerialNumber = 1;
-
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file) {
                 return STATUS_SUCCESS;
-            }
         }
+
         let original = NT_QUERY_INFORMATION_FILE_ORIGINAL.get().unwrap();
         original(
             file,
@@ -518,23 +507,23 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
-        if let Ok(mut handles) = MANAGED_HANDLES.try_write() {
-            if let Some(handle_context) = handles.get(&handle) {
-                let req = make_proxy_request_no_response(CloseFileRequest {
-                    fd: handle_context.fd,
-                });
+        if let Ok(mut handles) = MANAGED_HANDLES.try_write()
+            && let Some(managed_handle) = handles.get(&handle)
+                && let Ok(handle_context) = managed_handle.clone().try_read() {
+                    let req = make_proxy_request_no_response(CloseFileRequest {
+                        fd: handle_context.fd,
+                    });
 
-                // Remove entry regardless of following response.
-                handles.remove_entry(&handle);
+                    // Remove entry regardless of following response.
+                    handles.remove_entry(&handle);
 
-                if req.is_err() {
-                    // Valid [`NTSTATUS`] to facillitate investigations later.
-                    return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    if req.is_err() {
+                        // Valid [`NTSTATUS`] to facillitate investigations later.
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
+
+                    return STATUS_SUCCESS;
                 }
-
-                return STATUS_SUCCESS;
-            }
-        }
 
         let original = NT_CLOSE_ORIGINAL.get().unwrap();
         original(handle)
@@ -546,12 +535,11 @@ static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 
 unsafe extern "system" fn get_file_type_hook(handle: HANDLE) -> DWORD {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read() {
-            if handles.contains_key(&handle) {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && handles.contains_key(&handle) {
                 // TODO(gabriela): come back to this again, remove this hook
                 return FILE_TYPE_DISK;
             }
-        }
 
         let original = GET_FILE_TYPE_ORIGINAL.get().unwrap();
         original(handle)

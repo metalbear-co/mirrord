@@ -16,7 +16,7 @@ class FileOpsTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             open("/app/test.txt", "wb")
         with open("/app/test.txt", "r") as f:
-            #f.seek(0)
+            f.seek(0)
             self.assertEqual(f.readline(), TEXT)
         with self.assertRaises(FileNotFoundError):
             open("/app/test.txt", "wb")

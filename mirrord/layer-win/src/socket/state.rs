@@ -216,7 +216,7 @@ pub fn proxy_bind(
     };
 
     // Update socket state to bound using the socket manager
-    SOCKET_MANAGER.set_socket_state(socket, SocketState::Bound(bound.clone()));
+    SOCKET_MANAGER.set_socket_state(socket, SocketState::Bound(bound));
 
     tracing::info!(
         "proxy_bind -> socket {} successfully bound to {}",

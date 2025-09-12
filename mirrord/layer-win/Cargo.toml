@@ -44,6 +44,7 @@ phnt = "0.1.2"
 tokio = { version = "1", features = ["sync", "time"] }
 bincode = "1.3"
 tokio-util = { version = "0.7", features = ["codec"] }
+once_cell = "1.21.3"
 
 [lints]
 workspace = true

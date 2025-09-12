@@ -1,7 +1,17 @@
 //! Utilities of the managed handle system.
 
-use std::{cell::LazyCell, collections::HashMap, sync::RwLock};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    hash::Hash,
+    ops::Deref,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
+use once_cell::sync::Lazy;
 use winapi::{
     shared::{
         minwindef::{FILETIME, ULONG},
@@ -12,17 +22,43 @@ use winapi::{
 
 /// This is a [`HANDLE`] type. The values start with [`MIRRORD_FIRST_MANAGED_HANDLE`].
 /// To know what data is held behind this, look at [`HandleContext`].
-pub type MirrordHandle = HANDLE;
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MirrordHandle(pub HANDLE);
+
+unsafe impl Send for MirrordHandle {}
+unsafe impl Sync for MirrordHandle {}
+
+/// Implements support for `map.get(&HANDLE)`
+impl Borrow<HANDLE> for MirrordHandle {
+    fn borrow(&self) -> &HANDLE {
+        &self.0
+    }
+}
+
+impl Deref for MirrordHandle {
+    type Target = HANDLE;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// This is the minimum possible value of a [`MirrordHandle`].
-pub const MIRRORD_FIRST_MANAGED_HANDLE: MirrordHandle = 0x50000000 as _;
+pub const MIRRORD_FIRST_MANAGED_HANDLE: MirrordHandle = MirrordHandle(0x50000000 as _);
 
-/// This is a [`RwLock`]-guarded [`HashMap`] of [`MirrordHandle`]'s that map to [`HandleContext`]'s.
-pub static mut MANAGED_HANDLES: RwLock<LazyCell<HashMap<MirrordHandle, HandleContext>>> =
-    RwLock::new(LazyCell::new(|| HashMap::new()));
+/// Map [`MirrordHandle`] to [`HandleContext`].
+pub static MANAGED_HANDLES: Lazy<RwLock<HashMap<MirrordHandle, Arc<RwLock<HandleContext>>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Keeps track of latest handle.
+static HANDLE_COUNTER: AtomicUsize =
+    AtomicUsize::new(unsafe { std::mem::transmute(MIRRORD_FIRST_MANAGED_HANDLE.0) });
 
 /// The data behind a [`MirrordHandle`].
 pub struct HandleContext {
+    /// The Linux path, maps to the `fd`
+    pub path: String,
     /// Remote file descriptor for file
     pub fd: u64,
     /// Windows desired access
@@ -35,10 +71,16 @@ pub struct HandleContext {
     pub create_disposition: ULONG,
     /// Windows create options
     pub create_options: ULONG,
-    /// The Linux path, maps to the `fd`
-    pub path: String,
     /// Creation time as [`FILETIME`]
     pub creation_time: FILETIME,
+    /// Access time as [`FILETIME`]
+    pub access_time: FILETIME,
+    /// Write time as [`FILETIME`]
+    pub write_time: FILETIME,
+    /// Size of remote buffer, in bytes
+    pub size: u64,
+    /// Cursor in file, updated by seek, or equivalent, and by linear ReadFile
+    pub cursor: usize,
 }
 
 /// Try to linearly insert a new [`MirrordHandle`] starting at [`MIRRORD_FIRST_MANAGED_HANDLE`].
@@ -52,13 +94,10 @@ pub struct HandleContext {
 /// * `Some(MirrordHandle)` if the operation succeeded
 /// * `None` if the operation failed
 pub fn try_insert_handle(handle_context: HandleContext) -> Option<MirrordHandle> {
-    if let Ok(mut handles) = unsafe { MANAGED_HANDLES.try_write() } {
-        let new_handle = handles
-            .keys()
-            .last()
-            .map(|x| (*x as usize + 1) as _)
-            .unwrap_or(MIRRORD_FIRST_MANAGED_HANDLE);
-        handles.insert(new_handle, handle_context);
+    if let Ok(mut handles) = MANAGED_HANDLES.try_write() {
+        let new_handle_val = HANDLE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let new_handle = MirrordHandle(new_handle_val as _);
+        handles.insert(new_handle, Arc::new(RwLock::new(handle_context)));
 
         Some(new_handle)
     } else {

@@ -1521,16 +1521,10 @@ unsafe extern "system" fn getaddrinfow_detour(
 ) -> INT {
     tracing::warn!("GetAddrInfoW_detour called");
 
-    let node_opt = match Option::from(node_name) {
-        Some(ptr) => unsafe { Some(str_win::u16_buffer_to_string(PCWSTR::from(ptr).as_wide())) },
-        None => None,
-    };
+    let node_opt = Option::from(node_name).map(|ptr| unsafe { str_win::u16_buffer_to_string(ptr.as_wide()) });
     tracing::warn!("GetAddrInfoW_detour called for hostname: {:?}", node_opt);
 
-    let service_opt = match Option::from(service_name) {
-        Some(ptr) => unsafe { Some(str_win::u16_buffer_to_string(PCWSTR::from(ptr).as_wide())) },
-        None => None,
-    };
+    let service_opt = Option::from(service_name).map(|ptr| unsafe { str_win::u16_buffer_to_string(ptr.as_wide()) });
 
     let hints_ref = unsafe { hints.as_ref() };
 

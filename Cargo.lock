@@ -3386,6 +3386,7 @@ dependencies = [
  "mirrord-intproxy-protocol",
  "mirrord-layer-lib",
  "mirrord-protocol",
+ "once_cell",
  "phnt",
  "str-win",
  "thiserror 2.0.12",

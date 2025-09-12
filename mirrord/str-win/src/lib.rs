@@ -3,7 +3,7 @@ use std::{
     os::windows::ffi::{OsStrExt, OsStringExt},
 };
 
-pub fn u8_ptr_to_slice<'a>(ptr: *const u8) -> Option<&'a [u8]> {
+pub unsafe fn u8_ptr_to_slice<'a>(ptr: *const u8) -> Option<&'a [u8]> {
     unsafe {
         if ptr.is_null() {
             return None;
@@ -16,7 +16,7 @@ pub fn u8_ptr_to_slice<'a>(ptr: *const u8) -> Option<&'a [u8]> {
     }
 }
 
-pub fn u16_ptr_to_slice<'a>(ptr: *const u16) -> Option<&'a [u16]> {
+pub unsafe fn u16_ptr_to_slice<'a>(ptr: *const u16) -> Option<&'a [u16]> {
     unsafe {
         if ptr.is_null() {
             return None;
