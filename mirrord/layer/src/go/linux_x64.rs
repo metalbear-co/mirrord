@@ -615,61 +615,60 @@ mod go_1_25 {
     #[unsafe(naked)]
     unsafe extern "C" fn even_newer() {
         naked_asm!(
-            "cmp rax, 60", // SYS_EXIT
-            "je 4f",
-            "cmp rax, 231", // SYS_EXIT_GROUP
-            "je 4f",
-            // Save rdi in r10
-            "mov r10, rdi",
-            // Save r9 in r11
-            "mov r11, r9",
-            // Save rax in r12
-            "mov r12, rax",
-            // Save rsi in r13
-            "mov r13, rsi",
-            // Save rcx in r15
-            "mov r15, rcx",
-            // Save stack
-            "mov rdx, rsp",
-            // For any case, store g there in case it isn't stored
-            "mov QWORD PTR fs:[0xfffffff8], r14",
+            // If it's SYS_EXIT, just let it happen.
+            "cmp    rax, 60",
+            "je     3f",
+            // If it's SYS_EXIT_GROUP, just let it happen.
+            "cmp    rax, 231",
+            "je     3f",
+            // For any case, store g there in case it isn't stored.
+            // "g" is a pointer to the current goroutine.
+            // I do not now what "there" actually is.
+            // This is magic.
+            "mov    QWORD PTR fs:[0xfffffff8], r14",
+            // Prepare stack for C ABI call.
+            "mov    rdx, rsp",
             "sub    rsp, 0x40",
             "and    rsp, -0x10",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "mov    QWORD PTR [rsp+0x28], rdx",
-            // Call ABI handler
-            "mov QWORD PTR [rsp], r11",
-            "mov r9, r8",
-            "mov r8, r13",
-            "mov rsi, rbx",
-            "mov rdx, r15",
-            "mov rcx, r10",
-            "mov rdi, r12",
-            "call {c_abi_syscall6_handler}",
-            // Restore stack
+            // Move arguments to registers/memory according to C ABI.
+            "mov    QWORD PTR [rsp], r9",
+            "mov    r9, r8",
+            "mov    r8, rsi",
+            "mov    rsi, rbx",
+            "mov    rdx, rcx",
+            "mov    rcx, rdi",
+            "mov    rdi, rax",
+            // Call C ABI handler.
+            "call   {c_abi_syscall6_handler}",
+            // Restore stack after the call.
             "mov    rsi, QWORD PTR [rsp+0x28]",
             "mov    rsp, rsi",
+            // Check C ABI handler result.
             "cmp    rax, -0xfff",
-            "jbe    3f",
+            "jbe    2f",
+            // Failure.
+            // Return the error in the register expected by `syscall.RawSyscall6`.
             "neg    rax",
             "mov    rcx, rax",
             "mov    rax, -0x1",
             "mov    rbx, 0x0",
             "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR fs:[0xfffffff8]",
             "ret",
-            "3:",
-            // RAX already contains return value
+            "2:",
+            // Success. RAX already contains return value.
             "mov    rbx, 0x0",
             "mov    rcx, 0x0",
             "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR fs:[0xfffffff8]",
             "ret",
-            // just execute syscall instruction
-            // This is for SYS_EXIT and SYS_EXIT_GROUP only - we know for sure that it's safe to
-            // just let it happen. Running our code is an unnecessary risk due to
-            // switching between stacks. See issue https://github.com/metalbear-co/mirrord/issues/2988.
-            "4:",
+            // Just execute the syscall instruction.
+            //
+            // This is for SYS_EXIT and SYS_EXIT_GROUP only - we know for sure that it's always safe to let them happen.
+            //
+            // Running our code is an unnecessary risk due to vforks and general Go flakiness.
+            // See issue https://github.com/metalbear-co/mirrord/issues/2988.
+            "3:",
             "mov rdx, rdi",
             "syscall",
             c_abi_syscall6_handler = sym crate::go::c_abi_syscall6_handler,
