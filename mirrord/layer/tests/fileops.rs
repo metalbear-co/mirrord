@@ -763,13 +763,18 @@ async fn faccessat_go(
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, _intproxy) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
-    #[cfg(not(target_os = "windows"))]
     intproxy
-        .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)
+        .expect_file_access(
+            PathBuf::from("/app/test.txt"), 
+            #[cfg(not(target_os = "windows"))]
+            O_RDWR as u8,
+            #[cfg(target_os = "windows")]
+            0x3 // GENERIC_READ | GENERIC_WRITE equivalent
+        )
         .await;
 
     // Assert all clear
