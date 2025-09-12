@@ -50,7 +50,6 @@ pub(crate) mod outgoing_selector;
 /// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
 ///   they're set with the cloexec flag, so that children processes don't end up using sockets that
 ///   are exclusive for their parents.
-
 /// Unix-specific DNS resolver implementation
 pub(crate) struct UnixDnsResolver;
 
