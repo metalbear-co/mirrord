@@ -607,13 +607,13 @@ mod go_1_25 {
         hook_symbol!(
             hook_manager,
             "internal/runtime/syscall.Syscall6",
-            even_newer
+            syscall6_detour
         );
     }
 
     /// Detour for `internal/runtime/syscall.Syscall6`.
     #[unsafe(naked)]
-    unsafe extern "C" fn even_newer() {
+    unsafe extern "C" fn syscall6_detour() {
         naked_asm!(
             // If it's SYS_EXIT, just let it happen.
             "cmp    rax, 60",
