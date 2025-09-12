@@ -321,6 +321,9 @@ mod verify_config;
 mod vpn;
 mod wsl;
 
+#[cfg(feature = "wizard")]
+mod wizard;
+
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
@@ -1071,6 +1074,8 @@ fn main() -> miette::Result<()> {
             Commands::Newsletter => newsletter::newsletter_command().await,
             Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            #[cfg(feature = "wizard")]
+            Commands::Wizard => { wizard::wizard_command().await }
         };
 
         Ok(())
