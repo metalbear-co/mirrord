@@ -20,7 +20,7 @@ use mirrord_intproxy_protocol::{
 use crate::error::{HookError, HookResult, ProxyError, ProxyResult};
 
 /// Efficient result type for internal proxy operations to reduce memory usage
-/// Now that HookResult uses Box<HookError> by default, we can use it directly
+/// Now that HookResult uses `Box<HookError>` by default, we can use it directly
 type ProxyConnResult<T> = HookResult<T>;
 
 /// Global proxy connection instance, shared across the layer
