@@ -21,6 +21,20 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Who am I?
+        shell: pwsh
+        run: |
+          Write-Host "USERNAME=$env:USERNAME"
+          whoami
+          [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+          Write-Host "USERPROFILE=$env:USERPROFILE"
+
+      - name: Check cert presence
+        shell: pwsh
+        run: |
+          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
+
+
       # 1) rustup target add x86_64-pc-windows-msvc
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
