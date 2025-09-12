@@ -1,22 +1,18 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
 use std::{
     collections::HashSet,
+    os::unix::io::RawFd,
     sync::{LazyLock, Mutex},
 };
 
-#[cfg(not(target_os = "windows"))]
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
 use mirrord_config::experimental::ExperimentalConfig;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
-#[cfg(not(target_os = "windows"))]
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
@@ -24,34 +20,6 @@ use crate::{detour::DetourGuard, hooks::HookManager, replace};
 /// freeaddrinfo function and when to use our implementation
 pub(crate) static MANAGED_ADDRINFO: LazyLock<Mutex<HashSet<usize>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
-
-#[hook_fn]
-unsafe extern "C" fn socket(domain: c_int, type_: c_int, protocol: c_int) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn connect(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn listen(sockfd: c_int, backlog: c_int) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn accept(sockfd: c_int, addr: *mut sockaddr, addrlen: *mut socklen_t) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, arg: usize) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn dup(oldfd: c_int) -> c_int;
-
-#[hook_fn]
-unsafe extern "C" fn dup2(oldfd: c_int, newfd: c_int) -> c_int;
-
-#[cfg(target_os = "linux")]
-#[hook_fn]
-unsafe extern "C" fn dup3(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int;
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -61,7 +29,7 @@ pub(crate) unsafe extern "C" fn socket_detour(
 ) -> c_int {
     unsafe {
         socket(domain, type_, protocol)
-            .unwrap_or_bypass_with(|_| libc::socket(domain, type_, protocol))
+            .unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
     }
 }
 
@@ -73,7 +41,7 @@ pub(crate) unsafe extern "C" fn bind_detour(
 ) -> c_int {
     unsafe {
         bind(sockfd, raw_address, address_length)
-            .unwrap_or_bypass_with(|_| libc::bind(sockfd, raw_address, address_length))
+            .unwrap_or_bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
     }
 }
 
@@ -91,7 +59,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
     unsafe {
         connect(sockfd, raw_address, address_length)
             .map(From::from)
-            .unwrap_or_bypass_with(|_| libc::connect(sockfd, raw_address, address_length))
+            .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
     }
 }
 
@@ -229,7 +197,6 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
 
 /// Hook for `_accept$NOCANCEL` (for macos, see
 /// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
-#[cfg(not(target_os = "windows"))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     sockfd: c_int,
@@ -248,8 +215,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
 }
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
-#[cfg(not(target_os = "windows"))]
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     unsafe {
         let arg = arg.arg::<usize>();
@@ -270,7 +236,6 @@ pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     unsafe {
@@ -287,7 +252,6 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     unsafe {
@@ -631,15 +595,6 @@ pub(crate) unsafe fn enable_socket_hooks(
             FnConnect,
             FN_CONNECT
         );
-
-        if experimental.force_hook_connect {
-            let _ = hook_manager.hook_any_lib_export(
-                "connect",
-                connect_detour as *mut libc::c_void,
-                Some("libc"),
-            );
-        }
-
         replace!(
             hook_manager,
             "_connect$NOCANCEL",
