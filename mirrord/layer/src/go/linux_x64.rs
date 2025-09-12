@@ -4,9 +4,7 @@ use mirrord_config::experimental::ExperimentalConfig;
 use nix::errno::Errno;
 use tracing::trace;
 
-use crate::{
-    close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
-};
+use crate::{close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol};
 /*
  * Reference for which syscalls are managed by the handlers:
  * SYS_openat: Syscall6

@@ -5,7 +5,7 @@
 use nix::errno::Errno;
 use tracing::trace;
 
-use crate::{close_detour, file::hooks::*, socket::hooks::*};
+use crate::{close_detour, file::hooks::*};
 
 #[cfg_attr(
     all(target_os = "linux", target_arch = "x86_64"),

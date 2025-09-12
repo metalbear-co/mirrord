@@ -193,6 +193,12 @@ impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for HookError
     }
 }
 
+impl From<Box<ProxyError>> for HookError {
+    fn from(err: Box<ProxyError>) -> Self {
+        HookError::ProxyError(*err)
+    }
+}
+
 pub(crate) type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 

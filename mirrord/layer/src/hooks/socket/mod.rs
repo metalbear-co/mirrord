@@ -25,6 +25,34 @@ use crate::{detour::DetourGuard, hooks::HookManager, replace};
 pub(crate) static MANAGED_ADDRINFO: LazyLock<Mutex<HashSet<usize>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
+#[hook_fn]
+unsafe extern "C" fn socket(domain: c_int, type_: c_int, protocol: c_int) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn connect(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn listen(sockfd: c_int, backlog: c_int) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn accept(sockfd: c_int, addr: *mut sockaddr, addrlen: *mut socklen_t) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, arg: usize) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn dup(oldfd: c_int) -> c_int;
+
+#[hook_fn]
+unsafe extern "C" fn dup2(oldfd: c_int, newfd: c_int) -> c_int;
+
+#[cfg(target_os = "linux")]
+#[hook_fn]
+unsafe extern "C" fn dup3(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int;
+
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,
@@ -33,7 +61,7 @@ pub(crate) unsafe extern "C" fn socket_detour(
 ) -> c_int {
     unsafe {
         socket(domain, type_, protocol)
-            .unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
+            .unwrap_or_bypass_with(|_| libc::socket(domain, type_, protocol))
     }
 }
 
@@ -45,7 +73,7 @@ pub(crate) unsafe extern "C" fn bind_detour(
 ) -> c_int {
     unsafe {
         bind(sockfd, raw_address, address_length)
-            .unwrap_or_bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
+            .unwrap_or_bypass_with(|_| libc::bind(sockfd, raw_address, address_length))
     }
 }
 
@@ -63,7 +91,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
     unsafe {
         connect(sockfd, raw_address, address_length)
             .map(From::from)
-            .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
+            .unwrap_or_bypass_with(|_| libc::connect(sockfd, raw_address, address_length))
     }
 }
 
@@ -221,7 +249,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
 #[cfg(not(target_os = "windows"))]
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     unsafe {
         let arg = arg.arg::<usize>();

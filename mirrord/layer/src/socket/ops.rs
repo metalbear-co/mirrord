@@ -35,7 +35,7 @@ use tracing::{error, trace};
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
-use super::{dns_selector, hooks::*, outgoing_selector, *};
+use super::{dns_selector, outgoing_selector, *};
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
@@ -129,7 +129,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         return Detour::Error(HookError::SocketUnsuportedIpv6);
     }
 
-    let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
+    let socket_result = unsafe { libc::socket(domain, type_, protocol) };
 
     let socket_fd = if socket_result == -1 {
         Err(std::io::Error::last_os_error())
@@ -164,7 +164,7 @@ fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour
 
     let address = SockAddr::from(address);
 
-    let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+    let bind_result = unsafe { libc::bind(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
         Detour::Error(io::Error::last_os_error().into())
     } else {
@@ -316,7 +316,7 @@ pub(super) fn bind(
     // connect to.
     let address = unsafe {
         SockAddr::try_init(|storage, len| {
-            if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
+            if libc::getsockname(sockfd, storage.cast(), len) == -1 {
                 let error = io::Error::last_os_error();
                 error!(%error, sockfd, "`getsockname` failed to get address of a socket after bind");
                 Err(error)
@@ -422,7 +422,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             requested_address,
             address,
         }) => {
-            let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
+            let listen_result = unsafe { libc::listen(sockfd, backlog) };
             if listen_result != 0 {
                 let error = io::Error::last_os_error();
 
@@ -492,7 +492,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let connect_result: ConnectResult = if CALL_CONNECT {
             let layer_address = SockAddr::try_from(layer_address.clone())?;
 
-            unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+            unsafe { libc::connect(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
             ConnectResult {
                 result: 0,
@@ -542,7 +542,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                 let rawish_local_addr = SockAddr::from(addr);
 
                 let connect_result = ConnectResult::from(unsafe {
-                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
+                    libc::connect(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
                 });
 
                 Detour::Success(connect_result)
@@ -578,7 +578,7 @@ fn connect_to_local_address(
                     _ => None,
                 })
                 .map(|rawish_remote_address| unsafe {
-                    FN_CONNECT(
+                    libc::connect(
                         sockfd,
                         rawish_remote_address.as_ptr(),
                         rawish_remote_address.len(),
@@ -1384,7 +1384,7 @@ pub(super) fn send_to(
         let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         unsafe {
-            FN_SEND_TO(
+            libc::sendto(
                 sockfd,
                 raw_message,
                 message_length,
@@ -1414,7 +1414,7 @@ pub(super) fn send_to(
         let raw_interceptor_length = layer_address.len();
 
         unsafe {
-            FN_SEND_TO(
+            libc::sendto(
                 sockfd,
                 raw_message,
                 message_length,
@@ -1485,7 +1485,7 @@ pub(super) fn sendmsg(
         };
         true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
 
-        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
+        unsafe { libc::sendmsg(sockfd, true_message_header.as_ref(), flags) }
     } else {
         connect_outgoing::<false>(
             sockfd,
@@ -1515,7 +1515,7 @@ pub(super) fn sendmsg(
         };
         true_message_header.as_mut().msg_namelen = raw_interceptor_length;
 
-        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
+        unsafe { libc::sendmsg(sockfd, true_message_header.as_ref(), flags) }
     };
 
     Detour::Success(sent_result)
@@ -1655,7 +1655,7 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     let mut original_head = std::ptr::null_mut();
-    let result: i32 = unsafe { FN_GETIFADDRS(&mut original_head) };
+    let result: i32 = unsafe { libc::getifaddrs(&mut original_head) };
     if result != 0 {
         Err(io::Error::from_raw_os_error(result))?;
     }

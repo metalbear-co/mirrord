@@ -6,8 +6,8 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use libc::{sockaddr, socklen_t};
 // Re-export shared types from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{
-    Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketKind, SocketState,
-    UserSocket, is_ignored_port,
+    Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SHARED_SOCKETS_ENV_VAR,
+    SOCKETS, SocketKind, SocketState, UserSocket, is_ignored_port,
 };
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
@@ -27,6 +27,9 @@ use crate::{
 mod apple_dnsinfo;
 pub(crate) mod dns_selector;
 pub(super) mod hooks;
+// Re-export MANAGED_ADDRINFO for socket ops
+#[cfg(not(target_os = "windows"))]
+pub(crate) use hooks::socket::MANAGED_ADDRINFO;
 pub(crate) mod ops;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod outgoing_selector;
@@ -37,18 +40,16 @@ pub(crate) mod outgoing_selector;
 /// you're gonna have a bad time. The process hanging is the min you should expect, if you
 /// choose to ignore this warning.
 ///
-/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process
-///   through [`libc::execve`] (or any `exec*`), and the spawned children may want to use those
-///   sockets. As memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass
-///   parent sockets to child processes. The way we achieve this is by setting the
-///   [`SHARED_SOCKETS_ENV_VAR`] with an [`BASE64_URL_SAFE`] encoded version of our
-///   [`SOCKETS`]. The env var is set as `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
+/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process through
+///   [`libc::execve`] (or any `exec*`), and the spawned children may want to use those sockets. As
+///   memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets
+///   to child processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with
+///   an [`BASE64_URL_SAFE`] encoded version of our [`SOCKETS`]. The env var is set as
+///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
 ///
-/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check
-///   if they're set with the cloexec flag, so that children processes don't end up using
-///   sockets that are exclusive for their parents.
-// Re-export the unified SOCKETS from layer-lib
-pub(crate) use mirrord_layer_lib::socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS};
+/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
+///   they're set with the cloexec flag, so that children processes don't end up using sockets that
+///   are exclusive for their parents.
 
 /// Unix-specific DNS resolver implementation
 pub(crate) struct UnixDnsResolver;
