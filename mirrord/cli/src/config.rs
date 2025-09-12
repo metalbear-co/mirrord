@@ -191,6 +191,10 @@ pub(super) enum Commands {
     /// Execute a command related to mirrord CI.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
+    
+    /// Launch the config wizard
+    #[cfg(feature = "wizard")]
+    Wizard,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

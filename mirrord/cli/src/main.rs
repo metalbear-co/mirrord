@@ -315,6 +315,9 @@ mod verify_config;
 mod vpn;
 mod wsl;
 
+#[cfg(feature = "wizard")]
+mod wizard;
+
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
@@ -1051,6 +1054,8 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            #[cfg(feature = "wizard")]
+            Commands::Wizard => { wizard::wizard_command().await }
         };
 
         Ok(())
