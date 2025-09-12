@@ -18,6 +18,7 @@ members = [
     "tests/issue1317",
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
+    "mirrord/layer/tests/apps/fileops",
     #"mirrord-win-poc/ifeo/*",
     #"mirrord-win-poc/manual-exec/*",
 ]
@@ -30,7 +31,6 @@ exclude = [
     "mirrord/layer/tests/apps/issue1899",  # Uses Unix-specific libc::opendir
     "mirrord/layer/tests/apps/issue2001",  # Uses Unix-specific libc::opendir/readdir
     "mirrord/layer/tests/apps/issue2438",  # Unix-specific test app
-    "mirrord/layer/tests/apps/fileops",    # Unix-specific test app
     "tests/rust-unix-socket-client",       # Uses Unix domain sockets
     "tests/rust-bypassed-unix-socket",     # Uses Unix domain sockets
 ]
