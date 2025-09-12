@@ -590,7 +590,7 @@ where
     if user_socket_info.domain == AF_UNIX
         && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Err(HookError::UnsupportedSocketType);
+        return Err(Box::new(HookError::UnsupportedSocketType));
     }
 
     // Currently this flow only handles DNS resolution.
