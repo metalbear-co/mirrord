@@ -1451,7 +1451,7 @@ pub fn get_env(
         #[cfg(target_os = "linux")]
         (
             "LD_PRELOAD".to_string(),
-            _dylib_path().to_str().unwrap().to_string(),
+            _dylib_path.to_str().unwrap().to_string(),
         ),
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         (
