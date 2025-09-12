@@ -15,8 +15,12 @@ use mirrord_operator::crd::{
 use rstest::{fixture, rstest};
 
 use crate::utils::{
-    application::Application, config_dir, kube_client, kube_service::KubeService,
-    resource_guard::ResourceGuard, services::basic_service, TestProcess,
+    application::{Application, GoVersion},
+    config_dir, kube_client,
+    kube_service::KubeService,
+    resource_guard::ResourceGuard,
+    services::basic_service,
+    TestProcess,
 };
 
 mod copy_target;
@@ -295,7 +299,7 @@ async fn run_mirrord_and_verify_steal_result(
     target_deployment: bool,
     can_steal: CanSteal,
 ) {
-    let application = Application::Go21HTTP;
+    let application = Application::GoHTTP(GoVersion::LATEST);
 
     let target = if target_deployment {
         format!("deploy/{}", kube_service.name)
@@ -369,7 +373,7 @@ pub async fn create_policy_and_try_to_steal(
 }
 
 async fn run_mirrord_and_verify_mirror_result(kube_service: &KubeService, expected_success: bool) {
-    let application = Application::Go21HTTP;
+    let application = Application::GoHTTP(GoVersion::LATEST);
 
     let test_proc = application
         .run(

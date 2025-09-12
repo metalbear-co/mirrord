@@ -16,6 +16,10 @@ pub enum GoVersion {
     GO_1_25,
 }
 
+impl GoVersion {
+    pub const LATEST: Self = Self::GO_1_25;
+}
+
 impl fmt::Display for GoVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
