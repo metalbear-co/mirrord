@@ -20,8 +20,8 @@ use mirrord_intproxy_protocol::{
 use crate::error::{HookError, HookResult, ProxyError, ProxyResult};
 
 /// Efficient result type for internal proxy operations to reduce memory usage
-/// Converts to HookResult at API boundaries
-type ProxyConnResult<T> = Result<T, Box<HookError>>;
+/// Now that HookResult uses Box<HookError> by default, we can use it directly
+type ProxyConnResult<T> = HookResult<T>;
 
 /// Global proxy connection instance, shared across the layer
 pub static PROXY_CONNECTION: std::sync::OnceLock<ProxyConnection> = std::sync::OnceLock::new();
@@ -66,7 +66,7 @@ impl ProxyConnection {
                 proxy_addr,
             })
         } else {
-            Err(ProxyError::UnexpectedResponse(response))
+            Err(Box::new(ProxyError::UnexpectedResponse(response)))
         }
     }
 
@@ -91,7 +91,9 @@ impl ProxyConnection {
     pub fn receive(&self, response_id: u64) -> ProxyResult<ProxyToLayerMessage> {
         let response = self.responses.lock()?.receive(response_id)?;
         match response {
-            ProxyToLayerMessage::ProxyFailed(error_msg) => Err(ProxyError::ProxyFailure(error_msg)),
+            ProxyToLayerMessage::ProxyFailed(error_msg) => {
+                Err(Box::new(ProxyError::ProxyFailure(error_msg)))
+            }
             _ => Ok(response),
         }
     }
@@ -103,7 +105,7 @@ impl ProxyConnection {
     {
         let response_id = self.send(request.wrap())?;
         let response = self.receive(response_id)?;
-        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
+        T::try_unwrap_response(response).map_err(|e| Box::new(ProxyError::UnexpectedResponse(e)))
     }
 
     pub fn make_request_no_response<T: IsLayerRequest + Debug>(
@@ -163,7 +165,7 @@ where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
 {
-    make_proxy_request_with_response_impl(request).map_err(Into::into)
+    make_proxy_request_with_response_impl(request)
 }
 
 /// Internal implementation using ProxyConnResult for memory efficiency
@@ -183,7 +185,7 @@ where
             )))
         })?
         .make_request_with_response(request)
-        .map_err(|e| Box::new(HookError::ProxyError(e)))
+        .map_err(|e| e.into())
 }
 
 /// Generic helper function to proxy a request that might have a large response to mirrord intproxy.
@@ -191,7 +193,7 @@ where
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
-    make_proxy_request_no_response_impl(request).map_err(Into::into)
+    make_proxy_request_no_response_impl(request)
 }
 
 /// Internal implementation using ProxyConnResult for memory efficiency
@@ -211,5 +213,5 @@ fn make_proxy_request_no_response_impl<T: IsLayerRequest + Debug>(
             )))
         })?
         .make_request_no_response(request)
-        .map_err(|e| Box::new(HookError::ProxyError(e)))
+        .map_err(|e| e.into())
 }

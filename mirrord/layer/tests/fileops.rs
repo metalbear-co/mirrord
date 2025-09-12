@@ -616,18 +616,18 @@ use windows::Win32::{
 
 #[cfg(target_os = "windows")]
 fn terminate_tokio_child(child: &Child) -> std::io::Result<()> {
-    let pid = child.id().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "Failed to get child process ID")
-    })?;
+    let pid = child
+        .id()
+        .ok_or_else(|| std::io::Error::other("Failed to get child process ID"))?;
 
     unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, false.into(), pid)?;
+        let handle = OpenProcess(PROCESS_TERMINATE, false, pid)?;
         if handle.is_invalid() {
             return Err(std::io::Error::last_os_error());
         }
 
         let result = TerminateProcess(handle, 1);
-        let _ = CloseHandle(handle).unwrap();
+        CloseHandle(handle).unwrap();
 
         match result {
             Ok(()) => Ok(()),
@@ -763,7 +763,7 @@ async fn faccessat_go(
 ) {
     let _tracing = init_tracing();
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, _intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 

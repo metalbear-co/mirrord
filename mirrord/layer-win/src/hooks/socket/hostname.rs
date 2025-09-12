@@ -509,17 +509,3 @@ pub unsafe fn free_managed_addrinfo<T: WindowsAddrInfo>(addrinfo: *mut T) -> boo
         false
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_remote_hostname_detection() {
-        // This test would need a mocked resolver to work properly
-        // For now, just test that the function doesn't panic
-        let result = is_remote_hostname("some-hostname");
-        // Result could be true or false depending on state, just ensure no panic
-        assert!(result == true || result == false);
-    }
-}

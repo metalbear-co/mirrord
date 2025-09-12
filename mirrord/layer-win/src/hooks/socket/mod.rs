@@ -453,13 +453,22 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
     );
     match ops::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
-        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
-            tracing::error!(
-                "connect_detour -> socket {} connect target {:?} is unreachable: {}",
-                s,
-                raw_addr,
-                e
-            );
+        Err(err)
+            if matches!(
+                err.as_ref(),
+                HookError::ConnectError(ConnectError::AddressUnreachable(_))
+            ) =>
+        {
+            if let HookError::ConnectError(ConnectError::AddressUnreachable(e)) = err.as_ref() {
+                tracing::error!(
+                    "connect_detour -> socket {} connect target {:?} is unreachable: {}",
+                    s,
+                    raw_addr,
+                    e
+                );
+            } else {
+                tracing::error!("connect_detour -> unexpected error type");
+            }
             return SOCKET_ERROR;
         }
         Err(_) => {
@@ -791,13 +800,22 @@ unsafe extern "system" fn wsa_connect_detour(
         SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
     );
     match ops::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
-        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
-            tracing::error!(
-                "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
-                s,
-                raw_addr,
-                e
-            );
+        Err(err)
+            if matches!(
+                err.as_ref(),
+                HookError::ConnectError(ConnectError::AddressUnreachable(_))
+            ) =>
+        {
+            if let HookError::ConnectError(ConnectError::AddressUnreachable(e)) = err.as_ref() {
+                tracing::error!(
+                    "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
+                    s,
+                    raw_addr,
+                    e
+                );
+            } else {
+                tracing::error!("wsa_connect_detour -> unexpected error type");
+            }
             return SOCKET_ERROR;
         }
         Err(_) => {
@@ -1100,7 +1118,7 @@ unsafe extern "system" fn wsa_send_to_detour(
             if result == 0 {
                 // Success - update bytes sent if caller provided pointer
                 if lpNumberOfBytesSent.is_null() {
-                    return Err(HookError::NullPointer);
+                    return Err(Box::new(HookError::NullPointer));
                 }
 
                 unsafe { *lpNumberOfBytesSent = bytes_sent };

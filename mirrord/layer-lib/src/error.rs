@@ -398,6 +398,81 @@ impl From<Box<HookError>> for HookError {
     }
 }
 
+// Generic boxing helper - we'll implement specific From traits for the errors we need
+// This allows seamless use of ? operator with boxed errors
+
+// For HookError - implement From for all the errors it needs to convert from
+impl From<std::io::Error> for Box<HookError> {
+    fn from(error: std::io::Error) -> Self {
+        Box::new(HookError::IO(error))
+    }
+}
+
+impl<T> From<PoisonError<T>> for Box<HookError> {
+    fn from(_: PoisonError<T>) -> Self {
+        Box::new(HookError::LockError)
+    }
+}
+
+impl From<ResponseError> for Box<HookError> {
+    fn from(error: ResponseError) -> Self {
+        Box::new(HookError::ResponseError(error))
+    }
+}
+
+impl From<AddrInfoError> for Box<HookError> {
+    fn from(error: AddrInfoError) -> Self {
+        Box::new(HookError::AddrInfoError(error))
+    }
+}
+
+impl From<ConnectError> for Box<HookError> {
+    fn from(error: ConnectError) -> Self {
+        Box::new(HookError::ConnectError(error))
+    }
+}
+
+impl From<SendToError> for Box<HookError> {
+    fn from(error: SendToError) -> Self {
+        Box::new(HookError::SendToError(error))
+    }
+}
+
+// For ProxyError - implement From for all the errors it needs
+impl From<std::io::Error> for Box<ProxyError> {
+    fn from(error: std::io::Error) -> Self {
+        Box::new(ProxyError::IoFailed(error))
+    }
+}
+
+impl From<CodecError> for Box<ProxyError> {
+    fn from(error: CodecError) -> Self {
+        Box::new(ProxyError::CodecError(error))
+    }
+}
+
+impl<T> From<PoisonError<T>> for Box<ProxyError> {
+    fn from(_: PoisonError<T>) -> Self {
+        Box::new(ProxyError::LockPoisoned)
+    }
+}
+
+// For LayerError - implement From for ProxyError
+impl From<Box<ProxyError>> for Box<LayerError> {
+    fn from(error: Box<ProxyError>) -> Self {
+        Box::new(LayerError::ProxyConnectionFailed(*error))
+    }
+}
+
+// For HookError - implement From for ProxyError
+impl From<Box<ProxyError>> for Box<HookError> {
+    fn from(error: Box<ProxyError>) -> Self {
+        Box::new(HookError::ProxyError(*error))
+    }
+}
+
+// Automatic conversions are provided by the standard library for Box<T> <-> T
+
 #[cfg(unix)]
 impl From<frida_gum::Error> for LayerError {
     fn from(err: frida_gum::Error) -> Self {
@@ -405,9 +480,9 @@ impl From<frida_gum::Error> for LayerError {
     }
 }
 
-pub type LayerResult<T, E = LayerError> = std::result::Result<T, E>;
-pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
-pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
+pub type LayerResult<T, E = Box<LayerError>> = std::result::Result<T, E>;
+pub type HookResult<T, E = Box<HookError>> = std::result::Result<T, E>;
+pub type ProxyResult<T, E = Box<ProxyError>> = std::result::Result<T, E>;
 
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {

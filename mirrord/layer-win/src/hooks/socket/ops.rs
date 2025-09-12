@@ -24,7 +24,7 @@ use winapi::{
 };
 use windows_strings::PCWSTR;
 
-use crate::socket::{hostname, utils::SocketAddressExtWin};
+use crate::hooks::socket::{hostname, utils::SocketAddressExtWin};
 
 /// Wrapper around Windows WSABUF array for safe buffer handling
 #[derive(Debug)]
@@ -376,7 +376,7 @@ pub fn attempt_proxy_connection<F>(
 where
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
-    use crate::socket::utils::SocketAddrExtWin;
+    use crate::hooks::socket::utils::SocketAddrExtWin;
 
     // Get the socket state (we know it exists from validation)
     let user_socket = match get_socket(socket) {

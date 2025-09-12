@@ -663,7 +663,7 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
 }
 
 impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
-    type Error = HookError;
+    type Error = Box<HookError>;
 
     fn try_from(response: GetAddrInfoResponse) -> HookResult<Self> {
         // Check if the response was successful and ensure we have addresses to process

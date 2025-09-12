@@ -5,6 +5,11 @@
 #![allow(clippy::too_many_arguments)]
 use std::thread;
 
+mod console;
+mod hooks;
+mod macros;
+pub mod process;
+
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::MIRRORD_LAYER_WAIT_FOR_DEBUGGER;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -18,12 +23,6 @@ use winapi::{
 };
 
 use crate::hooks::initialize_hooks;
-
-mod console;
-mod hooks;
-mod macros;
-pub mod process;
-mod socket;
 
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 

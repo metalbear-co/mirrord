@@ -47,7 +47,7 @@ pub fn initialize_proxy_connection(process_info: ProcessInfo) -> LayerResult<()>
 
     // Establish proxy connection
     let new_connection = ProxyConnection::new(address, session, timeout)
-        .map_err(LayerError::ProxyConnectionFailed)?;
+        .map_err(|e| -> Box<LayerError> { e.into() })?;
 
     // Store the proxy connection
     PROXY_CONNECTION

@@ -1415,7 +1415,7 @@ pub fn config_dir() -> PathBuf {
 ///
 /// `extra_vars` are also added to the [`ConfigContext`] for [`LayerConfig::resolve`].
 pub fn get_env(
-    dylib_path: &Path,
+    _dylib_path: &Path,
     intproxy_addr: SocketAddr,
     extra_vars: Vec<(&str, &str)>,
     config_path: Option<&Path>,

@@ -20,10 +20,6 @@ use crate::{
     socket::{Connected, SOCKETS, SocketState, UserSocket},
 };
 
-/// Efficient result type for internal socket operations to reduce memory usage
-/// Converts to HookResult at API boundaries
-type SocketResult<T> = Result<T, Box<HookError>>;
-
 // Platform-specific socket descriptor type
 #[cfg(unix)]
 pub type SocketDescriptor = RawFd;
@@ -192,7 +188,6 @@ where
         proxy_request_fn,
         connect_fn,
     )
-    .map_err(Into::into)
 }
 
 /// Internal implementation using SocketResult for memory efficiency
@@ -203,13 +198,13 @@ fn connect_outgoing_impl<P, F>(
     protocol: NetProtocol,
     proxy_request_fn: P,
     connect_fn: F,
-) -> SocketResult<ConnectResult>
+) -> HookResult<ConnectResult>
 where
     P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
     // Closure that performs the connection with mirrord messaging.
-    let remote_connection = |remote_addr: SockAddr| -> SocketResult<ConnectResult> {
+    let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
         let remote_address = SocketAddress::try_from(remote_addr.clone()).map_err(|e| {
             Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
@@ -222,7 +217,7 @@ where
             protocol,
         };
 
-        let response = proxy_request_fn(request).map_err(Box::new)?;
+        let response = proxy_request_fn(request)?;
 
         let OutgoingConnectResponse {
             layer_address,
@@ -266,7 +261,6 @@ where
         in_cluster_address_opt,
         layer_address_opt,
     )
-    .map_err(Into::into)
 }
 
 /// Internal implementation using SocketResult for memory efficiency
@@ -276,7 +270,7 @@ fn call_connect_fn_impl<F>(
     remote_addr: SockAddr,
     in_cluster_address_opt: Option<SocketAddress>,
     layer_address_opt: Option<SocketAddress>,
-) -> SocketResult<ConnectResult>
+) -> HookResult<ConnectResult>
 where
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
@@ -452,7 +446,7 @@ pub fn send_dns_patch(
     user_socket_info: Arc<UserSocket>,
     destination: SocketAddr,
 ) -> HookResult<SockAddr> {
-    send_dns_patch_impl(sockfd, user_socket_info, destination).map_err(Into::into)
+    send_dns_patch_impl(sockfd, user_socket_info, destination)
 }
 
 /// Internal implementation using SocketResult for memory efficiency
@@ -460,7 +454,7 @@ fn send_dns_patch_impl(
     sockfd: SocketDescriptor,
     user_socket_info: Arc<UserSocket>,
     destination: SocketAddr,
-) -> SocketResult<SockAddr> {
+) -> HookResult<SockAddr> {
     let mut sockets = SOCKETS
         .lock()
         .map_err(|e| Box::new(HookError::from(std::io::Error::other(e.to_string()))))?;

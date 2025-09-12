@@ -9,7 +9,7 @@ use tracing::trace;
 
 use crate::{
     common::proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
-    error::HookResult,
+    error::{HookError, HookResult},
 };
 
 /// Efficient result type for internal file operations
@@ -184,10 +184,10 @@ fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HookResult<Vec<
     })();
 
     result.map_err(|e| {
-        crate::error::HookError::IO(std::io::Error::other(format!(
+        Box::new(HookError::IO(std::io::Error::other(format!(
             "Failed to read file {}: {}",
             file_path, e
-        )))
+        ))))
     })
 }
 
