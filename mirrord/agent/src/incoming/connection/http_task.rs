@@ -22,8 +22,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     http::{
-        HttpVersion, body::RolledBackBody, error::MirrordErrorResponse,
-        extract_requests::ExtractedRequest, sender::HttpSender,
+        HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, body::RolledBackBody,
+        error::MirrordErrorResponse, extract_requests::ExtractedRequest, sender::HttpSender,
     },
     incoming::{
         IncomingStreamItem,
@@ -140,6 +140,8 @@ impl HttpTask<PassthroughConnection> {
                 }
             };
 
+            Self::modify_response(&mut response, &info);
+
             let upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
                 .then(|| hyper::upgrade::on(&mut response));
             let _ = request.response_tx.send(response.map(BoxBody::new));
@@ -204,6 +206,18 @@ impl HttpTask<PassthroughConnection> {
             .await
             .map_err(From::from)
             .map_err(ConnError::PassthroughHttpError)
+    }
+
+    /// Used for applying transformations on responses to
+    /// passed-through requests.
+
+    /// Currently just inserts the mirrord agent
+    /// header.
+    fn modify_response(response: &mut Response<Incoming>, _connection: &ConnectionInfo) {
+        response.headers_mut().insert(
+            MIRRORD_AGENT_HTTP_HEADER_NAME,
+            http::HeaderValue::from_static("passed-through"),
+        );
     }
 }
 
