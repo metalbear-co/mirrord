@@ -27,10 +27,15 @@ use tracing::Level;
 
 use super::{Command, StealerCommand, StealerMessage};
 use crate::{
-    error::AgentResult, http::{filter::HttpFilter, MIRRORD_AGENT_HTTP_HEADER_NAME}, incoming::{
+    AgentError,
+    error::AgentResult,
+    http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
+    incoming::{
         ConnError, IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider,
         StolenHttp, StolenTcp,
-    }, steal::api::wait_body::WaitForFullBody, util::{protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus, ClientId}, AgentError
+    },
+    steal::api::wait_body::WaitForFullBody,
+    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
 };
 
 mod wait_body;
@@ -686,8 +691,8 @@ impl ClientConnectionState {
     /// Used for applying transformations on the response returned
     /// from the client. Currently just inserts the mirrord agent
     /// header.
-    fn modify_response<T>(&self, hyper_response: &mut Response<T>) {
-        hyper_response.headers_mut().insert(
+    fn modify_response<T>(&self, response: &mut Response<T>) {
+        response.headers_mut().insert(
             MIRRORD_AGENT_HTTP_HEADER_NAME,
             http::HeaderValue::from_static("forwarded-to-client"),
         );
