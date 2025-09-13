@@ -19,6 +19,8 @@ pub mod extract_requests;
 pub mod filter;
 pub mod sender;
 
+pub(crate) const MIRRORD_AGENT_HTTP_HEADER_NAME: &str = "Mirrord-Agent";
+
 /// [`Response`] type with a boxed body.
 pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;
 
