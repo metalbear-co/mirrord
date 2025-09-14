@@ -693,7 +693,6 @@ impl ClientConnectionState {
     /// from the client. Currently just inserts the mirrord agent
     /// header.
     fn modify_response<T>(&self, response: &mut Response<T>) {
-        // FIXME: Take this from Args instead
         if envs::INJECT_HEADERS.from_env_or_default() {
             response.headers_mut().insert(
                 MIRRORD_AGENT_HTTP_HEADER_NAME,
