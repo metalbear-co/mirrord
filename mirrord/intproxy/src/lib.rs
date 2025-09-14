@@ -145,9 +145,11 @@ impl IntProxy {
         let ping_pong = background_tasks.register_restartable(
             PingPong::new(
                 Self::PING_INTERVAL,
-                agent_conn_reconnectable
-                    .then_some(Self::PING_PONG_MAX_RECONNECTS)
-                    .unwrap_or(0),
+                if agent_conn_reconnectable {
+                    Self::PING_PONG_MAX_RECONNECTS
+                } else {
+                    0
+                },
             ),
             MainTaskId::PingPong,
             Self::CHANNEL_SIZE,
