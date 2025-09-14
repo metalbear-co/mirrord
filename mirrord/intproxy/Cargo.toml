@@ -40,9 +40,12 @@ hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
 rand.workspace = true
-tokio-rustls.workspace = true
 rustls.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
 tokio-retry.workspace = true
+tokio-rustls.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true

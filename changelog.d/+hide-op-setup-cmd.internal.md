@@ -1,1 +1,0 @@
-Hide `operator setup` command from `--help`.

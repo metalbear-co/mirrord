@@ -1,12 +1,13 @@
 use std::ops::Deref;
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
+use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
+use crate::config::{self, source::MirrordConfigSource};
 
-/// A list of configuration for database branches.
+/// A list of configurations for database branches.
 ///
 /// ```json
 /// {
@@ -47,8 +48,6 @@ impl DatabaseBranchesConfig {
 
 /// Configuration for a database branch.
 ///
-/// By specifying a unique `id`, the branch database will be reused if not expired.
-///
 /// Example:
 ///
 /// ```json
@@ -66,31 +65,50 @@ impl DatabaseBranchesConfig {
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[config(map_to = "DatabaseBranchFileConfig")]
 pub struct DatabaseBranchConfig {
-    /// A unique identifier chosen by the user. This is useful when reusing branch database
-    /// sharing among different Kubernetes users.
+    /// ### feature.db_branches.id {#feature-db_branches-id}
+    ///
+    /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
+    /// the same database branch among Kubernetes users.
     pub id: Option<String>,
 
-    /// Name of the database
+    /// ### feature.db_branches.name {#feature-db_branches-name}
+    ///
+    /// When source database connection detail is not accessible to mirrord operator, users
+    /// can specify the database `name` so it is included in the connection options mirrord
+    /// uses as the override.
     pub name: Option<String>,
 
-    /// The time-to-live (TTL) for the branch database, in seconds.
+    /// ### feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}
+    ///
+    /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+    /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+    /// Users can set `ttl_secs` to customize this value according to their need. Please note
+    /// that longer TTL paired with frequent mirrord session turnover can result in increased
+    /// resource usage. For this reason, branch database TTL caps out at 15 min.
     #[serde(default = "default_ttl_secs")]
-    pub ttl_secs: Option<u64>,
+    pub ttl_secs: u64,
 
-    /// The database type.
+    /// ### feature.db_branches.type {#feature-db_branches-type}
     #[serde(rename = "type")]
     pub _type: DatabaseType,
 
-    /// The database image version.
+    /// ### feature.db_branches.version {#feature-db_branches-version}
+    ///
+    /// Mirrord operator uses a default version of the database image unless `version` is given.
     pub version: Option<String>,
 
-    /// The database connection details.
+    /// ### feature.db_branches.connection {#feature-db_branches-connection}
+    ///
+    /// `connection` describes how to get the connection information to the source database.
+    /// When the branch database is ready for use, Mirrord operator will replace the connection
+    /// information with the branch database's.
     pub connection: ConnectionSource,
 }
 
-/// Supported database types.
+/// Currently MySQL is the only supported database type.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingDatabaseType")]
 pub enum DatabaseType {
@@ -98,7 +116,21 @@ pub enum DatabaseType {
     MySql,
 }
 
-/// Options for connecting to the database.
+/// Different ways of connecting to the source database.
+///
+/// Example:
+///
+/// A single complete connection URL stored in an environment variable accessible from
+/// the target pod template.
+///
+/// ```json
+/// {
+///   "url": {
+///     "type": "env",
+///     "variable": "DB_CONNECTION_URL"
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(rename_all = "snake_case")]
@@ -117,22 +149,18 @@ pub enum ConnectionSourceKind {
     },
 }
 
-fn default_ttl_secs() -> Option<u64> {
-    Some(60)
-}
-
-impl MirrordConfig for DatabaseBranchesConfig {
+impl config::MirrordConfig for DatabaseBranchesConfig {
     type Generated = Self;
 
     fn generate_config(
         self,
-        _context: &mut ConfigContext,
+        _context: &mut config::ConfigContext,
     ) -> crate::config::Result<Self::Generated> {
         Ok(self)
     }
 }
 
-impl FromMirrordConfig for DatabaseBranchesConfig {
+impl config::FromMirrordConfig for DatabaseBranchesConfig {
     type Generator = Self;
 }
 
@@ -140,4 +168,8 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("mysql_branch_count", self.mysql().count());
     }
+}
+
+fn default_ttl_secs() -> u64 {
+    300
 }
