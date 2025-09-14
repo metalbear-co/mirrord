@@ -68,6 +68,7 @@ impl fmt::Display for LinuxCapability {
 ///     "network_interface": "eth0",
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
+///     "inject_headers": false,
 ///   }
 /// }
 /// ```
@@ -423,6 +424,20 @@ pub struct AgentConfig {
     /// Defaults to true.
     #[config(default = true)]
     pub passthrough_mirroring: bool,
+
+    /// #### agent.inject_headers {#agent-inject_headers}
+    ///
+    /// Sets whether `Mirrord-Agent` headers are injected into HTTP
+    /// responses that went through the agent.
+    ///
+    /// Possible values for the header:
+    ///
+    /// - `passed-through`: set when the request was not sent to the local app (perhaps because it
+    ///   didn't match the filters)
+    ///
+    /// - `forwarded-to-client`: set when the request was sent to the local app
+    #[config(default = false)]
+    pub inject_headers: bool,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

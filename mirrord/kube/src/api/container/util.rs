@@ -79,6 +79,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::IDDLE_TTL.as_k8s_spec(&params.idle_ttl.as_secs()))
     }
 
+    if agent.inject_headers {
+        env.push(envs::INJECT_HEADERS.as_k8s_spec(&agent.inject_headers));
+    }
+
     env
 }
 

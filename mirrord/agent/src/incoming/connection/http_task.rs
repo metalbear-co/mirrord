@@ -10,6 +10,7 @@ use hyper::{
     upgrade::{OnUpgrade, Upgraded},
 };
 use hyper_util::rt::TokioIo;
+use mirrord_agent_env::envs;
 use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
@@ -210,14 +211,17 @@ impl HttpTask<PassthroughConnection> {
 
     /// Used for applying transformations on responses to
     /// passed-through requests.
-
+    ///
     /// Currently just inserts the mirrord agent
     /// header.
     fn modify_response(response: &mut Response<Incoming>, _connection: &ConnectionInfo) {
-        response.headers_mut().insert(
-            MIRRORD_AGENT_HTTP_HEADER_NAME,
-            http::HeaderValue::from_static("passed-through"),
-        );
+        // FIXME: Take this from Args instead
+        if envs::INJECT_HEADERS.from_env_or_default() {
+            response.headers_mut().insert(
+                MIRRORD_AGENT_HTTP_HEADER_NAME,
+                http::HeaderValue::from_static("passed-through"),
+            );
+        }
     }
 }
 

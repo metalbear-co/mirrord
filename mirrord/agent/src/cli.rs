@@ -63,6 +63,10 @@ pub struct Args {
     /// cluster.
     #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
     pub ipv6: bool,
+
+    /// Inject `Mirrord-Agent` headers into HTTP responses.
+    #[arg(long, short, default_value_t = false, env=envs::INJECT_HEADERS.name)]
+    pub inject_headers: bool,
 }
 
 impl Args {
