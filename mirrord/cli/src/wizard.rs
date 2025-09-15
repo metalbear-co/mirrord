@@ -65,4 +65,6 @@ pub async fn wizard_command() {
     axum::serve(listener, app.layer(TraceLayer::new_for_http()))
         .await
         .unwrap();
+
+    // TODO: on drop, cleanup files (?)
 }
