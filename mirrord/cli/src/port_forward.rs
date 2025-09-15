@@ -27,8 +27,11 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
-    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
+    tcp::{
+        Filter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
+    },
 };
+use semver::Version;
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
@@ -526,11 +529,12 @@ impl ReversePortForwarder {
                 .await?;
         }
 
+        let incoming_mode = IncomingMode::new(&mut network_config, &protocol_version);
+
         incoming
             .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
             .await;
 
-        let incoming_mode = IncomingMode::new(&mut network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;
@@ -920,13 +924,21 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    fn new(config: &mut IncomingConfig) -> Self {
+    fn new(config: &mut IncomingConfig, protocol_version: &Version) -> Self {
         // Only create HttpSettings if there are actual filters configured.
         if config.http_filter.is_filter_set().not() {
             return Self {
                 steal: config.is_steal(),
                 http_settings: None,
             };
+        }
+
+        if config.is_steal().not() && MIRROR_HTTP_FILTER_VERSION.matches(protocol_version).not() {
+            tracing::warn!(
+                %protocol_version,
+                "Negotiated mirrord-protocol does not support using an HTTP filter when mirroring traffic. \
+                The HTTP filter will be ignored."
+            )
         }
 
         let ports = config
