@@ -322,7 +322,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
             libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_close => close_detour(param1 as _) as i64,
 
-            _ if crate::setup().fs_config().is_active() => match syscall {
+            _ if crate::SETUP.get().map_or(false, |setup| setup.fs_config().is_active()) => match syscall {
                 libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
