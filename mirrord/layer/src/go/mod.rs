@@ -47,18 +47,36 @@ unsafe extern "C" fn c_abi_syscall6_handler(
 
             _ if crate::SETUP
                 .get()
-                .is_some_and(|setup| setup.fs_config().is_active()) =>
+                .map_or_else(|| {
+                    trace!("c_abi_syscall6_handler: SETUP not initialized yet for syscall {}", syscall);
+                    false
+                }, |setup| {
+                    let is_active = setup.fs_config().is_active();
+                    trace!("c_abi_syscall6_handler: SETUP initialized, fs_config().is_active() = {} for syscall {}", is_active, syscall);
+                    is_active
+                }) =>
             {
                 match syscall {
-                    libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    libc::SYS_read => {
+                        trace!("c_abi_syscall6_handler: handling SYS_read via mirrord");
+                        read_detour(param1 as _, param2 as _, param3 as _) as i64
+                    }
                     libc::SYS_pread64 => {
+                        trace!("c_abi_syscall6_handler: handling SYS_pread64 via mirrord");
                         pread_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
                     }
-                    libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    libc::SYS_write => {
+                        trace!("c_abi_syscall6_handler: handling SYS_write via mirrord");
+                        write_detour(param1 as _, param2 as _, param3 as _) as i64
+                    }
                     libc::SYS_pwrite64 => {
+                        trace!("c_abi_syscall6_handler: handling SYS_pwrite64 via mirrord");
                         pwrite_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
                     }
-                    libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
+                    libc::SYS_lseek => {
+                        trace!("c_abi_syscall6_handler: handling SYS_lseek via mirrord");
+                        lseek_detour(param1 as _, param2 as _, param3 as _)
+                    }
                     // Note(syscall_linux.go)
                     // if flags == 0 {
                     // 	return faccessat(dirfd, path, mode)
@@ -69,6 +87,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     // Because people naturally expect syscall.Faccessat to act
                     // like C faccessat, we do the same.
                     libc::SYS_faccessat => {
+                        trace!("c_abi_syscall6_handler: handling SYS_faccessat via mirrord");
                         faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
                     }
                     // Stat hooks:
@@ -110,6 +129,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     libc::SYS_fsync => fsync_detour(param1 as _) as i64,
                     libc::SYS_fdatasync => fsync_detour(param1 as _) as i64,
                     libc::SYS_openat => {
+                        trace!("c_abi_syscall6_handler: handling SYS_openat via mirrord");
                         openat_detour(param1 as _, param2 as _, param3 as _, param4 as libc::c_int)
                             as i64
                     }
@@ -132,6 +152,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         unlinkat_detour(param1 as _, param2 as _, param3 as _) as i64
                     }
                     _ => {
+                        trace!("c_abi_syscall6_handler: unknown fs syscall {} bypassing to kernel", syscall);
                         let (Ok(result) | Err(result)) = syscalls::syscall!(
                             syscalls::Sysno::from(syscall as i32),
                             param1,
@@ -153,6 +174,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 }
             }
             _ => {
+                trace!("c_abi_syscall6_handler: syscall {} bypassing - either not fs-related or layer not ready", syscall);
                 let (Ok(result) | Err(result)) = syscalls::syscall!(
                     syscalls::Sysno::from(syscall as i32),
                     param1,
