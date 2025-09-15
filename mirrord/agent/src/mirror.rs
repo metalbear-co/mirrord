@@ -10,8 +10,8 @@ use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
         HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, MIRROR_HTTP_FILTER_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
-        NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
+        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
+        NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
 use tokio_stream::StreamMap;
@@ -43,7 +43,7 @@ pub enum TcpMirrorApi {
     /// Mirroring is done with a raw socket.
     Sniffer {
         api: TcpSnifferApi,
-        queued_message: Option<DaemonTcp>,
+        queued_messages: VecDeque<DaemonMessage>,
     },
 }
 
@@ -73,7 +73,7 @@ impl TcpMirrorApi {
     pub fn sniffer(api: TcpSnifferApi) -> Self {
         Self::Sniffer {
             api,
-            queued_message: Default::default(),
+            queued_messages: Default::default(),
         }
     }
 
@@ -90,12 +90,10 @@ impl TcpMirrorApi {
                     incoming_streams.remove(&id);
                 }
                 LayerTcp::PortSubscribe(port) => {
-                    tracing::debug!(port = %port, "Received PortSubscribe (no filter)");
                     mirror_handle.mirror(port).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
                 LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
-                    tracing::debug!(port = %port, filter = %filter, "Received PortSubscribeFilteredHttp");
                     // Convert from protocol HttpFilter to agent HttpFilter
                     let agent_filter =
                         HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
@@ -109,11 +107,21 @@ impl TcpMirrorApi {
                     mirror_handle.stop_mirror(port);
                 }
             },
-            Self::Sniffer { api, .. } => {
-                // Sniffer mode doesn't support HTTP filtering, so ignore filtered subscriptions
-                if let LayerTcp::PortSubscribeFilteredHttp(_, _) = &message {
-                    return Ok(());
-                }
+            Self::Sniffer {
+                api,
+                queued_messages,
+            } => {
+                let message = match message {
+                    LayerTcp::PortSubscribeFilteredHttp(port, ..) => {
+                        queued_messages.push_back(DaemonMessage::LogMessage(
+                            LogMessage::warn(
+                                "mirrord-agent is not configured to use passthrough mirroring, HTTP filter will be ignored".into())
+                            )
+                        );
+                        LayerTcp::PortSubscribe(port)
+                    }
+                    other => other,
+                };
                 api.handle_client_message(message).await?;
             }
         }
@@ -179,10 +187,8 @@ impl TcpMirrorApi {
 
                         Some(traffic) = mirror_handle.next() => match traffic? {
                             MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                if port_filters.contains_key(&tcp.info.original_destination.port()) && !protocol_version.matches(&MIRROR_HTTP_FILTER_VERSION) {
-                                    return Ok(DaemonMessage::LogMessage(LogMessage::warn(
-                                        "TCP traffic skipped due to HTTP filter on this port".to_string()
-                                    )));
+                                if port_filters.contains_key(&tcp.info.original_destination.port()) {
+                                    continue;
                                 }
 
                                 let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
@@ -209,6 +215,10 @@ impl TcpMirrorApi {
                             }
 
                             MirroredTraffic::Tcp(tcp) => {
+                                if port_filters.contains_key(&tcp.info.original_destination.port()) {
+                                    continue;
+                                }
+
                                 if tcp.info.tls_connector.is_some() {
                                     return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                                         "A TLS connection was not mirrored due to mirrord-protocol version requirement: {}",
@@ -236,7 +246,6 @@ impl TcpMirrorApi {
                             }
 
                             MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                // Check HTTP filter if one exists for this port
                                 if let Some(filter) = port_filters.get(&http.info.original_destination.port()) &&  !filter.matches(http.parts_mut()) {
                                    continue;
                                 }
@@ -287,15 +296,15 @@ impl TcpMirrorApi {
 
                 Self::Sniffer {
                     api,
-                    queued_message,
+                    queued_messages,
                 } => {
-                    if let Some(message) = queued_message.take() {
-                        return Ok(DaemonMessage::Tcp(message));
+                    if let Some(message) = queued_messages.pop_front() {
+                        return Ok(message);
                     }
 
                     let (message, log) = api.recv().await?;
                     if let Some(log) = log {
-                        queued_message.replace(message);
+                        queued_messages.push_back(DaemonMessage::Tcp(message));
                         return Ok(DaemonMessage::LogMessage(log));
                     }
                     message

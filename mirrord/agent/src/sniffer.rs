@@ -404,7 +404,7 @@ mod test {
 
     use api::TcpSnifferApi;
     use mirrord_protocol::{
-        ConnectionId, LogLevel, ToPayload,
+        ConnectionId, DaemonMessage, LogLevel, LogMessage, ToPayload,
         tcp::{
             DaemonTcp, HttpFilter as ProtocolHttpFilter, LayerTcp, NewTcpConnectionV1, TcpClose,
             TcpData,
@@ -870,29 +870,31 @@ mod test {
         }
     }
 
-    /// Test that sniffer mode properly rejects filtered HTTP subscriptions.
-    /// This verifies that HTTP filtering requires passthrough mirroring.
+    /// Test that sniffer mode properly ignores HTTP filters in subscriptions.
     #[tokio::test]
-    async fn test_sniffer_rejects_http_filter() {
+    async fn test_sniffer_ignores_http_filter() {
         let mut setup = TestSnifferSetup::new();
         let api = setup.get_api().await;
-        let mut tcp_mirror_api = TcpMirrorApi::Sniffer {
-            api,
-            queued_message: None,
-        };
+        let mut tcp_mirror_api = TcpMirrorApi::sniffer(api);
 
         let filter = ProtocolHttpFilter::Header(
             mirrord_protocol::tcp::Filter::new("x-filter: yes".to_string()).unwrap(),
         );
         let message = LayerTcp::PortSubscribeFilteredHttp(80, filter);
 
-        // Handle the message - sniffer should ignore it silently
-        let result = tcp_mirror_api.handle_client_message(message).await;
-
-        // The message should be handled without error
-        assert!(
-            result.is_ok(),
-            "Sniffer should silently ignore filtered HTTP subscriptions"
-        );
+        tcp_mirror_api.handle_client_message(message).await.unwrap();
+        let message_1 = tcp_mirror_api.recv().await.unwrap();
+        let message_2 = tcp_mirror_api.recv().await.unwrap();
+        assert!([&message_1, &message_2].into_iter().any(|message| matches!(
+            message,
+            DaemonMessage::LogMessage(LogMessage {
+                level: LogLevel::Warn,
+                ..
+            }),
+        )));
+        assert!([&message_1, &message_2].into_iter().any(|message| matches!(
+            message,
+            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(80))),
+        )));
     }
 }

@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -902,14 +903,7 @@ impl LocalConnectionTask {
 
 #[derive(Debug)]
 pub struct IncomingMode {
-    // true if we are in steal mode
-    /// The agent sends data to both the user application and the remote target.
-    /// Data coming from the layer is discarded.
-    // false if we are in mirror mode
-    /// The agent sends data only to the user application.
-    /// Data coming from the layer is sent to the agent.
     pub steal: bool,
-    // http settings if we are in steal mode
     pub http_settings: Option<HttpSettings>,
 }
 #[derive(Debug)]
@@ -919,6 +913,7 @@ pub struct HttpSettings {
     /// Ports to filter HTTP on.
     pub ports: HashSet<Port>,
 }
+
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
     ///
@@ -926,17 +921,10 @@ impl IncomingMode {
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
     fn new(config: &mut IncomingConfig) -> Self {
-        if !config.is_steal() {
+        // Only create HttpSettings if there are actual filters configured.
+        if config.http_filter.is_filter_set().not() {
             return Self {
-                steal: false,
-                http_settings: None,
-            };
-        }
-
-        // Only create HttpSettings if there are actual filters configured
-        if !config.http_filter.is_filter_set() && config.http_filter.method_filter.is_none() {
-            return Self {
-                steal: true,
+                steal: config.is_steal(),
                 http_settings: None,
             };
         }
@@ -1004,7 +992,7 @@ impl IncomingMode {
         };
 
         Self {
-            steal: true,
+            steal: config.is_steal(),
             http_settings: Some(HttpSettings { filter, ports }),
         }
     }
@@ -1041,21 +1029,20 @@ impl IncomingMode {
                     }
                 }
             };
-            return PortSubscription::Steal(steal_type);
-        }
-
-        let mirror_type = match &self.http_settings {
-            None => MirrorType::All(port),
-            Some(settings) => {
-                if settings.ports.contains(&port) {
-                    MirrorType::FilteredHttp(port, settings.filter.clone())
-                } else {
-                    MirrorType::All(port)
+            PortSubscription::Steal(steal_type)
+        } else {
+            let mirror_type = match &self.http_settings {
+                None => MirrorType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
+                    } else {
+                        MirrorType::All(port)
+                    }
                 }
-            }
-        };
-
-        PortSubscription::Mirror(mirror_type)
+            };
+            PortSubscription::Mirror(mirror_type)
+        }
     }
 }
 
