@@ -124,6 +124,8 @@ impl IntProxy {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
 
+        let agent_conn_reconnectable = agent_conn.reconnectable();
+
         let agent = background_tasks.register_restartable(
             agent_conn,
             MainTaskId::AgentConnection,
@@ -141,7 +143,14 @@ impl IntProxy {
         // to requests that have a requirement on the mirrord-protocol version.
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
-            PingPong::new(Self::PING_INTERVAL, Self::PING_PONG_MAX_RECONNECTS),
+            PingPong::new(
+                Self::PING_INTERVAL,
+                if agent_conn_reconnectable {
+                    Self::PING_PONG_MAX_RECONNECTS
+                } else {
+                    0
+                },
+            ),
             MainTaskId::PingPong,
             Self::CHANNEL_SIZE,
         );
