@@ -1,9 +1,10 @@
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Represents operator patch state of some workload.
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, Hash)]
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "mirrord.metalbear.co",
     version = "v1alpha",
@@ -34,11 +35,13 @@ pub struct PatchedWorkloadRef {
 /// Request for a patch to be applied to a Kubernetes workload.
 ///
 /// Part of [`MirrordClusterWorkloadPatch`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchRequest {
     /// Opaque identifier of this request's owner.
     pub owner: String,
+    /// Optional expiration timestamp of this request.
+    pub expiration_timestamp: Option<MicroTime>,
     /// Environment variables to be set in the pod template.
     pub env_vars: Vec<EnvVar>,
     /// Number of replicas to be set in the workload spec.
