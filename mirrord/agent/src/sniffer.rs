@@ -484,22 +484,22 @@ mod test {
     /// Simulates two sniffed connections, only one matching client's subscription.
     #[tokio::test]
     async fn one_client() {
-        tracing_subscriber::util::SubscriberInitExt::init(
-            tracing_subscriber::layer::SubscriberExt::with(
-                tracing_subscriber::layer::SubscriberExt::with(
-                    tracing_subscriber::registry(),
-                    tracing_subscriber::fmt::layer()
-                        .with_thread_ids(true)
-                        .with_span_events(
-                            tracing_subscriber::fmt::format::FmtSpan::NEW
-                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-                        )
-                        .pretty()
-                        .with_line_number(true),
-                ),
-                tracing_subscriber::EnvFilter::from_default_env(),
-            ),
-        );
+        // tracing_subscriber::util::SubscriberInitExt::init(
+        //     tracing_subscriber::layer::SubscriberExt::with(
+        //         tracing_subscriber::layer::SubscriberExt::with(
+        //             tracing_subscriber::registry(),
+        //             tracing_subscriber::fmt::layer()
+        //                 .with_thread_ids(true)
+        //                 .with_span_events(
+        //                     tracing_subscriber::fmt::format::FmtSpan::NEW
+        //                         | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+        //                 )
+        //                 .pretty()
+        //                 .with_line_number(true),
+        //         ),
+        //         tracing_subscriber::EnvFilter::from_default_env(),
+        //     ),
+        // );
 
         let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
