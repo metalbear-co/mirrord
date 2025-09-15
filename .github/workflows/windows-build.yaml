@@ -91,8 +91,7 @@ jobs:
           $dllCandidates = @()
           if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
           $dllCandidates += @(
-            (Join-Path $buildDir 'win_layer.dll'),
-            (Join-Path $buildDir 'mirrord-layer-win.dll')
+            (Join-Path $buildDir 'mirrord_layer_win.d')
           )
 
           $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
