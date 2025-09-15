@@ -18,9 +18,6 @@ workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[features]
-wizard = []
-
 [dependencies]
 mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-operator = { path = "../operator", features = [
@@ -76,6 +73,10 @@ ci_info = "0.14"
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
+axum = { version = "0.8.4", optional = true }
+tower-http = { version = "0.6.6", features = ["fs"], optional = true }
+tar = { version = "0.4.44", optional = true }
+flate2 = { version = "1.1.2", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -106,3 +107,4 @@ rcgen.workspace = true
 
 [features]
 windows_build = []
+wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2"]
