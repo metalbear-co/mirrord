@@ -4,59 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import type { FeatureConfig, ConfigData } from "@/types/config";
 
-interface ConfigData {
-  name: string;
-  target: string;
-  targetType: string;
-  namespace: string;
-  service?: string;
-  fileSystem: {
-    enabled: boolean;
-    mode: "read" | "write" | "local";
-    rules: Array<{
-      mode: "read" | "write" | "local";
-      filter: string;
-    }>;
-  };
-  network: {
-    incoming: {
-      enabled: boolean;
-      mode: "steal" | "mirror";
-      httpFilter: Array<{
-        type: "header" | "method" | "content" | "path";
-        value: string;
-        matchType?: "exact" | "regex";
-      }>;
-      filterOperator: "AND" | "OR";
-      ports: Array<{
-        remote: string;
-        local: string;
-      }>;
-    };
-    outgoing: {
-      enabled: boolean;
-      protocol: "tcp" | "udp" | "both";
-      filter: string;
-      filterTarget: "remote" | "local";
-    };
-    dns: {
-      enabled: boolean;
-      filter: string;
-    };
-  };
-  environment: {
-    enabled: boolean;
-    include: string;
-    exclude: string;
-    override: string;
-  };
-  agent: {
-    scaledown: boolean;
-    copyTarget: boolean;
-  };
-  isActive: boolean;
-}
 
 interface ConfigExportProps {
   config: ConfigData;
@@ -68,8 +17,36 @@ export function ConfigExport({ config }: ConfigExportProps) {
   const [jsonError, setJsonError] = useState<string>("");
   const { toast } = useToast();
 
+  type FeatureConfig = {
+    network?: {
+      incoming?: {
+        mode: "steal" | "mirror";
+        http_filter?: Record<string, Array<Record<string, string>>>;
+        ports?: Array<Record<string, string>>;
+      };
+      outgoing?: {
+        filter: Record<string, string | Record<string, string>>;
+      };
+    };
+    fs?: {
+      mode: "read" | "write" | "local";
+    };
+    env?: {
+      include?: string;
+      exclude?: string;
+      override?: string;
+    };
+  };
+
   const generateConfigJson = () => {
-    const configObj: any = {
+    const configObj: {
+      target?: string;
+      agent: {
+        copy_target?: boolean;
+        scaledown?: boolean;
+      };
+      feature: FeatureConfig;
+    } = {
       target: config.target ? `${config.target}` : undefined,
       agent: {},
       feature: {}
