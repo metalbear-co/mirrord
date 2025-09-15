@@ -70,6 +70,11 @@ jobs:
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
+      
+      - name: Build layer-win (DLL)
+        run: |
+          cargo build -p layer-win --target x86_64-pc-windows-msvc
+          
       # Sign EXE + DLL and verify both
       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
         shell: pwsh
