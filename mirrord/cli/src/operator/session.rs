@@ -42,15 +42,17 @@ impl SessionCommandHandler {
 
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-        let config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
+        let layer_config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
         let mut subtask = progress.subtask("checking operator");
         let operator_api =
-            match OperatorApi::try_new(&config, &mut NullReporter::default(), &progress).await? {
+            match OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
+                .await?
+            {
                 Some(api) => {
-                    api.prepare_client_cert(&mut NullReporter::default(), &progress)
+                    api.prepare_client_cert(&mut NullReporter::default(), &progress, &layer_config)
                         .await
                 }
                 None => {
@@ -119,7 +121,7 @@ impl SessionCommandHandler {
                 operation: OperatorOperation::SessionManagement,
             },
         })
-        // Finish the progress report here if we have an error response. 
+        // Finish the progress report here if we have an error response.
         .inspect_err(|fail| {
             sub_progress.failure(Some(&fail.to_string()));
             progress.failure(Some("Session management operation failed!"));

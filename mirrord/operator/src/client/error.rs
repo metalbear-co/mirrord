@@ -3,6 +3,7 @@ use std::{fmt, num::ParseIntError};
 pub use http::Error as HttpError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
+use tower::retry::backoff::InvalidBackoff;
 
 use crate::crd::{NewOperatorFeature, kube_target::UnknownTargetType};
 
@@ -82,6 +83,9 @@ pub enum OperatorApiError {
 
     #[error("operation timed out: {}", operation)]
     OperationTimeout { operation: OperatorOperation },
+
+    #[error(transparent)]
+    InvalidBackoff(#[from] InvalidBackoff),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

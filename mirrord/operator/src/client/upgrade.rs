@@ -134,11 +134,11 @@ pub async fn connect_ws(
         HeaderValue::from_static(WS_PROTOCOL),
     );
 
-    let res = client
-        .send(Request::from_parts(parts, Body::from(body)))
-        .await?;
-    let res = verify_response(res, &key).await?;
-    match hyper::upgrade::on(res).await {
+    let request = Request::from_parts(parts.clone(), Body::from(body.clone()));
+    let response = client.send(request).await?;
+
+    let verified_response = verify_response(response, &key).await?;
+    match hyper::upgrade::on(verified_response).await {
         Ok(upgraded) => {
             Ok(WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Client, None).await)
         }
