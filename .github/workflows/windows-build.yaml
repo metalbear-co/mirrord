@@ -24,96 +24,96 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # - name: Ensure smctl (KeyLocker Tools) on PATH
-      #   run: |
-      #     'C:\Program Files\DigiCert\DigiCert Keylocker Tools' | Out-File -Append $env:GITHUB_PATH
+      - name: Ensure smctl (KeyLocker Tools) on PATH
+        run: |
+          'C:\Program Files\DigiCert\DigiCert Keylocker Tools' | Out-File -Append $env:GITHUB_PATH
 
-      # - name: Identity & DigiCert healthcheck
-      #   run: |
-      #     $ErrorActionPreference = 'Stop'
-      #     whoami
-      #     Write-Host "SM_HOST=$env:SM_HOST"
-      #     Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
-      #     smctl --version
-      #     smctl healthcheck
+      - name: Identity & DigiCert healthcheck
+        run: |
+          $ErrorActionPreference = 'Stop'
+          whoami
+          Write-Host "SM_HOST=$env:SM_HOST"
+          Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
+          smctl --version
+          smctl healthcheck
 
-      # - name: Check code-signing cert presence
-      #   run: |
-      #     $ErrorActionPreference = 'Stop'
-      #     $thumb = 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
-      #     Write-Host "== LocalMachine\My =="
-      #     $lm = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumb
-      #     if (-not $lm) { Write-Warning "Cert NOT found in LocalMachine\My. /sha1 signing under a service account will fail." }
-      #     else { $lm | Format-List Subject,Thumbprint,NotAfter }
+      - name: Check code-signing cert presence
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $thumb = 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
+          Write-Host "== LocalMachine\My =="
+          $lm = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumb
+          if (-not $lm) { Write-Warning "Cert NOT found in LocalMachine\My. /sha1 signing under a service account will fail." }
+          else { $lm | Format-List Subject,Thumbprint,NotAfter }
 
-      # - name: Add Rust MSVC target
-      #   run: rustup target add x86_64-pc-windows-msvc
+      - name: Add Rust MSVC target
+        run: rustup target add x86_64-pc-windows-msvc
 
-      # - name: Locate package for bin "mirrord" + set envs (package, version, layer path)
-      #   run: |
-      #     $ErrorActionPreference = 'Stop'
-      #     $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-      #     $pkg = $meta.packages | Where-Object {
-      #       $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
-      #     } | Select-Object -First 1
-      #     if (-not $pkg) {
-      #       $names = ($meta.packages | ForEach-Object name) -join ', '
-      #       throw "No bin target named 'mirrord' found. Workspace packages: $names"
-      #     }
-      #     "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      #     "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      #     Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
+      - name: Locate package for bin "mirrord" + set envs (package, version, layer path)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object {
+            $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
+          } | Select-Object -First 1
+          if (-not $pkg) {
+            $names = ($meta.packages | ForEach-Object name) -join ', '
+            throw "No bin target named 'mirrord' found. Workspace packages: $names"
+          }
+          "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
 
-      #     $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord-layer-win.dll'
-      #     "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord-layer-win.dll'
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      # - name: Build mirrord
-      #   run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
+      - name: Build mirrord
+        run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
       
-      # - name: Build mirrord-layer-win (DLL)
-      #   run: |
-      #     cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
+      - name: Build mirrord-layer-win (DLL)
+        run: |
+          cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
 
-      # # Sign EXE + DLL and verify both
-      # - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
-      #   shell: pwsh
-      #   run: |
-      #     $ErrorActionPreference = 'Stop'
-      #     $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+      # Sign EXE + DLL and verify both
+      - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
 
-      #     $exe = Join-Path $buildDir 'mirrord.exe'
-      #     if (!(Test-Path $exe)) {
-      #       throw "Expected binary not found at $exe"
-      #     }
+          $exe = Join-Path $buildDir 'mirrord.exe'
+          if (!(Test-Path $exe)) {
+            throw "Expected binary not found at $exe"
+          }
 
-      #     # Prefer explicit env, then common names
-      #     $dllCandidates = @()
-      #     if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
-      #     $dllCandidates += @(
-      #       (Join-Path $buildDir 'mirrord_layer_win.d')
-      #     )
+          # Prefer explicit env, then common names
+          $dllCandidates = @()
+          if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
+          $dllCandidates += @(
+            (Join-Path $buildDir 'mirrord_layer_win.d')
+          )
 
-      #     $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-      #     if (-not $dll) {
-      #       $list = ($dllCandidates | ForEach-Object { $_ }) -join [Environment]::NewLine
-      #       throw ("Layer DLL not found. Looked for:{0}{1}" -f [Environment]::NewLine, $list)
-      #     }
+          $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $dll) {
+            $list = ($dllCandidates | ForEach-Object { $_ }) -join [Environment]::NewLine
+            throw ("Layer DLL not found. Looked for:{0}{1}" -f [Environment]::NewLine, $list)
+          }
 
-      #     foreach ($f in @($exe, $dll)) {
-      #       Write-Host "Signing $f"
-      #       & signtool.exe sign `
-      #         /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
-      #         /tr http://timestamp.digicert.com `
-      #         /td SHA256 `
-      #         /fd SHA256 `
-      #         "$f"
-      #       if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
+          foreach ($f in @($exe, $dll)) {
+            Write-Host "Signing $f"
+            & signtool.exe sign `
+              /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
+              /tr http://timestamp.digicert.com `
+              /td SHA256 `
+              /fd SHA256 `
+              "$f"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
 
-      #       Write-Host "Verifying $f"
-      #       & signtool.exe verify /pa "$f"
-      #       if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
-      #     }
+            Write-Host "Verifying $f"
+            & signtool.exe verify /pa "$f"
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
+          }
 
 
       # # Ensure gcloud is present (uses VM's service account on GCE)
