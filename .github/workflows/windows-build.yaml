@@ -64,16 +64,16 @@ jobs:
           "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
 
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord-layer-win.dll'
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
       
-      - name: Build layer_win (DLL)
+      - name: Build mirrord-layer-win (DLL)
         run: |
-          cargo build -p layer_win --target x86_64-pc-windows-msvc
+          cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
 
       # Sign EXE + DLL and verify both
       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
@@ -92,7 +92,7 @@ jobs:
           if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
           $dllCandidates += @(
             (Join-Path $buildDir 'win_layer.dll'),
-            (Join-Path $buildDir 'layer_win.dll')
+            (Join-Path $buildDir 'mirrord-layer-win.dll')
           )
 
           $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
