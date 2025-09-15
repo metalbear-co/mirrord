@@ -78,24 +78,47 @@ jobs:
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      # Code sign (thumbprint in LocalMachine\My); then verify the signature
-      - name: Code sign mirrord.exe (thumbprint) + verify
+      # Code sign (thumbprint in LocalMachine\My); sign EXE + DLL and verify both
+      - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+
+          $exe = Join-Path $buildDir 'mirrord.exe'
+
+          # Try MIRRORD_LAYER_FILE first, then common names
+          $dllCandidates = @()
+          if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
+          $dllCandidates += @(
+            (Join-Path $buildDir 'win_layer.dll'),
+            (Join-Path $buildDir 'layer_win.dll')
+          )
+          $dll = $dllCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
           if (!(Test-Path $exe)) {
             Write-Error "Expected binary not found at $exe"
-            Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug') -Recurse -Filter 'mirrord*.exe' | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+            Get-ChildItem -Path $buildDir -Recurse -Filter 'mirrord*.exe' | ForEach-Object { Write-Host "Found EXE: $($_.FullName)" }
+            exit 1
+          }
+          if (-not $dll) {
+            Write-Error "Layer DLL not found. Looked for:`n$($dllCandidates -join \"`n\")"
+            Get-ChildItem -Path $buildDir -Recurse -Filter '*.dll' | ForEach-Object { Write-Host "Found DLL: $($_.FullName)" }
             exit 1
           }
 
-          # Sign
-          signtool.exe sign `
-            /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
-            /tr http://timestamp.digicert.com `
-            /td SHA256 `
-            /fd SHA256 `
-            "$exe"
+          $filesToSign = @($exe, $dll)
 
-          # Verify Authenticode signature
-          signtool.exe verify /pa "$exe"
+          foreach ($f in $filesToSign) {
+            Write-Host "Signing $f"
+            signtool.exe sign `
+              /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
+              /tr http://timestamp.digicert.com `
+              /td SHA256 `
+              /fd SHA256 `
+              "$f"
+
+            Write-Host "Verifying $f"
+            signtool.exe verify /pa "$f"
+          }
+
