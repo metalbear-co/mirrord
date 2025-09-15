@@ -53,6 +53,11 @@ impl PortSubscriptionExt for PortSubscription {
                     } else {
                         // For older agents or when protocol version is unknown, fall back to
                         // regular mirroring without filter
+                        tracing::warn!(
+                            ?protocol_version,
+                            "Negotiated mirrord-protocol version does not allow for using an HTTP filter when mirroring incoming traffic. \
+                            The filter will be ignored."
+                        );
                         ClientMessage::Tcp(LayerTcp::PortSubscribe(*port))
                     }
                 }

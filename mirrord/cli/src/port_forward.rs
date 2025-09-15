@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -26,8 +27,11 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
-    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
+    tcp::{
+        Filter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
+    },
 };
+use semver::Version;
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
@@ -525,11 +529,12 @@ impl ReversePortForwarder {
                 .await?;
         }
 
+        let incoming_mode = IncomingMode::new(&mut network_config, &protocol_version);
+
         incoming
             .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
             .await;
 
-        let incoming_mode = IncomingMode::new(&mut network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;
@@ -902,14 +907,7 @@ impl LocalConnectionTask {
 
 #[derive(Debug)]
 pub struct IncomingMode {
-    // true if we are in steal mode
-    /// The agent sends data to both the user application and the remote target.
-    /// Data coming from the layer is discarded.
-    // false if we are in mirror mode
-    /// The agent sends data only to the user application.
-    /// Data coming from the layer is sent to the agent.
     pub steal: bool,
-    // http settings if we are in steal mode
     pub http_settings: Option<HttpSettings>,
 }
 #[derive(Debug)]
@@ -919,26 +917,28 @@ pub struct HttpSettings {
     /// Ports to filter HTTP on.
     pub ports: HashSet<Port>,
 }
+
 impl IncomingMode {
     /// Creates a new instance from the given [`IncomingConfig`].
     ///
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    fn new(config: &mut IncomingConfig) -> Self {
-        if !config.is_steal() {
+    fn new(config: &mut IncomingConfig, protocol_version: &Version) -> Self {
+        // Only create HttpSettings if there are actual filters configured.
+        if config.http_filter.is_filter_set().not() {
             return Self {
-                steal: false,
+                steal: config.is_steal(),
                 http_settings: None,
             };
         }
 
-        // Only create HttpSettings if there are actual filters configured
-        if !config.http_filter.is_filter_set() && config.http_filter.method_filter.is_none() {
-            return Self {
-                steal: true,
-                http_settings: None,
-            };
+        if config.is_steal().not() && MIRROR_HTTP_FILTER_VERSION.matches(protocol_version).not() {
+            tracing::warn!(
+                %protocol_version,
+                "Negotiated mirrord-protocol does not support using an HTTP filter when mirroring traffic. \
+                The HTTP filter will be ignored."
+            )
         }
 
         let ports = config
@@ -1004,7 +1004,7 @@ impl IncomingMode {
         };
 
         Self {
-            steal: true,
+            steal: config.is_steal(),
             http_settings: Some(HttpSettings { filter, ports }),
         }
     }
@@ -1041,21 +1041,20 @@ impl IncomingMode {
                     }
                 }
             };
-            return PortSubscription::Steal(steal_type);
-        }
-
-        let mirror_type = match &self.http_settings {
-            None => MirrorType::All(port),
-            Some(settings) => {
-                if settings.ports.contains(&port) {
-                    MirrorType::FilteredHttp(port, settings.filter.clone())
-                } else {
-                    MirrorType::All(port)
+            PortSubscription::Steal(steal_type)
+        } else {
+            let mirror_type = match &self.http_settings {
+                None => MirrorType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
+                    } else {
+                        MirrorType::All(port)
+                    }
                 }
-            }
-        };
-
-        PortSubscription::Mirror(mirror_type)
+            };
+            PortSubscription::Mirror(mirror_type)
+        }
     }
 }
 

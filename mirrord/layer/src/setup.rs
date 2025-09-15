@@ -216,52 +216,23 @@ impl IncomingMode {
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
     fn new(config: &mut IncomingConfig) -> Self {
-        if !config.is_steal() {
-            if config.http_filter.is_filter_set() || config.http_filter.method_filter.is_some() {
-                let ports = config
-                    .http_filter
-                    .ports
-                    .get_or_insert_default()
-                    .iter()
-                    .copied()
-                    .collect();
+        let http_settings = config.http_filter.is_filter_set().then(|| {
+            let ports = config
+                .http_filter
+                .ports
+                .get_or_insert_default()
+                .iter()
+                .copied()
+                .collect();
 
-                let filter = Self::parse_http_filter(&config.http_filter);
+            let filter = Self::parse_http_filter(&config.http_filter);
 
-                return Self {
-                    steal: false,
-                    http_settings: Some(HttpSettings { filter, ports }),
-                };
-            }
-
-            return Self {
-                steal: false,
-                http_settings: None,
-            };
-        }
-
-        // Only create HttpSettings if there are actual filters configured
-        if !config.http_filter.is_filter_set() && config.http_filter.method_filter.is_none() {
-            return Self {
-                steal: true,
-                http_settings: None,
-            };
-        }
-
-        let ports = config
-            .http_filter
-            .ports
-            .get_or_insert_default()
-            .iter()
-            .copied()
-            .collect();
-
-        // Matching all fields to make this check future-proof.
-        let filter = Self::parse_http_filter(&config.http_filter);
+            HttpSettings { filter, ports }
+        });
 
         Self {
-            steal: true,
-            http_settings: Some(HttpSettings { filter, ports }),
+            steal: config.is_steal(),
+            http_settings,
         }
     }
 
@@ -350,20 +321,19 @@ impl IncomingMode {
                     }
                 }
             };
-            return PortSubscription::Steal(steal_type);
-        }
-
-        let mirror_type = match &self.http_settings {
-            None => MirrorType::All(port),
-            Some(settings) => {
-                if settings.ports.contains(&port) {
-                    MirrorType::FilteredHttp(port, settings.filter.clone())
-                } else {
-                    MirrorType::All(port)
+            PortSubscription::Steal(steal_type)
+        } else {
+            let mirror_type = match &self.http_settings {
+                None => MirrorType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
+                    } else {
+                        MirrorType::All(port)
+                    }
                 }
-            }
-        };
-
-        PortSubscription::Mirror(mirror_type)
+            };
+            PortSubscription::Mirror(mirror_type)
+        }
     }
 }
