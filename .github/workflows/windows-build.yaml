@@ -72,10 +72,15 @@ jobs:
 
       # Sign EXE + DLL and verify both
       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+
           $exe = Join-Path $buildDir 'mirrord.exe'
+          if (!(Test-Path $exe)) {
+            throw "Expected binary not found at $exe"
+          }
 
           # Prefer explicit env, then common names
           $dllCandidates = @()
@@ -84,49 +89,28 @@ jobs:
             (Join-Path $buildDir 'win_layer.dll'),
             (Join-Path $buildDir 'layer_win.dll')
           )
-          $dll = $dllCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-          if (!(Test-Path $exe)) {
-            Write-Error "Expected binary not found at $exe"
-            exit 1
-          }
+          $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
           if (-not $dll) {
-            Write-Error "Layer DLL not found. Looked for:`n$($dllCandidates -join \"`n\")"
-            exit 1
+            $list = ($dllCandidates | ForEach-Object { $_ }) -join [Environment]::NewLine
+            throw ("Layer DLL not found. Looked for:{0}{1}" -f [Environment]::NewLine, $list)
           }
 
-          foreach ($f in @($exe,$dll)) {
+          foreach ($f in @($exe, $dll)) {
             Write-Host "Signing $f"
-            signtool.exe sign `
+            & signtool.exe sign `
               /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
               /tr http://timestamp.digicert.com `
               /td SHA256 `
               /fd SHA256 `
               "$f"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
 
             Write-Host "Verifying $f"
-            signtool.exe verify /pa "$f"
+            & signtool.exe verify /pa "$f"
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
           }
 
-          # Stage artifacts + checksums for upload
-          $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
-          New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item $exe -Destination $staging -Force
-          $dllLeaf = Split-Path $dll -Leaf
-          Copy-Item $dll -Destination (Join-Path $staging $dllLeaf) -Force
-
-          foreach ($file in @('mirrord.exe', $dllLeaf)) {
-            $full = Join-Path $staging $file
-            $h = Get-FileHash -Algorithm SHA256 $full
-            "$($h.Hash)  $file" | Out-File (Join-Path $staging "$file.sha256") -Encoding ascii
-          }
-
-          # Compute per-build folder: windows/mirrord-<version>-run<run>-<sha7>
-          $sha7 = $env:GITHUB_SHA.Substring(0,7)
-          $artifactDir = "windows/mirrord-$($env:MIRRORD_VERSION)-run$($env:GITHUB_RUN_NUMBER)-$sha7"
-          "ARTIFACT_STAGING=$staging" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "ARTIFACT_DIR=$artifactDir"   | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Artifact dir: $artifactDir"
 
       # Ensure gcloud is present (uses VM's service account on GCE)
       - name: Ensure gcloud CLI
