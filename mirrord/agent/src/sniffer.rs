@@ -885,16 +885,22 @@ mod test {
         tcp_mirror_api.handle_client_message(message).await.unwrap();
         let message_1 = tcp_mirror_api.recv().await.unwrap();
         let message_2 = tcp_mirror_api.recv().await.unwrap();
-        assert!([&message_1, &message_2].into_iter().any(|message| matches!(
-            message,
-            DaemonMessage::LogMessage(LogMessage {
-                level: LogLevel::Warn,
-                ..
-            }),
-        )));
-        assert!([&message_1, &message_2].into_iter().any(|message| matches!(
-            message,
-            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(80))),
-        )));
+        assert!(
+            [&message_1, &message_2].into_iter().any(|message| matches!(
+                message,
+                DaemonMessage::LogMessage(LogMessage {
+                    level: LogLevel::Warn,
+                    ..
+                }),
+            )),
+            "TcpMirrorApi should emit a warning"
+        );
+        assert!(
+            [&message_1, &message_2].into_iter().any(|message| matches!(
+                message,
+                DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(80))),
+            )),
+            "TcpMirrorApi should accept the subscription"
+        );
     }
 }
