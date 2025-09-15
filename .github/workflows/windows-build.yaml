@@ -21,35 +21,44 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Who am I?
-        shell: pwsh
+      # Ensure smctl resolves even if the System PATH wasn't updated
+      - name: Ensure smctl (KeyLocker Tools) on PATH
         run: |
-          Write-Host "USERNAME=$env:USERNAME"
+          'C:\Program Files\DigiCert\DigiCert Keylocker Tools' | Out-File -Append $env:GITHUB_PATH
+
+      # Single sanity step: identity + smctl health
+      - name: Identity & DigiCert healthcheck
+        run: |
+          $ErrorActionPreference = 'Stop'
           whoami
-          [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
           Write-Host "USERPROFILE=$env:USERPROFILE"
+          Write-Host "SM_HOST=$env:SM_HOST"
+          Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
+          smctl --version
+          smctl healthcheck
 
-      - name: Verify identity & smctl
-        shell: pwsh
+      # Check the code-signing cert thumbprint; service context uses LocalMachine\My
+      - name: Check code-signing cert presence
         run: |
-          whoami
-          & 'C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe' --version
-          & 'C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe' healthcheck
+          $ErrorActionPreference = 'Stop'
+          $thumb = 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
 
+          Write-Host "== LocalMachine\My =="
+          $lm = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumb
+          if (-not $lm) { Write-Warning "Cert NOT found in LocalMachine\My. /sha1 signing under a service account will fail." }
+          else { $lm | Format-List Subject,Thumbprint,NotAfter }
 
-      - name: Check cert presence
-        shell: pwsh
-        run: |
-          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
+          Write-Host "== CurrentUser\My =="
+          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $thumb | Format-List Subject,Thumbprint,NotAfter
 
-
-      # 1) rustup target add x86_64-pc-windows-msvc
+      # Rust target
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      # Find which *package* contains the bin target named "mirrord"
+      # Discover the package that owns the 'mirrord' bin and set env vars
       - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
         run: |
+          $ErrorActionPreference = 'Stop'
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg = $meta.packages | Where-Object {
             $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
@@ -65,26 +74,28 @@ jobs:
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "MIRRORD_LAYER_FILE=$dll"
 
-      # 2) cargo build (just like your local command, but robust to package naming)
+      # Build
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      # NEW: DigiCert SMCTL health check (assumes smctl is installed on the runner and logged in)
-      - name: DigiCert Signing Manager health check
-        run: smctl healthcheck
-
-      # NEW: Code sign the built binary using thumbprint + DigiCert timestamp server
-      - name: Code sign mirrord.exe
+      # Code sign (thumbprint in LocalMachine\My); then verify the signature
+      - name: Code sign mirrord.exe (thumbprint) + verify
         run: |
+          $ErrorActionPreference = 'Stop'
           $exe = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
           if (!(Test-Path $exe)) {
             Write-Error "Expected binary not found at $exe"
             Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug') -Recurse -Filter 'mirrord*.exe' | ForEach-Object { Write-Host "Found: $($_.FullName)" }
             exit 1
           }
+
+          # Sign
           signtool.exe sign `
             /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
             /tr http://timestamp.digicert.com `
             /td SHA256 `
             /fd SHA256 `
             "$exe"
+
+          # Verify Authenticode signature
+          signtool.exe verify /pa "$exe"
