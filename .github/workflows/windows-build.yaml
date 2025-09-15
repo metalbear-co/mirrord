@@ -12,6 +12,9 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      # 👇 Set your bucket here (no trailing slash)
+      BUCKET_URI: gs://windows_builds
 
     steps:
       - name: Checkout PR 3536 (merge ref)
@@ -21,42 +24,32 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # Ensure smctl resolves even if the System PATH wasn't updated
       - name: Ensure smctl (KeyLocker Tools) on PATH
         run: |
           'C:\Program Files\DigiCert\DigiCert Keylocker Tools' | Out-File -Append $env:GITHUB_PATH
 
-      # Single sanity step: identity + smctl health
       - name: Identity & DigiCert healthcheck
         run: |
           $ErrorActionPreference = 'Stop'
           whoami
-          Write-Host "USERPROFILE=$env:USERPROFILE"
           Write-Host "SM_HOST=$env:SM_HOST"
           Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
           smctl --version
           smctl healthcheck
 
-      # Check the code-signing cert thumbprint; service context uses LocalMachine\My
       - name: Check code-signing cert presence
         run: |
           $ErrorActionPreference = 'Stop'
           $thumb = 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
-
           Write-Host "== LocalMachine\My =="
           $lm = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumb
           if (-not $lm) { Write-Warning "Cert NOT found in LocalMachine\My. /sha1 signing under a service account will fail." }
           else { $lm | Format-List Subject,Thumbprint,NotAfter }
 
-          Write-Host "== CurrentUser\My =="
-          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $thumb | Format-List Subject,Thumbprint,NotAfter
-
-      # Rust target
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
 
-      # Discover the package that owns the 'mirrord' bin and set env vars
-      - name: Locate package for bin "mirrord" + set MIRRORD_LAYER_FILE
+      - name: Locate package for bin "mirrord" + set envs (package, version, layer path)
         run: |
           $ErrorActionPreference = 'Stop'
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
@@ -68,26 +61,23 @@ jobs:
             throw "No bin target named 'mirrord' found. Workspace packages: $names"
           }
           "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Will build bin 'mirrord' from package: $($pkg.name)"
+          "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
 
           $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\layer_win.dll'
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "MIRRORD_LAYER_FILE=$dll"
 
-      # Build
       - name: Build mirrord
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      # Code sign (thumbprint in LocalMachine\My); sign EXE + DLL and verify both
+      # Sign EXE + DLL and verify both
       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-
           $exe = Join-Path $buildDir 'mirrord.exe'
 
-          # Try MIRRORD_LAYER_FILE first, then common names
+          # Prefer explicit env, then common names
           $dllCandidates = @()
           if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
           $dllCandidates += @(
@@ -98,18 +88,14 @@ jobs:
 
           if (!(Test-Path $exe)) {
             Write-Error "Expected binary not found at $exe"
-            Get-ChildItem -Path $buildDir -Recurse -Filter 'mirrord*.exe' | ForEach-Object { Write-Host "Found EXE: $($_.FullName)" }
             exit 1
           }
           if (-not $dll) {
             Write-Error "Layer DLL not found. Looked for:`n$($dllCandidates -join \"`n\")"
-            Get-ChildItem -Path $buildDir -Recurse -Filter '*.dll' | ForEach-Object { Write-Host "Found DLL: $($_.FullName)" }
             exit 1
           }
 
-          $filesToSign = @($exe, $dll)
-
-          foreach ($f in $filesToSign) {
+          foreach ($f in @($exe,$dll)) {
             Write-Host "Signing $f"
             signtool.exe sign `
               /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
@@ -122,3 +108,49 @@ jobs:
             signtool.exe verify /pa "$f"
           }
 
+          # Stage artifacts + checksums for upload
+          $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe -Destination $staging -Force
+          $dllLeaf = Split-Path $dll -Leaf
+          Copy-Item $dll -Destination (Join-Path $staging $dllLeaf) -Force
+
+          foreach ($file in @('mirrord.exe', $dllLeaf)) {
+            $full = Join-Path $staging $file
+            $h = Get-FileHash -Algorithm SHA256 $full
+            "$($h.Hash)  $file" | Out-File (Join-Path $staging "$file.sha256") -Encoding ascii
+          }
+
+          # Compute per-build folder: windows/mirrord-<version>-run<run>-<sha7>
+          $sha7 = $env:GITHUB_SHA.Substring(0,7)
+          $artifactDir = "windows/mirrord-$($env:MIRRORD_VERSION)-run$($env:GITHUB_RUN_NUMBER)-$sha7"
+          "ARTIFACT_STAGING=$staging" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ARTIFACT_DIR=$artifactDir"   | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Artifact dir: $artifactDir"
+
+      # Ensure gcloud is present (uses VM's service account on GCE)
+      - name: Ensure gcloud CLI
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+              winget install -e --id Google.CloudSDK --silent --accept-package-agreements --accept-source-agreements
+            } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+              choco install -y gcloudsdk
+            } else {
+              throw "gcloud not found and no winget/choco available. Please install Google Cloud SDK on the runner."
+            }
+          }
+          gcloud --quiet version
+
+      # Upload to GCS (requires the VM's service account to have storage.objects.create on the bucket)
+      - name: Upload signed artifacts to GCS
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
+          $src = Join-Path $env:ARTIFACT_STAGING '*'
+          $dest = "$($env:BUCKET_URI)/$($env:ARTIFACT_DIR)/"
+          Write-Host "Uploading $src -> $dest"
+          gcloud --quiet storage cp $src $dest
+          Write-Host "Listing:"
+          gcloud --quiet storage ls $dest
