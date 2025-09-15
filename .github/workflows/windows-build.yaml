@@ -135,7 +135,7 @@ jobs:
       - name: Upload signed artifacts to GCS
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
+          if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://windows_builds at job.env." }
           $src = Join-Path $env:ARTIFACT_STAGING '*'
           $dest = "$($env:BUCKET_URI)/$($env:ARTIFACT_DIR)/"
           Write-Host "Uploading $src -> $dest"
