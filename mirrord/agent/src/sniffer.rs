@@ -404,17 +404,23 @@ mod test {
 
     use api::TcpSnifferApi;
     use mirrord_protocol::{
-        ConnectionId, LogLevel, ToPayload,
-        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+        ConnectionId, DaemonMessage, LogLevel, LogMessage, ToPayload,
+        tcp::{
+            DaemonTcp, HttpFilter as ProtocolHttpFilter, LayerTcp, NewTcpConnectionV1, TcpClose,
+            TcpData,
+        },
     };
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::task::{
-        BgTaskRuntime,
-        status::{BgTaskStatus, IntoStatus},
+    use crate::{
+        mirror::TcpMirrorApi,
+        task::{
+            BgTaskRuntime,
+            status::{BgTaskStatus, IntoStatus},
+        },
     };
 
     struct TestSnifferSetup {
@@ -974,5 +980,39 @@ mod test {
                 other => panic!("unexpected times filter changed {other}"),
             }
         }
+    }
+
+    /// Test that sniffer mode properly ignores HTTP filters in subscriptions.
+    #[tokio::test]
+    async fn test_sniffer_ignores_http_filter() {
+        let mut setup = TestSnifferSetup::new().await;
+        let api = setup.get_api().await;
+        let mut tcp_mirror_api = TcpMirrorApi::sniffer(api);
+
+        let filter = ProtocolHttpFilter::Header(
+            mirrord_protocol::tcp::Filter::new("x-filter: yes".to_string()).unwrap(),
+        );
+        let message = LayerTcp::PortSubscribeFilteredHttp(80, filter);
+
+        tcp_mirror_api.handle_client_message(message).await.unwrap();
+        let message_1 = tcp_mirror_api.recv().await.unwrap();
+        let message_2 = tcp_mirror_api.recv().await.unwrap();
+        assert!(
+            [&message_1, &message_2].into_iter().any(|message| matches!(
+                message,
+                DaemonMessage::LogMessage(LogMessage {
+                    level: LogLevel::Warn,
+                    ..
+                }),
+            )),
+            "TcpMirrorApi should emit a warning"
+        );
+        assert!(
+            [&message_1, &message_2].into_iter().any(|message| matches!(
+                message,
+                DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(80))),
+            )),
+            "TcpMirrorApi should accept the subscription"
+        );
     }
 }

@@ -175,6 +175,14 @@ impl TcpSnifferApi {
                 Ok(())
             }
 
+            LayerTcp::PortSubscribeFilteredHttp(port, _) => {
+                let (tx, rx) = oneshot::channel();
+                self.send_command(SnifferCommandInner::Subscribe(port, tx))
+                    .await?;
+                self.subscriptions_in_progress.push(rx);
+                Ok(())
+            }
+
             LayerTcp::PortUnsubscribe(port) => {
                 self.send_command(SnifferCommandInner::UnsubscribePort(port))
                     .await?;
