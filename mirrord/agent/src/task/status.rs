@@ -8,8 +8,8 @@ use crate::{error::AgentError, task::BgTaskRuntime, util::error::BgTaskPanicked}
 /// Converts a [`JoinHandle`] created from [`super::BgTaskRuntime::spawn`] into a [`BgTaskStatus`]
 /// so we can wait and see if the task has ended properly (or not).
 pub(crate) trait IntoStatus {
-    /// [`tokio::spawn`]s a task that we use to get the result out of a [`BackgroundTask`], so we
-    /// can check it with [`BgTaskStatus::wait`] or [`BgTaskStatus::wait_assert_running`].
+    /// [`tokio::spawn`]s a task that we use to get the result out of a `BackgroundTask`, so we can
+    /// check it with [`BgTaskStatus::wait`] or [`BgTaskStatus::wait_assert_running`].
     fn into_status(self, task_name: &'static str, runtime: Arc<BgTaskRuntime>) -> BgTaskStatus;
 }
 

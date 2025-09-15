@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::namespace::NamespaceError;
 
-/// Errors that can occur when creating a [`RemoteRuntime`](super::remote_runtime::RemoteRuntime).
+/// Errors that can occur when creating a [`BgTaskRuntime`](crate::task::BgTaskRuntime).
 #[derive(Error, Debug)]
 pub enum AgentRuntimeError {
     #[error("failed to spawn runtime thread: {0}")]
@@ -18,7 +18,7 @@ pub enum AgentRuntimeError {
 }
 
 /// An error that occurs when polling a future spawned with
-/// [`BgTaskRuntime::spawn`](super::remote_runtime::BgTaskRuntime::spawn).
+/// [`BgTaskRuntime::spawn`](crate::task::BgTaskRuntime::spawn).
 ///
 /// This error indicated that the future has panicked.
 #[derive(Debug, Error)]
