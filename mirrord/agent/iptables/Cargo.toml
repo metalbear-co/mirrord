@@ -24,7 +24,7 @@ fancy-regex.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "process", "rt"] }
 tracing.workspace = true
 
-[target.'cfg(target_os = "unix")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 nix = { workspace = true, features = ["user"] }
 caps = "0.5"
