@@ -47,7 +47,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
 
             _ if crate::SETUP
                 .get()
-                .map_or(false, |setup| setup.fs_config().is_active()) =>
+                .is_some_and(|setup| setup.fs_config().is_active()) =>
             {
                 match syscall {
                     libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
