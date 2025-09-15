@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
     printcolumn = r#"{"name":"WORKLOAD-API-VERSION", "type":"string", "description":"API version of the workload.", "jsonPath":".spec.workloadRef.apiVersion"}"#,
     printcolumn = r#"{"name":"WORKLOAD-KIND", "type":"string", "description":"Kind of the workload.", "jsonPath":".spec.workloadRef.kind"}"#,
     printcolumn = r#"{"name":"WORKLOAD-NAME", "type":"string", "description":"Name of the workload.", "jsonPath":".spec.workloadRef.name"}"#,
-    printcolumn = r#"{"name":"WORKLOAD-NAMESPACE", "type":"string", "description":"API version of the workload.", "jsonPath":".spec.workloadRef.namespace"}"#
+    printcolumn = r#"{"name":"WORKLOAD-NAMESPACE", "type":"string", "description":"Namespace of the workload.", "jsonPath":".spec.workloadRef.namespace"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterWorkloadPatchSpec {
