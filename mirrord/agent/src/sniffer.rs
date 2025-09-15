@@ -429,6 +429,7 @@ mod test {
         packet_tx: Sender<(TcpSessionDirectionId, TcpPacketData)>,
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
+        cancellation_token: CancellationToken,
     }
 
     impl TestSnifferSetup {
@@ -462,10 +463,11 @@ mod test {
                 clients_closed: Default::default(),
             };
 
+            let cancellation_token = CancellationToken::new();
             let bg_task = Arc::new(BgTaskRuntime::spawn(None).await.unwrap());
             let task_status = bg_task
                 .handle()
-                .spawn(sniffer.start(CancellationToken::new()))
+                .spawn(sniffer.start(cancellation_token.clone()))
                 .into_status("TcpSnifferTask", bg_task.clone());
 
             Self {
@@ -474,96 +476,7 @@ mod test {
                 packet_tx,
                 times_filter_changed,
                 next_client_id: 0,
-                // TODO(alex) [high]: This was not enough, I'm still seeing a panic happen in some
-                // task:
-                /*
-                                                ------- failed -----
-                                                running 1 test
-                                  2025-09-12T22:43:39.347856Z  INFO mirrord_agent::task: new
-                                    at mirrord/agent/src/task.rs:45 on ThreadId(2)
-                                    in mirrord_agent::task::spawn with namespace: None
-
-                                  2025-09-12T22:43:39.348086Z  INFO mirrord_agent::task: thread_logic ->
-                                    at mirrord/agent/src/task.rs:54 on ThreadId(3)
-
-                                  2025-09-12T22:43:39.348159Z  INFO mirrord_agent::task: thread_logic -> rt_result Ok(Runtime { scheduler: CurrentThread(CurrentThread), handle: Handle { inner: CurrentThread(current_thread::Handle { ... }) }, blocking_pool: BlockingPool })
-                                    at mirrord/agent/src/task.rs:69 on ThreadId(3)
-
-                                  2025-09-12T22:43:39.348195Z  INFO mirrord_agent::task: thread_logic -> result_tx.send
-                                    at mirrord/agent/src/task.rs:78 on ThreadId(3)
-
-                                  2025-09-12T22:43:39.348218Z  INFO mirrord_agent::task: thread_logic -> rt.block_on
-                                    at mirrord/agent/src/task.rs:83 on ThreadId(3)
-
-                                  2025-09-12T22:43:39.348238Z  INFO mirrord_agent::task: return: BgTaskRuntime { target_pid: None, num_workers: 1, num_alive_tasks: 0 }
-                                    at mirrord/agent/src/task.rs:45 on ThreadId(2)
-                                    in mirrord_agent::task::spawn with namespace: None
-
-                                  2025-09-12T22:43:39.348269Z  INFO mirrord_agent::task: close, time.busy: 100µs, time.idle: 323µs
-                                    at mirrord/agent/src/task.rs:45 on ThreadId(2)
-                                    in mirrord_agent::task::spawn with namespace: None
-
-                                  2025-09-12T22:43:39.348395Z DEBUG mirrord_agent::sniffer: new
-                                    at mirrord/agent/src/sniffer.rs:190 on ThreadId(3)
-                                    in mirrord_agent::sniffer::start with self: TcpConnectionSniffer { clients: [], port_subscriptions: Subscriptions { inner: {} }, open_tcp_sessions: [] }
-
-                                  2025-09-12T22:43:39.348650Z  INFO mirrord_agent::task: Dropping the runtime!
-                                    at mirrord/agent/src/task.rs:120 on ThreadId(2)
-
-
-                                thread '<unnamed>' panicked at mirrord/agent/src/sniffer/tcp_capture.rs:182:43:
-                                channel closed
-                                note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-                                test sniffer::test::one_client ... ok
-
-                                test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 0.00s
-
-                                ---- works -----
-                running 1 test
-                  2025-09-12T22:43:42.042460Z  INFO mirrord_agent::task: new
-                    at mirrord/agent/src/task.rs:45 on ThreadId(2)
-                    in mirrord_agent::task::spawn with namespace: None
-
-                  2025-09-12T22:43:42.042644Z  INFO mirrord_agent::task: thread_logic ->
-                    at mirrord/agent/src/task.rs:54 on ThreadId(3)
-
-                  2025-09-12T22:43:42.042725Z  INFO mirrord_agent::task: thread_logic -> rt_result Ok(Runtime { scheduler: CurrentThread(CurrentThread), handle: Handle { inner: CurrentThread(current_thread::Handle { ... }) }, blocking_pool: BlockingPool })
-                    at mirrord/agent/src/task.rs:69 on ThreadId(3)
-
-                  2025-09-12T22:43:42.042758Z  INFO mirrord_agent::task: thread_logic -> result_tx.send
-                    at mirrord/agent/src/task.rs:78 on ThreadId(3)
-
-                  2025-09-12T22:43:42.042788Z  INFO mirrord_agent::task: thread_logic -> rt.block_on
-                    at mirrord/agent/src/task.rs:83 on ThreadId(3)
-
-                  2025-09-12T22:43:42.042837Z  INFO mirrord_agent::task: return: BgTaskRuntime { target_pid: None, num_workers: 1, num_alive_tasks: 0 }
-                    at mirrord/agent/src/task.rs:45 on ThreadId(2)
-                    in mirrord_agent::task::spawn with namespace: None
-
-                  2025-09-12T22:43:42.042902Z  INFO mirrord_agent::task: close, time.busy: 149µs, time.idle: 298µs
-                    at mirrord/agent/src/task.rs:45 on ThreadId(2)
-                    in mirrord_agent::task::spawn with namespace: None
-
-                  2025-09-12T22:43:42.043060Z DEBUG mirrord_agent::sniffer: new
-                    at mirrord/agent/src/sniffer.rs:190 on ThreadId(3)
-                    in mirrord_agent::sniffer::start with self: TcpConnectionSniffer { clients: [], port_subscriptions: Subscriptions { inner: {} }, open_tcp_sessions: [] }
-
-                  2025-09-12T22:43:42.043464Z  INFO mirrord_agent::task: Dropping the runtime!
-                    at mirrord/agent/src/task.rs:120 on ThreadId(2)
-
-                  2025-09-12T22:43:42.043477Z DEBUG mirrord_agent::sniffer: command channel closed, exiting
-                    at mirrord/agent/src/sniffer.rs:196 on ThreadId(3)
-                    in mirrord_agent::sniffer::start with self: TcpConnectionSniffer { clients: [], port_subscriptions: Subscriptions { inner: {} }, open_tcp_sessions: [] }
-
-                  2025-09-12T22:43:42.043533Z DEBUG mirrord_agent::sniffer: close, time.busy: 307µs, time.idle: 171µs
-                    at mirrord/agent/src/sniffer.rs:190 on ThreadId(3)
-                    in mirrord_agent::sniffer::start with self: TcpConnectionSniffer { clients: [], port_subscriptions: Subscriptions { inner: {} }, open_tcp_sessions: [] }
-
-                test sniffer::test::one_client ... ok
-
-                test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 0.00s
-                                                */
-                // _bg_runtime: bg_task,
+                cancellation_token,
             }
         }
     }
@@ -672,6 +585,9 @@ mod test {
         let (message, log) = api.recv().await.unwrap();
         assert_eq!(message, DaemonTcp::Close(TcpClose { connection_id: 0 }),);
         assert_eq!(log, None);
+
+        setup.cancellation_token.cancel();
+        tokio::try_join!(setup.task_status.wait()).expect("Should have succeeded!");
     }
 
     /// Tests that [`TcpCapture`] filter is replaced only when needed.
@@ -847,6 +763,23 @@ mod test {
     /// enough. Client should miss new connections.
     #[tokio::test]
     async fn client_lagging_on_new_connections() {
+        tracing_subscriber::util::SubscriberInitExt::init(
+            tracing_subscriber::layer::SubscriberExt::with(
+                tracing_subscriber::layer::SubscriberExt::with(
+                    tracing_subscriber::registry(),
+                    tracing_subscriber::fmt::layer()
+                        .with_thread_ids(true)
+                        .with_span_events(
+                            tracing_subscriber::fmt::format::FmtSpan::NEW
+                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                        )
+                        .pretty()
+                        .with_line_number(true),
+                ),
+                tracing_subscriber::EnvFilter::from_default_env(),
+            ),
+        );
+
         let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
@@ -928,6 +861,7 @@ mod test {
 
         // Verify that we missed the last connections from the first batch.
         let (msg, log) = api.recv().await.unwrap();
+        // println!("{msg:?} and log {log:?}");
         assert_eq!(log, None);
         assert_eq!(
             msg,
