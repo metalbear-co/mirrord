@@ -19,6 +19,6 @@ workspace = true
 [dependencies]
 socket2.workspace = true
 
-[target.'cfg(target_os = "unix")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc.workspace = true
 errno = "0.3"

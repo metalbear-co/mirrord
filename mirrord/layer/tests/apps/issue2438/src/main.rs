@@ -10,6 +10,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     os::fd::{FromRawFd, IntoRawFd},
 };
+
 #[cfg(unix)]
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, SockaddrStorage};
 
@@ -57,4 +58,3 @@ fn main() {
     // This test is Unix-specific and does nothing on other platforms
     println!("issue2438 test skipped on non-Unix platforms");
 }
-
