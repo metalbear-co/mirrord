@@ -24,72 +24,6 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # Make sure gcloud exists on the runner
-      - name: Ensure gcloud CLI
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-            if (Get-Command winget -ErrorAction SilentlyContinue) {
-              winget install -e --id Google.CloudSDK --silent --accept-package-agreements --accept-source-agreements
-            } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
-              choco install -y gcloudsdk
-            } else {
-              throw "gcloud not found and no winget/choco available. Please install Google Cloud SDK on the runner."
-            }
-          }
-          gcloud --quiet version
-
-      # GCS preflight: auth + scopes + write test
-      - name: GCS access preflight (auth, scopes, write probe)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
-
-          # Show who/what gcloud is using
-          gcloud auth list
-          $proj = (gcloud config get-value project) -join ''
-          Write-Host "gcloud project: $proj"
-
-          # Show VM access scopes (important on older GCE instances)
-          try {
-            $h = @{ 'Metadata-Flavor'='Google' }
-            $scopes = Invoke-RestMethod -Headers $h -Uri 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/scopes'
-            Write-Host "Instance scopes:`n$($scopes -join "`n")"
-            if ($scopes -notmatch 'cloud-platform') {
-              Write-Warning "No cloud-platform scope. If using the VM's default SA, writes may fail even with IAM. Stop the VM and set scopes to cloud-platform."
-            }
-          } catch {
-            Write-Warning "Could not query metadata scopes (non-GCE environment?)."
-          }
-
-          # Write a tiny probe file to the bucket
-          $sha7 = $env:GITHUB_SHA.Substring(0,7)
-          $probeName = "_preflight/run$($env:GITHUB_RUN_NUMBER)-$sha7.txt"
-          $tmp = Join-Path $env:RUNNER_TEMP 'gcs_probe.txt'
-          "probe $(Get-Date -Format o) run=$($env:GITHUB_RUN_NUMBER) sha=$sha7" | Set-Content -Path $tmp -Encoding ascii
-          $dest = "$($env:BUCKET_URI)/$probeName"
-
-          Write-Host "Uploading probe to $dest"
-          gcloud --quiet storage cp "$tmp" "$dest"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Active account:"
-            gcloud auth list
-            throw "GCS write probe FAILED. Ensure bucket IAM allows uploads for the active account AND the VM has cloud-platform scopes (or auth with a key in the job)."
-          }
-
-          # Best-effort list (may fail if you didn't grant Viewer)
-          gcloud --quiet storage ls "$($env:BUCKET_URI)/_preflight/" || Write-Host "Note: listing failed (no Viewer). Upload still succeeded."
-
-          # Best-effort delete (will fail if you didn't grant delete)
-          gcloud --quiet storage rm "$dest" || Write-Host "Note: delete failed (no Object Admin/Delete). Keeping probe object."
-
-
-
-      - name: Ensure smctl (KeyLocker Tools) on PATH
-        run: |
-          'C:\Program Files\DigiCert\DigiCert Keylocker Tools' | Out-File -Append $env:GITHUB_PATH
 
       - name: Identity & DigiCert healthcheck
         run: |
@@ -99,15 +33,6 @@ jobs:
           Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
           smctl --version
           smctl healthcheck
-
-      - name: Check code-signing cert presence
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $thumb = 'BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB'
-          Write-Host "== LocalMachine\My =="
-          $lm = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumb
-          if (-not $lm) { Write-Warning "Cert NOT found in LocalMachine\My. /sha1 signing under a service account will fail." }
-          else { $lm | Format-List Subject,Thumbprint,NotAfter }
 
       - name: Add Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
@@ -179,32 +104,6 @@ jobs:
           }
 
 
-      # # Ensure gcloud is present (uses VM's service account on GCE)
-      # - name: Ensure gcloud CLI
-      #   run: |
-      #     $ErrorActionPreference = 'Stop'
-      #     if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-      #       if (Get-Command winget -ErrorAction SilentlyContinue) {
-      #         winget install -e --id Google.CloudSDK --silent --accept-package-agreements --accept-source-agreements
-      #       } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
-      #         choco install -y gcloudsdk
-      #       } else {
-      #         throw "gcloud not found and no winget/choco available. Please install Google Cloud SDK on the runner."
-      #       }
-      #     }
-      #     gcloud --quiet version
-
-      # # Upload to GCS (requires the VM's service account to have storage.objects.create on the bucket)
-      # - name: Upload signed artifacts to GCS
-      #   run: |
-      #     $ErrorActionPreference = 'Stop'
-      #     if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://mirrord-windows-builds at job.env." }
-      #     $src = Join-Path $env:ARTIFACT_STAGING '*'
-      #     $dest = "$($env:BUCKET_URI)/$($env:ARTIFACT_DIR)/"
-      #     Write-Host "Uploading $src -> $dest"
-      #     gcloud --quiet storage cp $src $dest
-      #     Write-Host "Listing:"
-      #     gcloud --quiet storage ls $dest
       - name: Stage and upload signed artifacts to GCS
         shell: pwsh
         run: |
