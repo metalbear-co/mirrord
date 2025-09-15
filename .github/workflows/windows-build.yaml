@@ -29,6 +29,14 @@ jobs:
           [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
           Write-Host "USERPROFILE=$env:USERPROFILE"
 
+      - name: Verify identity & smctl
+        shell: pwsh
+        run: |
+          whoami
+          & 'C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe' --version
+          & 'C:\Program Files\DigiCert\DigiCert Keylocker Tools\smctl.exe' healthcheck
+
+
       - name: Check cert presence
         shell: pwsh
         run: |
