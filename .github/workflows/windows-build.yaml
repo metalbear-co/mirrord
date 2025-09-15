@@ -147,14 +147,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
-          if ($env:BUCKET_URI -match '_') { Write-Warning "GCS bucket names cannot contain underscores. Consider gs://windows-builds instead of $($env:BUCKET_URI)." }
 
           $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
           $exe = Join-Path $buildDir 'mirrord.exe'
           $dll = $env:MIRRORD_LAYER_FILE
           if (!(Test-Path $exe)) { throw "mirrord.exe missing at $exe" }
           if (-not $dll -or !(Test-Path $dll)) {
-            $dll = (Get-ChildItem $buildDir -Filter '*layer*.dll' | Select-Object -First 1).FullName
+            $dll = (Get-ChildItem -Path $buildDir -Filter '*layer*.dll' | Select-Object -First 1).FullName
             if (-not $dll) { throw "Layer DLL not found under $buildDir" }
           }
 
@@ -163,19 +162,27 @@ jobs:
           Copy-Item $exe -Destination $staging -Force
           Copy-Item $dll -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
 
-          foreach ($f in Get-ChildItem $staging -Include *.exe,*.dll) {
-            $h = Get-FileHash -Algorithm SHA256 $f.FullName
-            "$($h.Hash)  $($f.Name)" | Out-File (Join-Path $staging "$($f.Name).sha256") -Encoding ascii
+          # Make checksums
+          Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll | ForEach-Object {
+            $h = Get-FileHash -Algorithm SHA256 $_.FullName
+            "$($h.Hash)  $($_.Name)" | Out-File (Join-Path $staging "$($_.Name).sha256") -Encoding ascii
           }
 
+          # Build folder name
           $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
           $sha7 = $env:GITHUB_SHA.Substring(0,7)
           $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
           $dest = "$($env:BUCKET_URI)/$artifactDir/"
-
           Write-Host "Uploading to $dest"
-          $files = Get-ChildItem $staging -Include *.exe,*.dll,*.sha256
+
+          # ✅ Use wildcard path so -Include works; ensure we actually found files
+          $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
+          if (-not $files) { throw "No artifacts found in $staging" }
+
           foreach ($f in $files) {
             gcloud --quiet storage cp $($f.FullName) $dest
+            if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($f.Name) (exit $LASTEXITCODE)" }
           }
+
           gcloud --quiet storage ls $dest
+
