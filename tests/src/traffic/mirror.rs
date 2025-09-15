@@ -52,7 +52,10 @@ async fn mirror_with_http_header_filter(
                     }
                 }
             }
-        }
+        },
+        "agent": {
+            "passthrough_mirroring": true,
+        },
     });
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
     serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
