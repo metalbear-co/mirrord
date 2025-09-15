@@ -16,9 +16,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
-[dev-dependencies]
+[dependencies]
 socket2.workspace = true
 
-[target.'cfg(target_os = "unix")'.dev-dependencies]
+[target.'cfg(target_os = "unix")'.dependencies]
 libc.workspace = true
 errno = "0.3"

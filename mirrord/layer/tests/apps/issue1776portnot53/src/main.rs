@@ -4,10 +4,8 @@ use std::{
     alloc::{self, Layout},
     mem::{self, size_of},
     net::{SocketAddr, UdpSocket},
+    os::fd::AsRawFd,
 };
-
-#[cfg(unix)]
-use os::fd::AsRawFd;
 #[cfg(unix)]
 use libc::{c_void, iovec};
 #[cfg(unix)]
