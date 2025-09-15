@@ -26,6 +26,7 @@ pub(crate) struct BgTaskStatus {
     /// Call `await` on this to get the result of the `BackgroundTask`.
     result: Shared<oneshot::Receiver<Result<(), Arc<dyn Error + Send + Sync>>>>,
 
+    #[allow(unused)]
     runtime: Arc<BgTaskRuntime>,
 }
 
