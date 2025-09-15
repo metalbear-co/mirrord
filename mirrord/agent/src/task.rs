@@ -56,11 +56,10 @@ impl BgTaskRuntime {
                 target_pid,
                 namespace_type,
             }) = namespace
+                && let Err(error) = namespace::set_namespace(target_pid, namespace_type)
             {
-                if let Err(error) = namespace::set_namespace(target_pid, namespace_type) {
-                    let _ = result_tx.send(Err(error.into()));
-                    return;
-                }
+                let _ = result_tx.send(Err(error.into()));
+                return;
             }
 
             let rt_result = tokio::runtime::Builder::new_current_thread()
