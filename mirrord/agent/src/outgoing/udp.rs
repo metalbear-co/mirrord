@@ -2,6 +2,7 @@ use core::fmt;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
 };
 
 use bytes::{Bytes, BytesMut};
@@ -26,7 +27,10 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::UDP_OUTGOING_CONNECTION,
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
+    },
 };
 
 /// Task that handles [`LayerUdpOutgoing`] and [`DaemonUdpOutgoing`] messages.
@@ -303,13 +307,14 @@ async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseErr
 }
 
 impl UdpOutgoingApi {
-    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+    pub(crate) fn new(runtime: Arc<BgTaskRuntime>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
         let task_status = runtime
+            .handle()
             .spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
-            .into_status("UdpOutgoingTask");
+            .into_status("UdpOutgoingTask", runtime);
 
         Self {
             task_status,

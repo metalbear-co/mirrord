@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mirrord_agent_env::envs;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -9,10 +11,8 @@ use crate::{
     incoming::{self, MirrorHandle, RedirectorTask, StealHandle, tls::StealTlsHandlerStore},
     sniffer::{TcpConnectionSniffer, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerTask},
-    util::{
-        path_resolver::InTargetPathResolver,
-        remote_runtime::{BgTaskRuntime, IntoStatus},
-    },
+    task::{BgTaskRuntime, status::IntoStatus},
+    util::path_resolver::InTargetPathResolver,
 };
 
 /// Starts a [`RedirectorTask`] on the given `runtime`.
@@ -31,6 +31,7 @@ pub(super) async fn start_traffic_redirector(
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
     let (task, steal_handle, mirror_handle) = runtime
+        .handle()
         .spawn(async move {
             incoming::create_iptables_redirector(
                 flush_connections,
@@ -45,19 +46,20 @@ pub(super) async fn start_traffic_redirector(
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
-    runtime.spawn(task.run());
+    runtime.handle().spawn(task.run());
 
     Ok((steal_handle, mirror_handle))
 }
 
 pub(super) async fn start_sniffer(
     args: &super::Args,
-    runtime: &BgTaskRuntime,
+    runtime: Arc<BgTaskRuntime>,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<SnifferCommand> {
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
     let sniffer = runtime
+        .handle()
         .spawn(TcpConnectionSniffer::new(
             command_rx,
             args.network_interface.clone(),
@@ -68,8 +70,9 @@ pub(super) async fn start_sniffer(
     match sniffer {
         Ok(Ok(sniffer)) => {
             let task_status = runtime
+                .handle()
                 .spawn(sniffer.start(cancellation_token.clone()))
-                .into_status("TcpSnifferTask");
+                .into_status("TcpSnifferTask", runtime.clone());
 
             BackgroundTask::Running(task_status, command_tx)
         }
@@ -85,32 +88,34 @@ pub(super) async fn start_sniffer(
 }
 
 pub(super) fn start_stealer(
-    runtime: &BgTaskRuntime,
+    runtime: Arc<BgTaskRuntime>,
     steal_handle: StealHandle,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<StealerCommand> {
     let (command_tx, command_rx) = mpsc::channel::<StealerCommand>(1000);
 
     let task_status = runtime
+        .handle()
         .spawn(TcpStealerTask::new(command_rx, steal_handle).run(cancellation_token))
-        .into_status("TcpStealerTask");
+        .into_status("TcpStealerTask", runtime.clone());
 
     BackgroundTask::Running(task_status, command_tx)
 }
 
 pub(super) fn start_dns(
     args: &super::Args,
-    runtime: &BgTaskRuntime,
+    runtime: Arc<BgTaskRuntime>,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
 
     let task_status = runtime
+        .handle()
         .spawn(
             DnsWorker::new(runtime.target_pid(), command_rx, args.ipv6)
                 .run(cancellation_token.clone()),
         )
-        .into_status("DnsTask");
+        .into_status("DnsTask", runtime.clone());
 
     BackgroundTask::Running(task_status, command_tx)
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, time::Duration};
+use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use mirrord_protocol::{
@@ -20,7 +20,10 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::TCP_OUTGOING_CONNECTION,
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
+    },
 };
 
 mod socket_stream;
@@ -48,14 +51,15 @@ impl TcpOutgoingApi {
     /// # Params
     ///
     /// * `runtime` - tokio runtime to spawn the background task on.
-    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+    pub(crate) fn new(runtime: Arc<BgTaskRuntime>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
         let pid = runtime.target_pid();
         let task_status = runtime
+            .handle()
             .spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("TcpOutgoingTask");
+            .into_status("TcpOutgoingTask", runtime);
 
         Self {
             task_status,

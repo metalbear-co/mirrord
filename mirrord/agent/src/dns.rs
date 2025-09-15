@@ -31,7 +31,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, warn};
 
-use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, util::remote_runtime::BgTaskStatus};
+use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, task::status::BgTaskStatus};
 
 #[derive(Debug)]
 pub(crate) enum ClientGetAddrInfoRequest {
@@ -194,7 +194,7 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    #[tracing::instrument(level = Level::INFO, skip(self))]
     fn handle_message(&mut self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
@@ -213,6 +213,7 @@ impl DnsWorker {
         DNS_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[tracing::instrument(level = Level::INFO, skip(self))]
     pub(crate) async fn run(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {

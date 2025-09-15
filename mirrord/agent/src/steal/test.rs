@@ -3,7 +3,7 @@
 //! Verify the whole flow from the [`TcpStealerApi`](super::api::TcpStealerApi)
 //! to the [`RedirectorTask`](crate::incoming::RedirectorTask).
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use mirrord_protocol::{
@@ -25,9 +25,9 @@ use crate::{
         test::{DummyConnectionTx, DummyRedirector},
         tls::test::SimpleStore,
     },
-    util::{
-        local_runtime::LocalRuntime,
-        remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
     },
 };
 
@@ -461,10 +461,11 @@ impl TestSetup {
         let stealer_task = TcpStealerTask::new(stealer_rx, handle);
         tokio::spawn(redirector.run());
 
-        let local_bg_task_runtime = BgTaskRuntime::Local(LocalRuntime::new(None).await.unwrap());
+        let local_bg_task_runtime = Arc::new(BgTaskRuntime::spawn(None).await.unwrap());
         let stealer_status = local_bg_task_runtime
+            .handle()
             .spawn(stealer_task.run(CancellationToken::new()))
-            .into_status("stealer");
+            .into_status("stealer", local_bg_task_runtime.clone());
 
         Self {
             original_server,

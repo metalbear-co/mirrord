@@ -5,6 +5,7 @@ use std::{
     fmt,
     io::{self, Read},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
 };
 
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
@@ -19,7 +20,10 @@ use tokio::{
 
 use crate::{
     error::AgentResult,
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
+    },
 };
 
 /// An interface for a background task handling [`ClientVpn`] messages.
@@ -41,14 +45,15 @@ impl VpnApi {
     /// # Params
     ///
     /// * `runtime` - tokio runtime to spawn the task on.
-    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+    pub(crate) fn new(runtime: Arc<BgTaskRuntime>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
         let pid = runtime.target_pid();
 
         let task_status = runtime
+            .handle()
             .spawn(VpnTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("VpnTask");
+            .into_status("VpnTask", runtime);
 
         Self {
             task_status,

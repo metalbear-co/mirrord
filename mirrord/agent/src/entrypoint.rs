@@ -46,12 +46,8 @@ use crate::{
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerApi},
-    util::{
-        ClientId,
-        local_runtime::LocalRuntime,
-        protocol_version::ClientProtocolVersion,
-        remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime, RuntimeSpawn},
-    },
+    task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod setup;
@@ -87,7 +83,7 @@ struct State {
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations.
-    network_runtime: BgTaskRuntime,
+    network_runtime: Arc<BgTaskRuntime>,
 }
 
 impl State {
@@ -137,12 +133,13 @@ impl State {
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
-            Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
-                RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
-            ),
-            Some(pid) => BgTaskRuntime::Local(LocalRuntime::new(Some(pid)).await?),
-            None => BgTaskRuntime::Local(LocalRuntime::new(None).await?),
-        };
+            Some(pid) if ephemeral.not() => {
+                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, NamespaceType::Net)))
+            }
+
+            None | Some(..) => BgTaskRuntime::spawn(None),
+        }
+        .await?;
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) => pid.to_string(),
@@ -162,7 +159,7 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
-            network_runtime,
+            network_runtime: Arc::new(network_runtime),
         })
     }
 
@@ -208,6 +205,7 @@ impl State {
             && envs::IN_SERVICE_MESH.from_env_or_default()
     }
 }
+
 enum BackgroundTask<Command> {
     Running(BgTaskStatus, Sender<Command>),
     Disabled,
@@ -303,8 +301,8 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
-        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let tcp_outgoing_api = TcpOutgoingApi::new(state.network_runtime.clone());
+        let udp_outgoing_api = UdpOutgoingApi::new(state.network_runtime.clone());
 
         let client_handler = Self {
             id,
@@ -676,6 +674,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     if state.container_pid().is_some() {
         let leftover_rules = state
             .network_runtime
+            .handle()
             .spawn(async move {
                 let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
                 let rules_v4 = SafeIpTables::list_mirrord_rules(
@@ -731,7 +730,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let passthrough_mirroring_enabled = envs::PASSTHROUGH_MIRRORING.from_env_or_default();
     let sniffer = if state.container_pid().is_some() && passthrough_mirroring_enabled.not() {
-        setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
+        setup::start_sniffer(
+            &args,
+            state.network_runtime.clone(),
+            cancellation_token.clone(),
+        )
+        .await
     } else {
         BackgroundTask::Disabled
     };
@@ -748,7 +752,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             .await?;
             (
                 setup::start_stealer(
-                    &state.network_runtime,
+                    state.network_runtime.clone(),
                     steal_handle,
                     cancellation_token.clone(),
                 ),
@@ -756,7 +760,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             )
         }
     };
-    let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
+    let dns = setup::start_dns(
+        &args,
+        state.network_runtime.clone(),
+        cancellation_token.clone(),
+    );
     let bg_tasks = BackgroundTasks {
         sniffer,
         stealer,
@@ -852,19 +860,22 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ..
     } = bg_tasks;
 
-    let _ = timeout(Duration::from_secs(args.exit_timeout.unwrap_or(5)), async {
-        tokio::join!(
-            sniffer.wait().inspect_err(|error| {
-                error!(%error, "start_agent -> Sniffer task failed");
-            }),
-            stealer.wait().inspect_err(|error| {
-                error!(%error, "start_agent -> Stealer task failed");
-            }),
-            dns.wait().inspect_err(|error| {
-                error!(%error, "start_agent -> DNS task failed");
-            }),
-        )
-    })
+    let _ = timeout(
+        Duration::from_secs(args.exit_timeout.unwrap_or(45)),
+        async {
+            tokio::join!(
+                sniffer.wait().inspect_err(|error| {
+                    error!(%error, "start_agent -> Sniffer task failed");
+                }),
+                stealer.wait().inspect_err(|error| {
+                    error!(%error, "start_agent -> Stealer task failed");
+                }),
+                dns.wait().inspect_err(|error| {
+                    error!(%error, "start_agent -> DNS task failed");
+                }),
+            )
+        },
+    )
     .await
     .inspect_err(|fail| tracing::error!("{fail}"));
 
@@ -966,8 +977,11 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         return result;
     };
 
-    let runtime = RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?;
+    let runtime =
+        BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, NamespaceType::Net))).await?;
+
     runtime
+        .handle()
         .spawn(clear_iptable_chain(args.ipv6, with_mesh_exclusion))
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {
