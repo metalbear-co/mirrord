@@ -120,7 +120,8 @@ async fn mirror_with_http_header_filter(
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let stdout = mirror_process.get_stdout().await;
-            let requests = stdout.lines().filter(|line| line.contains("GET") || line.contains("DELETE")).count();
+            // Count only the "Request completed"
+            let requests = stdout.lines().filter(|line| line.contains("Request completed")).count();
             match requests.cmp(&2) {
                 Ordering::Equal => break,
                 Ordering::Less => {
