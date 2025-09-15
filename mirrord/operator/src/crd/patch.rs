@@ -15,10 +15,13 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterWorkloadPatchSpec {
+    /// Reference to the workload being patched.
     pub workload_ref: PatchedWorkloadRef,
+    /// Collection of individual [`PatchRequest`]s to be applied.
     pub requests: Vec<PatchRequest>,
 }
 
+/// Reference to a Kubernetes workload patched with [`MirrordClusterWorkloadPatch`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchedWorkloadRef {
@@ -28,17 +31,23 @@ pub struct PatchedWorkloadRef {
     pub name: String,
 }
 
+/// Request for a patch to be applied to a Kubernetes workload.
+///
+/// Part of [`MirrordClusterWorkloadPatch`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchRequest {
+    /// Opaque identifier of this request's owner.
     pub owner: String,
-    pub extra_inline_env: Vec<ExtraInlineEnv>,
+    /// Environment variables to be set in the pod template.
+    pub env_vars: Vec<EnvVar>,
+    /// Number of replicas to be set in the workload spec.
     pub replicas: Option<i32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ExtraInlineEnv {
+pub struct EnvVar {
     pub container: String,
     pub variable: String,
     pub value: String,
