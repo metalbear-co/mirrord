@@ -42,6 +42,8 @@ pub struct PatchRequest {
     /// Environment variables to be set in the pod template.
     pub env_vars: Vec<EnvVar>,
     /// Number of replicas to be set in the workload spec.
+    ///
+    /// [`None`] means that replicas should not be patched.
     pub replicas: Option<i32>,
 }
 
