@@ -1,4 +1,4 @@
-name: Build PR 3536 (Windows, self-hosted, minimal)
+name: Windows mirrord build and cert signing
 
 on:
   workflow_dispatch:
@@ -13,7 +13,6 @@ jobs:
       run:
         shell: pwsh
     env:
-      # 👇 Set your bucket here (no trailing slash)
       BUCKET_URI: gs://mirrord-windows-builds
 
     steps:
@@ -63,7 +62,6 @@ jobs:
         run: |
           cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
 
-      # Sign EXE + DLL and verify both
       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
         shell: pwsh
         run: |
@@ -137,7 +135,7 @@ jobs:
           $dest = "$($env:BUCKET_URI)/$artifactDir/"
           Write-Host "Uploading to $dest"
 
-          # ✅ Use wildcard path so -Include works; ensure we actually found files
+          # Use wildcard path so -Include works; ensure we actually found files
           $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
           if (-not $files) { throw "No artifacts found in $staging" }
 
