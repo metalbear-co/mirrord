@@ -32,7 +32,7 @@ pub(crate) struct AgentConnection {
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
-    config: &mut LayerConfig,
+    layer_config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
     branch_name: Option<String>,
@@ -42,14 +42,14 @@ where
     R: Reporter,
 {
     let mut operator_subtask = progress.subtask("checking operator");
-    if config.operator == Some(false) {
+    if layer_config.operator == Some(false) {
         operator_subtask.success(Some("operator disabled"));
         return Ok(None);
     }
 
-    let api = match OperatorApi::try_new(config, analytics, progress).await? {
+    let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
-        None if config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
+        None if layer_config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
         None => {
             operator_subtask.success(Some("operator not found"));
             return Ok(None);
@@ -70,7 +70,7 @@ where
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
 
-            if config.operator == Some(true) {
+            if layer_config.operator == Some(true) {
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
@@ -81,22 +81,26 @@ where
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
     let api = api
-        .prepare_client_cert(analytics, progress)
+        .prepare_client_cert(analytics, progress, layer_config)
         .await
         .into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));
 
     let target = ResolvedTarget::new(
         api.client(),
-        &config.target.path.clone().unwrap_or(Target::Targetless),
-        config.target.namespace.as_deref(),
+        &layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless),
+        layer_config.target.namespace.as_deref(),
     )
     .await
     .map_err(CliError::OperatorTargetResolution)?;
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
-        .connect_in_new_session(target, config, &session_subtask, branch_name)
+        .connect_in_new_session(target, layer_config, &session_subtask, branch_name)
         .await?;
     session_subtask.success(Some("session started"));
 

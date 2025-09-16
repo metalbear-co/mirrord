@@ -107,6 +107,7 @@ impl RedirectedHttp {
                     .collect(),
                 body_finished: self.request.body_tail.is_none(),
             },
+            parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
         }
     }
@@ -284,8 +285,17 @@ impl ResponseBodyProvider {
 pub struct MirroredHttp {
     pub info: ConnectionInfo,
     pub request_head: RequestHead,
+    /// The original request parts from ExtractedRequest, used for HTTP filtering
+    pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
+}
+
+impl MirroredHttp {
+    /// Returns a mutable reference to the request parts
+    pub fn parts_mut(&mut self) -> &mut request::Parts {
+        &mut self.parts
+    }
 }
 
 impl fmt::Debug for MirroredHttp {
@@ -293,6 +303,7 @@ impl fmt::Debug for MirroredHttp {
         f.debug_struct("MirroredHttp")
             .field("info", &self.info)
             .field("request_head", &self.request_head)
+            .field("parts", &self.parts)
             .finish()
     }
 }

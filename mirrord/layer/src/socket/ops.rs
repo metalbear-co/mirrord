@@ -189,7 +189,9 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .get_by_left(&addr.port())
         .copied()
         .unwrap_or_else(|| addr.port());
-    let http_filter_used = config.mode == IncomingMode::Steal && config.http_filter.is_filter_set();
+    let http_filter_used = (config.mode == IncomingMode::Steal
+        || config.mode == IncomingMode::Mirror)
+        && config.http_filter.is_filter_set();
 
     // this is a bit weird but it makes more sense configured ports are the remote port
     // and not the local, so the check is done on the mapped port

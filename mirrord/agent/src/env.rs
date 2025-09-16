@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
 };
 
-use mirrord_protocol::RemoteResult;
+use mirrord_protocol::{RemoteEnvVars, RemoteResult};
 use tokio::io::AsyncReadExt;
 use wildmatch::WildMatch;
 
@@ -119,7 +119,7 @@ pub(crate) fn select_env_vars(
     full_env: &HashMap<String, String>,
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,
-) -> RemoteResult<HashMap<String, String>> {
+) -> RemoteResult<RemoteEnvVars> {
     let env_filter = EnvFilter::new(select_env_vars, filter_env_vars);
     let env_vars = full_env
         .iter()
@@ -128,7 +128,7 @@ pub(crate) fn select_env_vars(
         // [("DB", "foo.db")]
         .collect::<HashMap<_, _>>();
 
-    Ok(env_vars)
+    Ok(env_vars.into())
 }
 
 #[cfg(test)]
