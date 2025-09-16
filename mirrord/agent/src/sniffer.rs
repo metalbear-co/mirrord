@@ -498,23 +498,6 @@ mod test {
     /// Simulates two sniffed connections, only one matching client's subscription.
     #[tokio::test]
     async fn one_client() {
-        // tracing_subscriber::util::SubscriberInitExt::init(
-        //     tracing_subscriber::layer::SubscriberExt::with(
-        //         tracing_subscriber::layer::SubscriberExt::with(
-        //             tracing_subscriber::registry(),
-        //             tracing_subscriber::fmt::layer()
-        //                 .with_thread_ids(true)
-        //                 .with_span_events(
-        //                     tracing_subscriber::fmt::format::FmtSpan::NEW
-        //                         | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-        //                 )
-        //                 .pretty()
-        //                 .with_line_number(true),
-        //         ),
-        //         tracing_subscriber::EnvFilter::from_default_env(),
-        //     ),
-        // );
-
         let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
@@ -601,7 +584,8 @@ mod test {
         assert_eq!(log, None);
 
         setup.cancellation_token.cancel();
-        tokio::try_join!(setup.task_status.wait()).expect("Should have succeeded!");
+        tokio::try_join!(setup.task_status.wait())
+            .expect("We should have cancelled the sniffer task!");
     }
 
     /// Tests that [`TcpCapture`] filter is replaced only when needed.
@@ -775,25 +759,11 @@ mod test {
 
     /// Simulates scenario where client does not read notifications about new connections fast
     /// enough. Client should miss new connections.
+    ///
+    /// There's a special `cfg(test)` case in [`TcpConnectionSniffer::handle_packet`] that skips
+    /// over a message if the `source_port: 3128` to simulate a full channel of sniffed connections.
     #[tokio::test]
     async fn client_lagging_on_new_connections() {
-        tracing_subscriber::util::SubscriberInitExt::init(
-            tracing_subscriber::layer::SubscriberExt::with(
-                tracing_subscriber::layer::SubscriberExt::with(
-                    tracing_subscriber::registry(),
-                    tracing_subscriber::fmt::layer()
-                        .with_thread_ids(true)
-                        .with_span_events(
-                            tracing_subscriber::fmt::format::FmtSpan::NEW
-                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-                        )
-                        .pretty()
-                        .with_line_number(true),
-                ),
-                tracing_subscriber::EnvFilter::from_default_env(),
-            ),
-        );
-
         let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
@@ -818,9 +788,6 @@ mod test {
                 dest_port: 80,
             });
 
-        // last is 3128 due to `..=`
-        tracing::info!("session_ids last {:?}", session_ids.clone().next_back());
-
         for session in session_ids {
             setup
                 .packet_tx
@@ -841,15 +808,12 @@ mod test {
             .reserve_many(setup.packet_tx.max_capacity())
             .await
             .unwrap();
-        // while permit.next().is_none().not() {}
         std::mem::drop(permit);
 
         let mut last_i = 0;
         // Verify that we picked up `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` first connections.
         for i in 0..TcpSnifferApi::CONNECTION_CHANNEL_SIZE {
-            let (msg, log) = api.recv().await.unwrap();
-            // tracing::info!("recv {i} - {msg:?} and log {log:?}");
-
+            let (msg, log) = api.recv().await.expect("Should have a message here!");
             assert_eq!(log, None);
             assert_eq!(
                 msg,
@@ -882,8 +846,6 @@ mod test {
             .await
             .unwrap();
 
-        // TODO(alex) [high]: Sometimes we don't miss the `3128`...
-        //
         // Verify that we missed the last connections from the first batch.
         let (msg, log) = api.recv().await.unwrap();
         tracing::info!("3128? {msg:?} and log {log:?} last_i {last_i:?}");
@@ -895,7 +857,6 @@ mod test {
                 remote_address: source_addr.into(),
                 destination_port: 80,
                 source_port: 3222,
-                // source_port: 3128,
                 local_address: dest_addr.into(),
             }),
         );
@@ -905,7 +866,6 @@ mod test {
             try_join!(setup.task_status.wait()).unwrap()
         })
         .await
-        .inspect_err(|f| tracing::error!(?f))
         .expect("We should have cancelled the sniffer task!");
     }
 
