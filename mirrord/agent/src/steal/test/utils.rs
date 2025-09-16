@@ -500,7 +500,7 @@ impl TestRequest {
         println!("[{}:{}] Sending request: {self:?}", file!(), line!());
         let request = self.as_hyper_request();
         let mut response = sender.send(request).await.unwrap();
-		verify(&response);
+        verify(&response);
 
         println!(
             "[{}:{}] Got response: {response:?}, expected {self:?}",
