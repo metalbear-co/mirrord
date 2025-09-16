@@ -284,7 +284,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false } } ```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, } } ```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -392,6 +392,14 @@
           "items": {
             "$ref": "#/definitions/AgentPullSecret"
           }
+        },
+        "inject_headers": {
+          "title": "agent.inject_headers {#agent-inject_headers}",
+          "description": "Sets whether `Mirrord-Agent` headers are injected into HTTP responses that went through the agent.\n\nPossible values for the header:\n\n- `passed-through`: set when the request was not sent to the local app (perhaps because it didn't match the filters)\n\n- `forwarded-to-client`: set when the request was sent to the local app",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "json_log": {
           "title": "agent.json_log {#agent-json_log}",
