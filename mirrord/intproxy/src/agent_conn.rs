@@ -292,6 +292,18 @@ impl RestartableBackgroundTask for AgentConnection {
                 config,
                 connect_info,
             } => {
+                match &error {
+                    AgentConnectionTaskError::RequestedReconnect(..) => {
+                        tracing::warn!(
+                            ?connect_info,
+                            "AgentConnection was requested to perform reconnect, attempting to reconnect"
+                        );
+                    }
+                    _ => {
+                        tracing::warn!(%error, ?connect_info, "AgentConnection experianced an error, attempting to reconnect");
+                    }
+                }
+
                 message_bus
                     .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::Start))
                     .await;
