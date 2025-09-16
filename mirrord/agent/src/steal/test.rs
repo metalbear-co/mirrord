@@ -13,7 +13,7 @@ use mirrord_protocol::{
 use mirrord_tls_util::MaybeTls;
 use rstest::rstest;
 use rustls::pki_types::ServerName;
-use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc};
+use tokio::{net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
 use tokio_util::sync::CancellationToken;
 use utils::{StealingClient, TestHttpKind, TestRequest, TestTcpProtocol};
