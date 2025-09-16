@@ -425,6 +425,82 @@ async fn multiple_filtered_subscriptions(
     );
 }
 
+#[timeout(Duration::from_secs(10))]
+async fn header_injection(
+    #[values(
+        TestHttpKind::Http1,
+        TestHttpKind::Http1Alpn,
+        TestHttpKind::Http1NoAlpn,
+        TestHttpKind::Http2,
+        TestHttpKind::Http2Alpn,
+        TestHttpKind::Http2NoAlpn
+    )]
+    http_kind: TestHttpKind,
+) {
+    let mut setup = TestSetup::new_http(http_kind).await;
+
+    // let request_passthrough = TestRequest {
+    //     path: "/passthrough".into(),
+    //     id_header: 0,
+    //     user_header: 0,
+    //     upgrade: None,
+    //     kind: http_kind,
+    //     connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+    //     acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+    // };
+
+    let request_forwarded = TestRequest {
+        path: "/forward".into(),
+        id_header: 0,
+        user_header: 0,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+    };
+
+    // let passthrough = StealingClient::new(
+    //     0,
+    //     setup.stealer_tx.clone(),
+    //     "1.19.4",
+    //     StealType::FilteredHttpEx(
+    //         setup.original_server.local_addr().unwrap().port(),
+    //         HttpFilter::Path(Filter::new("/passthrough".into()).unwrap()),
+    //     ),
+    //     setup.stealer_status.clone(),
+    // );
+
+    let mut forwarded = StealingClient::new(
+        1,
+        setup.stealer_tx.clone(),
+        "1.19.4",
+        StealType::FilteredHttpEx(
+            setup.original_server.local_addr().unwrap().port(),
+            HttpFilter::Path(Filter::new("/forward".into()).unwrap()),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+
+	forwarded.expect_request(&request_forwarded);
+    tokio::join!(
+		async move {
+		},
+        async move {
+            let conn = setup
+                .conn_tx
+                .make_connection(setup.original_server.local_addr().unwrap())
+                .await;
+            let mut sender = request_forwarded.make_connection(conn).await;
+            request_forwarded.send(&mut sender, 0).await;
+        }
+        // async move {
+		// 	let
+		// }
+    );
+}
+
 struct TestSetup {
     original_server: TcpListener,
     stealer_tx: mpsc::Sender<StealerCommand>,
