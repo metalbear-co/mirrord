@@ -1415,7 +1415,7 @@ pub fn config_dir() -> PathBuf {
 ///
 /// `extra_vars` are also added to the [`ConfigContext`] for [`LayerConfig::resolve`].
 pub fn get_env(
-    _dylib_path: &Path,
+    dylib_path: &Path,
     intproxy_addr: SocketAddr,
     extra_vars: Vec<(&str, &str)>,
     config_path: Option<&Path>,
@@ -1446,12 +1446,12 @@ pub fn get_env(
         #[cfg(target_os = "macos")]
         (
             "DYLD_INSERT_LIBRARIES".to_string(),
-            _dylib_path.to_str().unwrap().to_string(),
+            dylib_path.to_str().unwrap().to_string(),
         ),
         #[cfg(target_os = "linux")]
         (
             "LD_PRELOAD".to_string(),
-            _dylib_path.to_str().unwrap().to_string(),
+            dylib_path.to_str().unwrap().to_string(),
         ),
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         (
