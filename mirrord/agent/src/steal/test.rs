@@ -425,6 +425,9 @@ async fn multiple_filtered_subscriptions(
     );
 }
 
+
+/// Verifies that `Mirrord-Agent` headers are inserted with correct
+/// values into responses to stolen http requests.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
 #[timeout(Duration::from_secs(10))]
