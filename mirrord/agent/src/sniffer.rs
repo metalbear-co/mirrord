@@ -819,7 +819,7 @@ mod test {
             });
 
         // last is 3128 due to `..=`
-        tracing::info!("session_ids last {:?}", session_ids.clone().last());
+        tracing::info!("session_ids last {:?}", session_ids.clone().next_back());
 
         for session in session_ids {
             setup
