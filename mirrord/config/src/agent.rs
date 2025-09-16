@@ -425,7 +425,7 @@ pub struct AgentConfig {
     #[config(default = true)]
     pub passthrough_mirroring: bool,
 
-    /// #### agent.inject_headers {#agent-inject_headers}
+    /// ### agent.inject_headers {#agent-inject_headers}
     ///
     /// Sets whether `Mirrord-Agent` headers are injected into HTTP
     /// responses that went through the agent.
