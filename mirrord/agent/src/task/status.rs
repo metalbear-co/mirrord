@@ -26,6 +26,8 @@ pub(crate) struct BgTaskStatus {
     /// Call `await` on this to get the result of the `BackgroundTask`.
     result: Shared<oneshot::Receiver<Result<(), Arc<dyn Error + Send + Sync>>>>,
 
+    /// Need to keep the [`BgTaskRuntime`] alive until we're ready to exit, otherwise the main
+    /// tokio runtime may finish before it (potentially breaking some tests).
     #[allow(unused)]
     runtime: Arc<BgTaskRuntime>,
 }
