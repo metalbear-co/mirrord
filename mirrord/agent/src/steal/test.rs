@@ -13,7 +13,7 @@ use mirrord_protocol::{
 use mirrord_tls_util::MaybeTls;
 use rstest::rstest;
 use rustls::pki_types::ServerName;
-use tokio::{net::TcpListener, sync::mpsc};
+use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
 use tokio_util::sync::CancellationToken;
 use utils::{StealingClient, TestHttpKind, TestRequest, TestTcpProtocol};
@@ -425,6 +425,8 @@ async fn multiple_filtered_subscriptions(
     );
 }
 
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
 #[timeout(Duration::from_secs(10))]
 async fn header_injection(
     #[values(
@@ -437,17 +439,24 @@ async fn header_injection(
     )]
     http_kind: TestHttpKind,
 ) {
+    use crate::util::ClientId;
+
     let mut setup = TestSetup::new_http(http_kind).await;
 
-    // let request_passthrough = TestRequest {
-    //     path: "/passthrough".into(),
-    //     id_header: 0,
-    //     user_header: 0,
-    //     upgrade: None,
-    //     kind: http_kind,
-    //     connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
-    //     acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
-    // };
+    // Enable header injection.
+    unsafe {
+        std::env::set_var("MIRRORD_AGENT_INJECT_HEADERS", "true");
+    }
+
+    let request_passthrough = TestRequest {
+        path: "/passthrough".into(),
+        id_header: 0,
+        user_header: 0,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+    };
 
     let request_forwarded = TestRequest {
         path: "/forward".into(),
@@ -459,18 +468,7 @@ async fn header_injection(
         acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
     };
 
-    // let passthrough = StealingClient::new(
-    //     0,
-    //     setup.stealer_tx.clone(),
-    //     "1.19.4",
-    //     StealType::FilteredHttpEx(
-    //         setup.original_server.local_addr().unwrap().port(),
-    //         HttpFilter::Path(Filter::new("/passthrough".into()).unwrap()),
-    //     ),
-    //     setup.stealer_status.clone(),
-    // );
-
-    let mut forwarded = StealingClient::new(
+    let mut client = StealingClient::new(
         1,
         setup.stealer_tx.clone(),
         "1.19.4",
@@ -482,22 +480,38 @@ async fn header_injection(
     )
     .await;
 
-
-	forwarded.expect_request(&request_forwarded);
-    tokio::join!(
-		async move {
-		},
-        async move {
+    let mut run =
+        async |request: &TestRequest, expected_header_value: &str, expect_handled_by: ClientId| {
             let conn = setup
                 .conn_tx
                 .make_connection(setup.original_server.local_addr().unwrap())
                 .await;
-            let mut sender = request_forwarded.make_connection(conn).await;
-            request_forwarded.send(&mut sender, 0).await;
+
+            let mut sender = request.make_connection(conn).await;
+            request
+                .send_verify(&mut sender, expect_handled_by, |r| {
+                    assert_eq!(
+                        r.headers()
+                            .get(TestRequest::MIRRORD_AGENT_HEADER)
+                            .unwrap()
+                            .to_str()
+                            .unwrap(),
+                        expected_header_value
+                    )
+                })
+                .await;
+        };
+
+    tokio::join!(
+        async {
+            client.expect_request(&request_forwarded).await;
+            let (stream, _) = setup.original_server.accept().await.unwrap();
+            request_passthrough.accept(stream, 0).await;
+        },
+        async {
+            run(&request_forwarded, "forwarded-to-client", 1).await;
+            run(&request_passthrough, "passed-through", 0).await;
         }
-        // async move {
-		// 	let
-		// }
     );
 }
 
