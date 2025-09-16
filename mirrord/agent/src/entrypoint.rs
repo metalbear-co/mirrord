@@ -506,10 +506,8 @@ impl ClientConnectionHandler {
                 let env_vars_result =
                     env::select_env_vars(&self.state.env, env_vars_filter, env_vars_select);
 
-                self.respond(DaemonMessage::GetEnvVarsResponse(
-                    env_vars_result.map(Into::into),
-                ))
-                .await?
+                self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
+                    .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
                 self.dns_api
