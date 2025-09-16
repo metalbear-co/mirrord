@@ -300,7 +300,7 @@ impl RestartableBackgroundTask for AgentConnection {
                         );
                     }
                     _ => {
-                        tracing::warn!(%error, ?connect_info, "AgentConnection experianced an error, attempting to reconnect");
+                        tracing::warn!(%error, ?connect_info, "AgentConnection experienced an error, attempting to reconnect");
                     }
                 }
 
