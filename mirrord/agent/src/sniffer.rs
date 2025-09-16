@@ -229,7 +229,7 @@ where
 
     /// Removes the client with `client_id`, and also unsubscribes its port.
     /// Adjusts BPF filter if needed.
-    #[tracing::instrument(level = Level::DEBUG, err)]
+    #[tracing::instrument(level = Level::TRACE, err)]
     fn handle_client_closed(&mut self, client_id: ClientId) -> AgentResult<()> {
         self.client_txs.remove(&client_id);
 
@@ -259,7 +259,7 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::DEBUG, err)]
+    #[tracing::instrument(level = Level::TRACE, err)]
     fn handle_command(&mut self, command: SnifferCommand) -> AgentResult<()> {
         match command {
             SnifferCommand {
@@ -294,7 +294,7 @@ where
     }
 
     /// Handles TCP packet sniffed by [`Self::tcp_capture`].
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     fn handle_packet(
         &mut self,
         identifier: TcpSessionDirectionId,

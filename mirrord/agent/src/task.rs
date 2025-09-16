@@ -42,7 +42,7 @@ pub(crate) struct RuntimeNamespace {
 }
 
 impl BgTaskRuntime {
-    #[tracing::instrument(level = Level::INFO, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub(crate) async fn spawn(
         namespace: Option<RuntimeNamespace>,
     ) -> Result<Self, AgentRuntimeError> {
@@ -115,8 +115,8 @@ impl BgTaskRuntime {
 }
 
 impl Drop for BgTaskRuntime {
+    #[tracing::instrument(level = Level::TRACE)]
     fn drop(&mut self) {
-        tracing::info!("Dropping the runtime!");
         self.notify_drop.notify_one();
     }
 }
@@ -134,7 +134,7 @@ impl core::fmt::Debug for BgTaskRuntime {
 }
 
 impl RuntimeNamespace {
-    #[tracing::instrument(level = Level::INFO, ret)]
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub(crate) fn new(target_pid: u64, namespace_type: NamespaceType) -> Self {
         Self {
             target_pid,

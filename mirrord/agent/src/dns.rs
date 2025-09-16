@@ -194,7 +194,7 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
-    #[tracing::instrument(level = Level::INFO, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     fn handle_message(&mut self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;

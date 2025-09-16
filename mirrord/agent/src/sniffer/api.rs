@@ -13,7 +13,6 @@ use tokio_stream::{
     StreamMap, StreamNotifyClose,
     wrappers::{BroadcastStream, errors::BroadcastStreamRecvError},
 };
-use tracing::Level;
 
 use super::{
     AgentResult,
@@ -100,7 +99,6 @@ impl TcpSnifferApi {
 
     /// Return the next message from the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
     pub async fn recv(&mut self) -> AgentResult<(DaemonTcp, Option<LogMessage>)> {
         tokio::select! {
             conn = self.receiver.recv() => match conn {
@@ -167,7 +165,6 @@ impl TcpSnifferApi {
 
     /// Tansforms a [`LayerTcp`] message into a [`SnifferCommand`] and passes it to the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> AgentResult<()> {
         match message {
             LayerTcp::PortSubscribe(port) => {

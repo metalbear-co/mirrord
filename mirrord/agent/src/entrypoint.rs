@@ -860,24 +860,21 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ..
     } = bg_tasks;
 
-    let _ = timeout(
-        Duration::from_secs(args.exit_timeout.unwrap_or(45)),
-        async {
-            tokio::join!(
-                sniffer.wait().inspect_err(|error| {
-                    error!(%error, "start_agent -> Sniffer task failed");
-                }),
-                stealer.wait().inspect_err(|error| {
-                    error!(%error, "start_agent -> Stealer task failed");
-                }),
-                dns.wait().inspect_err(|error| {
-                    error!(%error, "start_agent -> DNS task failed");
-                }),
-            )
-        },
-    )
+    let _ = timeout(Duration::from_secs(args.exit_timeout.unwrap_or(5)), async {
+        tokio::join!(
+            sniffer.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> Sniffer task failed");
+            }),
+            stealer.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> Stealer task failed");
+            }),
+            dns.wait().inspect_err(|error| {
+                error!(%error, "start_agent -> DNS task failed");
+            }),
+        )
+    })
     .await
-    .inspect_err(|fail| tracing::error!("{fail}"));
+    .inspect_err(|fail| tracing::warn!(?fail, "Timed out waiting for the agent tasks to finish."));
 
     trace!("start_agent -> Agent shutdown");
 
