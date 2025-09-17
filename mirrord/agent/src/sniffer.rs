@@ -478,11 +478,11 @@ mod test {
             };
 
             let cancellation_token = CancellationToken::new();
-            let bg_task = Arc::new(BgTaskRuntime::spawn(None).await.unwrap());
+            let bg_task = BgTaskRuntime::spawn(None).await.unwrap();
             let task_status = bg_task
                 .handle()
                 .spawn(sniffer.start(cancellation_token.clone()))
-                .into_status("TcpSnifferTask", bg_task.clone());
+                .into_status("TcpSnifferTask", bg_task.handle().clone());
 
             Self {
                 command_tx,

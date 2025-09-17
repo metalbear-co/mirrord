@@ -45,7 +45,7 @@ impl VpnApi {
     /// # Params
     ///
     /// * `runtime` - tokio runtime to spawn the task on.
-    pub(crate) fn new(runtime: Arc<BgTaskRuntime>) -> Self {
+    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
         let pid = runtime.target_pid();
@@ -53,7 +53,7 @@ impl VpnApi {
         let task_status = runtime
             .handle()
             .spawn(VpnTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("VpnTask", runtime);
+            .into_status("VpnTask", runtime.handle().clone());
 
         Self {
             task_status,

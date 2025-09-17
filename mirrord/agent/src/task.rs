@@ -115,7 +115,7 @@ impl BgTaskRuntime {
 }
 
 impl Drop for BgTaskRuntime {
-    #[tracing::instrument(level = Level::TRACE)]
+    #[tracing::instrument(level = Level::DEBUG)]
     fn drop(&mut self) {
         self.notify_drop.notify_one();
     }

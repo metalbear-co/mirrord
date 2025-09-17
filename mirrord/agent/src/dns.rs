@@ -89,6 +89,7 @@ impl DnsWorker {
     /// # Note
     ///
     /// `pid` is used to find the correct path of `etc` directory.
+    #[tracing::instrument(level = Level::DEBUG)]
     pub(crate) fn new(
         pid: Option<u64>,
         request_rx: Receiver<DnsCommand>,
@@ -133,7 +134,7 @@ impl DnsWorker {
     /// We could probably cache results here.
     /// We cannot cache the [`TokioAsyncResolver`] itself, becaues the configuration in `etc` may
     /// change.
-    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
+    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
     async fn do_lookup(
         etc_path: PathBuf,
         request: GetAddrInfoRequestV2,
@@ -194,7 +195,7 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    #[tracing::instrument(level = Level::DEBUG, skip(self))]
     fn handle_message(&mut self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;

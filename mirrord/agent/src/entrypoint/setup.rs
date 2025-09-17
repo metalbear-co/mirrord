@@ -53,7 +53,7 @@ pub(super) async fn start_traffic_redirector(
 
 pub(super) async fn start_sniffer(
     args: &super::Args,
-    runtime: Arc<BgTaskRuntime>,
+    runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<SnifferCommand> {
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
@@ -72,7 +72,7 @@ pub(super) async fn start_sniffer(
             let task_status = runtime
                 .handle()
                 .spawn(sniffer.start(cancellation_token.clone()))
-                .into_status("TcpSnifferTask", runtime.clone());
+                .into_status("TcpSnifferTask", runtime.handle().clone());
 
             BackgroundTask::Running(task_status, command_tx)
         }
@@ -88,7 +88,7 @@ pub(super) async fn start_sniffer(
 }
 
 pub(super) fn start_stealer(
-    runtime: Arc<BgTaskRuntime>,
+    runtime: &BgTaskRuntime,
     steal_handle: StealHandle,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<StealerCommand> {
@@ -97,14 +97,14 @@ pub(super) fn start_stealer(
     let task_status = runtime
         .handle()
         .spawn(TcpStealerTask::new(command_rx, steal_handle).run(cancellation_token))
-        .into_status("TcpStealerTask", runtime.clone());
+        .into_status("TcpStealerTask", runtime.handle().clone());
 
     BackgroundTask::Running(task_status, command_tx)
 }
 
 pub(super) fn start_dns(
     args: &super::Args,
-    runtime: Arc<BgTaskRuntime>,
+    runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
@@ -115,7 +115,7 @@ pub(super) fn start_dns(
             DnsWorker::new(runtime.target_pid(), command_rx, args.ipv6)
                 .run(cancellation_token.clone()),
         )
-        .into_status("DnsTask", runtime.clone());
+        .into_status("DnsTask", runtime.handle().clone());
 
     BackgroundTask::Running(task_status, command_tx)
 }

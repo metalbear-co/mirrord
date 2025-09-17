@@ -51,7 +51,7 @@ impl TcpOutgoingApi {
     /// # Params
     ///
     /// * `runtime` - tokio runtime to spawn the background task on.
-    pub(crate) fn new(runtime: Arc<BgTaskRuntime>) -> Self {
+    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
@@ -59,7 +59,7 @@ impl TcpOutgoingApi {
         let task_status = runtime
             .handle()
             .spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("TcpOutgoingTask", runtime);
+            .into_status("TcpOutgoingTask", runtime.handle().clone());
 
         Self {
             task_status,

@@ -461,11 +461,11 @@ impl TestSetup {
         let stealer_task = TcpStealerTask::new(stealer_rx, handle);
         tokio::spawn(redirector.run());
 
-        let local_bg_task_runtime = Arc::new(BgTaskRuntime::spawn(None).await.unwrap());
+        let local_bg_task_runtime = BgTaskRuntime::spawn(None).await.unwrap();
         let stealer_status = local_bg_task_runtime
             .handle()
             .spawn(stealer_task.run(CancellationToken::new()))
-            .into_status("stealer", local_bg_task_runtime.clone());
+            .into_status("stealer", local_bg_task_runtime.handle().clone());
 
         Self {
             original_server,
