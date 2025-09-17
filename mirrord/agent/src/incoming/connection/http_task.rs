@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future};
+use std::{error::Report, future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -10,7 +10,6 @@ use hyper::{
     upgrade::{OnUpgrade, Upgraded},
 };
 use hyper_util::rt::TokioIo;
-use mirrord_agent_env::envs;
 use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
@@ -27,7 +26,7 @@ use crate::{
         error::MirrordErrorResponse, extract_requests::ExtractedRequest, sender::HttpSender,
     },
     incoming::{
-        IncomingStreamItem,
+        IncomingStreamItem, RedirectorTaskConfig,
         connection::{
             ConnectionInfo,
             copy_bidirectional::{self, CowBytes, OutgoingDestination},
@@ -108,6 +107,7 @@ impl HttpTask<PassthroughConnection> {
         info: ConnectionInfo,
         mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest,
+        redirector_config: Arc<RedirectorTaskConfig>,
     ) -> Self {
         let (request_frame_tx, request_frame_rx) = request
             .body_tail
@@ -115,6 +115,7 @@ impl HttpTask<PassthroughConnection> {
             .then(|| mpsc::channel::<Frame<Bytes>>(1))
             .unzip();
 
+		let redirector_config_clone = redirector_config.clone();
         let upgrade = tokio::spawn(async move {
             let version = request.parts.version;
 
@@ -141,7 +142,7 @@ impl HttpTask<PassthroughConnection> {
                 }
             };
 
-            Self::modify_response(&mut response, &info);
+            Self::modify_response(&mut response, &info, &redirector_config_clone);
 
             let upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
                 .then(|| hyper::upgrade::on(&mut response));
@@ -214,8 +215,12 @@ impl HttpTask<PassthroughConnection> {
     ///
     /// Currently just inserts the mirrord agent
     /// header.
-    fn modify_response(response: &mut Response<Incoming>, _connection: &ConnectionInfo) {
-        if envs::INJECT_HEADERS.from_env_or_default() {
+    fn modify_response(
+        response: &mut Response<Incoming>,
+        _connection: &ConnectionInfo,
+        redirector_config: &RedirectorTaskConfig,
+    ) {
+        if redirector_config.inject_headers {
             response.headers_mut().insert(
                 MIRRORD_AGENT_HTTP_HEADER_NAME,
                 http::HeaderValue::from_static("passed-through"),

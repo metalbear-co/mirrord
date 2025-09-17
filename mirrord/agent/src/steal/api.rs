@@ -3,6 +3,7 @@ use std::{
     error::Report,
     fmt,
     ops::{Not, RangeInclusive},
+    sync::Arc,
     vec,
 };
 
@@ -10,7 +11,6 @@ use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::Response;
-use mirrord_agent_env::envs;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
     tcp::{
@@ -32,8 +32,8 @@ use crate::{
     error::AgentResult,
     http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
     incoming::{
-        ConnError, IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider,
-        StolenHttp, StolenTcp,
+        ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
+        ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
     util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
@@ -204,6 +204,7 @@ impl TcpStealerApi {
             request_head,
             stream,
             response_provider,
+            redirector_config,
         } = request;
 
         if self
@@ -299,7 +300,10 @@ impl TcpStealerApi {
         self.incoming_streams.insert(connection_id, stream);
         self.connections.insert(
             connection_id,
-            ClientConnectionState::HttpRequestSent { response_provider },
+            ClientConnectionState::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            },
         );
 
         Ok(())
@@ -430,6 +434,7 @@ impl TcpStealerApi {
                     connection_id,
                     ClientConnectionState::HttpRequestSent {
                         response_provider: request.response_provider,
+                        redirector_config: request.redirector_config,
                     },
                 );
                 let message = if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
@@ -595,7 +600,10 @@ enum ClientConnectionState {
     /// TCP connection, client is sending data.
     Tcp { data_tx: mpsc::Sender<Bytes> },
     /// HTTP request sent, waiting for the response from the client.
-    HttpRequestSent { response_provider: ResponseProvider },
+    HttpRequestSent {
+        response_provider: ResponseProvider,
+        redirector_config: Arc<RedirectorTaskConfig>,
+    },
     /// HTTP request sent, response received, client is sending response body frames.
     HttpResponseReceived { body_provider: ResponseBodyProvider },
     /// HTTP request finished, connection upgraded, client is sending data.
@@ -649,8 +657,11 @@ impl ClientConnectionState {
         B: IntoIterator<Item = InternalHttpBodyFrame>,
     {
         let state = std::mem::replace(self, Self::Closed);
-        let response_provider = match state {
-            Self::HttpRequestSent { response_provider } => response_provider,
+        let (response_provider, redirector_config) = match state {
+            Self::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            } => (response_provider, redirector_config),
             state => {
                 *self = state;
                 return;
@@ -664,7 +675,7 @@ impl ClientConnectionState {
             *hyper_response.headers_mut() = response.internal_response.headers;
             *hyper_response.version_mut() = response.internal_response.version;
 
-            self.modify_response(&mut hyper_response);
+            self.modify_response(&mut hyper_response, &redirector_config);
 
             hyper_response.into_parts().0
         };
@@ -692,8 +703,12 @@ impl ClientConnectionState {
     /// Used for applying transformations on the response returned
     /// from the client. Currently just inserts the mirrord agent
     /// header.
-    fn modify_response<T>(&self, response: &mut Response<T>) {
-        if envs::INJECT_HEADERS.from_env_or_default() {
+    fn modify_response<T>(
+        &self,
+        response: &mut Response<T>,
+        redirector_config: &RedirectorTaskConfig,
+    ) {
+        if redirector_config.inject_headers {
             response.headers_mut().insert(
                 MIRRORD_AGENT_HTTP_HEADER_NAME,
                 http::HeaderValue::from_static("forwarded-to-client"),

@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -19,7 +19,7 @@ use super::{ConnectionInfo, IncomingStream};
 use crate::{
     http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
     incoming::{
-        IncomingStreamItem,
+        IncomingStreamItem, RedirectorTaskConfig,
         connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
     },
 };
@@ -38,18 +38,26 @@ pub struct RedirectedHttp {
     ///
     /// Thanks to this handle, this struct can be freely moved across runtimes.
     runtime_handle: Handle,
+
+    /// Configuration of the RedirectorTask that created this
+    redirector_config: Arc<RedirectorTaskConfig>,
 }
 
 impl RedirectedHttp {
     /// Should be called in the target's Linux network namespace,
     /// as [`Handle::current()`] is stored in this struct.
     /// We might need to connect to the original destination in the future.
-    pub fn new(info: ConnectionInfo, request: ExtractedRequest) -> Self {
+    pub fn new(
+        info: ConnectionInfo,
+        request: ExtractedRequest,
+        redirector_config: Arc<RedirectorTaskConfig>,
+    ) -> Self {
         Self {
             request,
             info,
             mirror_tx: None,
             runtime_handle: Handle::current(),
+            redirector_config,
         }
     }
 
@@ -152,6 +160,7 @@ impl RedirectedHttp {
                 response_tx: self.request.response_tx,
                 upgrade_tx,
             },
+			redirector_config: self.redirector_config
         }
     }
 
@@ -159,7 +168,7 @@ impl RedirectedHttp {
     ///
     /// All data will be directed to the original destination.
     pub fn pass_through(self) {
-        let task = HttpTask::new(self.info, self.mirror_tx.into(), self.request);
+        let task = HttpTask::new(self.info, self.mirror_tx.into(), self.request, self.redirector_config);
         self.runtime_handle.spawn(task.run());
     }
 }
@@ -180,6 +189,7 @@ pub struct StolenHttp {
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
     pub response_provider: ResponseProvider,
+	pub redirector_config: Arc<RedirectorTaskConfig>
 }
 
 impl fmt::Debug for StolenHttp {

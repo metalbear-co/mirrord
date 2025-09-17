@@ -27,6 +27,7 @@ use iptables::IpTablesRedirector;
 pub use mirror_handle::{MirrorHandle, MirroredTraffic};
 pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::RedirectorTask;
+pub use task::RedirectorTaskConfig;
 use tokio::net::TcpStream;
 
 /// A component that implements redirecting incoming TCP connections.

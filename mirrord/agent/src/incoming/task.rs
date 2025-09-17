@@ -8,6 +8,7 @@ use std::{
 
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
+use mirrord_agent_env::envs;
 use tokio::sync::{
     mpsc::{self, error::TrySendError},
     oneshot,
@@ -58,6 +59,8 @@ pub struct RedirectorTask<R> {
     internal_tx: mpsc::Sender<InternalMessage>,
     /// For accepting redirected TLS connections.
     tls_store: StealTlsHandlerStore,
+    /// Configuration
+    config: Arc<RedirectorTaskConfig>,
 }
 
 impl<R> RedirectorTask<R>
@@ -71,6 +74,7 @@ where
     pub fn new(
         redirector: R,
         tls_store: StealTlsHandlerStore,
+        config: RedirectorTaskConfig,
     ) -> (Self, StealHandle, MirrorHandle) {
         let (error_tx, error_rx) = oneshot::channel();
         let (message_tx, message_rx) = mpsc::channel(16);
@@ -84,6 +88,7 @@ where
             internal_rx,
             internal_tx,
             tls_store,
+            config: Arc::new(config),
         };
 
         let task_error = TaskError(error_rx.shared());
@@ -274,7 +279,7 @@ where
             return;
         };
 
-        let mut redirected = RedirectedHttp::new(info, request);
+        let mut redirected = RedirectedHttp::new(info, request, self.config.clone());
 
         for mirror_tx in &port_state.mirror_txs {
             if let Err(TrySendError::Full(..)) =
@@ -436,6 +441,20 @@ impl<R> fmt::Debug for RedirectorTask<R> {
     }
 }
 
+#[derive(Debug)]
+pub struct RedirectorTaskConfig {
+    /// Inject `Mirrord-Agent` headers into responses to stolen requests
+    pub inject_headers: bool,
+}
+
+impl Default for RedirectorTaskConfig {
+    fn default() -> Self {
+        Self {
+            inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
+        }
+    }
+}
+
 /// Channel that represents a port steal made with a [`StealHandle`].
 ///
 /// The handle uses it to receive stolen connections.
@@ -561,7 +580,7 @@ mod test {
     #[tokio::test]
     async fn cleanup_on_dead_channel() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default());
+        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default(), Default::default());
         tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();
@@ -595,7 +614,7 @@ mod test {
     #[tokio::test(flavor = "current_thread")]
     async fn http_graceful_shutdown_regression() {
         let (redirector, mut state, mut conn_tx) = DummyRedirector::new();
-        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default());
+        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default(), Default::Default());
         let redirector_task = tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();
