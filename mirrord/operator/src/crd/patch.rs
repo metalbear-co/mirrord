@@ -83,5 +83,5 @@ pub struct MirrordClusterWorkloadPatchRequestSpec {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
 pub struct MirrordClusterWorkloadPatchRequestStatus {
-    accepted: bool,
+    pub accepted: bool,
 }
