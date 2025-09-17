@@ -79,6 +79,16 @@ pub enum KubeApiError {
 
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
+
+    /// Failed to initialize the job agent's pod.
+    /// This will happen when the pod moves to the `"Failed"` stage while initializing.
+    #[error("Pod failed to spawn with reason `{0:?}` and message `{1:?}`.")]
+    PodFailedToInitialize(Option<String>, Option<String>),
+
+    /// The job agent's pod finished running all of it's containers without notifying us of the
+    /// `"Running"` stage. This is a bug and should never happen.
+    #[error("Pod terminated before running")]
+    PodTerminatedPrematurely,
 }
 
 impl KubeApiError {

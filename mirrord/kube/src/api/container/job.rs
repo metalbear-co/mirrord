@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use futures::StreamExt;
 use k8s_openapi::api::{
@@ -12,8 +12,8 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use tokio::pin;
-use tracing::debug;
+use tokio::{pin, time::timeout};
+use tracing::warn;
 
 use crate::{
     api::{
@@ -83,15 +83,62 @@ where
 
     let mut pod_progress = progress.subtask("waiting for pod to be ready...");
 
-    while let Some(Ok(pod)) = stream.next().await {
-        let Some(phase) = pod.status.as_ref().and_then(|status| status.phase.as_ref()) else {
-            continue;
-        };
+    let mut is_pending = false;
+    loop {
+        match timeout(Duration::from_secs(10), stream.next()).await {
+            Ok(Some(Ok(pod))) => {
+                let Some(ref status) = pod.status else {
+                    continue;
+                };
 
-        debug!(?phase, "Agent pod changed");
+                let Some(ref phase) = status.phase else {
+                    continue;
+                };
 
-        if phase == "Running" {
-            break;
+                is_pending = phase == "Pending";
+
+                // Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
+                match phase.as_str() {
+                    "Pending" => continue,
+                    "Running" => break,
+                    "Failed" => {
+                        pod_progress.failure(Some(&format!(
+                            "agent pod failed to initialize - '{}' ({})",
+                            status.message.as_deref().unwrap_or("<no message>"),
+                            status.reason.as_deref().unwrap_or("<unknown reason>")
+                        )));
+                        return Err(KubeApiError::PodFailedToInitialize(
+                            status.reason.clone(),
+                            status.message.clone(),
+                        ));
+                    }
+                    "Succeeded" => {
+                        pod_progress.failure(Some(
+                            "agent pod terminated prematurely - this is a bug, please report it!",
+                        ));
+                        return Err(KubeApiError::PodTerminatedPrematurely);
+                    }
+                    phase => warn!("Unhandled pod phase '{}'", phase),
+                }
+            }
+
+            Ok(None) | Ok(Some(Err(_))) => {
+                if is_pending {
+                    pod_progress.failure(Some("agent pod unexpectedly closed, \
+                    this likely means that you don't have the required permissions to spawn it. \
+                    look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists."));
+                    return Err(KubeApiError::AgentPodNotRunning);
+                } else {
+                    break;
+                }
+            }
+
+            // Timeout elapsed
+            Err(_) => {
+                if is_pending {
+                    pod_progress.warning("agent pod initialization is taking longer than expected");
+                }
+            }
         }
     }
 
