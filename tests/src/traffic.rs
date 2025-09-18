@@ -5,14 +5,14 @@ mod steal;
 mod traffic_tests {
     use std::{net::UdpSocket, ops::Not, path::PathBuf, time::Duration};
 
-    use futures::{stream, Future, StreamExt};
+    use futures::{stream, StreamExt};
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
 
     use crate::utils::{
-        application::Application,
+        application::{Application, GoVersion},
         ipv6::ipv6_service,
         kube_client,
         kube_service::KubeService,
@@ -27,10 +27,12 @@ mod traffic_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn remote_dns_enabled_works(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -50,10 +52,12 @@ mod traffic_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn remote_dns_lookup_google(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -75,10 +79,12 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_single_request_enabled(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -98,10 +104,12 @@ mod traffic_tests {
     #[should_panic]
     pub async fn outgoing_traffic_single_request_ipv6(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -120,10 +128,12 @@ mod traffic_tests {
     #[ignore]
     pub async fn outgoing_traffic_single_request_ipv6_enabled(#[future] ipv6_service: KubeService) {
         let service = ipv6_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -157,10 +167,12 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_single_request_disabled(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command,
@@ -180,10 +192,12 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_make_request_after_listen(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -203,7 +217,9 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_connection_to_self(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec!["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"];
+        let node_command = ["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"]
+            .map(String::from)
+            .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -244,13 +260,15 @@ mod traffic_tests {
             since_time: None,
         };
 
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
             "31415",
             // Reaching service by only service name is only possible from within the cluster.
             &internal_service.name,
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
 
         // Meta-test: verify that the application cannot reach the internal service without
         // mirrord forwarding outgoing UDP traffic via the target pod.
@@ -328,13 +346,15 @@ mod traffic_tests {
             since_time: None,
         };
 
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
             "31415",
             // Reaching service by only service name is only possible from within the cluster.
             &internal_service.name,
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
 
         // Make connections on port `31415` go through local.
         let mut config_file = tempfile::Builder::new()
@@ -438,11 +458,13 @@ mod traffic_tests {
         let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
         let port = socket.local_addr().unwrap().port().to_string();
 
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
             &port,
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command,
@@ -463,8 +485,15 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
-        let service = service.await;
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn go_outgoing_traffic_single_request_enabled(
+        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
+        #[future] basic_service: KubeService,
+    ) {
+        let command = vec![format!("go-e2e-outgoing/{go_version}.go_test_app")];
+        let service = basic_service.await;
         let mut process =
             run_exec_with_target(command, &service.pod_container_target(), None, None, None).await;
         let res = process.wait().await;
@@ -474,59 +503,17 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn go21_outgoing_traffic_single_request_enabled(
+    #[timeout(Duration::from_secs(60))]
+    pub async fn go_dns_lookup(
+        #[values(GoVersion::GO_1_23, GoVersion::GO_1_24, GoVersion::GO_1_25)] go_version: GoVersion,
         #[future] basic_service: KubeService,
     ) {
-        let command = vec!["go-e2e-outgoing/21.go_test_app"];
-        test_go(basic_service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn go22_outgoing_traffic_single_request_enabled(
-        #[future] basic_service: KubeService,
-    ) {
-        let command = vec!["go-e2e-outgoing/22.go_test_app"];
-        test_go(basic_service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn go23_outgoing_traffic_single_request_enabled(
-        #[future] basic_service: KubeService,
-    ) {
-        let command = vec!["go-e2e-outgoing/23.go_test_app"];
-        test_go(basic_service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn go21_dns_lookup(#[future] basic_service: KubeService) {
-        let command = vec!["go-e2e-dns/21.go_test_app"];
-        test_go(basic_service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn go22_dns_lookup(#[future] basic_service: KubeService) {
-        let command = vec!["go-e2e-dns/22.go_test_app"];
-        test_go(basic_service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn go23_dns_lookup(#[future] basic_service: KubeService) {
-        let command = vec!["go-e2e-dns/23.go_test_app"];
-        test_go(basic_service, command).await;
+        let command = vec![format!("go-e2e-dns/{go_version}.go_test_app")];
+        let service = basic_service.await;
+        let mut process =
+            run_exec_with_target(command, &service.pod_container_target(), None, None, None).await;
+        let res = process.wait().await;
+        assert!(res.success());
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -534,7 +521,9 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn listen_localhost(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
+        let node_command = ["node", "node-e2e/listen/test_listen_localhost.mjs"]
+            .map(String::from)
+            .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -553,15 +542,11 @@ mod traffic_tests {
     #[timeout(Duration::from_secs(120))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
-        let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];
-        let mut process = run_exec_with_target(
-            node_command,
-            &service.pod_container_target(),
-            None,
-            None,
-            None,
-        )
-        .await;
+        let command = ["python3", "-u", "python-e2e/hostname.py"]
+            .map(String::from)
+            .to_vec();
+        let mut process =
+            run_exec_with_target(command, &service.pod_container_target(), None, None, None).await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -593,7 +578,7 @@ mod traffic_tests {
             .join("../target/debug/rust-unix-socket-client")
             .to_string_lossy()
             .to_string();
-        let executable = vec![app_path.as_str()];
+        let executable = vec![app_path];
 
         // Tell mirrord to connect remotely to the pathname the deployed app is listening on.
         let env = Some(vec![(
@@ -623,7 +608,7 @@ mod traffic_tests {
             .join("../target/debug/rust-bypassed-unix-socket")
             .to_string_lossy()
             .to_string();
-        let executable = vec![app_path.as_str()];
+        let executable = vec![app_path];
 
         let mut process = run_exec_with_target(
             executable,
@@ -725,10 +710,12 @@ mod traffic_tests {
         println!("Running test app with AVAILABLE_HOSTS={as_env}");
 
         let service = basic_service.await;
-        let node_command = vec![
+        let node_command = [
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
-        ];
+        ]
+        .map(String::from)
+        .to_vec();
         let mirrord_args = if outgoing_enabled.not() {
             vec!["--no-outgoing"]
         } else {
