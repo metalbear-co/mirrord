@@ -107,7 +107,7 @@ impl HttpTask<PassthroughConnection> {
         info: ConnectionInfo,
         mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest,
-        redirector_config: Arc<RedirectorTaskConfig>,
+        redirector_config: RedirectorTaskConfig,
     ) -> Self {
         let (request_frame_tx, request_frame_rx) = request
             .body_tail

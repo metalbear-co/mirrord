@@ -40,7 +40,7 @@ pub struct RedirectedHttp {
     runtime_handle: Handle,
 
     /// Configuration of the RedirectorTask that created this
-    redirector_config: Arc<RedirectorTaskConfig>,
+    redirector_config: RedirectorTaskConfig,
 }
 
 impl RedirectedHttp {
@@ -50,7 +50,7 @@ impl RedirectedHttp {
     pub fn new(
         info: ConnectionInfo,
         request: ExtractedRequest,
-        redirector_config: Arc<RedirectorTaskConfig>,
+        redirector_config: RedirectorTaskConfig,
     ) -> Self {
         Self {
             request,
@@ -194,7 +194,7 @@ pub struct StolenHttp {
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
     pub response_provider: ResponseProvider,
-    pub redirector_config: Arc<RedirectorTaskConfig>,
+    pub redirector_config: RedirectorTaskConfig,
 }
 
 impl fmt::Debug for StolenHttp {

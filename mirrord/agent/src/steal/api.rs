@@ -602,7 +602,7 @@ enum ClientConnectionState {
     /// HTTP request sent, waiting for the response from the client.
     HttpRequestSent {
         response_provider: ResponseProvider,
-        redirector_config: Arc<RedirectorTaskConfig>,
+        redirector_config: RedirectorTaskConfig,
     },
     /// HTTP request sent, response received, client is sending response body frames.
     HttpResponseReceived { body_provider: ResponseBodyProvider },

@@ -60,7 +60,7 @@ pub struct RedirectorTask<R> {
     /// For accepting redirected TLS connections.
     tls_store: StealTlsHandlerStore,
     /// Configuration
-    config: Arc<RedirectorTaskConfig>,
+    config: RedirectorTaskConfig,
 }
 
 impl<R> RedirectorTask<R>
@@ -88,7 +88,7 @@ where
             internal_rx,
             internal_tx,
             tls_store,
-            config: Arc::new(config),
+            config: config,
         };
 
         let task_error = TaskError(error_rx.shared());
@@ -441,6 +441,7 @@ impl<R> fmt::Debug for RedirectorTask<R> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct RedirectorTaskConfig {
     /// Inject `Mirrord-Agent` headers into responses to stolen requests
     pub inject_headers: bool,
