@@ -142,7 +142,7 @@ impl HttpTask<PassthroughConnection> {
                 }
             };
 
-            Self::modify_response(&mut response, &info, &redirector_config_clone);
+            Self::modify_response(&mut response, &redirector_config_clone);
 
             let upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
                 .then(|| hyper::upgrade::on(&mut response));
@@ -217,7 +217,6 @@ impl HttpTask<PassthroughConnection> {
     /// header.
     fn modify_response(
         response: &mut Response<Incoming>,
-        _connection: &ConnectionInfo,
         redirector_config: &RedirectorTaskConfig,
     ) {
         if redirector_config.inject_headers {

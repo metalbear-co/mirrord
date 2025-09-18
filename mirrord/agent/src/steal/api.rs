@@ -675,7 +675,7 @@ impl ClientConnectionState {
             *hyper_response.headers_mut() = response.internal_response.headers;
             *hyper_response.version_mut() = response.internal_response.version;
 
-            self.modify_response(&mut hyper_response, &redirector_config);
+            Self::modify_response(&mut hyper_response, &redirector_config);
 
             hyper_response.into_parts().0
         };
@@ -704,7 +704,6 @@ impl ClientConnectionState {
     /// from the client. Currently just inserts the mirrord agent
     /// header.
     fn modify_response<T>(
-        &self,
         response: &mut Response<T>,
         redirector_config: &RedirectorTaskConfig,
     ) {
