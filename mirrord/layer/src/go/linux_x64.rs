@@ -738,17 +738,16 @@ mod go_1_25 {
             // Not having any local variables in this function is required as well.
             "push   rbp",
             "mov    rbp,rsp",
-            // Load address of g from TLS to rsi.
-            "mov    rsi,fs:0xfffffffffffffff8",
             // Load address of current m to rbx.
+            // We assume that r14 stores the address of g.
             //
             // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L408
-            "mov    rbx,[rsi+0x30]",
+            "mov    rbx,[r14+0x30]",
             // Check if g is m->gsignal.
             // If g is m->gsignal, no stack switch is required.
             //
             // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L543
-            "cmp    rsi,[rbx+0x48]",
+            "cmp    r14,[rbx+0x48]",
             "je     1f",
             // Load address of m->g0 to rdx.
             // Check if g is m->g0.
@@ -756,12 +755,12 @@ mod go_1_25 {
             //
             // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L537
             "mov    rdx,[rbx]",
-            "cmp    rsi,rdx",
+            "cmp    r14,rdx",
             "je     1f",
             // Check if g is m->curg.
             // If current g is not m->curg, something weird is happening.
             // Jump to abort.
-            "cmp    rsi,[rbx+0xb8]",
+            "cmp    r14,[rbx+0xb8]",
             "jne    2f",
             // Switch stacks.
             //
@@ -785,8 +784,8 @@ mod go_1_25 {
             // Call `c_abi_wrapper`.
             "call   {c_abi_wrapper}",
             // Switch back to g.
-            "mov    rsi,fs:0xfffffffffffffff8",
-            "mov    rbx,[rsi+0x30]",
+            // r14 should not have been changed inside `c_abi_wrapper`.
+            "mov    rbx,[r14+0x30]",
             "mov    rsi,[rbx+0xb8]",
             "mov    fs:0xfffffffffffffff8,rsi",
             "mov    r14,rsi",
