@@ -8,7 +8,7 @@ use super::process::TestProcess;
 
 /// See [`run_exec`].
 pub async fn run_exec_with_target(
-    process_cmd: Vec<&str>,
+    process_cmd: Vec<String>,
     target: &str,
     namespace: Option<&str>,
     args: Option<Vec<&str>>,
@@ -19,7 +19,7 @@ pub async fn run_exec_with_target(
 
 /// Run `mirrord exec` without specifying a target, to run in targetless mode.
 pub async fn run_exec_targetless(
-    process_cmd: Vec<&str>,
+    process_cmd: Vec<String>,
     namespace: Option<&str>,
     args: Option<Vec<&str>>,
     env: Option<Vec<(&str, &str)>>,
@@ -30,7 +30,7 @@ pub async fn run_exec_targetless(
 /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
 /// mirrord args, and env vars.
 pub async fn run_exec(
-    process_cmd: Vec<&str>,
+    process_cmd: Vec<String>,
     target: Option<&str>,
     namespace: Option<&str>,
     args: Option<Vec<&str>>,
@@ -50,7 +50,7 @@ pub async fn run_exec(
     mirrord_args.push("--");
     let args: Vec<&str> = mirrord_args
         .into_iter()
-        .chain(process_cmd.into_iter())
+        .chain(process_cmd.iter().map(String::as_str))
         .collect();
     let agent_image_env = "MIRRORD_AGENT_IMAGE";
     let agent_image_from_devs_env = std::env::var(agent_image_env);
