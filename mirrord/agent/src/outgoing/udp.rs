@@ -308,13 +308,14 @@ async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseErr
 
 impl UdpOutgoingApi {
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+        let _rt = runtime.handle().enter();
+
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task_status = runtime
-            .handle()
-            .spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
-            .into_status("UdpOutgoingTask", runtime.handle().clone());
+        let task_status =
+            tokio::spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
+                .into_status("UdpOutgoingTask");
 
         Self {
             task_status,

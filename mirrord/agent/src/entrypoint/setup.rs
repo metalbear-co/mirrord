@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use mirrord_agent_env::envs;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -23,6 +21,8 @@ pub(super) async fn start_traffic_redirector(
     target_pid: u64,
     with_mesh_exclusion: Option<u16>,
 ) -> AgentResult<(StealHandle, MirrorHandle)> {
+    let _rt = runtime.handle().enter();
+
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let support_ipv6 = envs::IPV6_SUPPORT.from_env_or_default();
@@ -30,21 +30,19 @@ pub(super) async fn start_traffic_redirector(
     let tls_handler_store =
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
-    let (task, steal_handle, mirror_handle) = runtime
-        .handle()
-        .spawn(async move {
-            incoming::create_iptables_redirector(
-                flush_connections,
-                &pod_ips,
-                support_ipv6,
-                with_mesh_exclusion,
-            )
-            .await
-            .map(|redirector| RedirectorTask::new(redirector, tls_handler_store))
-        })
+    let (task, steal_handle, mirror_handle) = tokio::spawn(async move {
+        incoming::create_iptables_redirector(
+            flush_connections,
+            &pod_ips,
+            support_ipv6,
+            with_mesh_exclusion,
+        )
         .await
-        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
-        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+        .map(|redirector| RedirectorTask::new(redirector, tls_handler_store))
+    })
+    .await
+    .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+    .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
     runtime.handle().spawn(task.run());
 
@@ -56,23 +54,23 @@ pub(super) async fn start_sniffer(
     runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<SnifferCommand> {
+    let _rt = runtime.handle().enter();
+
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
-    let sniffer = runtime
-        .handle()
-        .spawn(TcpConnectionSniffer::new(
-            command_rx,
-            args.network_interface.clone(),
-            args.is_mesh(),
-        ))
-        .await;
+    let sniffer = tokio::spawn(TcpConnectionSniffer::new(
+        command_rx,
+        args.network_interface.clone(),
+        args.is_mesh(),
+    ))
+    .await;
 
     match sniffer {
         Ok(Ok(sniffer)) => {
             let task_status = runtime
                 .handle()
                 .spawn(sniffer.start(cancellation_token.clone()))
-                .into_status("TcpSnifferTask", runtime.handle().clone());
+                .into_status("TcpSnifferTask");
 
             BackgroundTask::Running(task_status, command_tx)
         }
@@ -92,12 +90,13 @@ pub(super) fn start_stealer(
     steal_handle: StealHandle,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<StealerCommand> {
+    let _rt = runtime.handle().enter();
+
     let (command_tx, command_rx) = mpsc::channel::<StealerCommand>(1000);
 
-    let task_status = runtime
-        .handle()
-        .spawn(TcpStealerTask::new(command_rx, steal_handle).run(cancellation_token))
-        .into_status("TcpStealerTask", runtime.handle().clone());
+    let task_status =
+        tokio::spawn(TcpStealerTask::new(command_rx, steal_handle).run(cancellation_token))
+            .into_status("TcpStealerTask");
 
     BackgroundTask::Running(task_status, command_tx)
 }
@@ -107,15 +106,14 @@ pub(super) fn start_dns(
     runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
+    let _rt = runtime.handle().enter();
+
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
 
-    let task_status = runtime
-        .handle()
-        .spawn(
-            DnsWorker::new(runtime.target_pid(), command_rx, args.ipv6)
-                .run(cancellation_token.clone()),
-        )
-        .into_status("DnsTask", runtime.handle().clone());
+    let task_status = tokio::spawn(
+        DnsWorker::new(runtime.target_pid(), command_rx, args.ipv6).run(cancellation_token.clone()),
+    )
+    .into_status("DnsTask");
 
     BackgroundTask::Running(task_status, command_tx)
 }

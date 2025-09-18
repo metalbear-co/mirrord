@@ -444,6 +444,7 @@ mod test {
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
         cancellation_token: CancellationToken,
+        runtime: BgTaskRuntime,
     }
 
     impl TestSnifferSetup {
@@ -478,11 +479,11 @@ mod test {
             };
 
             let cancellation_token = CancellationToken::new();
-            let bg_task = BgTaskRuntime::spawn(None).await.unwrap();
-            let task_status = bg_task
+            let runtime = BgTaskRuntime::spawn(None).await.unwrap();
+            let task_status = runtime
                 .handle()
                 .spawn(sniffer.start(cancellation_token.clone()))
-                .into_status("TcpSnifferTask", bg_task.handle().clone());
+                .into_status("TcpSnifferTask");
 
             Self {
                 command_tx,
@@ -491,6 +492,7 @@ mod test {
                 times_filter_changed,
                 next_client_id: 0,
                 cancellation_token,
+                runtime,
             }
         }
     }
@@ -584,7 +586,8 @@ mod test {
         assert_eq!(log, None);
 
         setup.cancellation_token.cancel();
-        tokio::try_join!(setup.task_status.wait())
+        tokio::join!(setup.task_status.wait())
+            .0
             .expect("We should have cancelled the sniffer task!");
     }
 

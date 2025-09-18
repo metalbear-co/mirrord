@@ -465,7 +465,7 @@ impl TestSetup {
         let stealer_status = local_bg_task_runtime
             .handle()
             .spawn(stealer_task.run(CancellationToken::new()))
-            .into_status("stealer", local_bg_task_runtime.handle().clone());
+            .into_status("stealer");
 
         Self {
             original_server,

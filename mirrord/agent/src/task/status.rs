@@ -1,17 +1,17 @@
 use std::{error::Error, sync::Arc};
 
 use futures::{FutureExt, future::Shared};
-use tokio::{runtime::Handle, sync::oneshot, task::JoinHandle};
+use tokio::{sync::oneshot, task::JoinHandle};
 use tracing::Level;
 
-use crate::{error::AgentError, task::BgTaskRuntime, util::error::BgTaskPanicked};
+use crate::{error::AgentError, util::error::BgTaskPanicked};
 
 /// Converts a [`JoinHandle`] created from [`super::BgTaskRuntime::spawn`] into a [`BgTaskStatus`]
 /// so we can wait and see if the task has ended properly (or not).
 pub(crate) trait IntoStatus {
     /// [`tokio::spawn`]s a task that we use to get the result out of a `BackgroundTask`, so we can
     /// check it with [`BgTaskStatus::wait`] or [`BgTaskStatus::wait_assert_running`].
-    fn into_status(self, task_name: &'static str, runtime: Handle) -> BgTaskStatus;
+    fn into_status(self, task_name: &'static str) -> BgTaskStatus;
 }
 
 /// After spawning a `BackgroundTask` in a separate [`super::BgTaskRuntime`], we call
@@ -26,10 +26,6 @@ pub(crate) struct BgTaskStatus {
 
     /// Call `await` on this to get the result of the `BackgroundTask`.
     result: Shared<oneshot::Receiver<Result<(), Arc<dyn Error + Send + Sync>>>>,
-    // Need to keep the [`BgTaskRuntime`] alive until we're ready to exit, otherwise the main
-    // tokio runtime may finish before it (potentially breaking some tests).
-    // #[allow(unused)]
-    // runtime: Handle,
 }
 
 impl BgTaskStatus {
@@ -99,12 +95,8 @@ impl core::fmt::Debug for BgTaskStatus {
 
 impl IntoStatus for JoinHandle<()> {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    fn into_status(self, task_name: &'static str, runtime: Handle) -> BgTaskStatus {
-        // fn into_status(self, task_name: &'static str) -> BgTaskStatus {
-        // let _guard = runtime.enter();
+    fn into_status(self, task_name: &'static str) -> BgTaskStatus {
         let (result_tx, result_rx) = oneshot::channel();
-
-        // TODO(alex) [mid]: Do we need to use this runtime here?
 
         tokio::spawn(async move {
             let result = match self.await {
@@ -133,7 +125,7 @@ where
     E: Error + Send + Sync + 'static,
 {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    fn into_status(self, task_name: &'static str, runtime: Handle) -> BgTaskStatus {
+    fn into_status(self, task_name: &'static str) -> BgTaskStatus {
         // let _guard = runtime.enter();
         let (result_tx, result_rx) = oneshot::channel();
 
