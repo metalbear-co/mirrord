@@ -546,7 +546,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-      - uses: metalbear-co/ci/e2e-setup-action@bump-e2e-node
+      - uses: metalbear-co/ci/e2e-setup-action@main
         with:
           container-runtime: ${{matrix.container-runtime}}
       - name: download image
