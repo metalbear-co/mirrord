@@ -7,8 +7,7 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_BASIC_INFORMATION, FILE_INFORMATION_CLASS,
-    FILE_POSITION_INFORMATION, PFILE_BASIC_INFORMATION,
+    FILE_BASIC_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_STANDARD_INFORMATION, PFILE_BASIC_INFORMATION, _IO_STATUS_BLOCK, _LARGE_INTEGER
 };
 use str_win::u16_buffer_to_string;
 use winapi::{
@@ -25,8 +24,7 @@ use winapi::{
     um::{
         winbase::FILE_TYPE_DISK,
         winnt::{
-            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_DATA,
-            FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE,
+            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE
         },
     },
 };
@@ -541,7 +539,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
                 // A FILE_BASIC_INFORMATION structure. The caller must have opened the file with
                 // the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
                 FILE_INFORMATION_CLASS::FileBasicInformation => {
-                    if handle_context.desired_access & (FILE_WRITE_ATTRIBUTES) != 0 {
+                    if handle_context.desired_access & (FILE_READ_ATTRIBUTES) != 0 {
                         // Length must be the same size as [`FILE_BASIC_INFORMATION`] length!
                         if length as usize != std::mem::size_of::<FILE_BASIC_INFORMATION>() {
                             return STATUS_ACCESS_VIOLATION;
@@ -570,14 +568,75 @@ unsafe extern "system" fn nt_query_information_file_hook(
                     if (handle_context.desired_access & (FILE_READ_DATA) != 0)
                         || (handle_context.desired_access & (FILE_WRITE_DATA) != 0)
                     {
-                        // Length must be the same size as [`FILE_BASIC_INFORMATION`] length!
-                        if length as usize != std::mem::size_of::<FILE_BASIC_INFORMATION>() {
+                        // Length must be the same size as [`FILE_POSITION_INFORMATION`] length!
+                        if length as usize != std::mem::size_of::<FILE_POSITION_INFORMATION>() {
                             return STATUS_ACCESS_VIOLATION;
                         }
 
                         let out_ptr = file_information as *mut FILE_POSITION_INFORMATION;
                         (*out_ptr).CurrentByteOffset.QuadPart = handle_context.cursor as _;
                     }
+
+                    return STATUS_SUCCESS;
+                },
+                // A FILE_STANDARD_INFORMATION structure. The caller can query this information as long as the file is open,
+                // without any particular requirements for DesiredAccess.
+                FILE_INFORMATION_CLASS::FileStandardInformation => {
+                    // Length must be the same size as [`FILE_STANDARD_INFORMATION`] length!
+                    if length as usize != std::mem::size_of::<FILE_STANDARD_INFORMATION>() {
+                        return STATUS_ACCESS_VIOLATION;
+                    }
+
+                    let out_ptr = file_information as *mut FILE_STANDARD_INFORMATION;
+
+                    (*out_ptr).AllocationSize.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).EndOfFile.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).NumberOfLinks = 0;
+                    (*out_ptr).DeletePending = 0;
+                    (*out_ptr).Directory = 0;
+
+                    return STATUS_SUCCESS;
+                },
+                // https://github.com/reactos/reactos/blob/9ab8761f2c76d437830195ebea2600e414ac4c73/dll/win32/kernelbase/wine/file.c#L3039
+                // Doesn't seem to be used in Windows 11
+                FILE_INFORMATION_CLASS::FileStatInformation => {
+                    // NOTE(gabriela): tracking @ https://github.com/delulu-hq/phnt-rs/issues/7
+                    // let's remove once the bindgen of above supports it
+                    // i just quickly did it myself by hand for now
+                    #[allow(non_camel_case_types)]
+                    #[repr(C)]
+                    struct FILE_STAT_INFORMATION {
+                        FileId: _LARGE_INTEGER,
+                        CreationTime: _LARGE_INTEGER,
+                        LastAccessTime: _LARGE_INTEGER,
+                        LastWriteTime: _LARGE_INTEGER,
+                        ChangeTime: _LARGE_INTEGER,
+                        AllocationSize: _LARGE_INTEGER,
+                        EndOfFile: _LARGE_INTEGER,
+                        FileAttributes: ULONG,
+                        ReparseTag: ULONG,
+                        NumberOfLinks: ULONG,
+                        EffectiveAccess: ACCESS_MASK,
+                    } 
+
+                    // Length must be the same size as [`FILE_STAT_INFORMATION`] length!
+                    if length as usize != std::mem::size_of::<FILE_STAT_INFORMATION>() {
+                        return STATUS_ACCESS_VIOLATION;
+                    }
+
+                    let out_ptr = file_information as *mut FILE_STAT_INFORMATION;
+
+                    (*out_ptr).FileId.QuadPart = 0;
+                    (*out_ptr).FileAttributes = handle_context.file_attributes;
+                    (*out_ptr).CreationTime.QuadPart = WindowsTime::from(handle_context.creation_time).as_file_time_i64();
+                    (*out_ptr).LastAccessTime.QuadPart = WindowsTime::from(handle_context.access_time).as_file_time_i64();
+                    (*out_ptr).LastWriteTime.QuadPart = WindowsTime::from(handle_context.write_time).as_file_time_i64();
+                    (*out_ptr).ChangeTime.QuadPart = WindowsTime::from(handle_context.change_time).as_file_time_i64();
+                    (*out_ptr).AllocationSize.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).EndOfFile.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).ReparseTag = 0;
+                    (*out_ptr).NumberOfLinks = 0;
+                    (*out_ptr).EffectiveAccess = handle_context.desired_access;
 
                     return STATUS_SUCCESS;
                 }

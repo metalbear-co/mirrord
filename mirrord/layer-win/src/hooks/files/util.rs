@@ -98,8 +98,7 @@ impl WindowsTime {
 
     /// Get current Windows time as [`i64`] from [`FILETIME`].
     pub fn as_file_time_i64(&self) -> i64 {
-        let file_time = self.as_file_time();
-        (((file_time.dwHighDateTime as u64) << 32) | file_time.dwLowDateTime as u64) as i64
+        i64::try_from(self.as_file_time_u64()).unwrap()
     }
 }
 
