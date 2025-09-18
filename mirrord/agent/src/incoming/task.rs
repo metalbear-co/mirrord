@@ -441,14 +441,13 @@ impl<R> fmt::Debug for RedirectorTask<R> {
     }
 }
 
-#[derive(Debug)]
 pub struct RedirectorTaskConfig {
     /// Inject `Mirrord-Agent` headers into responses to stolen requests
     pub inject_headers: bool,
 }
 
-impl Default for RedirectorTaskConfig {
-    fn default() -> Self {
+impl RedirectorTaskConfig {
+    pub fn from_env() -> Self {
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
         }
@@ -573,14 +572,15 @@ mod test {
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
 
-    use crate::incoming::{RedirectorTask, StolenTraffic, test::DummyRedirector};
+    use crate::incoming::{test::DummyRedirector, RedirectorTask, RedirectorTaskConfig, StolenTraffic};
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_dead_channel() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default(), Default::default());
+        let (task, mut handle, _) =
+            RedirectorTask::new(redirector, Default::default(), RedirectorTaskConfig::from_env());
         tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();
@@ -614,7 +614,8 @@ mod test {
     #[tokio::test(flavor = "current_thread")]
     async fn http_graceful_shutdown_regression() {
         let (redirector, mut state, mut conn_tx) = DummyRedirector::new();
-        let (task, mut handle, _) = RedirectorTask::new(redirector, Default::default(), Default::Default());
+        let (task, mut handle, _) =
+            RedirectorTask::new(redirector, Default::default(), RedirectorTaskConfig::from_env());
         let redirector_task = tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();

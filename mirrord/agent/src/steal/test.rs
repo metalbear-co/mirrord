@@ -21,7 +21,7 @@ use utils::{StealingClient, TestHttpKind, TestRequest, TestTcpProtocol};
 use super::{StealerCommand, TcpStealerTask};
 use crate::{
     incoming::{
-        RedirectorTask,
+        RedirectorTask, RedirectorTaskConfig,
         test::{DummyConnectionTx, DummyRedirector},
         tls::test::SimpleStore,
     },
@@ -49,7 +49,7 @@ async fn request_upgrade(
     )]
     upgraded_protocol: TestTcpProtocol,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let request = TestRequest {
         path: "/api/v1".into(),
@@ -109,7 +109,7 @@ async fn http_with_unfiltered_subscription(
     )]
     http_kind: TestHttpKind,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let request = TestRequest {
         path: "/api/v1".into(),
@@ -166,7 +166,7 @@ async fn http_with_unfiltered_subscription(
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, true)] stolen: bool) {
-    let mut setup = TestSetup::new_tcp(with_tls).await;
+    let mut setup = TestSetup::new_tcp(with_tls, RedirectorTaskConfig::from_env()).await;
 
     let steal_type = if stolen {
         StealType::All(setup.original_server.local_addr().unwrap().port())
@@ -244,7 +244,7 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tls_protocol_version_check() {
-    let mut setup = TestSetup::new_tcp(true).await;
+    let mut setup = TestSetup::new_tcp(true, RedirectorTaskConfig::from_env()).await;
 
     let mut client = StealingClient::new(
         0,
@@ -293,7 +293,7 @@ async fn multiple_matching_filters(
     )]
     http_kind: TestHttpKind,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let request = TestRequest {
         path: "/api/v1".into(),
@@ -366,7 +366,7 @@ async fn multiple_filtered_subscriptions(
     )]
     http_kind: TestHttpKind,
 ) {
-    let mut setup = TestSetup::new_http(http_kind).await;
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
 
     let mut requests = (0..4)
         .map(|i| TestRequest {
@@ -425,7 +425,6 @@ async fn multiple_filtered_subscriptions(
     );
 }
 
-
 /// Verifies that `Mirrord-Agent` headers are inserted with correct
 /// values into responses to stolen http requests.
 #[rstest]
@@ -444,12 +443,10 @@ async fn header_injection(
 ) {
     use crate::util::ClientId;
 
-    let mut setup = TestSetup::new_http(http_kind).await;
-
-    // Enable header injection.
-    unsafe {
-        std::env::set_var("MIRRORD_AGENT_INJECT_HEADERS", "true");
-    }
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig{
+		inject_headers: true,
+		.. RedirectorTaskConfig::from_env()
+	}).await;
 
     let request_passthrough = TestRequest {
         path: "/passthrough".into(),
@@ -527,11 +524,11 @@ struct TestSetup {
 }
 
 impl TestSetup {
-    async fn new_http(http_kind: TestHttpKind) -> Self {
-        Self::new_tcp(http_kind.uses_tls()).await
+    async fn new_http(http_kind: TestHttpKind, redirector_config: RedirectorTaskConfig) -> Self {
+        Self::new_tcp(http_kind.uses_tls(), redirector_config).await
     }
 
-    async fn new_tcp(with_tls: bool) -> Self {
+    async fn new_tcp(with_tls: bool, redirector_config: RedirectorTaskConfig) -> Self {
         let original_server = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let original_destination = original_server.local_addr().unwrap();
         let tls_setup = if with_tls {
@@ -546,6 +543,7 @@ impl TestSetup {
                 .as_ref()
                 .map(|setup| setup.store.clone())
                 .unwrap_or_default(),
+            redirector_config,
         );
         let (stealer_tx, stealer_rx) = mpsc::channel(8);
         let stealer_task = TcpStealerTask::new(stealer_rx, handle);

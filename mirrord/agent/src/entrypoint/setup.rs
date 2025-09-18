@@ -33,7 +33,7 @@ pub(super) async fn start_traffic_redirector(
     let tls_handler_store =
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
-    let redirector_task_config = RedirectorTaskConfig::default();
+    let redirector_task_config = RedirectorTaskConfig::from_env();
 
     let (task, steal_handle, mirror_handle) = runtime
         .spawn(async move {
