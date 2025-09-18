@@ -93,7 +93,7 @@ use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
-use mirrord_layer_lib::common::proxy_connection::ProxyConnection;
+use mirrord_layer_lib::proxy_connection::ProxyConnection;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
@@ -679,6 +679,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.
             socket.close();
+            // Transition the socket state to prevent double cleanup
+            // We'll change it to Bound state to indicate it's no longer listening
+            // self.state = SocketState::Bound(bound.clone());
+            // set_socket_state(socket.id(), SocketState::Bound);
         }
         _ => {
             if setup().fs_config().is_active() {

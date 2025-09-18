@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use mirrord_intproxy_protocol::{PortSubscribe, PortSubscription};
 // Re-export shared types from layer-lib and use unified SOCKETS
 pub use mirrord_layer_lib::{
-    common::proxy_connection::make_proxy_request_with_response,
+    proxy_connection::make_proxy_request_with_response,
     socket::{Bound, Connected, SocketState, register_socket, set_socket_state},
 };
 use mirrord_protocol::{outgoing::SocketAddress, tcp::StealType};

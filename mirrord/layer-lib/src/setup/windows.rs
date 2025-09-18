@@ -1,65 +1,81 @@
-//! Setup and configuration for mirrord layers
-//!
-//! This module provides the setup functionality shared between Unix and Windows layers,
-//! including outgoing selector and DNS selector for filtering logic.
+/// Windows supported subset of LayerSetup
+/// this will fill up over time
+/// until it becomes layer's LayerSetup
+use std::{net::SocketAddr, sync::OnceLock};
 
-use std::net::SocketAddr;
-
+use anyhow;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::network::outgoing::OutgoingConfig,
     target::Target,
 };
-use tracing::debug;
 
-pub use crate::dns_selector::DnsSelector;
-// Re-export common types for compatibility
-pub use crate::socket::{ConnectionThrough, OutgoingSelector};
+use crate::{
+    setup::CONFIG,
+    socket::{DnsSelector, OutgoingSelector},
+};
 
-/// Global setup structure for mirrord layers
+static SETUP: OnceLock<LayerSetup> = OnceLock::new();
+
+pub fn init_setup(config: LayerConfig) -> anyhow::Result<()> {
+    let state = LayerSetup::new(config);
+    SETUP.set(state).expect("Failed to set layer setup");
+    Ok(())
+}
+
+pub fn layer_setup() -> &'static LayerSetup {
+    SETUP.get().expect("LayerSetup is not initialized")
+}
+
+/// Windows supported layer setup.
+/// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
+/// the layer.
+#[derive(Debug)]
 pub struct LayerSetup {
-    config: LayerConfig,
+    // config: LayerConfig,
     outgoing_selector: OutgoingSelector,
     dns_selector: DnsSelector,
     proxy_address: SocketAddr,
+    local_hostname: bool,
 }
 
 impl LayerSetup {
-    /// Initialize the layer setup from configuration
     pub fn new(config: LayerConfig) -> Self {
-        debug!("Creating LayerSetup for mirrord layer");
-
         let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
-        let dns_selector = DnsSelector::new(&config.feature.network.dns);
+
+        let dns_selector = DnsSelector::from(&config.feature.network.dns);
 
         let proxy_address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
             .expect("missing internal proxy address")
             .parse::<SocketAddr>()
             .expect("malformed internal proxy address");
 
-        debug!("Created LayerSetup with outgoing_selector and dns_selector");
+        let local_hostname = !config.feature.hostname;
+
+        CONFIG.set(config).expect("Failed to set layer config");
 
         Self {
-            config,
+            // config,
             outgoing_selector,
             dns_selector,
             proxy_address,
+            local_hostname,
         }
     }
 
     pub fn layer_config(&self) -> &LayerConfig {
-        &self.config
+        &CONFIG.get().expect("Layer config not initialized")
     }
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {
-        &self.config.feature.network.outgoing
+        &self.layer_config().feature.network.outgoing
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.config.feature.network.dns.enabled
+        self.layer_config().feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {
-        self.config
+        self.layer_config()
             .target
             .path
             .as_ref()
@@ -77,5 +93,9 @@ impl LayerSetup {
 
     pub fn proxy_address(&self) -> SocketAddr {
         self.proxy_address
+    }
+
+    pub fn local_hostname(&self) -> bool {
+        self.local_hostname
     }
 }

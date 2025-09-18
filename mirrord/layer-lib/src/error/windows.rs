@@ -1,4 +1,4 @@
-//! Module responsible for handling Windows errors.
+//! Module responsible for handling Windows only errors.
 
 use std::fmt::{Debug, Display};
 

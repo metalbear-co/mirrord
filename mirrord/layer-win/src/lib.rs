@@ -3,15 +3,23 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
-use std::thread;
 
 mod console;
 mod hooks;
 mod macros;
 pub mod process;
+mod setup;
+
+use std::{net::SocketAddr, thread};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::MIRRORD_LAYER_WAIT_FOR_DEBUGGER;
+use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
+pub use mirrord_layer_lib::setup::windows::layer_setup;
+use mirrord_layer_lib::{
+    error::LayerError,
+    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
+    setup::windows::init_setup,
+};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
@@ -23,7 +31,6 @@ use winapi::{
 };
 
 use crate::hooks::initialize_hooks;
-
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
@@ -63,7 +70,7 @@ fn init_tracing() {
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
-    };
+    }
 }
 
 fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
@@ -82,9 +89,32 @@ fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
         loaded: true,
     };
 
-    // Use the layer-lib function which handles everything internally
-    mirrord_layer_lib::common::initialize_proxy_connection(process_info)
-        .map_err(|e| anyhow::anyhow!("Failed to initialize proxy connection: {}", e))?;
+    // Try to parse `SocketAddr` from [`MIRRORD_LAYER_INTPROXY_ADDR`] environment variable.
+    let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
+        .map_err(LayerError::MissingEnvIntProxyAddr)?
+        .parse::<SocketAddr>()
+        .map_err(LayerError::MalformedIntProxyAddr)?;
+
+    // Read and initialize configuration
+    let config = mirrord_config::util::read_resolved_config()
+        .map_err(|e| anyhow::anyhow!("Failed to read mirrord configuration: {}", e))?;
+
+    // Initialize layer setup with the configuration
+    init_setup(config)?;
+
+    // Set up session request.
+    let session = mirrord_intproxy_protocol::NewSessionRequest {
+        parent_layer: None,
+        process_info,
+    };
+
+    // Use a default timeout of 30 seconds
+    let timeout = std::time::Duration::from_secs(30);
+
+    let new_connection = ProxyConnection::new(address, session, timeout)?;
+    PROXY_CONNECTION
+        .set(new_connection)
+        .expect("Could not initialize PROXY_CONNECTION");
 
     Ok(())
 }

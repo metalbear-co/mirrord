@@ -3,13 +3,12 @@
 use std::{ffi::c_void, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::common::layer_setup;
 use winapi::{
     shared::ntdef::{BOOLEAN, NTSTATUS, PCOBJECT_ATTRIBUTES, PHANDLE, ULONG},
     um::winnt::{ACCESS_MASK, HANDLE},
 };
 
-use crate::apply_hook;
+use crate::{apply_hook, layer_setup};
 
 // https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1890
 type NtCreateProcessType = unsafe extern "system" fn(

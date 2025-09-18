@@ -22,7 +22,6 @@
 ///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
 /// }
 /// ```
-#[cfg(not(target_os = "windows"))]
 #[macro_export]
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
@@ -30,26 +29,18 @@ macro_rules! graceful_exit {
         graceful_exit!();
     }};
     () => {{
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(std::process::id() as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        );
-        std::process::abort();
-    }};
-}
-
-#[cfg(target_os = "windows")]
-#[macro_export]
-macro_rules! graceful_exit {
-    ($($arg:tt)+) => {{
-        eprintln!($($arg)+);
-        graceful_exit!();
-    }};
-    () => {{
+        #[cfg(target_os = "windows")]
         unsafe {
             use winapi::um::processthreadsapi::{GetCurrentProcess, TerminateProcess};
             let _ = TerminateProcess(GetCurrentProcess(), 1);
         }
+
+        #[cfg(not(target_os = "windows"))]
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(std::process::id() as i32),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+
         std::process::abort();
     }};
 }

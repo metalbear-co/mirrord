@@ -1,8 +1,9 @@
 pub mod dns;
+pub mod hostname;
 pub mod ops;
 pub mod sockets;
 
-use std::{collections::HashSet, net::SocketAddr, str::FromStr};
+use std::{collections::HashSet, net::SocketAddr, ops::Deref, str::FromStr};
 
 use bincode::{Decode, Encode};
 // Re-export dns module items
@@ -12,15 +13,16 @@ pub use dns::{
 };
 // Cross-platform socket constants
 #[cfg(unix)]
-use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM, c_int};
+use libc::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 use mirrord_config::feature::network::{
+    dns::{DnsConfig, DnsFilterConfig},
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
 use mirrord_intproxy_protocol::NetProtocol;
-#[cfg(unix)]
-use mirrord_intproxy_protocol::PortUnsubscribe;
 use mirrord_protocol::outgoing::SocketAddress;
+#[cfg(unix)]
+pub use ops::sendmsg;
 // Re-export ops module items
 pub use ops::{
     ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
@@ -37,7 +39,7 @@ pub use sockets::{
 #[cfg(windows)]
 use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 
-pub use crate::error::{ConnectError, HookResult};
+pub use crate::{ConnectError, HookResult};
 
 /// Contains the addresses of a mirrord connected socket.
 ///
@@ -46,10 +48,10 @@ pub use crate::error::{ConnectError, HookResult};
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
     ///
-    /// Whenever the user calls `getpeername`, this is the address we return to them.
+    /// Whenever the user calls [`getpeername`], this is the address we return to them.
     ///
     /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
-    /// but use this address in the `recvfrom` handling.
+    /// but use this address in the [`recvfrom`] handling of [`fill_address`].
     pub remote_address: SocketAddress,
 
     /// Local address (pod-wise)
@@ -72,7 +74,7 @@ pub struct Connected {
     pub layer_address: Option<SocketAddress>,
 }
 
-/// Represents a [`SocketState`] where the user made a bind call, and we intercepted it.
+/// Represents a [`SocketState`] where the user made a [`bind`] call, and we intercepted it.
 ///
 /// ## Details
 ///
@@ -123,21 +125,6 @@ impl From<SocketKind> for NetProtocol {
         match kind {
             SocketKind::Tcp(..) => Self::Stream,
             SocketKind::Udp(..) => Self::Datagrams,
-        }
-    }
-}
-
-#[cfg(unix)]
-impl TryFrom<c_int> for SocketKind {
-    type Error = ();
-
-    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        if (type_ & SOCK_STREAM) > 0 {
-            Ok(SocketKind::Tcp(type_))
-        } else if (type_ & SOCK_DGRAM) > 0 {
-            Ok(SocketKind::Udp(type_))
-        } else {
-            Err(())
         }
     }
 }
@@ -206,23 +193,6 @@ impl UserSocket {
             SocketState::Bound(_) | SocketState::Listening(_)
         )
     }
-
-    /// Inform internal proxy about closing a listening port.
-    #[cfg(unix)]
-    pub fn close(&self) {
-        if let Self {
-            state: SocketState::Listening(bound),
-            kind: SocketKind::Tcp(..),
-            ..
-        } = self
-        {
-            use crate::common::proxy_connection::make_proxy_request_no_response;
-            let _ = make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            });
-        }
-    }
 }
 
 /// Trait for DNS resolution functionality that can be implemented by platform-specific layers
@@ -231,7 +201,6 @@ pub trait DnsResolver {
 
     /// Resolve a hostname to IP addresses
     fn resolve_hostname(
-        &self,
         hostname: &str,
         port: u16,
         family: i32,
@@ -239,7 +208,7 @@ pub trait DnsResolver {
     ) -> Result<Vec<std::net::IpAddr>, Self::Error>;
 
     /// Check if remote DNS is enabled
-    fn remote_dns_enabled(&self) -> bool;
+    fn remote_dns_enabled() -> bool;
 }
 
 /// Cross-platform address conversion utilities
@@ -355,7 +324,6 @@ impl OutgoingSelector {
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
-        resolver: &R,
     ) -> Result<ConnectionThrough, R::Error> {
         let (filters, selector_is_local) = match self {
             Self::Unfiltered => return Ok(ConnectionThrough::Remote(address)),
@@ -364,7 +332,7 @@ impl OutgoingSelector {
         };
 
         for filter in filters {
-            if !filter.matches_with_resolver(address, protocol, selector_is_local, resolver)? {
+            if !filter.matches_with_resolver::<R>(address, protocol, selector_is_local)? {
                 continue;
             }
 
@@ -410,6 +378,123 @@ impl OutgoingSelector {
     }
 }
 
+/// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
+/// Decides whether DNS queries are done locally or remotely.
+#[derive(Debug)]
+pub struct DnsSelector {
+    /// Filters provided in the config.
+    filters: Vec<AddressFilter>,
+    /// Whether a query matching one of [`Self::filters`] should be done locally.
+    filter_is_local: bool,
+}
+
+impl DnsSelector {
+    /// Creates a new DnsSelector from configuration
+    pub fn new(config: &DnsConfig) -> Self {
+        if !config.enabled {
+            return Self {
+                filters: Default::default(),
+                filter_is_local: false,
+            };
+        }
+
+        let (filters, filter_is_local) = match &config.filter {
+            Some(DnsFilterConfig::Local(filters)) => (Some(filters.deref()), true),
+            Some(DnsFilterConfig::Remote(filters)) => (Some(filters.deref()), false),
+            None => (None, true),
+        };
+
+        let filters = filters
+            .into_iter()
+            .flatten()
+            .map(|filter| {
+                filter
+                    .parse::<AddressFilter>()
+                    .expect("bad address filter, should be verified in the CLI")
+            })
+            .collect();
+
+        Self {
+            filters,
+            filter_is_local,
+        }
+    }
+
+    /// Returns whether DNS is enabled (based on whether filters exist)
+    pub fn is_enabled(&self) -> bool {
+        !self.filters.is_empty() || self.filter_is_local
+    }
+
+    /// Returns whether queries matching filters should be done locally
+    pub fn filter_is_local(&self) -> bool {
+        self.filter_is_local
+    }
+
+    /// Gets the filters
+    pub fn filters(&self) -> &[AddressFilter] {
+        &self.filters
+    }
+
+    /// Checks if a query should be handled locally or remotely.
+    /// Returns true if it should be handled locally.
+    pub fn should_be_local(&self, node: &str, port: u16) -> bool {
+        let matched = self
+            .filters
+            .iter()
+            .filter(|filter| {
+                let filter_port = filter.port();
+                filter_port == 0 || filter_port == port
+            })
+            .any(|filter| match filter {
+                AddressFilter::Port(..) => true,
+                AddressFilter::Name(filter_name, _) => filter_name == node,
+                AddressFilter::Socket(filter_socket) => {
+                    filter_socket.ip().is_unspecified()
+                        || Some(filter_socket.ip()) == node.parse().ok()
+                }
+                AddressFilter::Subnet(filter_subnet, _) => {
+                    let Ok(ip): std::result::Result<std::net::IpAddr, _> = node.parse() else {
+                        return false;
+                    };
+
+                    filter_subnet.contains(&ip)
+                }
+            });
+
+        matched == self.filter_is_local
+    }
+
+    /// Check if a DNS query should be resolved remotely (Windows layer compatibility)
+    pub fn should_resolve_remotely(&self, node: &str, port: u16) -> bool {
+        !self.should_be_local(node, port)
+    }
+
+    /// Bypasses queries that should be done locally (Unix layer compatibility)
+    /// This returns a platform-specific result type that can be used by the Unix layer
+    pub fn check_query_result(&self, node: &str, port: u16) -> CheckQueryResult {
+        if self.should_be_local(node, port) {
+            CheckQueryResult::Local
+        } else {
+            CheckQueryResult::Remote
+        }
+    }
+}
+
+impl From<&DnsConfig> for DnsSelector {
+    fn from(config: &DnsConfig) -> Self {
+        Self::new(config)
+    }
+}
+
+/// Result of DNS query checking - whether to handle locally or remotely
+#[derive(Debug, PartialEq, Eq)]
+pub enum CheckQueryResult {
+    /// Handle the query locally
+    Local,
+    /// Handle the query remotely
+    Remote,
+}
+
 /// [`ProtocolAndAddressFilter`] extension.
 /// Advanced filter matching with DNS resolution capability
 pub trait ProtocolAndAddressFilterExt {
@@ -420,15 +505,14 @@ pub trait ProtocolAndAddressFilterExt {
     ///
     /// This method may require a DNS resolution (when [`ProtocolAndAddressFilter::address`] is
     /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
-    /// flag is used, the method uses local resolution [`std::net::ToSocketAddrs`]. Otherwise, it
-    /// uses remote resolution.
+    /// flag is used, the method uses local resolution [`ToSocketAddrs`]. Otherwise, it uses
+    /// remote resolution [`remote_getaddrinfo`].
     /// Matches the outgoing connection request against this filter with optional DNS resolution
     fn matches_with_resolver<R: DnsResolver>(
         &self,
         address: SocketAddr,
         protocol: NetProtocol,
         force_local_dns: bool,
-        resolver: &R,
     ) -> Result<bool, R::Error>;
 }
 
@@ -438,15 +522,14 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
         address: SocketAddr,
         protocol: NetProtocol,
         force_local_dns: bool,
-        resolver: &R,
     ) -> Result<bool, R::Error> {
         // Check protocol match
-        let protocol_matches = matches!(
-            (&self.protocol, protocol),
-            (ProtocolFilter::Any, _)
-                | (ProtocolFilter::Tcp, NetProtocol::Stream)
-                | (ProtocolFilter::Udp, NetProtocol::Datagrams)
-        );
+        let protocol_matches = match (&self.protocol, protocol) {
+            (ProtocolFilter::Any, _) => true,
+            (ProtocolFilter::Tcp, NetProtocol::Stream) => true,
+            (ProtocolFilter::Udp, NetProtocol::Datagrams) => true,
+            _ => false,
+        };
 
         if !protocol_matches {
             return Ok(false);
@@ -467,15 +550,14 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
 
         match &self.address {
             AddressFilter::Name(name, port) => {
-                let resolved_ips = if resolver.remote_dns_enabled() && !force_local_dns {
-                    resolver.resolve_hostname(name, *port, family, addr_protocol)?
+                let resolved_ips = if R::remote_dns_enabled() && !force_local_dns {
+                    R::resolve_hostname(name, *port, family, addr_protocol)?
                 } else {
                     // Use standard library DNS resolution as fallback
                     use std::net::ToSocketAddrs;
                     match (name.as_str(), *port).to_socket_addrs() {
                         Ok(addresses) => addresses.map(|addr| addr.ip()).collect(),
-                        // No records found
-                        Err(_) => vec![],
+                        Err(_) => vec![], // No records found
                     }
                 };
 

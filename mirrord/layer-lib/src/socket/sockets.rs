@@ -1,4 +1,4 @@
-// Unified socket collection
+// Unified socket collection for both Unix and Windows layers
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -23,22 +23,7 @@ pub type SocketDescriptor = SOCKET;
 pub const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 
 /// Unified socket collection that can be used by both Unix and Windows layers
-/// Stores the [`UserSocket`]s created by the user.
-///
-/// **Warning**: Do not put logs in here! If you try logging stuff inside this initialization
-/// you're gonna have a bad time. The process hanging is the min you should expect, if you
-/// choose to ignore this warning.
-///
-/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process through
-///   `execve` (or any `exec*`), and the spawned children may want to use those sockets. As memory
-///   is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets to child
-///   processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with a base64
-///   URL-safe encoded version of our [`SOCKETS`]. The env var is set as
-///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
-///
-/// - `FD_CLOEXEC` behaviour: While rebuilding sockets from the env var, we also check if they're
-///   set with the cloexec flag, so that children processes don't end up using sockets that are
-///   exclusive for their parents.
+/// This replaces the platform-specific SOCKETS collections
 ///
 /// For Unix: includes shared socket initialization from environment variables
 /// For Windows: starts with empty collection
@@ -47,6 +32,7 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
         #[cfg(unix)]
         {
             use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
+            use bincode::{Decode, Encode};
 
             std::env::var(SHARED_SOCKETS_ENV_VAR)
                 .ok()

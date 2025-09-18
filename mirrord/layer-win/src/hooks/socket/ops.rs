@@ -5,16 +5,19 @@ use std::{
 
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_layer_lib::{
-    common::{layer_setup, proxy_connection::make_proxy_request_with_response},
-    error::ConnectError,
+    error::{ConnectError, HostnameResolveError},
+    proxy_connection::make_proxy_request_with_response,
     socket::{
         ConnectionThrough, DnsResolver, HookResult, SocketDescriptor, SocketKind, SocketState,
-        UserSocket, get_socket, is_ignored_port,
+        UserSocket, get_socket,
+        hostname::remote_dns_resolve_via_proxy,
+        is_ignored_port,
         ops::{ConnectResult, call_connect_fn, connect_outgoing},
     },
 };
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
+use str_win;
 use winapi::{
     shared::{
         minwindef::INT,
@@ -24,7 +27,7 @@ use winapi::{
 };
 use windows_strings::PCWSTR;
 
-use crate::hooks::socket::{hostname, utils::SocketAddressExtWin};
+use crate::{hooks::socket::utils::SocketAddressExtWin, layer_setup};
 
 /// Wrapper around Windows WSABUF array for safe buffer handling
 #[derive(Debug)]
@@ -130,17 +133,16 @@ impl TryFrom<(*mut u8, u32)> for WSABufferData {
 pub struct WindowsDnsResolver;
 
 impl DnsResolver for WindowsDnsResolver {
-    type Error = Box<dyn std::error::Error + Send + Sync>;
+    type Error = HostnameResolveError;
 
     fn resolve_hostname(
-        &self,
         hostname: &str,
         _port: u16,
         _family: i32,
         _protocol: i32,
     ) -> Result<Vec<IpAddr>, Self::Error> {
         // Use the existing Windows remote DNS resolution
-        match hostname::remote_dns_resolve(hostname) {
+        match remote_dns_resolve_via_proxy(hostname) {
             Ok(records) => Ok(records.into_iter().map(|(_, ip)| ip).collect()),
             Err(e) => {
                 tracing::debug!("Remote DNS resolution failed for {}: {}", hostname, e);
@@ -160,7 +162,7 @@ impl DnsResolver for WindowsDnsResolver {
         }
     }
 
-    fn remote_dns_enabled(&self) -> bool {
+    fn remote_dns_enabled() -> bool {
         layer_setup().remote_dns_enabled()
     }
 }
@@ -270,10 +272,9 @@ where
     };
 
     // Check the outgoing selector to determine routing
-    let resolver = WindowsDnsResolver;
     match layer_setup()
         .outgoing_selector()
-        .get_connection_through_with_resolver(remote_addr, protocol, &resolver)
+        .get_connection_through_with_resolver::<WindowsDnsResolver>(remote_addr, protocol)
     {
         Ok(ConnectionThrough::Remote(_filtered_addr)) => {
             tracing::debug!(

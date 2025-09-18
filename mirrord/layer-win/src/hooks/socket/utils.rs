@@ -375,6 +375,10 @@ pub fn validate_buffer_params(
     }
 
     let buffer_size = unsafe { *size } as usize;
+    if buffer_size <= 0 {
+        tracing::warn!("Empty buffer passed");
+        return None;
+    }
 
     if buffer_size > max_reasonable_size {
         tracing::warn!("Suspicious buffer size {}, rejecting request", buffer_size);
@@ -663,7 +667,7 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
 }
 
 impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
-    type Error = Box<HookError>;
+    type Error = HookError;
 
     fn try_from(response: GetAddrInfoResponse) -> HookResult<Self> {
         // Check if the response was successful and ensure we have addresses to process

@@ -16,7 +16,8 @@ use winapi::um::winsock2::SOCKET;
 
 use super::sockets::set_socket_state;
 use crate::{
-    error::{ConnectError, HookError, HookResult},
+    HookError, HookResult,
+    error::ConnectError,
     socket::{Connected, SOCKETS, SocketState, UserSocket},
 };
 
@@ -54,7 +55,7 @@ macro_rules! connect_fn_def {
 #[cfg(windows)]
 pub type ConnectFn = connect_fn_def!("system");
 #[cfg(unix)]
-pub type ConnectFn = connect_fn_def!("C");
+pub type ConnectFn = connect_fn_def!("c");
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -118,24 +119,14 @@ impl From<ConnectResult> for i32 {
 }
 
 // Platform-specific error handling
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn get_last_error() -> i32 {
     unsafe { *libc::__errno_location() }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn set_last_error(error: i32) {
     unsafe { *libc::__errno_location() = error };
-}
-
-#[cfg(target_os = "macos")]
-fn get_last_error() -> i32 {
-    unsafe { *libc::__error() }
-}
-
-#[cfg(target_os = "macos")]
-fn set_last_error(error: i32) {
-    unsafe { *libc::__error() = error };
 }
 
 #[cfg(windows)]
@@ -180,52 +171,29 @@ where
     P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
-    connect_outgoing_impl(
-        sockfd,
-        remote_address,
-        _user_socket_info,
-        protocol,
-        proxy_request_fn,
-        connect_fn,
-    )
-}
-
-/// Internal implementation using SocketResult for memory efficiency
-fn connect_outgoing_impl<P, F>(
-    sockfd: SocketDescriptor,
-    remote_address: SockAddr,
-    _user_socket_info: Arc<UserSocket>,
-    protocol: NetProtocol,
-    proxy_request_fn: P,
-    connect_fn: F,
-) -> HookResult<ConnectResult>
-where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
-{
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_addr.clone()).map_err(|e| {
-            Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
-                e.to_string(),
-            )))
-        })?;
+        let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
 
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
         };
 
-        let response = proxy_request_fn(request)?;
+        let response = match proxy_request_fn(request) {
+            Ok(response) => response,
+            Err(e) => return Err(ConnectError::ProxyRequest(format!("{:?}", e)).into()),
+        };
 
         let OutgoingConnectResponse {
             layer_address,
             in_cluster_address,
+            ..
         } = response;
 
         // Connect to the interceptor socket that is listening.
-        call_connect_fn_impl(
+        call_connect_fn(
             connect_fn,
             sockfd,
             remote_addr,
@@ -254,31 +222,7 @@ pub fn call_connect_fn<F>(
 where
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
-    call_connect_fn_impl(
-        connect_fn,
-        sockfd,
-        remote_addr,
-        in_cluster_address_opt,
-        layer_address_opt,
-    )
-}
-
-/// Internal implementation using SocketResult for memory efficiency
-fn call_connect_fn_impl<F>(
-    connect_fn: F,
-    sockfd: SocketDescriptor,
-    remote_addr: SockAddr,
-    in_cluster_address_opt: Option<SocketAddress>,
-    layer_address_opt: Option<SocketAddress>,
-) -> HookResult<ConnectResult>
-where
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
-{
-    let remote_address = SocketAddress::try_from(remote_addr.clone()).map_err(|e| {
-        Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
-            e.to_string(),
-        )))
-    })?;
+    let remote_address = SocketAddress::try_from(remote_addr.clone()).unwrap();
     let (connect_result, connected) = match (
         layer_address_opt.clone(),
         in_cluster_address_opt.clone(),
@@ -289,18 +233,14 @@ where
                 remote_address, in_cluster_address, layer_address
             );
 
-            let layer_addr = SockAddr::try_from(layer_address.clone()).map_err(|e| {
-                Box::new(HookError::ConnectError(ConnectError::ProxyRequest(
-                    e.to_string(),
-                )))
-            })?;
+            let layer_addr = SockAddr::try_from(layer_address.clone())?;
             let connect_result: ConnectResult = connect_fn(sockfd, layer_addr);
             if connect_result.is_failure() {
                 error!(
                     "connect -> Failed call to connect_fn with {:#?}",
                     connect_result,
                 );
-                return Err(Box::new(HookError::from(std::io::Error::last_os_error())));
+                return Err(std::io::Error::last_os_error().into());
             }
 
             (
@@ -315,12 +255,11 @@ where
         _ => {
             // both or none of layer_address and in_cluster_address must be provided
             if layer_address_opt.is_none() ^ in_cluster_address_opt.is_none() {
-                return Err(Box::new(HookError::ConnectError(
-                    ConnectError::ParameterMissing(format!(
-                        "layer_address: {:?}, in_cluster_address: {:?}",
-                        layer_address_opt, in_cluster_address_opt
-                    )),
-                )));
+                return Err(ConnectError::ParameterMissing(format!(
+                    "layer_address: {:?}, in_cluster_address: {:?}",
+                    layer_address_opt, in_cluster_address_opt
+                ))
+                .into());
             }
 
             debug!(
@@ -334,7 +273,7 @@ where
                     "connect -> Failed call to connect_fn with {:#?}",
                     connect_result,
                 );
-                return Err(Box::new(HookError::from(std::io::Error::last_os_error())));
+                return Err(std::io::Error::last_os_error().into());
             }
 
             (
@@ -393,7 +332,36 @@ pub fn prepare_outgoing_address(address: SocketAddr) -> SocketAddress {
 }
 
 /// Version of connect_outgoing that performs the actual connect call when needed
-#[mirrord_layer_macro::instrument(level = "debug", ret, skip(user_socket_info, proxy_request_fn))]
+#[mirrord_layer_macro::instrument(
+    level = "debug",
+    ret,
+    skip(user_socket_info, proxy_request_fn, actual_connect_fn)
+)]
+pub fn connect_outgoing_with_call<P, F>(
+    sockfd: SocketDescriptor,
+    remote_address: SockAddr,
+    user_socket_info: Arc<UserSocket>,
+    protocol: NetProtocol,
+    proxy_request_fn: P,
+    actual_connect_fn: F,
+) -> HookResult<ConnectResult>
+where
+    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
+    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
+{
+    let connect_fn = |sockfd: SocketDescriptor, addr: SockAddr| -> ConnectResult {
+        ConnectResult::from(actual_connect_fn(sockfd, addr))
+    };
+
+    connect_outgoing(
+        sockfd,
+        remote_address,
+        user_socket_info,
+        protocol,
+        proxy_request_fn,
+        connect_fn,
+    )
+}
 
 /// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
 /// only)
@@ -426,7 +394,7 @@ where
     )
 }
 
-/// Helps manually resolving DNS on port `53` with UDP, see `send_to` and `sendmsg`.
+/// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
 ///
 /// This function is used for DNS resolution handling and socket address mapping. When sending
 /// UDP packets to non-port-53 destinations, it checks if the destination is one of our bound
@@ -446,18 +414,7 @@ pub fn send_dns_patch(
     user_socket_info: Arc<UserSocket>,
     destination: SocketAddr,
 ) -> HookResult<SockAddr> {
-    send_dns_patch_impl(sockfd, user_socket_info, destination)
-}
-
-/// Internal implementation using SocketResult for memory efficiency
-fn send_dns_patch_impl(
-    sockfd: SocketDescriptor,
-    user_socket_info: Arc<UserSocket>,
-    destination: SocketAddr,
-) -> HookResult<SockAddr> {
-    let mut sockets = SOCKETS
-        .lock()
-        .map_err(|e| Box::new(HookError::from(std::io::Error::other(e.to_string()))))?;
+    let mut sockets = SOCKETS.lock()?;
     // We want to keep holding this socket.
     sockets.insert(sockfd, user_socket_info);
 
@@ -496,7 +453,7 @@ fn send_dns_patch_impl(
             }
             _ => None,
         })
-        .ok_or_else(|| Box::new(HookError::ManagedSocketNotFound(destination)))?;
+        .ok_or(HookError::ManagedSocketNotFound(destination))?;
 
     Ok(actual_destination.into())
 }
@@ -525,13 +482,13 @@ pub type SendtoFn = unsafe extern "system" fn(
 /// ## DNS resolution on port `53`
 ///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
-/// connection to an interceptor socket (we don't `connect` this `sockfd`, just change the
-/// [`UserSocket`] state), and only then calls the actual `sendto` to send `raw_message` to
+/// connection to an interceptor socket (we don't [`connect`] this `sockfd`, just change the
+/// [`UserSocket`] state), and only then calls the actual [`sendto`] to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
 ///
-/// Once the [`UserSocket`] is in the [`Connected`] state, then any other `sendto` call with
-/// a [`None`] `raw_destination` will call the original `sendto` to the bound `address`. A
-/// similar logic applies to a bound socket.
+/// Once the [`UserSocket`] is in the [`Connected`] state, then any other [`sendto`] call with
+/// a [`None`] `raw_destination` will call the original [`sendto`] to the bound `address`. A
+/// similar logic applies to a [`Bound`] socket.
 ///
 /// ## Usage
 ///
@@ -549,7 +506,7 @@ pub type SendtoFn = unsafe extern "system" fn(
 /// - `proxy_request_fn`: Function to make proxy requests
 ///
 /// ## Returns
-/// `HookResult<isize>`
+/// HookResult<isize>
 #[mirrord_layer_macro::instrument(
     level = "debug",
     ret,
@@ -574,23 +531,14 @@ where
     let user_socket_info = SOCKETS
         .lock()?
         .remove(&sockfd)
-        .ok_or(HookError::SocketNotFound({
-            #[cfg(target_os = "windows")]
-            {
-                sockfd
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                sockfd as usize
-            }
-        }))?;
+        .ok_or(HookError::SocketNotFound(sockfd))?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]
-    if user_socket_info.domain == AF_UNIX
+    if (raw_destination.is_unix() || user_socket_info.domain == AF_UNIX)
         && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Err(Box::new(HookError::UnsupportedSocketType));
+        return Err(HookError::UnsupportedSocketType);
     }
 
     // Currently this flow only handles DNS resolution.
@@ -609,7 +557,7 @@ where
             "layer-lib send_to -> non-DNS destination (port {}), checking for DNS patch",
             destination.port()
         );
-        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination.into())?;
 
         sendto_fn(
             sockfd,
@@ -658,8 +606,7 @@ mod tests {
 
     #[test]
     fn test_connect_result_failure() {
-        // Generic error code
-        let result = ConnectResult::new(-1, Some(1));
+        let result = ConnectResult::new(-1, Some(1)); // Generic error code
         assert!(result.is_failure());
         assert_eq!(result.result(), -1);
         assert_eq!(result.error(), Some(1));

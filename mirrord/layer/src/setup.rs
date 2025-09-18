@@ -17,6 +17,10 @@ use mirrord_config::{
     target::Target,
 };
 use mirrord_intproxy_protocol::PortSubscription;
+use mirrord_layer_lib::{
+    setup::CONFIG,
+    socket::{DnsSelector, OutgoingSelector},
+};
 use mirrord_protocol::{
     Port,
     tcp::{Filter, HttpFilter, HttpMethodFilter, StealType},
@@ -26,7 +30,6 @@ use regex::RegexSet;
 use crate::{
     debugger_ports::DebuggerPorts,
     file::{filter::FileFilter, mapper::FileRemapper},
-    socket::{OutgoingSelector, dns_selector::DnsSelector},
 };
 
 /// Complete layer setup.
@@ -34,7 +37,7 @@ use crate::{
 /// the layer.
 #[derive(Debug)]
 pub struct LayerSetup {
-    config: LayerConfig,
+    // config: LayerConfig,
     file_filter: FileFilter,
     file_remapper: FileRemapper,
     debugger_ports: DebuggerPorts,
@@ -86,8 +89,10 @@ impl LayerSetup {
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
             .collect();
 
+        CONFIG.set(config).expect("Failed to set layer config");
+
         Self {
-            config,
+            // config,
             file_filter,
             file_remapper,
             debugger_ports,
@@ -103,15 +108,15 @@ impl LayerSetup {
     }
 
     pub fn layer_config(&self) -> &LayerConfig {
-        &self.config
+        &CONFIG.get().expect("Layer config not initialized")
     }
 
     pub fn env_config(&self) -> &EnvConfig {
-        &self.config.feature.env
+        &self.layer_config().feature.env
     }
 
     pub fn fs_config(&self) -> &FsConfig {
-        &self.config.feature.fs
+        &self.layer_config().feature.fs
     }
 
     pub fn file_filter(&self) -> &FileFilter {
@@ -123,23 +128,23 @@ impl LayerSetup {
     }
 
     pub fn incoming_config(&self) -> &IncomingConfig {
-        &self.config.feature.network.incoming
+        &self.layer_config().feature.network.incoming
     }
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {
-        &self.config.feature.network.outgoing
+        &self.layer_config().feature.network.outgoing
     }
 
     pub fn experimental(&self) -> &ExperimentalConfig {
-        &self.config.experimental
+        &self.layer_config().experimental
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.config.feature.network.dns.enabled
+        self.layer_config().feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {
-        self.config
+        self.layer_config()
             .target
             .path
             .as_ref()
@@ -149,7 +154,7 @@ impl LayerSetup {
 
     #[cfg(target_os = "macos")]
     pub fn sip_binaries(&self) -> Vec<String> {
-        self.config
+        self.layer_config()
             .sip_binaries
             .as_deref()
             .map(<[_]>::to_vec)
@@ -158,7 +163,7 @@ impl LayerSetup {
 
     #[cfg(target_os = "macos")]
     pub fn skip_patch_binaries(&self) -> Vec<String> {
-        self.config.skip_sip.to_vec()
+        self.layer_config().skip_sip.to_vec()
     }
 
     pub fn is_debugger_port(&self, addr: &SocketAddr) -> bool {

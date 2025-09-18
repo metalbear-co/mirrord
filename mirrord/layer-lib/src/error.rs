@@ -6,26 +6,16 @@
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-#[cfg(unix)]
-use std::ptr;
 use std::{
     env::VarError,
     io,
     net::{AddrParseError, SocketAddr},
     str::ParseBoolError,
-    sync::PoisonError,
+    sync::{MutexGuard, PoisonError},
 };
 
-// TODO: These imports need proper dependencies or should be moved to the layer crate
-#[cfg(target_os = "macos")]
-use exec;
-#[cfg(target_os = "macos")]
-use libc::EACCES;
 #[cfg(unix)]
-use libc::{
-    DIR, EADDRINUSE, EAFNOSUPPORT, EAI_AGAIN, EAI_FAIL, EAI_NONAME, EBADF, EFAULT, EINVAL, EIO,
-    EISDIR, ENETUNREACH, ENOENT, ENOMEM, ENOTDIR, FILE, c_char, hostent,
-};
+use libc::{DIR, FILE, c_char, hostent};
 use mirrord_config::config::ConfigError;
 use mirrord_intproxy_protocol::{ProxyToLayerMessage, codec::CodecError};
 use mirrord_protocol::{ResponseError, SerializationError};
@@ -35,18 +25,8 @@ use mirrord_sip::SipError;
 use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
-#[cfg(windows)]
-use winapi::{
-    shared::winerror::{ERROR_DIRECTORY, ERROR_FILE_NOT_FOUND, ERROR_IO_DEVICE},
-    um::winsock2::{
-        WSAEADDRINUSE, WSAEAFNOSUPPORT, WSAEBADF, WSAEFAULT, WSAEINVAL, WSAENETUNREACH, WSAENOBUFS,
-        WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN,
-    },
-};
 
-#[cfg(target_os = "windows")]
-use crate::error::windows::ConsoleError;
-use crate::graceful_exit;
+use crate::{graceful_exit, windows::ConsoleError};
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -64,11 +44,10 @@ mod ignore_codes {
 
     #[cfg(windows)]
     const IGNORE_ERROR_CODES: [i32; 4] = [
-        winapi::um::winsock2::WSAEINPROGRESS,
-        winapi::um::winsock2::WSAEAFNOSUPPORT,
-        winapi::um::winsock2::WSAEADDRINUSE,
-        // Using EACCES as equivalent to EPERM
-        winapi::um::winsock2::WSAEACCES,
+        winapi::um::winsock2::WSAEINPROGRESS as i32,
+        winapi::um::winsock2::WSAEAFNOSUPPORT as i32,
+        winapi::um::winsock2::WSAEADDRINUSE as i32,
+        winapi::um::winsock2::WSAEACCES as i32, // Using EACCES as equivalent to EPERM
     ];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
@@ -151,20 +130,20 @@ pub enum HostnameResolveError {
     #[error("Proxy connection not available")]
     ProxyConnectionUnavailable,
 
+    #[error("mirrord-layer: Proxy connection failed: `{0}`")]
+    ProxyError(#[from] ProxyError),
+
     #[error("Failed to open file {path}: {details}")]
-    FileOpenError { path: String, details: &'static str },
+    FileOpenError { path: String, details: String },
 
     #[error("Failed to read file {path}: {details}")]
-    FileReadError { path: String, details: &'static str },
+    FileReadError { path: String, details: String },
 
     #[error("Remote error while accessing file {path}: {error}")]
-    RemoteFileError { path: String, error: &'static str },
+    RemoteFileError { path: String, error: String },
 
     #[error("DNS resolution failed for hostname '{hostname}': {details}")]
-    DnsResolutionFailed {
-        hostname: String,
-        details: &'static str,
-    },
+    DnsResolutionFailed { hostname: String, details: String },
 
     #[error("Invalid hostname: '{hostname}' (reason: {reason})")]
     InvalidHostname {
@@ -302,7 +281,7 @@ pub enum HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`].
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub enum LayerError {
     #[error("mirrord-layer: `{0}`")]
@@ -345,7 +324,6 @@ pub enum LayerError {
     UnsupportedSocketType,
 
     #[cfg(target_os = "macos")]
-    #[allow(dead_code)]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
 
@@ -385,93 +363,11 @@ impl From<SerializationError> for HookError {
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
-impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for HookError {
-    fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
+impl<T> From<PoisonError<MutexGuard<'_, T>>> for HookError {
+    fn from(_: PoisonError<MutexGuard<'_, T>>) -> Self {
         HookError::LockError
     }
 }
-
-/// Enables efficient error handling with boxed HookError for memory optimization
-impl From<Box<HookError>> for HookError {
-    fn from(boxed_error: Box<HookError>) -> Self {
-        *boxed_error
-    }
-}
-
-// Generic boxing helper - we'll implement specific From traits for the errors we need
-// This allows seamless use of ? operator with boxed errors
-
-// For HookError - implement From for all the errors it needs to convert from
-impl From<std::io::Error> for Box<HookError> {
-    fn from(error: std::io::Error) -> Self {
-        Box::new(HookError::IO(error))
-    }
-}
-
-impl<T> From<PoisonError<T>> for Box<HookError> {
-    fn from(_: PoisonError<T>) -> Self {
-        Box::new(HookError::LockError)
-    }
-}
-
-impl From<ResponseError> for Box<HookError> {
-    fn from(error: ResponseError) -> Self {
-        Box::new(HookError::ResponseError(error))
-    }
-}
-
-impl From<AddrInfoError> for Box<HookError> {
-    fn from(error: AddrInfoError) -> Self {
-        Box::new(HookError::AddrInfoError(error))
-    }
-}
-
-impl From<ConnectError> for Box<HookError> {
-    fn from(error: ConnectError) -> Self {
-        Box::new(HookError::ConnectError(error))
-    }
-}
-
-impl From<SendToError> for Box<HookError> {
-    fn from(error: SendToError) -> Self {
-        Box::new(HookError::SendToError(error))
-    }
-}
-
-// For ProxyError - implement From for all the errors it needs
-impl From<std::io::Error> for Box<ProxyError> {
-    fn from(error: std::io::Error) -> Self {
-        Box::new(ProxyError::IoFailed(error))
-    }
-}
-
-impl From<CodecError> for Box<ProxyError> {
-    fn from(error: CodecError) -> Self {
-        Box::new(ProxyError::CodecError(error))
-    }
-}
-
-impl<T> From<PoisonError<T>> for Box<ProxyError> {
-    fn from(_: PoisonError<T>) -> Self {
-        Box::new(ProxyError::LockPoisoned)
-    }
-}
-
-// For LayerError - implement From for ProxyError
-impl From<Box<ProxyError>> for Box<LayerError> {
-    fn from(error: Box<ProxyError>) -> Self {
-        Box::new(LayerError::ProxyConnectionFailed(*error))
-    }
-}
-
-// For HookError - implement From for ProxyError
-impl From<Box<ProxyError>> for Box<HookError> {
-    fn from(error: Box<ProxyError>) -> Self {
-        Box::new(HookError::ProxyError(*error))
-    }
-}
-
-// Automatic conversions are provided by the standard library for Box<T> <-> T
 
 #[cfg(unix)]
 impl From<frida_gum::Error> for LayerError {
@@ -480,9 +376,165 @@ impl From<frida_gum::Error> for LayerError {
     }
 }
 
-pub type LayerResult<T, E = Box<LayerError>> = std::result::Result<T, E>;
-pub type HookResult<T, E = Box<HookError>> = std::result::Result<T, E>;
-pub type ProxyResult<T, E = Box<ProxyError>> = std::result::Result<T, E>;
+pub type Result<T, E = LayerError> = std::result::Result<T, E>;
+pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
+pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
+
+#[cfg(unix)]
+fn get_platform_errno(fail: HookError) -> i32 {
+    match fail {
+        HookError::Null(_) => libc::EINVAL,
+        HookError::TryFromInt(_) => libc::EINVAL,
+        HookError::CannotGetProxyConnection => libc::EINVAL,
+        HookError::ProxyError(_) => libc::EINVAL,
+        HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
+        HookError::LockError => libc::EINVAL,
+        HookError::BincodeEncode(_) => libc::EINVAL,
+        HookError::ResponseError(response_fail) => match response_fail {
+            ResponseError::IdsExhausted(_) => libc::ENOMEM,
+            ResponseError::OpenLocal => libc::ENOENT,
+            ResponseError::NotFound(_) => libc::ENOENT,
+            ResponseError::NotDirectory(_) => libc::ENOTDIR,
+            ResponseError::NotFile(_) => libc::EISDIR,
+            ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
+            ResponseError::Remote(remote) => match remote {
+                // So far only encountered when trying to make requests from golang.
+                mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
+                _ => libc::EINVAL,
+            },
+            ResponseError::DnsLookup(dns_fail) => {
+                return match dns_fail.kind {
+                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                    // prevents an infinite loop that used to happen in some apps, don't know if
+                    // this is the correct mapping.
+                    mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
+                        libc::EAI_NONAME
+                    }
+                    _ => libc::EAI_FAIL,
+                    // TODO: Add more error kinds, next time we break protocol compatibility.
+                } as _;
+            }
+            // for listen, EINVAL means "socket is already connected."
+            // Will not happen, because this ResponseError is not return from any hook, so it
+            // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
+            // this could be changed by waiting for the Subscribed response from agent.
+            ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
+            ResponseError::NotImplemented => libc::EINVAL,
+            ResponseError::StripPrefix(_) => libc::EINVAL,
+            err @ (ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. }) => {
+                graceful_exit!(
+                    "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
+                );
+            }
+        },
+        HookError::DNSNoName => libc::EFAULT,
+        HookError::Utf8(_) => libc::EINVAL,
+        HookError::NullPointer => libc::EINVAL,
+        HookError::LocalFileCreation(_, err) => err,
+        #[cfg(target_os = "macos")]
+        HookError::FailedSipPatch(_) => libc::EACCES,
+        HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
+        HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
+        HookError::BadPointer => libc::EFAULT,
+        HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
+        HookError::FileNotFound => libc::ENOENT,
+        #[cfg(target_os = "linux")]
+        HookError::BadDescriptor => libc::EBADF,
+        #[cfg(target_os = "linux")]
+        HookError::BadFlag => libc::EINVAL,
+        #[cfg(target_os = "linux")]
+        HookError::EmptyPath => libc::ENOENT,
+        HookError::InvalidBindAddressForDomain => libc::EINVAL,
+        HookError::SocketNotFound(_) => libc::EBADF,
+        HookError::ManagedSocketNotFound(_) => libc::EBADF,
+        HookError::ConnectError(_) => libc::EFAULT,
+        HookError::AddrInfoError(_) => libc::EFAULT,
+        HookError::SendToError(_) => libc::EFAULT,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_platform_errno(fail: HookError) -> u32 {
+    use winapi::shared::winerror::*;
+    match fail {
+        HookError::Null(_) => WSAEINVAL,
+        HookError::TryFromInt(_) => WSAEINVAL,
+        HookError::CannotGetProxyConnection => WSAEINVAL,
+        HookError::ProxyError(_) => WSAEINVAL,
+        HookError::IO(io_fail) => io_fail
+            .raw_os_error()
+            .unwrap_or(ERROR_IO_DEVICE.try_into().unwrap())
+            .try_into()
+            .unwrap(),
+        HookError::LockError => WSAEINVAL,
+        HookError::BincodeEncode(_) => WSAEINVAL,
+        HookError::ResponseError(response_fail) => match response_fail {
+            ResponseError::IdsExhausted(_) => WSAENOBUFS,
+            ResponseError::OpenLocal => ERROR_FILE_NOT_FOUND,
+            ResponseError::NotFound(_) => ERROR_FILE_NOT_FOUND,
+            ResponseError::NotDirectory(_) => ERROR_DIRECTORY,
+            ResponseError::NotFile(_) => ERROR_DIRECTORY,
+            ResponseError::RemoteIO(io_fail) => io_fail
+                .raw_os_error
+                .unwrap_or(ERROR_IO_DEVICE.try_into().unwrap())
+                .try_into()
+                .unwrap(),
+            ResponseError::Remote(remote) => match remote {
+                // So far only encountered when trying to make requests from golang.
+                mirrord_protocol::RemoteError::ConnectTimedOut(_) => WSAENETUNREACH,
+                _ => WSAEINVAL,
+            },
+            ResponseError::DnsLookup(dns_fail) => {
+                return match dns_fail.kind {
+                    mirrord_protocol::ResolveErrorKindInternal::Timeout => WSATRY_AGAIN,
+                    // prevents an infinite loop that used to happen in some apps, don't know if
+                    // this is the correct mapping.
+                    mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
+                        WSAHOST_NOT_FOUND
+                    }
+                    _ => WSANO_RECOVERY,
+                    // TODO: Add more error kinds, next time we break protocol compatibility.
+                } as _;
+            }
+            // for listen, EINVAL means "socket is already connected."
+            // Will not happen, because this ResponseError is not return from any hook, so it
+            // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
+            // this could be changed by waiting for the Subscribed response from agent.
+            ResponseError::PortAlreadyStolen(_port) => WSAEINVAL,
+            ResponseError::NotImplemented => WSAEINVAL,
+            ResponseError::StripPrefix(_) => WSAEINVAL,
+            err @ (ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. }) => {
+                graceful_exit!(
+                    "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
+                );
+            }
+        },
+        HookError::DNSNoName => WSAEFAULT,
+        HookError::Utf8(_) => WSAEINVAL,
+        HookError::NullPointer => WSAEINVAL,
+        HookError::LocalFileCreation(_, err) => err.try_into().unwrap(),
+        #[cfg(target_os = "macos")]
+        HookError::FailedSipPatch(_) => WSAEACCES,
+        HookError::SocketUnsuportedIpv6 => WSAEAFNOSUPPORT,
+        HookError::UnsupportedSocketType => WSAEAFNOSUPPORT,
+        HookError::BadPointer => WSAEFAULT,
+        HookError::AddressAlreadyBound(_) => WSAEADDRINUSE,
+        HookError::FileNotFound => ERROR_FILE_NOT_FOUND,
+        #[cfg(target_os = "linux")]
+        HookError::BadDescriptor => WSAEBADF,
+        #[cfg(target_os = "linux")]
+        HookError::BadFlag => WSAEINVAL,
+        #[cfg(target_os = "linux")]
+        HookError::EmptyPath => ERROR_FILE_NOT_FOUND,
+        HookError::InvalidBindAddressForDomain => WSAEINVAL,
+        HookError::SocketNotFound(_) => WSAEBADF,
+        HookError::ManagedSocketNotFound(_) => WSAEBADF,
+        HookError::ConnectError(_) => WSAEFAULT,
+        HookError::AddrInfoError(_) => WSAEFAULT,
+        HookError::SendToError(_) => WSAEFAULT,
+        HookError::HostnameResolveError(_) => WSAEFAULT,
+    }
+}
 
 /// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
@@ -513,422 +565,33 @@ impl From<HookError> for i64 {
                 return -1;
             }
             HookError::ProxyError(ref err) => {
-                match err {
+                let reason = match err {
                     ProxyError::ProxyFailure(err) => {
-                        graceful_exit!("Proxy encountered an error: {err}")
+                        format!("Proxy encountered an error: {err}")
                     }
-                    err => {
-                        graceful_exit!("Proxy error, connectivity issue or a bug: {err}")
-                    }
+                    err => format!("Proxy error, connectivity issue or a bug: {err}"),
                 };
-            }
-            #[cfg(target_os = "macos")]
-            HookError::FailedSipPatch(_) => {
-                error!("SIP patch failed >> {fail:?}")
+                graceful_exit!(
+                    r"{reason}.
+                    Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
+                    You can find the `mirrord-intproxy` logs in {}.",
+                    crate::setup::layer_config()
+                        .internal_proxy
+                        .log_destination
+                        .display()
+                );
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
-        let errno = match fail {
-            HookError::Null(_) => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::TryFromInt(_) => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::CannotGetProxyConnection => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::ProxyError(_) => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::IO(io_fail) => {
-                #[cfg(unix)]
-                {
-                    io_fail.raw_os_error().unwrap_or(EIO)
-                }
-                #[cfg(windows)]
-                {
-                    io_fail.raw_os_error().unwrap_or(ERROR_IO_DEVICE as i32)
-                }
-            }
-            HookError::LockError => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::BincodeEncode(_) => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::ResponseError(response_fail) => match response_fail {
-                ResponseError::IdsExhausted(_) => {
-                    #[cfg(unix)]
-                    {
-                        ENOMEM
-                    }
-                    #[cfg(windows)]
-                    {
-                        WSAENOBUFS
-                    }
-                }
-                ResponseError::OpenLocal => {
-                    #[cfg(unix)]
-                    {
-                        ENOENT
-                    }
-                    #[cfg(windows)]
-                    {
-                        ERROR_FILE_NOT_FOUND as i32
-                    }
-                }
-                ResponseError::NotFound(_) => {
-                    #[cfg(unix)]
-                    {
-                        ENOENT
-                    }
-                    #[cfg(windows)]
-                    {
-                        ERROR_FILE_NOT_FOUND as i32
-                    }
-                }
-                ResponseError::NotDirectory(_) => {
-                    #[cfg(unix)]
-                    {
-                        ENOTDIR
-                    }
-                    #[cfg(windows)]
-                    {
-                        ERROR_DIRECTORY as i32
-                    }
-                }
-                ResponseError::NotFile(_) => {
-                    #[cfg(unix)]
-                    {
-                        EISDIR
-                    }
-                    #[cfg(windows)]
-                    {
-                        ERROR_DIRECTORY as i32
-                    }
-                }
-                ResponseError::RemoteIO(io_fail) => {
-                    #[cfg(unix)]
-                    {
-                        io_fail.raw_os_error.unwrap_or(EIO)
-                    }
-                    #[cfg(windows)]
-                    {
-                        io_fail.raw_os_error.unwrap_or(ERROR_IO_DEVICE as i32)
-                    }
-                }
-                ResponseError::Remote(remote) => match remote {
-                    // So far only encountered when trying to make requests from golang.
-                    mirrord_protocol::RemoteError::ConnectTimedOut(_) => {
-                        #[cfg(unix)]
-                        {
-                            ENETUNREACH
-                        }
-                        #[cfg(windows)]
-                        {
-                            WSAENETUNREACH
-                        }
-                    }
-                    _ => {
-                        #[cfg(unix)]
-                        {
-                            EINVAL
-                        }
-                        #[cfg(windows)]
-                        {
-                            WSAEINVAL
-                        }
-                    }
-                },
-                ResponseError::DnsLookup(dns_fail) => {
-                    return match dns_fail.kind {
-                        mirrord_protocol::ResolveErrorKindInternal::Timeout => {
-                            #[cfg(unix)]
-                            {
-                                EAI_AGAIN
-                            }
-                            #[cfg(windows)]
-                            {
-                                WSATRY_AGAIN
-                            }
-                        }
-                        // prevents an infinite loop that used to happen in some apps, don't know if
-                        // this is the correct mapping.
-                        mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
-                            #[cfg(unix)]
-                            {
-                                EAI_NONAME
-                            }
-                            #[cfg(windows)]
-                            {
-                                WSAHOST_NOT_FOUND
-                            }
-                        }
-                        _ => {
-                            #[cfg(unix)]
-                            {
-                                EAI_FAIL
-                            }
-                            #[cfg(windows)]
-                            {
-                                WSANO_RECOVERY
-                            }
-                        } // TODO: Add more error kinds, next time we break protocol compatibility.
-                    } as _;
-                }
-                // for listen, EINVAL means "socket is already connected."
-                // Will not happen, because this ResponseError is not return from any hook, so it
-                // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
-                // this could be changed by waiting for the Subscribed response from agent.
-                ResponseError::PortAlreadyStolen(_port) => {
-                    #[cfg(unix)]
-                    {
-                        EINVAL
-                    }
-                    #[cfg(windows)]
-                    {
-                        WSAEINVAL
-                    }
-                }
-                ResponseError::NotImplemented => {
-                    #[cfg(unix)]
-                    {
-                        EINVAL
-                    }
-                    #[cfg(windows)]
-                    {
-                        WSAEINVAL
-                    }
-                }
-                ResponseError::StripPrefix(_) => {
-                    #[cfg(unix)]
-                    {
-                        EINVAL
-                    }
-                    #[cfg(windows)]
-                    {
-                        WSAEINVAL
-                    }
-                }
-                ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. } => {
-                    graceful_exit!("Operation forbidden by policy");
-                }
-            },
-            HookError::DNSNoName => {
-                #[cfg(unix)]
-                {
-                    EFAULT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEFAULT
-                }
-            }
-            HookError::Utf8(_) => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::NullPointer => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::LocalFileCreation(_, err) => err,
-            #[cfg(target_os = "macos")]
-            HookError::FailedSipPatch(_) => EACCES,
-            HookError::SocketUnsuportedIpv6 => {
-                #[cfg(unix)]
-                {
-                    EAFNOSUPPORT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEAFNOSUPPORT
-                }
-            }
-            HookError::UnsupportedSocketType => {
-                #[cfg(unix)]
-                {
-                    EAFNOSUPPORT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEAFNOSUPPORT
-                }
-            }
-            HookError::BadPointer => {
-                #[cfg(unix)]
-                {
-                    EFAULT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEFAULT
-                }
-            }
-            HookError::AddressAlreadyBound(_) => {
-                #[cfg(unix)]
-                {
-                    EADDRINUSE
-                }
-                #[cfg(windows)]
-                {
-                    WSAEADDRINUSE
-                }
-            }
-            HookError::FileNotFound => {
-                #[cfg(unix)]
-                {
-                    ENOENT
-                }
-                #[cfg(windows)]
-                {
-                    ERROR_FILE_NOT_FOUND as i32
-                }
-            }
-            #[cfg(target_os = "linux")]
-            HookError::BadDescriptor => EBADF,
-            #[cfg(target_os = "linux")]
-            HookError::BadFlag => EINVAL,
-            #[cfg(target_os = "linux")]
-            HookError::EmptyPath => ENOENT,
-            HookError::InvalidBindAddressForDomain => {
-                #[cfg(unix)]
-                {
-                    EINVAL
-                }
-                #[cfg(windows)]
-                {
-                    WSAEINVAL
-                }
-            }
-            HookError::SocketNotFound(_) => {
-                #[cfg(unix)]
-                {
-                    EBADF
-                }
-                #[cfg(windows)]
-                {
-                    WSAEBADF
-                }
-            }
-            HookError::ManagedSocketNotFound(_) => {
-                #[cfg(unix)]
-                {
-                    EBADF
-                }
-                #[cfg(windows)]
-                {
-                    WSAEBADF
-                }
-            }
-            HookError::ConnectError(_) => {
-                #[cfg(unix)]
-                {
-                    EFAULT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEFAULT
-                }
-            }
-            HookError::AddrInfoError(_) => {
-                #[cfg(unix)]
-                {
-                    EFAULT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEFAULT
-                }
-            }
-            HookError::SendToError(_) => {
-                #[cfg(unix)]
-                {
-                    EFAULT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEFAULT
-                }
-            }
-            HookError::HostnameResolveError(_) => {
-                #[cfg(unix)]
-                {
-                    EFAULT
-                }
-                #[cfg(windows)]
-                {
-                    WSAEFAULT
-                }
-            }
-        };
-
         // Set platform-specific error
+        let errno = get_platform_errno(fail);
         #[cfg(unix)]
-        {
-            Errno::set_raw(errno);
-        }
+        Errno::set_raw(errno);
+
         #[cfg(windows)]
-        {
-            unsafe {
-                winapi::um::errhandlingapi::SetLastError(errno as u32);
-            }
+        unsafe {
+            winapi::um::errhandlingapi::SetLastError(errno as u32);
         }
 
         -1

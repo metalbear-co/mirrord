@@ -19,7 +19,11 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
 };
-use mirrord_layer_lib::socket::dns::update_dns_reverse_mapping;
+use mirrord_layer_lib::socket::{
+    ConnectionThrough, OutgoingSelector,
+    dns::update_dns_reverse_mapping,
+    dns_selector::{CheckQueryResult, DnsSelector},
+};
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -35,11 +39,12 @@ use tracing::{error, trace};
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
-use super::{dns_selector, outgoing_selector, *};
+use super::{hooks::*, *};
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
+    socket::{SocketAddrExtUnix, UnixDnsResolver},
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -114,10 +119,51 @@ impl From<ConnectResult> for i32 {
     }
 }
 
+// Unix-specific extensions for OutgoingSelector
+// Provides convenience functions for the OutgoingSelector when running on Unix platforms.
+trait OutgoingSelectorUnixExt {
+    /// Get connection through using the Unix DNS resolver
+    ///
+    /// This is a convenience function that uses the Unix DNS resolver.
+    fn get_connection_through(
+        &self,
+        address: std::net::SocketAddr,
+        protocol: NetProtocol,
+    ) -> HookResult<ConnectionThrough>;
+}
+
+impl OutgoingSelectorUnixExt for OutgoingSelector {
+    fn get_connection_through(
+        &self,
+        address: std::net::SocketAddr,
+        protocol: NetProtocol,
+    ) -> HookResult<ConnectionThrough> {
+        self.get_connection_through_with_resolver::<UnixDnsResolver>(address, protocol)
+    }
+}
+
+/// DNS selector for Unix layer
+pub trait DnsSelectorExt {
+    /// Bypasses queries that should be done locally (Unix-specific method).
+    /// Returns Detour<()> which is used by the Unix layer's detour system.
+    fn check_query(&self, node: &str, port: u16) -> Detour<()>;
+}
+
+/// Unix-specific extensions for DnsSelector
+impl DnsSelectorExt for DnsSelector {
+    #[tracing::instrument(level = Level::DEBUG, ret)]
+    fn check_query(&self, node: &str, port: u16) -> Detour<()> {
+        match self.check_query_result(node, port) {
+            CheckQueryResult::Local => Detour::Bypass(Bypass::LocalDns),
+            CheckQueryResult::Remote => Detour::Success(()),
+        }
+    }
+}
+
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = SocketKind::try_from(type_).map_err(|_| Bypass::Type(type_))?;
+    let socket_kind = type_.try_into()?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -129,7 +175,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         return Detour::Error(HookError::SocketUnsuportedIpv6);
     }
 
-    let socket_result = unsafe { libc::socket(domain, type_, protocol) };
+    let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
 
     let socket_fd = if socket_result == -1 {
         Err(std::io::Error::last_os_error())
@@ -164,7 +210,7 @@ fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour
 
     let address = SockAddr::from(address);
 
-    let bind_result = unsafe { libc::bind(sockfd, address.as_ptr(), address.len()) };
+    let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
         Detour::Error(io::Error::last_os_error().into())
     } else {
@@ -316,7 +362,7 @@ pub(super) fn bind(
     // connect to.
     let address = unsafe {
         SockAddr::try_init(|storage, len| {
-            if libc::getsockname(sockfd, storage.cast(), len) == -1 {
+            if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
                 let error = io::Error::last_os_error();
                 error!(%error, sockfd, "`getsockname` failed to get address of a socket after bind");
                 Err(error)
@@ -422,7 +468,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             requested_address,
             address,
         }) => {
-            let listen_result = unsafe { libc::listen(sockfd, backlog) };
+            let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
                 let error = io::Error::last_os_error();
 
@@ -486,13 +532,14 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let OutgoingConnectResponse {
             layer_address,
             in_cluster_address,
+            ..
         } = response;
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
             let layer_address = SockAddr::try_from(layer_address.clone())?;
 
-            unsafe { libc::connect(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+            unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
             ConnectResult {
                 result: 0,
@@ -529,11 +576,10 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
         // address, in a local connection context (or vice-versa), so we let `remote_connection`
         // handle this address trickery.
-        match outgoing_selector::get_connection_through(
-            crate::setup().outgoing_selector(),
-            remote_address.as_socket()?,
-            protocol,
-        )? {
+        match crate::setup()
+            .outgoing_selector()
+            .get_connection_through(remote_address.as_socket()?, protocol)?
+        {
             ConnectionThrough::Remote(addr) => {
                 let connect_result = remote_connection(SockAddr::from(addr))?;
                 Detour::Success(connect_result)
@@ -542,7 +588,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                 let rawish_local_addr = SockAddr::from(addr);
 
                 let connect_result = ConnectResult::from(unsafe {
-                    libc::connect(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
+                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
                 });
 
                 Detour::Success(connect_result)
@@ -578,7 +624,7 @@ fn connect_to_local_address(
                     _ => None,
                 })
                 .map(|rawish_remote_address| unsafe {
-                    libc::connect(
+                    FN_CONNECT(
                         sockfd,
                         rawish_remote_address.as_ptr(),
                         rawish_remote_address.len(),
@@ -637,7 +683,7 @@ pub(super) fn connect(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_).map_err(|_| Bypass::Type(type_))?;
+            let kind = SocketKind::try_from(type_)?;
 
             Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
         }
@@ -841,13 +887,7 @@ pub(super) fn accept(
         layer_address: None,
     });
 
-    let new_socket = UserSocket::new(
-        domain,
-        type_,
-        protocol,
-        state,
-        SocketKind::try_from(type_).map_err(|_| Bypass::Type(type_))?,
-    );
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
     fill_address(address, address_len, remote_source.into())?;
 
@@ -864,15 +904,15 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
     }
 }
 
-/// Managed part of our [`super::hooks::dup_detour`], that clones the `Arc<T>` thing we have keyed
+/// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed
 /// by `fd` ([`UserSocket`], or [`file::ops::RemoteFile`]).
 ///
 /// - `SWITCH_MAP`:
 ///
 /// Indicates that we're switching the `fd` from [`SOCKETS`] to [`OPEN_FILES`] (or vice-versa).
 ///
-/// We need this to properly handle some cases in [`fcntl`], [`super::hooks::dup2_detour`], and
-/// [`super::hooks::dup3_detour`]. Extra relevant for node on macos.
+/// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and
+/// [`dup3_detour`]. Extra relevant for node on macos.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut sockets = SOCKETS.lock()?;
@@ -904,7 +944,8 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// # Note
 ///
-/// This function updates the reverse DNS mapping.
+/// This function updates the mapping in `REMOTE_DNS_REVERSE_MAPPING` using
+/// [`update_dns_reverse_mapping`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn remote_getaddrinfo(
     node: String,
@@ -993,7 +1034,7 @@ pub(super) fn getaddrinfo(
         .unwrap_or(0);
 
     let setup = crate::setup();
-    dns_selector::check_query(setup.dns_selector(), &node, service)?;
+    setup.dns_selector().check_query(&node, service)?;
     let ipv6_enabled = setup.layer_config().feature.network.ipv6;
 
     let raw_hints = raw_hints
@@ -1119,7 +1160,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
         })?
         .into();
 
-    dns_selector::check_query(crate::setup().dns_selector(), &name, 0)?;
+    crate::setup().dns_selector().check_query(&name, 0)?;
 
     let hosts_and_ips = remote_getaddrinfo(name.clone(), 0, 0, 0, 0, 0)?;
 
@@ -1384,7 +1425,7 @@ pub(super) fn send_to(
         let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         unsafe {
-            libc::sendto(
+            FN_SEND_TO(
                 sockfd,
                 raw_message,
                 message_length,
@@ -1414,7 +1455,7 @@ pub(super) fn send_to(
         let raw_interceptor_length = layer_address.len();
 
         unsafe {
-            libc::sendto(
+            FN_SEND_TO(
                 sockfd,
                 raw_message,
                 message_length,
@@ -1485,7 +1526,7 @@ pub(super) fn sendmsg(
         };
         true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
 
-        unsafe { libc::sendmsg(sockfd, true_message_header.as_ref(), flags) }
+        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     } else {
         connect_outgoing::<false>(
             sockfd,
@@ -1515,7 +1556,7 @@ pub(super) fn sendmsg(
         };
         true_message_header.as_mut().msg_namelen = raw_interceptor_length;
 
-        unsafe { libc::sendmsg(sockfd, true_message_header.as_ref(), flags) }
+        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     };
 
     Detour::Success(sent_result)
@@ -1572,31 +1613,21 @@ fn create_dns_resolver_t(
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
-    unsafe {
-        let resolver = Box::from_raw(resolver);
+    let resolver = Box::from_raw(resolver);
 
-        let nameservers = Vec::from_raw_parts(
-            resolver.nameserver,
-            resolver.n_nameserver as usize,
-            resolver.n_nameserver as usize,
-        );
+    let nameservers = Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
 
-        for nameserver in nameservers {
-            let _ = Box::from_raw(nameserver);
-        }
-
-        let searchs = Vec::from_raw_parts(
-            resolver.search,
-            resolver.n_search as usize,
-            resolver.n_search as usize,
-        );
-
-        for search in searchs {
-            let _ = CString::from_raw(search);
-        }
-
-        let _ = CString::from_raw(resolver.options);
+    for nameserver in nameservers {
+        let _ = Box::from_raw(nameserver);
     }
+
+    let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
+
+    for search in searchs {
+        let _ = CString::from_raw(search);
+    }
+
+    let _ = CString::from_raw(resolver.options);
 }
 
 /// reconstruct a macos specific [`dns_config_t`] api from parsing the `/etc/resolv.conf` file from
@@ -1655,7 +1686,7 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     let mut original_head = std::ptr::null_mut();
-    let result: i32 = unsafe { libc::getifaddrs(&mut original_head) };
+    let result: i32 = unsafe { FN_GETIFADDRS(&mut original_head) };
     if result != 0 {
         Err(io::Error::from_raw_os_error(result))?;
     }

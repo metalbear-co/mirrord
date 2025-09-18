@@ -13,43 +13,39 @@ use std::{net::SocketAddr, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
-    common::{layer_setup, proxy_connection::make_proxy_request_with_response},
     error::{ConnectError, HookError, HookResult, SendToError},
-    hostname::HostnameResult,
+    proxy_connection::make_proxy_request_with_response,
     socket::{
-        Bound, ConnectResult, SocketDescriptor, SocketKind, SocketState,
-        dns::update_dns_reverse_mapping, get_bound_address, get_connected_addresses, get_socket,
-        get_socket_state, is_socket_in_state, is_socket_managed, remove_socket, send_to,
-        set_socket_state,
+        Bound, ConnectResult, SocketDescriptor, SocketKind, SocketState, get_bound_address,
+        get_connected_addresses, get_socket, get_socket_state,
+        hostname::{get_remote_hostname, remote_dns_resolve_via_proxy},
+        is_socket_in_state, is_socket_managed, remove_socket, send_to, set_socket_state,
     },
 };
 use socket2::SockAddr;
 use winapi::{
     shared::{
         minwindef::INT,
+        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
-    um::{
-        errhandlingapi::SetLastError,
-        sysinfoapi::ComputerNameMax,
-        winsock2::{
-            HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, fd_set, timeval,
-        },
-        // ws2tcpip::{GetNameInfoW, socklen_t},
+    um::winsock2::{
+        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, fd_set, timeval,
     },
+    // ws2tcpip::{GetNameInfoW, socklen_t},
 };
 use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
     hostname::{
         MANAGED_ADDRINFO, free_managed_addrinfo, handle_hostname_ansi, handle_hostname_unicode,
-        is_remote_hostname, resolve_hostname_with_fallback, windows_getaddrinfo,
+        is_remote_hostname, windows_getaddrinfo,
     },
     ops::{WSABufferData, log_connection_result},
     state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
-    utils::{ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, extract_ip_from_hostent},
+    utils::{ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin},
 };
-use crate::apply_hook;
+use crate::{apply_hook, layer_setup};
 
 // Function type definitions for original Windows socket functions
 type SocketType = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
@@ -453,22 +449,13 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
     );
     match ops::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
-        Err(err)
-            if matches!(
-                err.as_ref(),
-                HookError::ConnectError(ConnectError::AddressUnreachable(_))
-            ) =>
-        {
-            if let HookError::ConnectError(ConnectError::AddressUnreachable(e)) = err.as_ref() {
-                tracing::error!(
-                    "connect_detour -> socket {} connect target {:?} is unreachable: {}",
-                    s,
-                    raw_addr,
-                    e
-                );
-            } else {
-                tracing::error!("connect_detour -> unexpected error type");
-            }
+        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
+            tracing::error!(
+                "connect_detour -> socket {} connect target {:?} is unreachable: {}",
+                s,
+                raw_addr,
+                e
+            );
             return SOCKET_ERROR;
         }
         Err(_) => {
@@ -800,22 +787,13 @@ unsafe extern "system" fn wsa_connect_detour(
         SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
     );
     match ops::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
-        Err(err)
-            if matches!(
-                err.as_ref(),
-                HookError::ConnectError(ConnectError::AddressUnreachable(_))
-            ) =>
-        {
-            if let HookError::ConnectError(ConnectError::AddressUnreachable(e)) = err.as_ref() {
-                tracing::error!(
-                    "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
-                    s,
-                    raw_addr,
-                    e
-                );
-            } else {
-                tracing::error!("wsa_connect_detour -> unexpected error type");
-            }
+        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
+            tracing::error!(
+                "wsa_connect_detour -> socket {} connect target {:?} is unreachable: {}",
+                s,
+                raw_addr,
+                e
+            );
             return SOCKET_ERROR;
         }
         Err(_) => {
@@ -1095,6 +1073,10 @@ unsafe extern "system" fn wsa_send_to_detour(
                              send_flags: i32,
                              addr: SockAddr|
          -> HookResult<isize> {
+            if lpNumberOfBytesSent.is_null() {
+                return Err(HookError::NullPointer);
+            }
+
             let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
 
             // Create a WSABUF for the single buffer using our helper
@@ -1117,10 +1099,6 @@ unsafe extern "system" fn wsa_send_to_detour(
 
             if result == 0 {
                 // Success - update bytes sent if caller provided pointer
-                if lpNumberOfBytesSent.is_null() {
-                    return Err(Box::new(HookError::NullPointer));
-                }
-
                 unsafe { *lpNumberOfBytesSent = bytes_sent };
                 Ok(result.try_into().unwrap())
             } else {
@@ -1201,83 +1179,45 @@ unsafe extern "system" fn wsa_recv_from_detour(
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT {
     tracing::debug!("gethostname_detour called with namelen: {}", namelen);
-
-    // Validate parameters
-    if name.is_null() || namelen <= 0 {
-        tracing::debug!("gethostname: invalid parameters");
-        return SOCKET_ERROR;
-    }
-
-    // Check if hostname feature is enabled
-    let hostname_enabled = layer_setup().layer_config().feature.hostname;
-    tracing::debug!(
-        "gethostname: hostname feature enabled: {}",
-        hostname_enabled
-    );
-
-    // Try to get the remote hostname first only if hostname feature is enabled
-    if hostname_enabled {
-        match hostname::get_hostname_with_resolver() {
-            HostnameResult::Success(remote_hostname_cstring) => {
-                let remote_hostname = remote_hostname_cstring.to_string_lossy().to_string();
-                tracing::debug!("gethostname: got remote hostname: '{}'", remote_hostname);
-
-                let hostname_bytes = remote_hostname.as_bytes();
-                let required_len = hostname_bytes.len();
-
-                // Check if buffer is large enough
-                if (namelen as usize) < required_len {
-                    tracing::debug!(
-                        "gethostname: buffer too small, need {} bytes, have {}",
-                        required_len,
-                        namelen
-                    );
-                    return SOCKET_ERROR;
-                }
-
-                // Copy hostname to buffer
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        hostname_bytes.as_ptr(),
-                        name as *mut u8,
-                        hostname_bytes.len(),
-                    );
-                    *(name.add(hostname_bytes.len())) = 0;
-                }
-
-                tracing::debug!(
-                    "gethostname: returning remote hostname: '{}'",
-                    remote_hostname
-                );
-                // Success
-                return 0;
-            }
-            _ => {
-                tracing::error!("gethostname: no remote hostname available");
-                return SOCKET_ERROR;
-            }
-        };
-    }
-
-    // Fall back to original function if hostname feature is disabled or no remote hostname
-    // available
-    tracing::debug!(
-        "gethostname: hostname feature disabled or no remote hostname available, calling original"
-    );
     let original = GET_HOST_NAME_ORIGINAL.get().unwrap();
-    unsafe { original(name, namelen) }
+
+    // IN namelen is not writable, we work on local variable we"ll ditch
+    let mut namelen_mut = namelen;
+    let mut namelen_ptr: *mut u32 = &mut namelen_mut;
+    unsafe {
+        // gethostname is similar to hostname_ansi except:
+        //     * different ret vals
+        //     * GLE (GetLastError) -> WSAGLE
+        handle_hostname_ansi(
+            name,
+            namelen_ptr,
+            || original(name, namelen),
+            || get_remote_hostname(true),
+            "gethostname",
+            ERROR_BUFFER_OVERFLOW,
+            // If no error occurs, gethostname returns zero. Otherwise, it returns SOCKET_ERROR
+            //  and a specific error code can be retrieved by calling WSAGetLastError.
+            (0, SOCKET_ERROR),
+        )
+    }
 }
 
 /// Windows kernel32 hook for GetComputerNameA
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *mut u32) -> i32 {
     let original = GET_COMPUTER_NAME_A_ORIGINAL.get().unwrap();
+
     unsafe {
         handle_hostname_ansi(
             lpBuffer,
             nSize,
-            |buf, size| original(buf, size),
+            || original(lpBuffer, nSize),
+            || get_remote_hostname(true),
             "GetComputerNameA",
+            ERROR_BUFFER_OVERFLOW,
+            // If the function succeeds, the return value is a nonzero value.
+            // If the function fails, the return value is zero.
+            (1, 0),
         )
     }
 }
@@ -1290,8 +1230,10 @@ unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: 
         handle_hostname_unicode(
             lpBuffer,
             nSize,
-            |buf, size| original(buf, size),
+            || original(lpBuffer, nSize),
+            || get_remote_hostname(true),
             "GetComputerNameW",
+            ERROR_BUFFER_OVERFLOW,
         )
     }
 }
@@ -1303,35 +1245,15 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
     lpBuffer: *mut i8,
     nSize: *mut u32,
 ) -> i32 {
-    use winapi::um::{errhandlingapi::SetLastError, sysinfoapi::*};
+    use winapi::um::sysinfoapi::*;
 
     tracing::debug!(
         "GetComputerNameExA hook called with name_type: {}",
         name_type
     );
+    let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
 
-    const ERROR_MORE_DATA: u32 = 234;
-    const ERROR_INVALID_PARAMETER: u32 = 87;
-
-    // Validate input parameters first
-    if nSize.is_null() {
-        unsafe {
-            SetLastError(ERROR_INVALID_PARAMETER);
-        }
-        // FALSE
-        return 0;
-    }
-
-    // Handle invalid name_type (ComputerNameMax and beyond)
-    if name_type >= ComputerNameMax {
-        unsafe {
-            SetLastError(ERROR_INVALID_PARAMETER);
-        }
-        // FALSE
-        return 0;
-    }
-
-    // For hostname-related types that Python uses, try to return our remote hostname
+    // supported name types for hostname interception
     let should_intercept = matches!(
         name_type,
         ComputerNameDnsHostname
@@ -1343,95 +1265,25 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
     );
 
     if should_intercept {
-        // Get hostname using the centralized helper function
-        let hostname_to_return = match hostname::get_hostname_for_name_type(name_type) {
-            Some(hostname) => {
-                tracing::debug!(
-                    "GetComputerNameExA: got hostname for name_type {}: '{}'",
-                    name_type,
-                    hostname
-                );
-                hostname
-            }
-            None => {
-                tracing::debug!(
-                    "GetComputerNameExA: no hostname available for name_type {}, falling back to original",
-                    name_type
-                );
-                // Fallback to original function
-                let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
-                return unsafe { original(name_type, lpBuffer, nSize) };
-            }
-        };
-
-        let dns_bytes = hostname_to_return.as_bytes();
-        // Size without null terminator
-        let required_size = dns_bytes.len();
-        let current_buffer_size = unsafe { *nSize } as usize;
-
-        tracing::debug!(
-            "GetComputerNameExA: hostname_to_return='{}', len={}, buffer_size={}",
-            hostname_to_return,
-            required_size,
-            current_buffer_size
+        return handle_hostname_ansi(
+            lpBuffer,
+            nSize,
+            || unsafe { original(name_type, lpBuffer, nSize) },
+            || hostname::get_hostname_for_name_type(name_type),
+            "GetComputerNameExA",
+            ERROR_MORE_DATA,
+            // If the function succeeds, the return value is a nonzero value.
+            // If the function fails, the return value is zero.
+            (1, 0),
         );
-
-        // Check if buffer is large enough (needs space for characters + null
-        // terminator)
-        if current_buffer_size <= required_size {
-            // Buffer too small - set required size and return ERROR_MORE_DATA
-            unsafe {
-                // Include null terminator in required size
-                *nSize = (required_size + 1) as u32;
-            }
-            tracing::debug!(
-                "GetComputerNameExA: buffer too small for name_type {}, need {} chars, have {}",
-                name_type,
-                required_size + 1,
-                current_buffer_size
-            );
-            unsafe {
-                SetLastError(ERROR_MORE_DATA);
-            }
-            // FALSE
-            return 0;
-        }
-
-        // Buffer is large enough - copy the hostname
-        if !lpBuffer.is_null() && current_buffer_size > required_size {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    dns_bytes.as_ptr(),
-                    lpBuffer as *mut u8,
-                    dns_bytes.len(),
-                );
-                // Add null terminator - safe because we verified buffer size above
-                *(lpBuffer.add(dns_bytes.len())) = 0;
-                // Set actual length (excluding null terminator)
-                *nSize = required_size as u32;
-            }
-            tracing::debug!(
-                "GetComputerNameExA: returning remote hostname for name_type {}: '{}' ({} chars)",
-                name_type,
-                hostname_to_return,
-                required_size
-            );
-            // TRUE - Success
-            return 1;
-        } else {
-            // Invalid buffer pointer
-            unsafe {
-                SetLastError(ERROR_INVALID_PARAMETER);
-            }
-            // FALSE
-            return 0;
-        }
     }
 
-    // For domain types, non-intercepted name types, or when feature disabled, call original
-    // function
-    let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
-    unsafe { original(name_type, lpBuffer, nSize) }
+    // forward non-supported name_types to original func
+    tracing::debug!(
+        "GetComputerNameExW: unsupported name_type {}, falling back to original",
+        name_type
+    );
+    return unsafe { original(name_type, lpBuffer, nSize) };
 }
 
 /// Windows kernel32 hook for GetComputerNameExW
@@ -1441,119 +1293,47 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
     lpBuffer: *mut u16,
     nSize: *mut u32,
 ) -> i32 {
-    // 0x000000EA
-    const ERROR_MORE_DATA: u32 = 234;
-    const ERROR_INVALID_PARAMETER: u32 = 87;
+    use winapi::um::sysinfoapi::*;
+    let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
 
-    // Validate input parameters first
-    if nSize.is_null() {
-        unsafe {
-            SetLastError(ERROR_INVALID_PARAMETER);
-        }
-        // FALSE
-        return 0;
-    }
+    // supported name types for hostname interception
+    let should_intercept = matches!(
+        name_type,
+        ComputerNameDnsHostname
+            | ComputerNameDnsFullyQualified
+            | ComputerNamePhysicalDnsHostname
+            | ComputerNamePhysicalDnsFullyQualified
+            | ComputerNameNetBIOS
+            | ComputerNamePhysicalNetBIOS
+    );
 
-    // Handle valid name types (0-7)
-    if name_type < ComputerNameMax {
-        // Check if hostname feature is enabled
-        let hostname_enabled = layer_setup().layer_config().feature.hostname;
-        tracing::debug!(
-            "GetComputerNameExW: hostname feature enabled: {}",
-            hostname_enabled
+    if should_intercept {
+        return handle_hostname_unicode(
+            lpBuffer,
+            nSize,
+            || unsafe { original(name_type, lpBuffer, nSize) },
+            || hostname::get_hostname_for_name_type(name_type),
+            "GetComputerNameExW",
+            ERROR_MORE_DATA,
         );
-
-        if hostname_enabled {
-            // Get hostname using the centralized helper function
-            let result_name = match hostname::get_hostname_for_name_type(name_type) {
-                Some(hostname) => {
-                    tracing::debug!(
-                        "GetComputerNameExW: got hostname for name_type {}: '{}'",
-                        name_type,
-                        hostname
-                    );
-                    hostname
-                }
-                None => {
-                    tracing::debug!(
-                        "GetComputerNameExW: no hostname available for name_type {}, falling back to original",
-                        name_type
-                    );
-                    // Fallback to original function
-                    let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
-                    return unsafe { original(name_type, lpBuffer, nSize) };
-                }
-            };
-
-            // Convert to UTF-16
-            let name_utf16: Vec<u16> = result_name.encode_utf16().collect();
-            let required_size = name_utf16.len();
-
-            let current_buffer_size = unsafe { *nSize } as usize;
-
-            // Check if buffer is large enough (needs space for UTF-16 chars + null terminator)
-            if current_buffer_size <= required_size {
-                // Buffer too small - set required size and return ERROR_MORE_DATA
-                unsafe {
-                    // Include null terminator
-                    *nSize = (required_size + 1) as u32;
-                }
-                tracing::debug!(
-                    "GetComputerNameExW: buffer too small, need {} chars, have {}",
-                    required_size + 1,
-                    current_buffer_size
-                );
-                unsafe { SetLastError(ERROR_MORE_DATA) };
-                // FALSE
-                return 0;
-            }
-
-            // Buffer is large enough - copy the hostname
-            if !lpBuffer.is_null() && current_buffer_size > required_size {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(name_utf16.as_ptr(), lpBuffer, name_utf16.len());
-                    // Add UTF-16 null terminator - safe because we verified buffer size above
-                    *(lpBuffer.add(name_utf16.len())) = 0;
-                    // Set actual length (excluding null terminator)
-                    *nSize = name_utf16.len() as u32;
-                }
-                tracing::debug!(
-                    "GetComputerNameExW: returning remote hostname for type {}: '{}' ({} chars)",
-                    name_type,
-                    result_name,
-                    name_utf16.len()
-                );
-                // TRUE - Success
-                return 1;
-            } else {
-                // Invalid buffer pointer
-                unsafe {
-                    SetLastError(ERROR_INVALID_PARAMETER);
-                }
-                // FALSE
-                return 0;
-            }
-        }
-
-        // If hostname feature is disabled, fall back to original
-        tracing::debug!("GetComputerNameExW: hostname feature disabled, falling back to original");
-        let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
-        return unsafe { original(name_type, lpBuffer, nSize) };
     }
 
-    // Invalid name_type (ComputerNameMax and above)
-    unsafe {
-        SetLastError(ERROR_INVALID_PARAMETER);
-    }
-    0 // FALSE
+    // forward non-supported name_types to original func
+    tracing::debug!(
+        "GetComputerNameExW: unsupported name_type {}, falling back to original",
+        name_type
+    );
+    return unsafe { original(name_type, lpBuffer, nSize) };
 }
 
 /// Hook for gethostbyname to handle DNS resolution of our modified hostname
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT {
+    let fallback_to_original = || unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) };
+
     if name.is_null() {
         tracing::debug!("gethostbyname: name is null, calling original");
-        return unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) };
+        return fallback_to_original();
     }
 
     // SAFETY: Validate the string pointer before dereferencing
@@ -1561,39 +1341,66 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         Ok(s) => s,
         Err(_) => {
             tracing::debug!("gethostbyname: invalid UTF-8 in hostname, calling original");
-            return unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) };
+            return fallback_to_original();
         }
     };
 
     tracing::debug!("gethostbyname: resolving hostname: {}", hostname_cstr);
 
     // Check if this is our remote hostname
-    if is_remote_hostname(hostname_cstr) {
+    if is_remote_hostname(hostname_cstr.to_string()) {
         tracing::debug!(
             "gethostbyname: intercepting resolution for our hostname: {}",
             hostname_cstr
         );
+        // TODO - return intproxy ip? for now let it resolve,
+        //  it should work from local/remote
+    }
 
-        // Try to resolve with fallback logic
-        if let Some(fallback_hostname) = resolve_hostname_with_fallback(hostname_cstr) {
-            let result =
-                unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(fallback_hostname.as_ptr()) };
-            if !result.is_null() {
-                tracing::debug!("gethostbyname: successfully resolved with fallback");
+    // Check if we should resolve this hostname remotely using the DNS selector
+    let should_resolve_remotely = {
+        let result = layer_setup()
+            .dns_selector()
+            .should_resolve_remotely(hostname_cstr, 0);
+        tracing::debug!(
+            "is_remote_hostname DNS selector check for '{}': {}",
+            hostname_cstr,
+            result
+        );
+        result
+    };
 
-                // Cache this mapping for future use with the unified cache (IP -> hostname)
-                if let Some(ip_str) = unsafe { extract_ip_from_hostent(result) }
-                    && let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>()
-                {
-                    update_dns_reverse_mapping(ip_addr, hostname_cstr.to_string());
-                    tracing::debug!(
-                        "gethostbyname: cached mapping {} -> {}",
-                        ip_addr,
-                        hostname_cstr
-                    );
-                }
-                return result;
+    tracing::warn!(
+        "DNS selector decision for {}: resolve_remotely={}",
+        hostname_cstr,
+        should_resolve_remotely
+    );
+
+    if !should_resolve_remotely {
+        return fallback_to_original();
+    }
+    // Try to resolve the hostname using mirrord's remote DNS resolution
+    match remote_dns_resolve_via_proxy(hostname_cstr) {
+        Ok(results) => {
+            if !results.is_empty() {
+                // Use the first IP address from the results
+                let (_name, ip) = &results[0];
+                tracing::debug!(
+                    "Remote DNS resolution successful: {} -> {}",
+                    hostname_cstr,
+                    ip
+                );
+                return &results[0];
             }
+            tracing::warn!(
+                "Remote DNS resolution returned empty results for {}",
+                hostname_cstr
+            );
+            // fallback to original
+        }
+        Err(e) => {
+            tracing::warn!("Remote DNS resolution failed for {}: {}", hostname_cstr, e);
+            // fallback to original
         }
     }
 
@@ -1602,7 +1409,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         "gethostbyname: calling original function for hostname: {}",
         hostname_cstr
     );
-    unsafe { GET_HOST_BY_NAME_ORIGINAL.get().unwrap()(name) }
+    return fallback_to_original();
 }
 
 /// Hook for getaddrinfo to handle DNS resolution with full mirrord functionality

@@ -19,10 +19,6 @@ use mirrord_intproxy_protocol::{
 
 use crate::error::{HookError, HookResult, ProxyError, ProxyResult};
 
-/// Efficient result type for internal proxy operations to reduce memory usage
-/// Now that HookResult uses `Box<HookError>` by default, we can use it directly
-type ProxyConnResult<T> = HookResult<T>;
-
 /// Global proxy connection instance, shared across the layer
 pub static PROXY_CONNECTION: std::sync::OnceLock<ProxyConnection> = std::sync::OnceLock::new();
 
@@ -66,7 +62,7 @@ impl ProxyConnection {
                 proxy_addr,
             })
         } else {
-            Err(Box::new(ProxyError::UnexpectedResponse(response)))
+            Err(ProxyError::UnexpectedResponse(response))
         }
     }
 
@@ -91,9 +87,7 @@ impl ProxyConnection {
     pub fn receive(&self, response_id: u64) -> ProxyResult<ProxyToLayerMessage> {
         let response = self.responses.lock()?.receive(response_id)?;
         match response {
-            ProxyToLayerMessage::ProxyFailed(error_msg) => {
-                Err(Box::new(ProxyError::ProxyFailure(error_msg)))
-            }
+            ProxyToLayerMessage::ProxyFailed(error_msg) => Err(ProxyError::ProxyFailure(error_msg)),
             _ => Ok(response),
         }
     }
@@ -105,7 +99,7 @@ impl ProxyConnection {
     {
         let response_id = self.send(request.wrap())?;
         let response = self.receive(response_id)?;
-        T::try_unwrap_response(response).map_err(|e| Box::new(ProxyError::UnexpectedResponse(e)))
+        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
     }
 
     pub fn make_request_no_response<T: IsLayerRequest + Debug>(
@@ -160,16 +154,7 @@ impl ResponseManager {
 }
 
 /// Generic helper to make proxy requests with consistent error handling
-pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
-where
-    T: IsLayerRequestWithResponse + Debug,
-    T::Response: Debug,
-{
-    make_proxy_request_with_response_impl(request)
-}
-
-/// Internal implementation using ProxyConnResult for memory efficiency
-fn make_proxy_request_with_response_impl<T>(request: T) -> ProxyConnResult<T::Response>
+pub fn make_proxy_request_with_response<T>(request: T) -> ProxyResult<T::Response>
 where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
@@ -177,12 +162,10 @@ where
     PROXY_CONNECTION
         .get()
         .ok_or_else(|| {
-            Box::new(HookError::ProxyError(ProxyError::IoFailed(
-                std::io::Error::new(
-                    std::io::ErrorKind::NotConnected,
-                    "Cannot get proxy connection",
-                ),
-            )))
+            ProxyError::IoFailed(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "Cannot get proxy connection",
+            ))
         })?
         .make_request_with_response(request)
         .map_err(|e| e.into())
@@ -193,23 +176,14 @@ where
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
-    make_proxy_request_no_response_impl(request)
-}
-
-/// Internal implementation using ProxyConnResult for memory efficiency
-fn make_proxy_request_no_response_impl<T: IsLayerRequest + Debug>(
-    request: T,
-) -> ProxyConnResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     #[allow(static_mut_refs)]
     PROXY_CONNECTION
         .get()
         .ok_or_else(|| {
-            Box::new(HookError::ProxyError(ProxyError::IoFailed(
-                std::io::Error::new(
-                    std::io::ErrorKind::NotConnected,
-                    "Cannot get proxy connection",
-                ),
+            HookError::ProxyError(ProxyError::IoFailed(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "Cannot get proxy connection",
             )))
         })?
         .make_request_no_response(request)

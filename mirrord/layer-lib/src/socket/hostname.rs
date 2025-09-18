@@ -3,26 +3,30 @@
 //! This module provides a cross-platform interface for managing hostname resolution
 //! that can be used by both the Unix layer and the Windows layer-win.
 
-use std::ffi::CString;
-
 use tracing::trace;
 
 use crate::{
-    common::proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
-    error::{HookError, HookResult},
+    error::HostnameResolveError,
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    setup::layer_config,
+    socket::dns::update_dns_reverse_mapping,
 };
 
-/// Efficient result type for internal file operations
-type FileResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+// HostnameResult states:
+//  - Ok(Some(hostname)) - Hostname was successfully resolved
+//  - Ok(None) - Hostname resolution was not attempted or failed, local fallback suggested
+//  - Err(HostnameResolveError) - An error occurred during hostname resolution
+pub type HostnameResult<T = Option<String>, E = HostnameResolveError> = Result<T, E>;
 
 /// RAII wrapper for remote file operations that automatically closes the file when dropped
 struct ManagedRemoteFile {
+    path: String,
     fd: u64,
 }
 
 impl ManagedRemoteFile {
     /// Open a remote file for reading
-    fn open(file_path: &str) -> FileResult<Self> {
+    fn open(file_path: &str) -> HostnameResult<Self> {
         use std::path::PathBuf;
 
         use mirrord_protocol::file::{OpenFileRequest, OpenOptionsInternal};
@@ -39,16 +43,21 @@ impl ManagedRemoteFile {
             },
         };
 
-        let fd = make_proxy_request_with_response(open_request)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+        let fd = make_proxy_request_with_response(open_request)?
+            .map_err(|e| HostnameResolveError::FileOpenError {
+                path: file_path.to_string(),
+                details: e.to_string(),
+            })?
             .fd;
 
-        Ok(Self { fd })
+        Ok(Self {
+            fd,
+            path: file_path.to_string(),
+        })
     }
 
     /// Read the entire file content up to max_size bytes
-    fn read_all(&self, max_size: u64) -> FileResult<Vec<u8>> {
+    fn read_all(&self, max_size: u64) -> HostnameResult<Vec<u8>> {
         use mirrord_protocol::file::ReadFileRequest;
 
         let read_request = ReadFileRequest {
@@ -56,9 +65,11 @@ impl ManagedRemoteFile {
             buffer_size: max_size,
         };
 
-        let config_bytes = make_proxy_request_with_response(read_request)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+        let config_bytes = make_proxy_request_with_response(read_request)?
+            .map_err(|e| HostnameResolveError::FileReadError {
+                path: self.path.clone(),
+                details: e.to_string(),
+            })?
             .bytes
             .to_vec();
 
@@ -75,125 +86,71 @@ impl Drop for ManagedRemoteFile {
     }
 }
 
-/// Error type for hostname operations
-#[derive(Debug, thiserror::Error)]
-pub enum HostnameError {
-    #[error("Should use local hostname")]
-    UseLocal,
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Invalid hostname data")]
-    InvalidData,
-    #[error("Protocol error: {0}")]
-    Protocol(String),
-}
-
-/// Result type for hostname resolution that can indicate different outcomes
-#[derive(Debug)]
-pub enum HostnameResult {
-    /// Successfully resolved hostname
-    Success(CString),
-    /// Should bypass to local hostname resolution
-    UseLocal,
-    /// An error occurred
-    Error(HostnameError),
-}
-
 /// Trait for hostname resolution backend that can be implemented differently
 /// for Unix and Windows layers depending on their specific requirements.
 pub trait HostnameResolver {
     /// Fetch hostname from the remote agent
-    fn fetch_remote_hostname(&self) -> HostnameResult;
+    fn fetch_remote_hostname(check_enabled: bool) -> HostnameResult;
 
-    /// Check if local hostname should be used instead of remote
-    fn should_use_local_hostname(&self) -> bool;
-}
-
-/// Platform-agnostic hostname resolver that works on both Unix and Windows.
-/// This resolver tries multiple sources to get the remote hostname.
-pub struct DefaultHostnameResolver {
-    /// Whether to use local hostname instead of remote
-    use_local: bool,
-}
-
-impl DefaultHostnameResolver {
-    /// Create a new hostname resolver
-    pub fn new(use_local: bool) -> Self {
-        Self { use_local }
-    }
-
-    /// Create a resolver that prefers remote hostname
-    pub fn remote() -> Self {
-        Self::new(false)
-    }
-
-    /// Create a resolver that prefers local hostname
-    pub fn local() -> Self {
-        Self::new(true)
-    }
-}
-
-impl HostnameResolver for DefaultHostnameResolver {
-    fn fetch_remote_hostname(&self) -> HostnameResult {
-        trace!("DefaultHostnameResolver: Starting remote hostname fetch...");
-
-        // Check for target hostname from environment (what mirrord sets from the target pod)
-        if let Ok(hostname) = std::env::var("HOSTNAME") {
-            trace!("Using target hostname from HOSTNAME env var: {}", hostname);
-            if let Ok(cstring) = CString::new(hostname) {
-                return HostnameResult::Success(cstring);
-            }
+    fn is_enabled(check_enabled: bool) -> bool {
+        // Check if hostname feature is enabled
+        let hostname_enabled = layer_config().feature.hostname;
+        if check_enabled && !hostname_enabled {
+            tracing::debug!("Hostname feature disabled");
+            return false;
         }
 
-        // Check for override environment variable as fallback
+        true
+    }
+}
+
+/// Unix-specific hostname resolver that fetches hostname from remote /etc/hostname
+/// Works for both Unix and Windows clients since remote target is always Linux
+pub struct UnixHostnameResolver;
+
+impl HostnameResolver for UnixHostnameResolver {
+    fn fetch_remote_hostname(check_enabled: bool) -> HostnameResult {
+        // Check if hostname feature is enabled
+        if !Self::is_enabled(check_enabled) {
+            tracing::debug!("Hostname feature disabled");
+            return Ok(None);
+        }
+
         if let Ok(hostname) = std::env::var("MIRRORD_OVERRIDE_HOSTNAME") {
             trace!(
-                "Using hostname from MIRRORD_OVERRIDE_HOSTNAME env var: {}",
+                "UnixHostnameResolver: Using hostname from MIRRORD_OVERRIDE_HOSTNAME env var: {}",
                 hostname
             );
-            if let Ok(cstring) = CString::new(hostname) {
-                return HostnameResult::Success(cstring);
-            }
+            return Ok(Some(hostname));
         }
 
-        // If no environment variables are set, fall back to local hostname
-        HostnameResult::UseLocal
-    }
-
-    fn should_use_local_hostname(&self) -> bool {
-        self.use_local
+        // Try to fetch hostname from remote /etc/hostname via ProxyConnection
+        // hostnames should never exceed 256 bytes
+        let hostname_bytes = read_remote_file_via_proxy("/etc/hostname", 256)?;
+        let hostname = String::from_utf8_lossy(&hostname_bytes);
+        trace!(
+            "UnixHostnameResolver: Successfully fetched hostname via proxy: {}",
+            hostname
+        );
+        Ok(Some(hostname.to_string()))
     }
 }
 
-/// Get hostname using the provided resolver.
+/// Get hostname using the Unix resolver.
 /// This function always calls the resolver to get the most up-to-date hostname
 /// instead of using any cached values.
-pub fn get_hostname<R: HostnameResolver>(resolver: &R) -> HostnameResult {
-    if resolver.should_use_local_hostname() {
-        return HostnameResult::UseLocal;
-    }
-
-    resolver.fetch_remote_hostname()
+pub fn get_remote_hostname(check_enabled: bool) -> HostnameResult {
+    UnixHostnameResolver::fetch_remote_hostname(check_enabled)
 }
 
 /// Generic helper to read a file from the remote target via ProxyConnection
-fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HookResult<Vec<u8>> {
-    let result: FileResult<Vec<u8>> = (|| {
-        let file = ManagedRemoteFile::open(file_path)?;
-        file.read_all(max_size)
-    })();
-
-    result.map_err(|e| {
-        Box::new(HookError::IO(std::io::Error::other(format!(
-            "Failed to read file {}: {}",
-            file_path, e
-        ))))
-    })
+fn read_remote_file_via_proxy(file_path: &str, max_size: u64) -> HostnameResult<Vec<u8>> {
+    ManagedRemoteFile::open(file_path)?.read_all(max_size)
 }
 
 /// Fetch Samba NetBIOS configuration from remote target via ProxyConnection by reading
 /// /etc/samba/smb.conf
-pub fn fetch_samba_config_via_proxy() -> HookResult<Option<String>> {
+pub fn get_remote_netbios_name() -> HostnameResult<Option<String>> {
     // Read /etc/samba/smb.conf from the remote target (max 64KB should be enough)
     let config_bytes = read_remote_file_via_proxy("/etc/samba/smb.conf", 65536)?;
 
@@ -210,7 +167,7 @@ pub fn fetch_samba_config_via_proxy() -> HookResult<Option<String>> {
 /// - netbios name = HOSTNAME
 /// - netbios name=HOSTNAME
 /// - workgroup = WORKGROUP (fallback)
-pub fn parse_samba_netbios_name(config: &str) -> Option<String> {
+fn parse_samba_netbios_name(config: &str) -> Option<String> {
     let mut in_global_section = false;
     let mut netbios_name = None;
     let mut workgroup = None;
@@ -262,7 +219,9 @@ pub fn parse_samba_netbios_name(config: &str) -> Option<String> {
 }
 
 /// Perform remote DNS resolution via ProxyConnection using mirrord protocol
-pub fn remote_dns_resolve_via_proxy(hostname: &str) -> HookResult<Vec<(String, std::net::IpAddr)>> {
+pub fn remote_dns_resolve_via_proxy(
+    hostname: &str,
+) -> HostnameResult<Vec<(String, std::net::IpAddr)>> {
     use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType};
 
     let request = GetAddrInfoRequestV2 {
@@ -275,9 +234,17 @@ pub fn remote_dns_resolve_via_proxy(hostname: &str) -> HookResult<Vec<(String, s
     };
 
     // DNS requests have a different response type, so we need to handle them directly
-    let addr_info_list = make_proxy_request_with_response(request)?.0?;
+    let addr_info_list = make_proxy_request_with_response(request)?.0.map_err(|e| {
+        HostnameResolveError::DnsResolutionFailed {
+            hostname: hostname.to_string(),
+            details: e.to_string(),
+        }
+    })?;
     Ok(addr_info_list
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, ip))
+        .map(|LookupRecord { name, ip }| {
+            update_dns_reverse_mapping(ip, name.clone());
+            (name, ip)
+        })
         .collect())
 }
