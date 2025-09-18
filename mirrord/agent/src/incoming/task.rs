@@ -88,7 +88,7 @@ where
             internal_rx,
             internal_tx,
             tls_store,
-            config: config,
+            config,
         };
 
         let task_error = TaskError(error_rx.shared());

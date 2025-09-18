@@ -447,7 +447,6 @@ async fn header_injection(
         http_kind,
         RedirectorTaskConfig {
             inject_headers: true,
-            ..RedirectorTaskConfig::from_env()
         },
     )
     .await;
