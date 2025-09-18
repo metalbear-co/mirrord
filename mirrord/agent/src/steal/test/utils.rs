@@ -198,6 +198,7 @@ impl TestRequest {
     const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("request-id");
     pub const USER_ID_HEADER: HeaderName = HeaderName::from_static("user-id");
     const HANDLED_BY_HEADER: HeaderName = HeaderName::from_static("handled-by");
+    pub const MIRRORD_AGENT_HEADER: HeaderName = HeaderName::from_static("mirrord-agent");
 
     fn as_hyper_request(&self) -> Request<BoxBody<Bytes, hyper::Error>> {
         let uri = format!(
@@ -493,9 +494,21 @@ impl TestRequest {
         sender: &mut HttpSender<BoxBody<Bytes, hyper::Error>>,
         expect_handled_by: ClientId,
     ) {
+        self.send_verify(sender, expect_handled_by, |_| ()).await
+    }
+
+    pub async fn send_verify<F>(
+        &self,
+        sender: &mut HttpSender<BoxBody<Bytes, hyper::Error>>,
+        expect_handled_by: ClientId,
+        verify: F,
+    ) where
+        F: FnOnce(&Response<Incoming>),
+    {
         println!("[{}:{}] Sending request: {self:?}", file!(), line!());
         let request = self.as_hyper_request();
         let mut response = sender.send(request).await.unwrap();
+        verify(&response);
 
         println!(
             "[{}:{}] Got response: {response:?}, expected {self:?}",
