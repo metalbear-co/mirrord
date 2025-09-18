@@ -157,6 +157,7 @@ pub mod test {
     use super::{PortRedirector, Redirected};
 
     /// Implementation of [`PortRedirector`] that can be used in unit tests.
+    /// Receives connections sent from [`DummyConnectionTx`].
     pub struct DummyRedirector {
         state: watch::Sender<DummyRedirectorState>,
         conn_rx: mpsc::Receiver<Redirected>,
@@ -262,6 +263,7 @@ pub mod test {
         }
     }
 
+    /// Used for simulating incoming connections from the outside world.
     pub struct DummyConnectionTx {
         tx: mpsc::Sender<Redirected>,
         v4_listener: Option<TcpListener>,
