@@ -33,7 +33,7 @@ impl BgTaskStatus {
     ///
     /// Should the future fail or panic, this function will return
     /// [`AgentError::BackgroundTaskFailed`].
-    #[tracing::instrument(level = Level::DEBUG, fields(rt), err)]
+    #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), err)]
     pub(crate) async fn wait(&self) -> Result<(), AgentError> {
         let handle = tokio::runtime::Handle::current();
         tracing::Span::current().record("rt", &format!("{handle:?}"));
@@ -41,23 +41,14 @@ impl BgTaskStatus {
 
         match self.result.clone().await {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => {
-                // TODO(alex) [high]: The problem can be seen from here.
-                // Go to the `DnsTask`, as it's one of the panicked tasks, try to see where/when it
-                // panics and why, adding logs.
-                tracing::warn!(?error, "Task is panicking in `wait` for some reason...");
-                Err(AgentError::BackgroundTaskFailed {
-                    task: self.task_name,
-                    error,
-                })
-            }
-            Err(error) => {
-                tracing::warn!(?error, "Task is panicking in `wait` for recv");
-                Err(AgentError::BackgroundTaskFailed {
-                    task: self.task_name,
-                    error: Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>,
-                })
-            }
+            Ok(Err(error)) => Err(AgentError::BackgroundTaskFailed {
+                task: self.task_name,
+                error,
+            }),
+            Err(..) => Err(AgentError::BackgroundTaskFailed {
+                task: self.task_name,
+                error: Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>,
+            }),
         }
     }
 
@@ -66,7 +57,12 @@ impl BgTaskStatus {
     /// This function always returns [`AgentError::BackgroundTaskFailed`]. Use it when the task is
     /// not expected to finish yet, e.g. when we send a message to the `BackgroundTask` through its
     /// channel, and `send` returns an error.
+    #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), ret)]
     pub(crate) async fn wait_assert_running(&self) -> AgentError {
+        let handle = tokio::runtime::Handle::current();
+        tracing::Span::current().record("rt", &format!("{handle:?}"));
+        tracing::Span::current().record("rt_metrics", &format!("{:?}", handle.metrics()));
+
         match self.result.clone().await {
             Ok(Ok(())) => AgentError::BackgroundTaskFailed {
                 task: self.task_name,
@@ -101,14 +97,8 @@ impl IntoStatus for JoinHandle<()> {
         tokio::spawn(async move {
             let result = match self.await {
                 Ok(()) => Ok(()),
-                Err(fail) => {
-                    tracing::warn!(?fail, task_name, "something failed in the task");
-
-                    Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>)
-                }
+                Err(..) => Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>),
             };
-
-            tracing::debug!(?result, task_name, "what's the result we have in the task?");
 
             let _ = result_tx.send(result);
         });
@@ -132,19 +122,9 @@ where
         tokio::spawn(async move {
             let result = match self.await {
                 Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => {
-                    tracing::warn!(?e, task_name, "it's ok, but it's actually an error");
-
-                    Err(Arc::new(e) as Arc<dyn Error + Send + Sync>)
-                }
-                Err(fail) => {
-                    tracing::warn!(?fail, task_name, "something failed in the task");
-
-                    Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>)
-                }
+                Ok(Err(e)) => Err(Arc::new(e) as Arc<dyn Error + Send + Sync>),
+                Err(fail) => Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>),
             };
-
-            tracing::debug!(?result, task_name, "what's the result we have in the task?");
 
             let _ = result_tx.send(result);
         });

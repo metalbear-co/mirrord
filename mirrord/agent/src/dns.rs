@@ -134,7 +134,7 @@ impl DnsWorker {
     /// We could probably cache results here.
     /// We cannot cache the [`TokioAsyncResolver`] itself, becaues the configuration in `etc` may
     /// change.
-    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
         etc_path: PathBuf,
         request: GetAddrInfoRequestV2,
@@ -195,7 +195,7 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
-    #[tracing::instrument(level = Level::DEBUG, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     fn handle_message(&mut self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
@@ -214,7 +214,7 @@ impl DnsWorker {
         DNS_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[tracing::instrument(level = Level::INFO, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) async fn run(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {

@@ -24,7 +24,7 @@ use tokio::{
     signal::unix::SignalKind,
     sync::mpsc::Sender,
     task::JoinSet,
-    time::{Duration, sleep, timeout},
+    time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, debug, error, trace, warn};
@@ -761,53 +761,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
 
-    // let (f_status, f_command_tx) = {
-    //     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<i32>(1000);
-
-    //     let task_status = crate::task::status::IntoStatus::into_status(
-    //         state.network_runtime.handle().spawn(async move {
-    //             tracing::debug!("Forever will start...");
-    //             loop {
-    //                 sleep(Duration::from_secs(1)).await;
-    //             }
-    //             tracing::debug!("Forever is ending...");
-    //             Ok::<_, std::io::Error>(())
-    //         }),
-    //         "DnsTask",
-    //     );
-
-    //     (task_status, command_tx)
-    // };
-    // let f_bg = BackgroundTask::Running(f_status, f_command_tx);
-
-    tracing::debug!("Now creating the other test task ...");
-
-    // let (q_status, q_command_tx) = {
-    //     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<i32>(1000);
-
-    //     let task_status = crate::task::status::IntoStatus::into_status(
-    //         state.network_runtime.handle().spawn(async move {
-    //             tracing::debug!("Waiting seconds...");
-    //             tokio::time::sleep(Duration::from_secs(60)).await;
-
-    //             tracing::debug!("done - Waiting seconds...");
-    //             Ok::<_, std::io::Error>(())
-    //         }),
-    //         "DnsTask",
-    //     );
-
-    //     (task_status, command_tx)
-    // };
-
-    // let q_bg = BackgroundTask::Running(q_status, q_command_tx);
-
     let bg_tasks = BackgroundTasks {
         sniffer,
         stealer,
         dns,
         mirror_handle,
-        // forever: f_bg,
-        // dies: q_bg,
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -891,17 +849,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
     mem::drop(cancel_guard);
 
-    // let BackgroundTasks {
-    //     sniffer,
-    //     stealer,
-    //     dns,
-    //     // forever,
-    //     // dies,
-    //     ..
-    // } = bg_tasks;
-
     let _ = timeout(
-        Duration::from_secs(args.exit_timeout.unwrap_or(60)),
+        Duration::from_secs(args.exit_timeout.unwrap_or(5)),
         async move {
             tokio::join!(
                 bg_tasks.sniffer.wait().inspect_err(|error| {
@@ -913,19 +862,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 bg_tasks.dns.wait().inspect_err(|error| {
                     error!(%error, "start_agent -> DNS task failed");
                 }),
-                // forever.wait().inspect_err(|error| {
-                //     error!(%error, "start_agent -> forever task failed");
-                // }),
-                // dies.wait().inspect_err(|error| {
-                //     error!(%error, "start_agent -> dies task failed");
-                // }),
             )
         },
     )
     .await
     .inspect_err(|fail| tracing::warn!(?fail, "Timed out waiting for the agent tasks to finish."));
 
-    // drop(bg_tasks);
     trace!("start_agent -> Agent shutdown");
 
     Ok(())

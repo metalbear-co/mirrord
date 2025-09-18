@@ -3,7 +3,7 @@
 //! Verify the whole flow from the [`TcpStealerApi`](super::api::TcpStealerApi)
 //! to the [`RedirectorTask`](crate::incoming::RedirectorTask).
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use futures::StreamExt;
 use mirrord_protocol::{
