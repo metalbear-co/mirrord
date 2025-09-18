@@ -444,6 +444,7 @@ mod test {
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
         cancellation_token: CancellationToken,
+        #[allow(dead_code)]
         runtime: BgTaskRuntime,
     }
 

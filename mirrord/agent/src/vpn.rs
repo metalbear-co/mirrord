@@ -5,7 +5,6 @@ use std::{
     fmt,
     io::{self, Read},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
 };
 
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};

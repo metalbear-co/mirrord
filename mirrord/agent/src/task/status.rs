@@ -36,8 +36,8 @@ impl BgTaskStatus {
     #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), err)]
     pub(crate) async fn wait(&self) -> Result<(), AgentError> {
         let handle = tokio::runtime::Handle::current();
-        tracing::Span::current().record("rt", &format!("{handle:?}"));
-        tracing::Span::current().record("rt_metrics", &format!("{:?}", handle.metrics()));
+        tracing::Span::current().record("rt", format!("{handle:?}"));
+        tracing::Span::current().record("rt_metrics", format!("{:?}", handle.metrics()));
 
         match self.result.clone().await {
             Ok(Ok(())) => Ok(()),
@@ -60,8 +60,8 @@ impl BgTaskStatus {
     #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), ret)]
     pub(crate) async fn wait_assert_running(&self) -> AgentError {
         let handle = tokio::runtime::Handle::current();
-        tracing::Span::current().record("rt", &format!("{handle:?}"));
-        tracing::Span::current().record("rt_metrics", &format!("{:?}", handle.metrics()));
+        tracing::Span::current().record("rt", format!("{handle:?}"));
+        tracing::Span::current().record("rt_metrics", format!("{:?}", handle.metrics()));
 
         match self.result.clone().await {
             Ok(Ok(())) => AgentError::BackgroundTaskFailed {
@@ -123,7 +123,7 @@ where
             let result = match self.await {
                 Ok(Ok(())) => Ok(()),
                 Ok(Err(e)) => Err(Arc::new(e) as Arc<dyn Error + Send + Sync>),
-                Err(fail) => Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>),
+                Err(..) => Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>),
             };
 
             let _ = result_tx.send(result);

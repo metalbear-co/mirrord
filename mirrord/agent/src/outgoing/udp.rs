@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::Arc,
 };
 
 use bytes::{Bytes, BytesMut};
