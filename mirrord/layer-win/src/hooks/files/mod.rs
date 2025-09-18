@@ -7,8 +7,8 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, FILE_INFORMATION_CLASS, FS_INFORMATION_CLASS,
-    PFILE_BASIC_INFORMATION,
+    _IO_STATUS_BLOCK, FILE_BASIC_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION,
+    FS_INFORMATION_CLASS, PFILE_BASIC_INFORMATION,
 };
 use str_win::u16_buffer_to_string;
 use winapi::{
@@ -24,7 +24,9 @@ use winapi::{
     },
     um::{
         winbase::FILE_TYPE_DISK,
-        winnt::{ACCESS_MASK, FILE_APPEND_DATA, FILE_WRITE_DATA, GENERIC_WRITE},
+        winnt::{
+            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE,
+        },
     },
 };
 
@@ -171,8 +173,10 @@ unsafe extern "system" fn nt_create_file_hook(
                         creation_time: WindowsTime::current().as_file_time(),
                         access_time: WindowsTime::current().as_file_time(),
                         write_time: WindowsTime::current().as_file_time(),
+                        // Data will be retrieved on first read.
+                        data: None,
                         // Xstat request contains the size of the remote file in this field,
-                        size: xstat.size,
+                        data_xstat_size: xstat.size as _,
                         // Cursor is a detail to be maintained by reader, etc. Starts at 0.
                         cursor: 0,
                     })
@@ -241,70 +245,79 @@ unsafe extern "system" fn nt_read_file_hook(
                 return STATUS_ACCESS_VIOLATION;
             }
 
-            // If we're trying to read past end marker.
-            if handle_context.size == 0
-                || (!byte_offset.is_null()
-                    && ((*byte_offset).u().HighPart > 0
-                        || (*byte_offset).u().LowPart as u64 > handle_context.size))
-            {
+            // If data is not present yet, read it once.
+            // NOTE(gabriela): should we either
+            // - do this
+            // - update to seek + read every time ReadFile happens?
+            if handle_context.data.is_none() {
+                let req = make_proxy_request_with_response(ReadFileRequest {
+                    remote_fd: handle_context.fd,
+                    buffer_size: handle_context.data_xstat_size as _,
+                });
+
+                if req.is_err() {
+                    return STATUS_UNEXPECTED_NETWORK_ERROR;
+                }
+
+                let req = req.unwrap();
+
+                match req {
+                    Ok(res) => {
+                        handle_context.data = Some(res.bytes.to_vec());
+                    }
+                    Err(e) => {
+                        eprintln!("{:?}", e);
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
+                }
+            }
+
+            // Update last access time to current time, as we are reading.
+            handle_context.access_time = WindowsTime::current().as_file_time();
+
+            // Data must be guaranteed by the time we get here!
+            let bytes = handle_context.data.as_ref().unwrap();
+
+            if handle_context.cursor >= bytes.len() {
                 (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_END_OF_FILE);
                 (*io_status_block).Information = 0;
 
                 return STATUS_END_OF_FILE;
             }
 
-            // If we ever succesfully receive the request response, the buffer
-            // we receive can never be bigger than `length`.
-            let req = make_proxy_request_with_response(ReadFileRequest {
-                remote_fd: handle_context.fd,
-                buffer_size: length as _,
-            });
+            // Start offset if there's a byte offset.
+            let start_off = if byte_offset.is_null() {
+                handle_context.cursor
+            } else {
+                *(*byte_offset).QuadPart() as _
+            };
 
-            if req.is_err() {
-                return STATUS_UNEXPECTED_NETWORK_ERROR;
+            // Get a slice of the bytes.
+            let bytes = &bytes[start_off as usize..];
+
+            // Calculate target length for copy.
+            // TODO(gabriela): make sure the contiguous memory pages are all fine
+            // using VirtQuery, otherwise return
+            // STATUS_ACCCESS_VIOLATION.
+            let len = usize::min(bytes.len(), length as _);
+
+            // Otherwise, copy the remote received buffer (relative to
+            // fd cursor) to the provided buffer, as far as we can.
+            std::ptr::copy(bytes.as_ptr(), buffer as _, len);
+
+            // We get this information over IRP normally, so need to replicate the
+            // structure in usermode
+            (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+            (*io_status_block).Information = len as _;
+
+            // Update or reset handle context cursor.
+            if byte_offset.is_null() {
+                handle_context.cursor += len;
+            } else {
+                handle_context.cursor = 0;
             }
 
-            let req = req.unwrap();
-
-            match req {
-                Ok(res) => {
-                    // Update last access time to current time, as we are reading.
-                    handle_context.access_time = WindowsTime::current().as_file_time();
-
-                    // If the response's buffer is finally 0, then we finished reading.
-                    if res.bytes.is_empty() {
-                        (*io_status_block).__bindgen_anon_1.Status =
-                            ManuallyDrop::new(STATUS_SUCCESS);
-                        (*io_status_block).Information = 0;
-
-                        return STATUS_SUCCESS;
-                    }
-
-                    // Calculate target length for copy.
-                    // TODO(gabriela): make sure the contiguous memory pages are all fine
-                    // using VirtQuery, otherwise return
-                    // STATUS_ACCCESS_VIOLATION.
-                    let len = usize::min(res.bytes.len(), length as _);
-
-                    // Otherwise, copy the remote received buffer (relative to
-                    // fd cursor) to the provided buffer, as far as we can.
-                    std::ptr::copy(res.bytes.as_ptr(), buffer as _, len);
-
-                    // We get this information over IRP normally, so need to replicate the
-                    // structure in usermode
-                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
-                    (*io_status_block).Information = len as _;
-
-                    handle_context.cursor += len;
-
-                    return STATUS_SUCCESS;
-                }
-                Err(e) => {
-                    eprintln!("{:?}", e);
-                    // TODO(gabriela): come up with an adequate return.
-                    return -1;
-                }
-            }
+            return STATUS_SUCCESS;
         }
 
         let original = NT_READ_FILE_ORIGINAL.get().unwrap();
@@ -382,22 +395,30 @@ unsafe extern "system" fn nt_set_information_file_hook(
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
             && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_write()
+            && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             // The possible values are documented at the following link:
             // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryinformationfile
-            //match file_information_class {
-            //    // A FILE_BASIC_INFORMATION structure. The caller must have opened the file
-            // with the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
-            //    FILE_INFORMATION_CLASS::FileBasicInformation => {
-            //        if handle_context.desired_access & (FILE_READ_ATTRIBUTES) != 0 {
-            //            let out_ptr = file_information as *mut FILE_BASIC_INFORMATION;
-            //
-            //        }
+            match file_information_class {
+                // A FILE_BASIC_INFORMATION structure. The caller must have opened the file
+                // with the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
+                FILE_INFORMATION_CLASS::FileBasicInformation => {
+                    if handle_context.desired_access & (FILE_READ_ATTRIBUTES) != 0 {
+                        let in_ptr = file_information as *const FILE_BASIC_INFORMATION;
+                    }
+                }
+                // Change the current file information, which is stored in a
+                // FILE_POSITION_INFORMATION structure.
+                FILE_INFORMATION_CLASS::FilePositionInformation => {
+                    // Cast file information pointer to FILE_POSITION_INFORMATION
+                    let in_ptr = file_information as *const FILE_POSITION_INFORMATION;
 
-            //    },
-            //    _ => todo!()
-            //}
+                    // Set CurrentByteOffset from FILE_POSITION_INFORMATION to handle context.
+                    handle_context.cursor = (*in_ptr).CurrentByteOffset.QuadPart as _;
+                }
+                _ => {}
+            }
+
             return STATUS_SUCCESS;
         }
 

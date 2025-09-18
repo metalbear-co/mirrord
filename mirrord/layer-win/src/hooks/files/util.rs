@@ -8,11 +8,7 @@ use std::{
 use mirrord_protocol::file::{MetadataInternal, XstatRequest};
 use winapi::{
     shared::minwindef::FILETIME,
-    um::{
-        minwinbase::SYSTEMTIME,
-        sysinfoapi::GetSystemTime,
-        timezoneapi::SystemTimeToFileTime,
-    },
+    um::{minwinbase::SYSTEMTIME, sysinfoapi::GetSystemTime, timezoneapi::SystemTimeToFileTime},
 };
 
 use crate::common::make_proxy_request_with_response;

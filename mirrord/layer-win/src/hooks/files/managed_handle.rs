@@ -77,8 +77,12 @@ pub struct HandleContext {
     pub access_time: FILETIME,
     /// Write time as [`FILETIME`]
     pub write_time: FILETIME,
-    /// Size of remote buffer, in bytes
-    pub size: u64,
+    /// Data, in bytes.
+    /// NOTE(gabriela): should we do this, or seek + read on
+    /// every readfile?
+    pub data: Option<Vec<u8>>,
+    /// Data number of bytes.
+    pub data_xstat_size: usize,
     /// File read cursor
     pub cursor: usize,
 }
