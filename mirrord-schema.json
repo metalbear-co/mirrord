@@ -166,6 +166,17 @@
         }
       ]
     },
+    "startup_retry": {
+      "title": "startup_retry {#root-startup_retry}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StartupRetryFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "target": {
       "title": "target {#root-target}",
       "anyOf": [
@@ -284,7 +295,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false } } ```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, } } ```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -392,6 +403,14 @@
           "items": {
             "$ref": "#/definitions/AgentPullSecret"
           }
+        },
+        "inject_headers": {
+          "title": "agent.inject_headers {#agent-inject_headers}",
+          "description": "Sets whether `Mirrord-Agent` headers are injected into HTTP responses that went through the agent.\n\nPossible values for the header:\n\n- `passed-through`: set when the request was not sent to the local app (perhaps because it didn't match the filters)\n\n- `forwarded-to-client`: set when the request was sent to the local app",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "json_log": {
           "title": "agent.json_log {#agent-json_log}",
@@ -2118,6 +2137,43 @@
       "additionalProperties": {
         "$ref": "#/definitions/QueueFilter"
       }
+    },
+    "StartupRetryFileConfig": {
+      "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g. for resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing [`max_retries`](#startup_retry-max_retries) and changing both [`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry some of its initial Kubernetes API requests.\n\n```json { \"startup_retry\": { \"min_ms\": 500, \"max_ms\": 5000, \"max_retries\": 2, } } ```",
+      "type": "object",
+      "properties": {
+        "max_ms": {
+          "title": "startup_retry.max_ms {#startup_retry-max_ms}",
+          "description": "Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nDefaults to `5000` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "max_retries": {
+          "title": "startup_retry.max_retries {#startup_retry-max_retries}",
+          "description": "Sets the max amount of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nIf you want to **disable** request retries, set this value to `0`.\n\nDefaults to `2`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "min_ms": {
+          "title": "startup_retry.min_ms {#startup_retry-min_ms}",
+          "description": "Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nDefaults to `500` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
     },
     "StatefulSetTarget": {
       "type": "object",

@@ -312,31 +312,31 @@ jobs:
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.23"
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 21
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 22
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 25
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -447,32 +447,32 @@ jobs:
           rustc issue2058.rs --out-dir target
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.23"
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 21
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 22
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 25
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build

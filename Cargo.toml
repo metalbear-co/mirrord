@@ -31,7 +31,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.161.0"
+version = "3.162.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -63,6 +63,9 @@ actix-codec = "0.5"
 bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 
+# Used by `protocol`
+derive_more = "2.0.1"
+
 tokio = { version = "1" }
 tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
@@ -82,7 +85,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { git = "https://github.com/metalbear-co/kube.git", rev = "c095706801fd0fc287e82bcbc314b458097fe9e1", default-features = false, features = [
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "842a9e2ef0fe8bc62c25106c763a0a2f800ff6e5", default-features = false, features = [
     "runtime",
     "derive",
     "client",
@@ -126,7 +129,7 @@ rustls = "0.23"
 # Used by `operator`, `tests`.
 tokio-tungstenite = { version = "0.24" }
 
-# Used by `operator`, `agent`.
+# Used by `operator`, `agent`, `kube`.
 http = { version = "1" }
 
 # Used by `intproxy`, `cli`.

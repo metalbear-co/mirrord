@@ -1,10 +1,12 @@
 use k8s_openapi::api::core::v1::ConfigMap;
+use kube::client::ClientBuilder;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::api::kubernetes::create_kube_config;
+use mirrord_kube::{api::kubernetes::create_kube_config, retry::RetryKube};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 
 use crate::{
     config::VpnArgs,
@@ -20,16 +22,24 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
-    config.agent.privileged = true;
+
+    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    layer_config.agent.privileged = true;
 
     let client = create_kube_config(
-        config.accept_invalid_certificates,
-        config.kubeconfig.clone(),
-        config.kube_context.clone(),
+        layer_config.accept_invalid_certificates,
+        layer_config.kubeconfig.clone(),
+        layer_config.kube_context.clone(),
     )
     .await
-    .and_then(|config| kube::Client::try_from(config).map_err(From::from))
+    .and_then(|config| {
+        Ok(ClientBuilder::try_from(config.clone())?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &layer_config.startup_retry,
+            )?))
+            .build())
+    })
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
     let mut sub_progress = progress.subtask("fetching vpn info");
@@ -49,10 +59,14 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut sub_progress = progress.subtask("create agent");
 
     let branch_name = get_user_git_branch().await;
-    let (_, connection) =
-        create_and_connect(&mut config, &mut sub_progress, &mut analytics, branch_name)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    let (_, connection) = create_and_connect(
+        &mut layer_config,
+        &mut sub_progress,
+        &mut analytics,
+        branch_name,
+    )
+    .await
+    .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     sub_progress.success(None);
 

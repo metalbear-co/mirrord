@@ -6,6 +6,7 @@ use std::{
 use k8s_openapi::NamespaceResourceScope;
 use kube::{
     Api, Client, Config, Discovery,
+    client::ClientBuilder,
     config::{KubeConfigOptions, Kubeconfig},
 };
 use mirrord_agent_env::mesh::MeshVendor;
@@ -18,6 +19,7 @@ use mirrord_config::{
 use mirrord_progress::Progress;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::{Level, debug, info};
 
 use super::container::ContainerConfig;
@@ -33,6 +35,7 @@ use crate::{
         runtime::{RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
+    retry::RetryKube,
 };
 
 #[cfg(feature = "portforward")]
@@ -58,7 +61,13 @@ impl KubernetesAPI {
         )
         .await?;
 
-        let client = progress.suspend(|| client_config.try_into())?;
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(client_config.clone()))?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &config.startup_retry,
+            )?))
+            .build();
 
         let mut agent = config.agent.clone();
         if config
@@ -158,7 +167,7 @@ impl KubernetesAPI {
         Ok(conn)
     }
 
-    /// Connects to the agent using kube's [`Api::portforward`].
+    /// Connects to the agent using kube's [`kube::Api::portforward`].
     #[cfg(feature = "portforward")]
     pub async fn create_connection_portforward(
         &self,
@@ -329,6 +338,7 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
+#[tracing::instrument(level = Level::TRACE, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
@@ -360,6 +370,7 @@ where
                 .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
                     let expanded = shellexpand::full(&path_str)
                         .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
                     Kubeconfig::read_from(expanded.deref())
                         .and_then(|config| merged_kubeconfig.merge(config))
                         .map_err(KubeApiError::from)

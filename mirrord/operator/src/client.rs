@@ -9,6 +9,7 @@ use http::{HeaderName, HeaderValue, request::Request};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
+    client::ClientBuilder,
 };
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
@@ -21,12 +22,14 @@ use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
     resolved::ResolvedTarget,
+    retry::RetryKube,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
@@ -218,10 +221,15 @@ impl OperatorApi<NoClientCert> {
         P: Progress,
     {
         let base_config = Self::base_client_config(config).await?;
+
         let client = progress
-            .suspend(|| Client::try_from(base_config.clone()))
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
+            .suspend(|| ClientBuilder::try_from(base_config.clone()))
+            .map_err(KubeApiError::from)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &config.startup_retry,
+            )?))
+            .build();
 
         let operator: Result<MirrordOperatorCrd, _> =
             Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
@@ -276,6 +284,7 @@ impl OperatorApi<NoClientCert> {
         self,
         reporter: &mut R,
         progress: &P,
+        layer_config: &LayerConfig,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
@@ -303,10 +312,16 @@ impl OperatorApi<NoClientCert> {
             config
                 .headers
                 .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
             let client = progress
-                .suspend(|| Client::try_from(config))
+                .suspend(|| ClientBuilder::try_from(config))
                 .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?;
+                .map_err(OperatorApiError::CreateKubeClient)?
+                .with_layer(&BufferLayer::new(1024))
+                .with_layer(&RetryLayer::new(RetryKube::try_from(
+                    &layer_config.startup_retry,
+                )?))
+                .build();
 
             (client, certificate)
         };
@@ -925,6 +940,7 @@ impl OperatorApi<PreparedClientCert> {
             .clone();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
+
         let copy_target_name = TargetCrd::urlfied_name(&target);
         let copy_target_spec = CopyTargetSpec {
             target,
@@ -1114,9 +1130,14 @@ impl OperatorApi<PreparedClientCert> {
             .headers
             .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
 
-        let client = Client::try_from(config)
+        let client = ClientBuilder::try_from(config)
             .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &layer_config.startup_retry,
+            )?))
+            .build();
 
         let (tx, rx) = Self::connect_target(&client, &session).await?;
 

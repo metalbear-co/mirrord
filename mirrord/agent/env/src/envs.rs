@@ -79,3 +79,7 @@ pub const PASSTHROUGH_MIRRORING: CheckedEnv<bool> =
 ///
 /// Specified in seconds.
 pub const IDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL");
+
+/// Sets whether `Mirrord-Agent` headers are injected into HTTP
+/// responses that went through the agent.
+pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJECT_HEADERS");

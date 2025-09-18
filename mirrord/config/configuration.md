@@ -2121,6 +2121,51 @@ Defaults to `{ "skip_sip": "git" }`
 When specified, the given value will replace the default list rather than
 being added to.
 
+## startup_retry {#root-startup_retry}
+
+Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.
+for resolving the target or connecting to the mirrord Operator).
+
+If you're having cluster connectivity issues when **starting** mirrord, consider increasing
+[`max_retries`](#startup_retry-max_retries) and changing both
+[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry
+some of its initial Kubernetes API requests.
+
+```json
+{
+  "startup_retry": {
+    "min_ms": 500,
+    "max_ms": 5000,
+    "max_retries": 2,
+  }
+}
+```
+
+## startup_retry.max_ms {#startup_retry-max_ms}
+
+Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by
+mirrord during startup (e.g. for resolving the target or connecting to the mirrord
+Operator).
+
+Defaults to `5000` milliseconds.
+
+## startup_retry.max_retries {#startup_retry-max_retries}
+
+Sets the max amount of retries for Kubernetes API requests made by mirrord during startup
+(e.g. for resolving the target or connecting to the mirrord Operator).
+
+If you want to **disable** request retries, set this value to `0`.
+
+Defaults to `2`.
+
+## startup_retry.min_ms {#startup_retry-min_ms}
+
+Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by
+mirrord during startup (e.g. for resolving the target or connecting to the mirrord
+Operator).
+
+Defaults to `500` milliseconds.
+
 ## target {#root-target}
 
 Specifies the target and namespace to target.
