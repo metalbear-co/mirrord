@@ -166,6 +166,17 @@
         }
       ]
     },
+    "startup_retry": {
+      "title": "startup_retry {#root-startup_retry}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StartupRetryFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "target": {
       "title": "target {#root-target}",
       "anyOf": [
@@ -2118,6 +2129,43 @@
       "additionalProperties": {
         "$ref": "#/definitions/QueueFilter"
       }
+    },
+    "StartupRetryFileConfig": {
+      "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g. for resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing [`max_retries`](#startup_retry-max_retries) and changing both [`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry some of its initial Kubernetes API requests.\n\n```json { \"startup_retry\": { \"min_ms\": 500, \"max_ms\": 5000, \"max_retries\": 2, } } ```",
+      "type": "object",
+      "properties": {
+        "max_ms": {
+          "title": "startup_retry.max_ms {#startup_retry-max_ms}",
+          "description": "Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nDefaults to `5000` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "max_retries": {
+          "title": "startup_retry.max_retries {#startup_retry-max_retries}",
+          "description": "Sets the max amount of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nIf you want to **disable** request retries, set this value to `0`.\n\nDefaults to `2`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "min_ms": {
+          "title": "startup_retry.min_ms {#startup_retry-min_ms}",
+          "description": "Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nDefaults to `500` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
     },
     "StatefulSetTarget": {
       "type": "object",

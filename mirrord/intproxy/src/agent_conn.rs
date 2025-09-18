@@ -94,6 +94,12 @@ impl ReconnectFlow {
     }
 }
 
+impl ReconnectFlow {
+    const fn reconnectable(&self) -> bool {
+        matches!(self, ReconnectFlow::ConnectInfo { .. })
+    }
+}
+
 impl fmt::Debug for ReconnectFlow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -212,6 +218,10 @@ impl AgentConnection {
             .await
             .map_err(|_| AgentConnectionTaskError::ChannelError(self.reconnect.kind()))
     }
+
+    pub fn reconnectable(&self) -> bool {
+        self.reconnect.reconnectable()
+    }
 }
 
 impl fmt::Debug for AgentConnection {
@@ -282,6 +292,18 @@ impl RestartableBackgroundTask for AgentConnection {
                 config,
                 connect_info,
             } => {
+                match &error {
+                    AgentConnectionTaskError::RequestedReconnect(..) => {
+                        tracing::warn!(
+                            ?connect_info,
+                            "AgentConnection was requested to perform reconnect, attempting to reconnect"
+                        );
+                    }
+                    _ => {
+                        tracing::warn!(%error, ?connect_info, "AgentConnection experienced an error, attempting to reconnect");
+                    }
+                }
+
                 message_bus
                     .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::Start))
                     .await;

@@ -644,7 +644,7 @@ impl MirrordExecution {
                 )),
             };
 
-            return result;
+            return result.map(Into::into);
         }
     }
 

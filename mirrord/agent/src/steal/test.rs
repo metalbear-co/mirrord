@@ -426,6 +426,7 @@ async fn multiple_filtered_subscriptions(
 }
 
 struct TestSetup {
+    /// Simulates the app that would be running on the cluster.
     original_server: TcpListener,
     stealer_tx: mpsc::Sender<StealerCommand>,
     stealer_status: BgTaskStatus,

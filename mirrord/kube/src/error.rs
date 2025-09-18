@@ -3,6 +3,7 @@ use std::fmt;
 use kube::Resource;
 use mirrord_config::target::TargetType;
 use thiserror::Error;
+use tower::retry::backoff::InvalidBackoff;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
@@ -75,6 +76,9 @@ pub enum KubeApiError {
     /// listing that type has not been implemented.
     #[error("Targets of type `{0}` cannot be listed. This is a bug.")]
     InvalidTargetTypeBug(TargetType),
+
+    #[error(transparent)]
+    InvalidBackoff(#[from] InvalidBackoff),
 }
 
 impl KubeApiError {

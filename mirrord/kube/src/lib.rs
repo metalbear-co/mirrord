@@ -16,6 +16,9 @@
 //! Turn this feature on if you want to connect to agent pods from outside the cluster with port
 //! forwarding.
 
+pub use kube;
+
 pub mod api;
 pub mod error;
 pub mod resolved;
+pub mod retry;

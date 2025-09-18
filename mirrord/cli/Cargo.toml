@@ -69,6 +69,7 @@ home.workspace = true
 uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
+tower = { workspace = true, features = ["retry"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

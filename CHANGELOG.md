@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.162.0](https://github.com/metalbear-co/mirrord/tree/3.162.0) - 2025-09-16
+
+
+### Added
+
+- Mirroring incoming TCP traffic now supports using an HTTP filter.
+  [#2538](https://github.com/metalbear-co/mirrord/issues/2538)
+- mirrord now retries failed Kubernetes API requests made during startup. This
+  should improve stability when facing transient errors, like cluster
+  connectivity issues.
+
+  The retry policy can be adjusted in startup_retry mirrord config section.
+
+
+### Changed
+
+- Agent->layer message logs will no longer contain environment variables.
+- Update TELEMETRY.md to include the machine_id metric in the OSS.
+- Updated so if the PingPong will not attempt to request restart if not
+  connected to operator.
+
+
+### Fixed
+
+- Intproxy now no longer runs as a child of the user process so it doesn't get
+  reaped by wait/waitall calls.
+  [#3563](https://github.com/metalbear-co/mirrord/issues/3563)
+
+
+### Internal
+
+- Add tuple struct support for medschool.
+- Add warning message to `AgentConnection`'s reconnect to print out what kind
+  of reconnect is requested.
+- Fixed cancellation of background tasks in the internal proxy.
+- Improved UX of filtered traffic mirroring with old agents.
+
 ## [3.161.0](https://github.com/metalbear-co/mirrord/tree/3.161.0) - 2025-09-04
 
 

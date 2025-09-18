@@ -111,16 +111,13 @@ pub(super) async fn wait_for_agent_startup(
     pod_name: &str,
     container_name: String,
 ) -> Result<Option<String>> {
-    let logs = pod_api
-        .log_stream(
-            pod_name,
-            &LogParams {
-                follow: true,
-                container: Some(container_name),
-                ..LogParams::default()
-            },
-        )
-        .await?;
+    let log_params = LogParams {
+        follow: true,
+        container: Some(container_name),
+        ..LogParams::default()
+    };
+
+    let logs = pod_api.log_stream(pod_name, &log_params).await?;
 
     let mut lines = logs.lines();
     while let Some(line) = lines.try_next().await? {

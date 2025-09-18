@@ -1,3 +1,4 @@
+mod mirror;
 mod steal;
 
 #[cfg(test)]
