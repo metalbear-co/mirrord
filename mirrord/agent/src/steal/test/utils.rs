@@ -241,6 +241,9 @@ impl TestRequest {
         }
     }
 
+    /// Generates a test response to this request. Includes
+    /// `request-id` and `handled-by` headers for running later
+    /// assertions.
     fn as_hyper_response(&self, handled_by: ClientId) -> Response<BoxBody<Bytes, hyper::Error>> {
         match self.upgrade {
             Some(protocol) => Response::builder()
@@ -396,6 +399,11 @@ impl TestRequest {
         }
     }
 
+    /// Accept a request on `conn`, verify that it matches this one,
+    /// and respond to it.
+    ///
+    /// This is only useful for verifying passthrough requests. For
+    /// stolen requests, see [`StealingClient::expect_request`].
     pub async fn accept(&self, conn: TcpStream, handled_by: ClientId) {
         let conn = match &self.acceptor {
             Some(acceptor) => {
@@ -511,6 +519,9 @@ impl TestRequest {
     }
 }
 
+/// Client for listening for and handling stolen connections. Directly
+/// receives and interprets `DaemonMessage`s. For handling passthrough
+/// requests, see `TestRequest::accept` and friends.
 pub struct StealingClient {
     id: ClientId,
     api: TcpStealerApi,
@@ -597,6 +608,7 @@ impl StealingClient {
         }
     }
 
+    /// For handling passthrough requests, see [`TestRequest::accept`].
     pub async fn expect_request(&mut self, expected: &TestRequest) {
         let mut request = match self.api.recv().await.unwrap() {
             DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(
