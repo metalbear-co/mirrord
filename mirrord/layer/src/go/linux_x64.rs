@@ -598,80 +598,274 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &Experi
     }
 }
 
+/// Implementation for Go runtime 1.25.
 mod go_1_25 {
-    use std::arch::naked_asm;
+    use std::{arch::naked_asm, ffi::c_void};
 
     use crate::{hooks::HookManager, macros::hook_symbol};
 
+    static mut FN_GOSAVE_SYSTEMSTACK_SWITCH: *const c_void = std::ptr::null();
+
     pub fn hook(hook_manager: &mut HookManager) {
+        let gosave_address = hook_manager
+            .resolve_symbol_main_module("gosave_systemstack_switch")
+            .expect(
+                "couldn't find the address of symbol \
+                `gosave_systemstack_switch`, please file a bug",
+            );
+
+        unsafe {
+            FN_GOSAVE_SYSTEMSTACK_SWITCH = gosave_address.0;
+        }
+
         hook_symbol!(
             hook_manager,
             "internal/runtime/syscall.Syscall6",
-            syscall6_detour
+            internal_runtime_syscall_syscall6_detour
         );
     }
 
     /// Detour for `internal/runtime/syscall.Syscall6`.
+    ///
+    /// Logic:
+    /// 1. If the syscall is `SYS_EXIT` or `SYS_EXIT_GROUP`, let it happen.
+    /// 2. Store syscall arguments on the stack.
+    /// 3. Call [`c_abi_wrapper_on_systemstack`].
+    /// 4. Put the result into correct registers, as expected by the caller.
+    ///
+    /// Essentially, a thin compatibility layer between the Go runtime code and the rest of our
+    /// assembly glue.
+    ///
+    /// # Params
+    ///
+    /// `internal/runtime/syscall.Syscall6` params in rax, rdi, rcx, rbx, rsi, r8, and r9.
+    ///
+    /// # Returns
+    ///
+    /// Mocked `internal/runtime/syscall.Syscall6` return values in rax, rbx, and rcx.
+    ///
+    /// # `SYS_EXIT` and `SYS_EXIT_GROUP`
+    ///
+    /// These two syscalls we should always pass through.
+    /// See the [relevant issue](https://github.com/metalbear-co/mirrord/issues/2988)
+    /// and the [fix](https://github.com/metalbear-co/mirrord/pull/2989).
     #[unsafe(naked)]
-    unsafe extern "C" fn syscall6_detour() {
+    unsafe extern "C" fn internal_runtime_syscall_syscall6_detour() {
         naked_asm!(
-            // If it's SYS_EXIT, just let it happen.
+            // If the syscall is SYS_EXIT or SYS_EXIT_GROUP,
+            // skip our logic and just execute it.
             "cmp    rax, 60",
-            "je     3f",
-            // If it's SYS_EXIT_GROUP, just let it happen.
+            "je     2f",
             "cmp    rax, 231",
-            "je     3f",
-            // For any case, store g there in case it isn't stored.
-            // "g" is a pointer to the current goroutine.
-            // I do not now what "there" actually is.
-            // This is magic.
-            "mov    QWORD PTR fs:[0xfffffff8], r14",
-            // Prepare stack for C ABI call.
-            "mov    rdx, rsp",
-            "sub    rsp, 0x40",
-            "and    rsp, -0x10",
-            "mov    QWORD PTR [rsp+0x30], 0x0",
-            "mov    QWORD PTR [rsp+0x28], rdx",
-            // Move arguments to registers/memory according to C ABI.
-            "mov    QWORD PTR [rsp], r9",
-            "mov    r9, r8",
-            "mov    r8, rsi",
-            "mov    rsi, rbx",
-            "mov    rdx, rcx",
-            "mov    rcx, rdi",
-            "mov    rdi, rax",
-            // Call C ABI handler.
-            "call   {c_abi_syscall6_handler}",
-            // Restore stack after the call.
-            "mov    rsi, QWORD PTR [rsp+0x28]",
-            "mov    rsp, rsi",
-            // Check C ABI handler result.
-            "cmp    rax, -0xfff",
-            "jbe    2f",
-            // Failure.
-            // Return the error in the register expected by `syscall.RawSyscall6`.
+            "je     2f",
+            // Save rbp.
+            "push   rbp",
+            "mov    rbp,rsp",
+            // Reserve space for all arguments.
+            "sub    rsp,0x40",
+            // Move arguments from registers to the stack:
+            // * syscall number is in rax
+            // * 6 syscall arguments are rdi, rcx, rbx, rsi, r8, r9
+            //
+            // Note that these are not the correct registers for making a syscall on x64.
+            // These are the registers where arguments are stored
+            // when `internal/runtime/syscall.Syscall6` is called.
+            //
+            // Note that we only move the arguments to the stack for simplicity.
+            // We don't have to worry about overwriting the registers later.
+            "mov    [rsp+0x38],r9",
+            "mov    [rsp+0x30],r8",
+            "mov    [rsp+0x28],rsi",
+            "mov    [rsp+0x20],rdi",
+            "mov    [rsp+0x18],rcx",
+            "mov    [rsp+0x10],rbx",
+            "mov    [rsp],rax",
+            // Call `c_abi_wrapper_on_systemstack`, passing address of args in rdi.
+            // Expect syscall result in rax.
+            "mov    rdi,rsp",
+            "call   {c_abi_wrapper_on_systemstack}",
+            // Check failure.
+            "cmp    rax,-0xfff",
+            "jbe    1f",
+            // Syscall failed.
+            // Fill result registers: -1 in rax, errno in rcx, 0 in rbx.
             "neg    rax",
-            "mov    rcx, rax",
-            "mov    rax, -0x1",
-            "mov    rbx, 0x0",
-            "xorps  xmm15, xmm15",
+            "mov    rcx,rax",
+            "mov    rax,-0x1",
+            "mov    rbx,0x0",
+            // Drop space reserved for locals.
+            "add    rsp,0x40",
+            // Restore rbp and return.
+            "pop    rbp",
             "ret",
+            // Syscall did not fail.
+            // Result already in rax.
+            // Clear the other two result registers.
+            "1:",
+            "mov    rbx,0x0",
+            "mov    rcx,0x0",
+            // Drop space reserved for locals.
+            "add    rsp,0x40",
+            // Restore rbp and return.
+            "pop    rbp",
+            "ret",
+            // Move the first syscall argument to the correct register (rdx),
+            // and execute the syscall.
             "2:",
-            // Success. RAX already contains return value.
-            "mov    rbx, 0x0",
-            "mov    rcx, 0x0",
-            "xorps  xmm15, xmm15",
-            "ret",
-            // Just execute the syscall instruction.
-            //
-            // This is for SYS_EXIT and SYS_EXIT_GROUP only - we know for sure that it's always safe to let them happen.
-            //
-            // Running our code is an unnecessary risk due to vforks and general Go flakiness.
-            // See issue https://github.com/metalbear-co/mirrord/issues/2988.
-            "3:",
-            "mov rdx, rdi",
+            "mov    rdx, rdi",
             "syscall",
-            c_abi_syscall6_handler = sym crate::go::c_abi_syscall6_handler,
+
+            c_abi_wrapper_on_systemstack = sym c_abi_wrapper_on_systemstack,
+        )
+    }
+
+    /// Calls [`c_abi_wrapper`] on systemstack.
+    ///
+    /// Implemented based on <https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/asm_amd64.s#L481>.
+    ///
+    /// # Params
+    ///
+    /// * rdi - address of syscall number and arguments in memory.
+    ///
+    /// # Returns
+    ///
+    /// * rax - value returned by [`c_abi_wrapper`]
+    #[unsafe(naked)]
+    unsafe extern "C" fn c_abi_wrapper_on_systemstack() {
+        naked_asm!(
+            // Save rbp.
+            // This is required, as we call `gosave_systemstack_switch` later.
+            // Not having any local variables in this function is required as well.
+            "push   rbp",
+            "mov    rbp,rsp",
+            // Load address of g from TLS to rsi.
+            "mov    rsi,fs:0xfffffffffffffff8",
+            // Load address of current m to rbx.
+            //
+            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L408
+            "mov    rbx,[rsi+0x30]",
+            // Check if g is m->gsignal.
+            // If g is m->gsignal, no stack switch is required.
+            //
+            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L543
+            "cmp    rsi,[rbx+0x48]",
+            "je     1f",
+            // Load address of m->g0 to rdx.
+            // Check if g is m->g0.
+            // If g is m->g0, no stack switch is required.
+            //
+            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L537
+            "mov    rdx,[rbx]",
+            "cmp    rsi,rdx",
+            "je     1f",
+            // Check if g is m->curg.
+            // If current g is not m->curg, something weird is happening.
+            // Jump to abort.
+            "cmp    rsi,[rbx+0xb8]",
+            "jne    2f",
+            // Switch stacks.
+            //
+            // This part I do not fully understand, but it works.
+            //
+            // Call to `gosave_systemstack_switch` allows us
+            // to pretend we're systemstack_switch if the G stack is scanned,
+            // whatever it means.
+            //
+            // After the call, rdx still contains address of m->g0.
+            // We move it to TLS and r14 (runtime code sometimes expects it in r14),
+            // and switch stacks by explicitly changing rsp.
+            "mov    rsi,[rip + {gosave_systemstack_switch}]",
+            "call   rsi",
+            "mov    fs:0xfffffffffffffff8,rdx",
+            "mov    r14,rdx",
+            "mov    rsp,[rdx+0x38]",
+            // At this point, rdi should still store the address of original syscall args in memory
+            // (should not be smashed by `gosave_systemstack_switch`).
+            // Original implementation relies on preserved rdi as well.
+            // Call `c_abi_wrapper`.
+            "call   {c_abi_wrapper}",
+            // Switch back to g.
+            "mov    rsi,fs:0xfffffffffffffff8",
+            "mov    rbx,[rsi+0x30]",
+            "mov    rsi,[rbx+0xb8]",
+            "mov    fs:0xfffffffffffffff8,rsi",
+            "mov    r14,rsi",
+            "mov    rsp,[rsi+0x38]",
+            "mov    rbp,[rsi+0x60]",
+            "mov    QWORD PTR [rsi+0x38],0x0",
+            "mov    QWORD PTR [rsi+0x60],0x0",
+            // Restore rbp and return.
+            "pop    rbp",
+            "ret",
+            // Already on system stack.
+            "1:",
+            // We're going to tail call `c_abi_wrapper`, so we need to pop rbp first.
+            //
+            // Quote the original implementation:
+            // "Using a tail call here cleans up tracebacks since we won't stop at an intermediate systemstack"
+            "pop    rbp",
+            // At this point, rdi still stores the address of original syscall args in memory.
+            // Call `c_abi_wrapper`.
+            "jmp    {c_abi_wrapper}",
+            // Current g is not gsignal, g0, nor curg.
+            // Not idea what it is.
+            // Original implementation calls an internal panic routine.
+            // For simplicity, we explicitly trigger an invalid instruction interrupt.
+            "2:",
+            "ud2",
+
+            gosave_systemstack_switch = sym FN_GOSAVE_SYSTEMSTACK_SWITCH,
+            c_abi_wrapper = sym c_abi_wrapper,
+        );
+    }
+
+    /// Calls [`c_abi_syscall6_handler`](crate::go::c_abi_syscall6_handler).
+    ///
+    /// Logic:
+    /// 1. Make sure that stack conforms to C ABI.
+    /// 2. Move call params from memory to correct registers/stack slots.
+    ///
+    /// Essentially, a thin compatibility layer between our assembly glue and C ABI.
+    ///
+    /// # Params
+    ///
+    /// * rdi - address of syscall number and arguments in memory.
+    ///
+    /// # Returns
+    ///
+    /// * rax - value returned by [`c_abi_syscall6_handler`](crate::go::c_abi_syscall6_handler).
+    #[unsafe(naked)]
+    unsafe extern "C" fn c_abi_wrapper() {
+        naked_asm!(
+            // Save rbp.
+            "push   rbp",
+            "mov    rbp,rsp",
+            // Reserve space for the last `c_abi_syscall6_handler` param.
+            "sub    rsp,0x8",
+            // Align stack to 16-byte boundary.
+            // This is required by C ABI.
+            // This operation clears last 8 bytes of rsp.
+            // This is either substracts 8 bytes of rsp or is a noop.
+            // Therefore, in order to make space for the last `c_abi_syscall6_handler` param,
+            // we still had to substract those 8 bytes before.
+            "and    rsp,-0x10",
+            // Prepare params and call `c_abi_syscall6_handler`.
+            "mov    rax,[rdi]",      // syscall number -> tmp rax
+            "mov    rsi,[rdi+0x10]", // arg1 -> rsi (C ABI param2)
+            "mov    rdx,[rdi+0x18]", // arg2 -> rdx (C ABI param3)
+            "mov    rcx,[rdi+0x20]", // arg3 -> rcx (C ABI param4)
+            "mov    r8,[rdi+0x28]",  // arg4 -> r8  (C ABI param5)
+            "mov    r9,[rdi+0x30]",  // arg5 -> r9  (C ABI param6)
+            "mov    r10,[rdi+0x38]", // arg6 -> tmp r10
+            "mov    [rsp],r10",      // arg6 -> stack (C ABI param7)
+            "mov    rdi,rax",        // syscall number -> rdi (C ABI param1)
+            "call   c_abi_syscall6_handler",
+            // Restore rsp.
+            "mov    rsp, rbp",
+            // Restore rbp and return.
+            // `c_abi_syscall6_handler` return value is already in rax.
+            "pop    rbp",
+            "ret"
         )
     }
 }
