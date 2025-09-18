@@ -69,10 +69,10 @@ where
         .applied_objects()
         .next()
         .await
-        .ok_or(KubeApiError::AgentPodStartError(
-            "Watch stream failed".to_owned(),
-        ))?
-        .map_err(|err| KubeApiError::AgentPodStartError(err.to_string()))?;
+        .ok_or_else(|| {
+            KubeApiError::AgentPodStartError("wach stream unexpectedly finished".to_owned())
+        })?
+        .map_err(|err| KubeApiError::AgentPodStartError(format!("watch stream failed: {err}")))?;
 
     let pod_name = agent_pod
         .metadata
@@ -106,7 +106,7 @@ where
                 pod_progress.warning(&format!(
                     "agent pod initialization is taking longer than expected ({}s) - container state: '{}'",
                     initialization_start.elapsed().as_secs(),
-                    last_known_container_state.unwrap_or("<unknown>")
+                    last_known_container_state
                 ));
             }
             event = stream.next() => {
@@ -127,38 +127,39 @@ where
                             "Pending" | "Unknown" => continue,
                             "Running" => break,
                             "Failed" => {
-                                pod_progress.failure(Some(&format!(
+                                let message = format!(
                                     "agent pod failed to initialize - '{}' ({})",
                                     status.message.as_deref().unwrap_or("<no message>"),
                                     status.reason.as_deref().unwrap_or("<unknown reason>")
-                                )));
-                                return Err(KubeApiError::AgentPodStartError(
-                                    status.message.clone().unwrap_or_else(|| "<no message>".to_owned()),
-                                ));
+                                );
+                                pod_progress.failure(Some(&message));
+                                return Err(KubeApiError::AgentPodStartError(message));
                             }
                             "Succeeded" => {
                                 pod_progress.failure(Some(
                                     "agent pod terminated prematurely - this is a bug, please report it!",
                                 ));
-                                return Err(KubeApiError::AgentPodStartError("Skipped 'Running' phase".to_owned()));
+                                return Err(KubeApiError::AgentPodStartError("agent pod unexpectedly finished".to_owned()));
                             }
                             phase => {
-                                pod_progress.failure(Some(&format!("agent pod moved to an unhandled phase - '{phase}'")));
-                                return Err(KubeApiError::AgentPodStartError(format!("Unhandled pod phase '{phase}'")));
+                                let message = format!("agent pod moved to an unhandled phase - '{phase}'");
+                                pod_progress.failure(Some(&message));
+                                return Err(KubeApiError::AgentPodStartError(message));
                             },
                         }
                     }
 
                     Some(Ok(Event::Delete(_))) => {
-                        pod_progress.failure(Some("agent pod got unexpectedly deleted"));
+                        pod_progress.failure(Some("agent pod was unexpectedly deleted"));
                         return Err(KubeApiError::AgentPodDeleted);
                     }
 
                     Some(Ok(Event::Init | Event::InitDone)) => continue,
 
                     Some(Err(_)) | None => {
-                            pod_progress.failure(Some("watch stream has unexpectedly failed"));
-                            return Err(KubeApiError::AgentPodStartError("Stream failed".to_owned()));
+                            let message = "watch stream has failed".to_owned();
+                            pod_progress.failure(Some(&message));
+                            return Err(KubeApiError::AgentPodStartError(message));
                     }
                 }
             }
@@ -188,33 +189,31 @@ where
 
 /// Tries finding mirrord-agent's container in `status.container_statuses` and returns a string
 /// representing it's state.
-fn find_agent_container_state(status: &Option<PodStatus>) -> Option<&'static str> {
+fn find_agent_container_state(status: &Option<PodStatus>) -> String {
     status
         .as_ref()
-        .and_then(|status| status.container_statuses.clone())
-        .and_then(|statuses| {
-            statuses
-                .iter()
-                .find(|container| container.name == "mirrord-agent")
-                .cloned()
-        })
-        .and_then(|status| status.state)
+        .into_iter()
+        .flat_map(|status| status.container_statuses.as_deref().unwrap_or_default())
+        .find(|status| status.name == "mirrord-agent")
+        .and_then(|status| status.state.as_ref())
         .and_then(|state| {
-            // `ContainerState` is essentially an enum pretending to be a struct, so we have to this
-            // little dance, which really wants to be a pattern match.
             if state.running.is_some() {
-                Some("running")
-            } else if state.terminated.is_some() {
-                Some("terminated")
-            } else if state.waiting.is_some() {
-                Some("waiting")
+                Some("running".into())
+            } else if let Some(terminated) = &state.terminated {
+                Some(format!(
+                    "terminated ({})",
+                    terminated.reason.as_deref().unwrap_or("no reason found")
+                ))
             } else {
-                // This should be unreachable - the docs say that if the state is unknown then the
-                // active state will be 'waiting', but it doesn't sound nice to
-                // crash if another state ever gets added.
-                None
+                state.waiting.as_ref().map(|waiting| {
+                    format!(
+                        "waiting ({})",
+                        waiting.reason.as_deref().unwrap_or("no reason found")
+                    )
+                })
             }
         })
+        .unwrap_or_else(|| "not found".into())
 }
 
 pub struct JobVariant<T> {
