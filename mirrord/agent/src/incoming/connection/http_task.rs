@@ -115,7 +115,7 @@ impl HttpTask<PassthroughConnection> {
             .then(|| mpsc::channel::<Frame<Bytes>>(1))
             .unzip();
 
-		let redirector_config_clone = redirector_config.clone();
+        let redirector_config_clone = redirector_config.clone();
         let upgrade = tokio::spawn(async move {
             let version = request.parts.version;
 

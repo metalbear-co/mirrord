@@ -703,10 +703,7 @@ impl ClientConnectionState {
     /// Used for applying transformations on the response returned
     /// from the client. Currently just inserts the mirrord agent
     /// header.
-    fn modify_response<T>(
-        response: &mut Response<T>,
-        redirector_config: &RedirectorTaskConfig,
-    ) {
+    fn modify_response<T>(response: &mut Response<T>, redirector_config: &RedirectorTaskConfig) {
         if redirector_config.inject_headers {
             response.headers_mut().insert(
                 MIRRORD_AGENT_HTTP_HEADER_NAME,

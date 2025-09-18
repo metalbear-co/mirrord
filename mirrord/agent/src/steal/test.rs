@@ -443,10 +443,14 @@ async fn header_injection(
 ) {
     use crate::util::ClientId;
 
-    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig{
-		inject_headers: true,
-		.. RedirectorTaskConfig::from_env()
-	}).await;
+    let mut setup = TestSetup::new_http(
+        http_kind,
+        RedirectorTaskConfig {
+            inject_headers: true,
+            ..RedirectorTaskConfig::from_env()
+        },
+    )
+    .await;
 
     let request_passthrough = TestRequest {
         path: "/passthrough".into(),

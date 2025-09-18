@@ -160,7 +160,7 @@ impl RedirectedHttp {
                 response_tx: self.request.response_tx,
                 upgrade_tx,
             },
-			redirector_config: self.redirector_config
+            redirector_config: self.redirector_config,
         }
     }
 
@@ -168,7 +168,12 @@ impl RedirectedHttp {
     ///
     /// All data will be directed to the original destination.
     pub fn pass_through(self) {
-        let task = HttpTask::new(self.info, self.mirror_tx.into(), self.request, self.redirector_config);
+        let task = HttpTask::new(
+            self.info,
+            self.mirror_tx.into(),
+            self.request,
+            self.redirector_config,
+        );
         self.runtime_handle.spawn(task.run());
     }
 }
@@ -189,7 +194,7 @@ pub struct StolenHttp {
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
     pub response_provider: ResponseProvider,
-	pub redirector_config: Arc<RedirectorTaskConfig>
+    pub redirector_config: Arc<RedirectorTaskConfig>,
 }
 
 impl fmt::Debug for StolenHttp {

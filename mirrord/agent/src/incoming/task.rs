@@ -572,15 +572,20 @@ mod test {
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
 
-    use crate::incoming::{test::DummyRedirector, RedirectorTask, RedirectorTaskConfig, StolenTraffic};
+    use crate::incoming::{
+        RedirectorTask, RedirectorTaskConfig, StolenTraffic, test::DummyRedirector,
+    };
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_dead_channel() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (task, mut handle, _) =
-            RedirectorTask::new(redirector, Default::default(), RedirectorTaskConfig::from_env());
+        let (task, mut handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
         tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();
@@ -614,8 +619,11 @@ mod test {
     #[tokio::test(flavor = "current_thread")]
     async fn http_graceful_shutdown_regression() {
         let (redirector, mut state, mut conn_tx) = DummyRedirector::new();
-        let (task, mut handle, _) =
-            RedirectorTask::new(redirector, Default::default(), RedirectorTaskConfig::from_env());
+        let (task, mut handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
         let redirector_task = tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();
