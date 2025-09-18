@@ -199,6 +199,7 @@ impl TestRequest {
     const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("request-id");
     pub const USER_ID_HEADER: HeaderName = HeaderName::from_static("user-id");
     const HANDLED_BY_HEADER: HeaderName = HeaderName::from_static("handled-by");
+    pub const MIRRORD_AGENT_HEADER: HeaderName = HeaderName::from_static("mirrord-agent");
 
     fn as_hyper_request(&self) -> Request<BoxBody<Bytes, hyper::Error>> {
         let uri = format!(
@@ -242,6 +243,9 @@ impl TestRequest {
         }
     }
 
+    /// Generates a test response to this request. Includes
+    /// `request-id` and `handled-by` headers for running later
+    /// assertions.
     fn as_hyper_response(&self, handled_by: ClientId) -> Response<BoxBody<Bytes, hyper::Error>> {
         match self.upgrade {
             Some(protocol) => Response::builder()
@@ -397,6 +401,11 @@ impl TestRequest {
         }
     }
 
+    /// Accept a request on `conn`, verify that it matches this one,
+    /// and respond to it.
+    ///
+    /// This is only useful for verifying passthrough requests. For
+    /// stolen requests, see [`StealingClient::expect_request`].
     pub async fn accept(&self, conn: TcpStream, handled_by: ClientId) {
         let conn = match &self.acceptor {
             Some(acceptor) => {
@@ -486,9 +495,21 @@ impl TestRequest {
         sender: &mut HttpSender<BoxBody<Bytes, hyper::Error>>,
         expect_handled_by: ClientId,
     ) {
+        self.send_verify(sender, expect_handled_by, |_| ()).await
+    }
+
+    pub async fn send_verify<F>(
+        &self,
+        sender: &mut HttpSender<BoxBody<Bytes, hyper::Error>>,
+        expect_handled_by: ClientId,
+        verify: F,
+    ) where
+        F: FnOnce(&Response<Incoming>),
+    {
         println!("[{}:{}] Sending request: {self:?}", file!(), line!());
         let request = self.as_hyper_request();
         let mut response = sender.send(request).await.unwrap();
+        verify(&response);
 
         println!(
             "[{}:{}] Got response: {response:?}, expected {self:?}",
@@ -512,6 +533,9 @@ impl TestRequest {
     }
 }
 
+/// Client for listening for and handling stolen connections. Directly
+/// receives and interprets `DaemonMessage`s. For handling passthrough
+/// requests, see `TestRequest::accept` and friends.
 pub struct StealingClient {
     id: ClientId,
     api: TcpStealerApi,
@@ -598,6 +622,7 @@ impl StealingClient {
         }
     }
 
+    /// For handling passthrough requests, see [`TestRequest::accept`].
     pub async fn expect_request(&mut self, expected: &TestRequest) {
         let mut request = match self.api.recv().await.unwrap() {
             DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(

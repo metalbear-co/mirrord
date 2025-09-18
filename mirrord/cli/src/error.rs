@@ -445,6 +445,14 @@ pub(crate) enum CliError {
         "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not teh case in your config, then this might be a bug!"
     ))]
     InvalidBackoff(String),
+
+    #[error("Job Agent's Pod got deleted during initialization")]
+    #[diagnostic(help(
+        "This likely means that you don't have the required permissions to spawn it.
+        Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
+        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+    ))]
+    AgentPodDeleted,
 }
 
 impl CliError {
@@ -470,6 +478,7 @@ impl CliError {
             {
                 Self::InvalidCertificate(error)
             }
+            KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
             error => fallback(error),
         }
     }

@@ -6,7 +6,10 @@ use super::BackgroundTask;
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
-    incoming::{self, MirrorHandle, RedirectorTask, StealHandle, tls::StealTlsHandlerStore},
+    incoming::{
+        self, MirrorHandle, RedirectorTask, RedirectorTaskConfig, StealHandle,
+        tls::StealTlsHandlerStore,
+    },
     sniffer::{TcpConnectionSniffer, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerTask},
     task::{BgTaskRuntime, status::IntoStatus},
@@ -30,6 +33,7 @@ pub(super) async fn start_traffic_redirector(
     let tls_handler_store =
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
+    let redirector_task_config = RedirectorTaskConfig::from_env();
     let (task, steal_handle, mirror_handle) = tokio::spawn(async move {
         incoming::create_iptables_redirector(
             flush_connections,
@@ -38,13 +42,15 @@ pub(super) async fn start_traffic_redirector(
             with_mesh_exclusion,
         )
         .await
-        .map(|redirector| RedirectorTask::new(redirector, tls_handler_store))
+        .map(|redirector| {
+            RedirectorTask::new(redirector, tls_handler_store, redirector_task_config)
+        })
     })
     .await
     .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
     .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
 
-    runtime.handle().spawn(task.run());
+    tokio::spawn(task.run());
 
     Ok((steal_handle, mirror_handle))
 }
