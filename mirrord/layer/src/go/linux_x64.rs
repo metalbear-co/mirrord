@@ -638,7 +638,7 @@ mod go_1_25 {
     ///
     /// # Params
     ///
-    /// `internal/runtime/syscall.Syscall6` params in rax, rdi, rcx, rbx, rsi, r8, and r9.
+    /// `internal/runtime/syscall.Syscall6` params in rax, rbx, rcx, rdi, rsi, r8, r9.
     ///
     /// # Returns
     ///
@@ -665,7 +665,7 @@ mod go_1_25 {
             "sub    rsp,0x40",
             // Move arguments from registers to the stack:
             // * syscall number is in rax
-            // * 6 syscall arguments are rdi, rcx, rbx, rsi, r8, r9
+            // * 6 syscall arguments are in rbx, rcx, rdi, rsi, r8, r9
             //
             // Note that these are not the correct registers for making a syscall on x64.
             // These are the registers where arguments are stored
