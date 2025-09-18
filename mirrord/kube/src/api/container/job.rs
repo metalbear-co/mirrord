@@ -1,19 +1,24 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 use futures::StreamExt;
 use k8s_openapi::api::{
     batch::v1::{Job, JobSpec},
-    core::v1::{Pod, PodTemplateSpec},
+    core::v1::{Pod, PodStatus, PodTemplateSpec},
 };
 use kube::{
     Api, Client, ResourceExt,
     api::{ObjectMeta, PostParams},
-    runtime::{WatchStreamExt, watcher},
+    runtime::{
+        WatchStreamExt,
+        watcher::{self, Event, watcher},
+    },
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use tokio::{pin, time::sleep};
-use tracing::warn;
+use tokio::{pin, time::interval};
 
 use crate::{
     api::{
@@ -56,14 +61,18 @@ where
 
     let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
-    let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
+    let stream = watcher(pod_api.clone(), watcher_config);
     pin!(stream);
 
     let agent_pod = stream
+        .as_mut()
+        .applied_objects()
         .next()
         .await
-        .ok_or(KubeApiError::AgentPodNotRunning)?
-        .map_err(|_| KubeApiError::AgentPodNotRunning)?;
+        .ok_or(KubeApiError::AgentPodStartError(
+            "Watch stream failed".to_owned(),
+        ))?
+        .map_err(|err| KubeApiError::AgentPodStartError(err.to_string()))?;
 
     let pod_name = agent_pod
         .metadata
@@ -83,21 +92,28 @@ where
 
     let mut pod_progress = progress.subtask("waiting for pod to be ready...");
 
-    // We want to warn the user if the pod has been in the "Pending" phase for 10+ seconds
-    let mut is_pending = false;
-    let mut warned_user = false;
-    let pending_timer = sleep(Duration::from_secs(10));
-    tokio::pin!(pending_timer);
+    let initialization_start = Instant::now();
+
+    let mut long_initialization_timer = interval(Duration::from_secs(20));
+    // First tick is instant
+    long_initialization_timer.tick().await;
+
+    let mut last_known_container_state = find_agent_container_state(&agent_pod.status);
 
     loop {
         tokio::select! {
-            _ = &mut pending_timer, if is_pending && !warned_user => {
-                pod_progress.warning("agent pod initialization is taking longer than expected");
-                warned_user = true;
+            _ = long_initialization_timer.tick() => {
+                pod_progress.warning(&format!(
+                    "agent pod initialization is taking longer than expected ({}s) - container state: '{}'",
+                    initialization_start.elapsed().as_secs(),
+                    last_known_container_state.unwrap_or("<unknown>")
+                ));
             }
             event = stream.next() => {
                 match event {
-                    Some(Ok(pod)) => {
+                    Some(Ok(Event::Apply(pod) | Event::InitApply(pod))) => {
+                        last_known_container_state = find_agent_container_state(&pod.status);
+
                         let Some(ref status) = pod.status else {
                             continue;
                         };
@@ -106,11 +122,9 @@ where
                             continue;
                         };
 
-                        is_pending = phase == "Pending";
-
                         // Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
                         match phase.as_str() {
-                            "Pending" => continue,
+                            "Pending" | "Unknown" => continue,
                             "Running" => break,
                             "Failed" => {
                                 pod_progress.failure(Some(&format!(
@@ -118,29 +132,33 @@ where
                                     status.message.as_deref().unwrap_or("<no message>"),
                                     status.reason.as_deref().unwrap_or("<unknown reason>")
                                 )));
-                                return Err(KubeApiError::PodFailedToInitialize(
-                                    status.reason.clone(),
-                                    status.message.clone(),
+                                return Err(KubeApiError::AgentPodStartError(
+                                    status.message.clone().unwrap_or_else(|| "<no message>".to_owned()),
                                 ));
                             }
                             "Succeeded" => {
                                 pod_progress.failure(Some(
                                     "agent pod terminated prematurely - this is a bug, please report it!",
                                 ));
-                                return Err(KubeApiError::PodTerminatedPrematurely);
+                                return Err(KubeApiError::AgentPodStartError("Skipped 'Running' phase".to_owned()));
                             }
-                            phase => warn!("Unhandled pod phase '{}'", phase),
+                            phase => {
+                                pod_progress.failure(Some(&format!("agent pod moved to an unhandled phase - '{phase}'")));
+                                return Err(KubeApiError::AgentPodStartError(format!("Unhandled pod phase '{phase}'")));
+                            },
                         }
                     }
+
+                    Some(Ok(Event::Delete(_))) => {
+                        pod_progress.failure(Some("agent pod got unexpectedly deleted"));
+                        return Err(KubeApiError::AgentPodDeleted);
+                    }
+
+                    Some(Ok(Event::Init | Event::InitDone)) => continue,
+
                     Some(Err(_)) | None => {
-                        if is_pending {
-                            pod_progress.failure(Some("agent pod unexpectedly closed, \
-                            this likely means that you don't have the required permissions to spawn it. \
-                            look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists."));
-                            return Err(KubeApiError::AgentPodNotRunning);
-                        } else {
-                            break;
-                        }
+                            pod_progress.failure(Some("watch stream has unexpectedly failed"));
+                            return Err(KubeApiError::AgentPodStartError("Stream failed".to_owned()));
                     }
                 }
             }
@@ -166,6 +184,37 @@ where
         pod_namespace,
         agent_port: params.port,
     })
+}
+
+/// Tries finding mirrord-agent's container in `status.container_statuses` and returns a string
+/// representing it's state.
+fn find_agent_container_state(status: &Option<PodStatus>) -> Option<&'static str> {
+    status
+        .as_ref()
+        .and_then(|status| status.container_statuses.clone())
+        .and_then(|statuses| {
+            statuses
+                .iter()
+                .find(|container| container.name == "mirrord-agent")
+                .cloned()
+        })
+        .and_then(|status| status.state)
+        .and_then(|state| {
+            // `ContainerState` is essentially an enum pretending to be a struct, so we have to this
+            // little dance, which really wants to be a pattern match.
+            if state.running.is_some() {
+                Some("running")
+            } else if state.terminated.is_some() {
+                Some("terminated")
+            } else if state.waiting.is_some() {
+                Some("waiting")
+            } else {
+                // This should be unreachable - the docs say that if the state is unknown then the
+                // active state will be 'waiting', but it doesn't sound nice to
+                // crash if another state ever gets added.
+                None
+            }
+        })
 }
 
 pub struct JobVariant<T> {

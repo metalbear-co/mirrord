@@ -48,9 +48,6 @@ pub enum KubeApiError {
     #[error("Resource fetched from Kube API is invalid: {0}")]
     InvalidResourceState(String),
 
-    #[error("Agent Job was created, but Pod is not running")]
-    AgentPodNotRunning,
-
     /// Attempted to create an `OperatorTarget` from a resource that cannot be an immediate target.
     ///
     /// Create this variant with the [`KubeApiError::requires_copy`] method.
@@ -80,15 +77,13 @@ pub enum KubeApiError {
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 
-    /// Failed to initialize the job agent's pod.
-    /// This will happen when the pod moves to the `"Failed"` stage while initializing.
-    #[error("Pod failed to spawn with reason `{0:?}` and message `{1:?}`.")]
-    PodFailedToInitialize(Option<String>, Option<String>),
+    /// Generic failure of the agent pod startup routine.
+    #[error("Failed to wait for the agent pod to start: {0}")]
+    AgentPodStartError(String),
 
-    /// The job agent's pod finished running all of it's containers without notifying us of the
-    /// `"Running"` stage. This is a bug and should never happen.
-    #[error("Pod terminated before running")]
-    PodTerminatedPrematurely,
+    /// Spawned agent pod was deleted during startup.
+    #[error("Agent pod was unexpectedly deleted")]
+    AgentPodDeleted,
 }
 
 impl KubeApiError {
