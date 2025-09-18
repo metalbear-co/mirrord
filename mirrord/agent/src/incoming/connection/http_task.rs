@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future, sync::Arc};
+use std::{error::Report, future::Future};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;

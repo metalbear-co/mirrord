@@ -3,7 +3,6 @@ use std::{
     error::Report,
     fmt,
     ops::{Not, RangeInclusive},
-    sync::Arc,
     vec,
 };
 

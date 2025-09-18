@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 use bytes::Bytes;
 use futures::StreamExt;
