@@ -7,13 +7,13 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, FILE_BASIC_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION,
-    FS_INFORMATION_CLASS, PFILE_BASIC_INFORMATION,
+    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_BASIC_INFORMATION, FILE_INFORMATION_CLASS,
+    FILE_POSITION_INFORMATION, PFILE_BASIC_INFORMATION,
 };
 use str_win::u16_buffer_to_string;
 use winapi::{
     shared::{
-        minwindef::DWORD,
+        minwindef::{DWORD, FILETIME},
         ntdef::{
             HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID, ULONG,
         },
@@ -25,7 +25,8 @@ use winapi::{
     um::{
         winbase::FILE_TYPE_DISK,
         winnt::{
-            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE,
+            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_DATA,
+            FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE,
         },
     },
 };
@@ -173,6 +174,7 @@ unsafe extern "system" fn nt_create_file_hook(
                         creation_time: WindowsTime::current().as_file_time(),
                         access_time: WindowsTime::current().as_file_time(),
                         write_time: WindowsTime::current().as_file_time(),
+                        change_time: WindowsTime::current().as_file_time(),
                         // Data will be retrieved on first read.
                         data: None,
                         // Xstat request contains the size of the remote file in this field,
@@ -293,7 +295,7 @@ unsafe extern "system" fn nt_read_file_hook(
             };
 
             // Get a slice of the bytes.
-            let bytes = &bytes[start_off as usize..];
+            let bytes = &bytes[start_off..];
 
             // Calculate target length for copy.
             // TODO(gabriela): make sure the contiguous memory pages are all fine
@@ -398,23 +400,54 @@ unsafe extern "system" fn nt_set_information_file_hook(
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             // The possible values are documented at the following link:
-            // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryinformationfile
+            // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetinformationfile
             match file_information_class {
                 // A FILE_BASIC_INFORMATION structure. The caller must have opened the file
-                // with the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
+                // with the FILE_WRITE_ATTRIBUTES flag specified in the DesiredAccess parameter.
                 FILE_INFORMATION_CLASS::FileBasicInformation => {
-                    if handle_context.desired_access & (FILE_READ_ATTRIBUTES) != 0 {
+                    if handle_context.desired_access & (FILE_WRITE_ATTRIBUTES) != 0 {
+                        // Length must be the same size as [`FILE_BASIC_INFORMATION`] length!
+                        if length as usize != std::mem::size_of::<FILE_BASIC_INFORMATION>() {
+                            return STATUS_ACCESS_VIOLATION;
+                        }
+
                         let in_ptr = file_information as *const FILE_BASIC_INFORMATION;
+
+                        /// If you specify a value of zero for any of the XxxTime members of the
+                        /// FILE_BASIC_INFORMATION structure, the ZwSetInformationFile function
+                        /// keeps a file's current setting for that time.
+                        fn update_time(file_time: &mut FILETIME, new_time: _LARGE_INTEGER) {
+                            unsafe {
+                                if new_time.QuadPart != 0 {
+                                    file_time.dwLowDateTime = new_time.u.LowPart;
+                                    file_time.dwHighDateTime = new_time.u.HighPart as u32;
+                                }
+                            }
+                        }
+                        update_time(&mut handle_context.access_time, (*in_ptr).LastAccessTime);
+                        update_time(&mut handle_context.write_time, (*in_ptr).LastWriteTime);
+                        update_time(&mut handle_context.change_time, (*in_ptr).ChangeTime);
+
+                        handle_context.file_attributes = (*in_ptr).FileAttributes;
                     }
+
+                    return STATUS_SUCCESS;
                 }
                 // Change the current file information, which is stored in a
                 // FILE_POSITION_INFORMATION structure.
                 FILE_INFORMATION_CLASS::FilePositionInformation => {
+                    // Length must be the same size as [`FILE_POSITION_INFORMATION`] length!
+                    if length as usize != std::mem::size_of::<FILE_POSITION_INFORMATION>() {
+                        return STATUS_ACCESS_VIOLATION;
+                    }
+
                     // Cast file information pointer to FILE_POSITION_INFORMATION
                     let in_ptr = file_information as *const FILE_POSITION_INFORMATION;
 
                     // Set CurrentByteOffset from FILE_POSITION_INFORMATION to handle context.
                     handle_context.cursor = (*in_ptr).CurrentByteOffset.QuadPart as _;
+
+                    return STATUS_SUCCESS;
                 }
                 _ => {}
             }
@@ -442,24 +475,28 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     file_basic_info: PFILE_BASIC_INFORMATION,
 ) -> NTSTATUS {
     unsafe {
-        let name = read_object_attributes_name(object_attributes);
-        println!("query_attributes: {name}");
+        // TODO: call hook
 
         let original = NT_QUERY_ATTRIBUTES_FILE_ORIGINAL.get().unwrap();
         original(object_attributes, file_basic_info)
     }
 }
-type NtQueryVolumeInformationFileType =
-    unsafe extern "system" fn(HANDLE, *mut c_void, PVOID, ULONG, FS_INFORMATION_CLASS) -> NTSTATUS;
+type NtQueryVolumeInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut c_void,
+    PVOID,
+    ULONG,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
 static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInformationFileType> =
     OnceLock::new();
 
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut c_void,
-    fs_information: PVOID,
+    file_information: PVOID,
     length: ULONG,
-    file_information_class: FS_INFORMATION_CLASS,
+    file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
@@ -467,32 +504,86 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
         {
             return STATUS_SUCCESS;
         }
+
         let original = NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL.get().unwrap();
         original(
             file,
             io_status_block,
-            fs_information,
+            file_information,
             length,
             file_information_class,
         )
     }
 }
 
-type NtQueryInformationFileType =
-    unsafe extern "system" fn(HANDLE, *mut c_void, PVOID, ULONG, FS_INFORMATION_CLASS) -> NTSTATUS;
+type NtQueryInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut c_void,
+    PVOID,
+    ULONG,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
 static NT_QUERY_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryInformationFileType> = OnceLock::new();
 
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut c_void,
-    fs_information: PVOID,
+    file_information: PVOID,
     length: ULONG,
-    file_information_class: FS_INFORMATION_CLASS,
+    file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
             && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
         {
+            match file_information_class {
+                // A FILE_BASIC_INFORMATION structure. The caller must have opened the file with
+                // the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
+                FILE_INFORMATION_CLASS::FileBasicInformation => {
+                    if handle_context.desired_access & (FILE_WRITE_ATTRIBUTES) != 0 {
+                        // Length must be the same size as [`FILE_BASIC_INFORMATION`] length!
+                        if length as usize != std::mem::size_of::<FILE_BASIC_INFORMATION>() {
+                            return STATUS_ACCESS_VIOLATION;
+                        }
+
+                        let out_ptr = file_information as *mut FILE_BASIC_INFORMATION;
+
+                        // Initialize structure from our context.
+                        (*out_ptr).CreationTime.QuadPart =
+                            WindowsTime::from(handle_context.creation_time).as_file_time_i64();
+                        (*out_ptr).LastAccessTime.QuadPart =
+                            WindowsTime::from(handle_context.access_time).as_file_time_i64();
+                        (*out_ptr).LastWriteTime.QuadPart =
+                            WindowsTime::from(handle_context.write_time).as_file_time_i64();
+                        (*out_ptr).ChangeTime.QuadPart =
+                            WindowsTime::from(handle_context.change_time).as_file_time_i64();
+                        (*out_ptr).FileAttributes = handle_context.file_attributes;
+                    }
+
+                    return STATUS_SUCCESS;
+                }
+                // A FILE_POSITION_INFORMATION structure. The caller must have opened the file with
+                // the DesiredAccess FILE_READ_DATA or FILE_WRITE_DATA flag
+                // specified in the DesiredAccess parameter.
+                FILE_INFORMATION_CLASS::FilePositionInformation => {
+                    if (handle_context.desired_access & (FILE_READ_DATA) != 0)
+                        || (handle_context.desired_access & (FILE_WRITE_DATA) != 0)
+                    {
+                        // Length must be the same size as [`FILE_BASIC_INFORMATION`] length!
+                        if length as usize != std::mem::size_of::<FILE_BASIC_INFORMATION>() {
+                            return STATUS_ACCESS_VIOLATION;
+                        }
+
+                        let out_ptr = file_information as *mut FILE_POSITION_INFORMATION;
+                        (*out_ptr).CurrentByteOffset.QuadPart = handle_context.cursor as _;
+                    }
+
+                    return STATUS_SUCCESS;
+                }
+                _ => {}
+            }
+
             return STATUS_SUCCESS;
         }
 
@@ -500,7 +591,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
         original(
             file,
             io_status_block,
-            fs_information,
+            file_information,
             length,
             file_information_class,
         )

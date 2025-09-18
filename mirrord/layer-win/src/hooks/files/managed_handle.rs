@@ -77,6 +77,8 @@ pub struct HandleContext {
     pub access_time: FILETIME,
     /// Write time as [`FILETIME`]
     pub write_time: FILETIME,
+    /// Change time as [`FILETIME`]
+    pub change_time: FILETIME,
     /// Data, in bytes.
     /// NOTE(gabriela): should we do this, or seek + read on
     /// every readfile?
