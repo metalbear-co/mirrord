@@ -1,6 +1,11 @@
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    io::{Read, Write},
+};
 
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{DateTime, NaiveDate, Utc};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 #[cfg(feature = "client")]
@@ -9,7 +14,7 @@ use x509_certificate::{
 };
 use x509_certificate::{asn1time::Time, rfc5280};
 
-use crate::{certificate::Certificate, key_pair::KeyPair};
+use crate::{certificate::Certificate, error::ApiKeyError, key_pair::KeyPair};
 
 /// Client credentials container for authentication with the operator.
 /// Contains a local [`KeyPair`] and an optional [`Certificate`].
@@ -102,6 +107,67 @@ impl LicenseValidity for NaiveDate {
             .num_days()
             .try_into()
             .ok()
+    }
+}
+
+/// Continuous Integration API Key versioned container.
+#[derive(Debug)]
+pub enum CiApiKey {
+    /// V1 API key carries exactly the same data as [`Credentials`].
+    V1(Credentials),
+}
+
+impl CiApiKey {
+    const V1_PREFIX: &str = "mci-v1:";
+
+    /// V1 encoding:
+    /// 1. Serialize [`Credentials`] with `bincode` (standard config).
+    /// 2. Compress with `zlib` with highest compression level (9).
+    /// 3. Encode with URL-safe base64 without padding.
+    /// 4. Prefix with `mci-v1:`, mirrord CI version 1.
+    pub fn encode(&self) -> Result<String, ApiKeyError> {
+        match self {
+            CiApiKey::V1(credentials) => {
+                let bytes =
+                    bincode::serde::encode_to_vec(credentials, bincode::config::standard())?;
+
+                let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+                compression_encoder.write_all(&bytes)?;
+                let compressed = compression_encoder.finish()?;
+
+                let encoded = format!(
+                    "{}{}",
+                    Self::V1_PREFIX,
+                    BASE64_URL_SAFE_NO_PAD.encode(compressed),
+                );
+                Ok(encoded)
+            }
+        }
+    }
+
+    /// Decoding a CI API key by first checking the prefix to determine the version.
+    /// Then follow the encoding process in reverse for each version.
+    pub fn decode(encoded: &str) -> Result<Self, ApiKeyError> {
+        if let Some(rest) = encoded.strip_prefix(Self::V1_PREFIX) {
+            let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+
+            let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
+            let mut bytes = Vec::new();
+            compression_decoder.read_to_end(&mut bytes)?;
+
+            let (credentials, _) =
+                bincode::serde::decode_from_slice(&bytes, bincode::config::standard())?;
+
+            return Ok(CiApiKey::V1(credentials));
+        }
+
+        Err(ApiKeyError::InvalidFormat)
+    }
+}
+
+impl From<Credentials> for CiApiKey {
+    fn from(credentials: Credentials) -> Self {
+        CiApiKey::V1(credentials)
     }
 }
 
@@ -280,6 +346,8 @@ mod test {
     };
     use x509_certificate::rfc2986::CertificationRequest;
 
+    use crate::credentials::CiApiKey;
+
     /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
     #[test]
     fn decode_old_certificate_request() {
@@ -321,5 +389,25 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
                 .octet_bytes(),
             PUBLIC_KEY
         );
+    }
+
+    #[test]
+    fn v1_ci_api_key_encode_decode() {
+        // This credential is generated using a test root issuer
+        const V1_API_KEY: &str = "mci-v1:eNptk8uSmzoQhhdnRxXvkP3UqTFgZsziLAQIELZgMBgQOy62DBbEYxvL5pnOG2YTeZJUTSpRlTbd6tb_9eWb_c-_j2NCFwVfLLhOkIMskMAPqyxhhCw8WRbYhhRwZAIqbgI8k-JTkQMH2GaA4wVfRcROo8i2rcLcwAON1VRHTjrKUplHNHXTqXHNCcF0bNz0Xnv-sVY3NHFZV2T6VCSwxCZ1gbKBFuXrKDV9BC9sG5upLFU9myFnzWot4t6-DnC34WECddzBCdtYyz5s9e-2Dgw43nDEiS1LH8rM26XM_Xul-YdVFhwj6ERxbK6K_EDTTD82lrkp8mCGLc5NEbVU09GMgI0icJIlZYaqO4GJf9w3zqnSFgYPr-d3e07rZqv1Srr4anoT6f330AIR5ZRCKGpnAkDylaowWWpc50z6dF-3xrnMAlYNAVupbCz6hQl2C0i3zisa1nrtbtqw9YVfEA_mvcwDhlreijpkzjzXAkby9YS6rzdsgzMaAoUMQVf3jDcuu1bMOBYWekEdUUlGlDCpZ6sEaKRDF1kKbMjDWGkDNehWCdFwhlXsojnuoUJadEa9cS9UZyxzgfkpWzWk58p6aGhE50jG27Av9pUnCCxfLXJ_KjNjFJpafJ_fcEdGbD2ysbHW1vuqD1jh_KAWFIL7QVEPBatb9FL0zlnMwoPkQbYTP-yJejlWfbOrMuNQxILmEIhoMTvwkaEe1seiZ514zdAw-9Ut_uiWaLT3rM-eYlA2T6fzNemiRLFSBeb2vXzTDSMYlrI0zZWw0bqKpWTvh3TKXyq81JPSKqPbczvX-65b8u3u_amhr8PVSiude7L0sRIwsP-yJv9_WqK3NUqF58sSkl9L5EAxFFAI_CnUQhD5RaK9cD6ba-9TRovTyhkVRK9okXvAiYnydh1zV4e3-HqUJRpDsDQay130JryXgrxUjee32j69LukT8rz8ol_S3RKsF6rfkv8-if1TznfBtD2g";
+
+        let api_key = CiApiKey::decode(V1_API_KEY).expect("decode api key");
+        let CiApiKey::V1(credentials) = &api_key;
+        assert_eq!(
+            credentials.as_ref().subject_common_name().unwrap(),
+            "mirrord-ci@API Key Unit Test"
+        );
+        assert_eq!(
+            credentials.as_ref().issuer_common_name().unwrap(),
+            "API Key Unit Test`s Enterprise License"
+        );
+
+        let encoded = api_key.encode().expect("encode api key");
+        assert_eq!(encoded, V1_API_KEY);
     }
 }
