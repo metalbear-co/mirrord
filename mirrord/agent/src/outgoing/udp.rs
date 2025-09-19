@@ -307,6 +307,8 @@ async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseErr
 
 impl UdpOutgoingApi {
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+        // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+        // Do not remove this.
         let _rt = runtime.handle().enter();
 
         let (layer_tx, layer_rx) = mpsc::channel(1000);

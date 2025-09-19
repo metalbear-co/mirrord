@@ -52,6 +52,8 @@ impl TcpOutgoingApi {
     ///
     /// * `runtime` - tokio runtime to spawn the background task on.
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+        // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+        // Do not remove this.
         let _rt = runtime.handle().enter();
 
         let (layer_tx, layer_rx) = mpsc::channel(1000);

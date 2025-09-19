@@ -24,6 +24,8 @@ pub(super) async fn start_traffic_redirector(
     target_pid: u64,
     with_mesh_exclusion: Option<u16>,
 ) -> AgentResult<(StealHandle, MirrorHandle)> {
+    // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+    // Do not remove this.
     let _rt = runtime.handle().enter();
 
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
@@ -60,6 +62,8 @@ pub(super) async fn start_sniffer(
     runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<SnifferCommand> {
+    // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+    // Do not remove this.
     let _rt = runtime.handle().enter();
 
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
@@ -96,6 +100,8 @@ pub(super) fn start_stealer(
     steal_handle: StealHandle,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<StealerCommand> {
+    // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+    // Do not remove this.
     let _rt = runtime.handle().enter();
 
     let (command_tx, command_rx) = mpsc::channel::<StealerCommand>(1000);
@@ -112,6 +118,8 @@ pub(super) fn start_dns(
     runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
+    // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+    // Do not remove this.
     let _rt = runtime.handle().enter();
 
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
