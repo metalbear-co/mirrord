@@ -35,13 +35,19 @@ use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
+#[cfg(not(target_os = "windows"))]
+use crate::extract::extract_library;
+#[cfg(unix)]
+use crate::util::reparent_to_init;
 use crate::{
     CliResult,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
-    extract::extract_library,
-    util::{get_user_git_branch, remove_proxy_env, reparent_to_init},
+    util::{get_user_git_branch, remove_proxy_env},
 };
+
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -192,6 +198,9 @@ impl MirrordExecution {
     where
         P: Progress,
     {
+        // Extract Layer from exe
+        // currently disabled for windows
+        #[cfg(not(target_os = "windows"))]
         let lib_path = extract_library(None, progress, true)?;
 
         if !config.use_proxy {
@@ -272,14 +281,17 @@ impl MirrordExecution {
             );
         }
 
-        let lib_path = lib_path.to_string_lossy().into_owned();
-        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
-        // If already exists, we append.
-        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
-        } else {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
-        };
+        #[cfg(not(target_os = "windows"))]
+        {
+            let lib_path = lib_path.to_string_lossy().into_owned();
+            // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
+            // If already exists, we append.
+            if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+            } else {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+            };
+        }
 
         let encoded_config = config.encode()?;
 
@@ -301,6 +313,7 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        #[cfg(unix)]
         unsafe {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
         }

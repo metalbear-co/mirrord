@@ -23,6 +23,7 @@ mod file_ops_tests {
         services::{basic_service, go_statfs_service},
     };
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
@@ -56,6 +57,7 @@ mod file_ops_tests {
         ops.assert(process).await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
@@ -91,6 +93,7 @@ mod file_ops_tests {
         process.assert_python_fileops_stderr().await;
     }
 
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
@@ -223,6 +226,7 @@ mod file_ops_tests {
     /// Test our getdents64 Go syscall hook, for `os.ReadDir` on go, and mkdir and rmdir.
     /// This is an E2E test and not an integration test in order to test the agent side of the
     /// detours.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
@@ -295,6 +299,7 @@ mod file_ops_tests {
     /// the statfs values are correct.
     /// This is to prevent a regression to a bug we had where because of `statfs`/`statfs64`
     /// struct conversions, we were returning an invalid struct to go when it called SYS_statfs.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
