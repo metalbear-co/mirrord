@@ -215,12 +215,15 @@ impl<Command> BackgroundTask<Command> {
     /// Waits for the task to finish, and returns its result.
     ///
     /// If the task is [`BackgroundTask::Disabled`], returns [`Ok`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), fields(status), err(level = Level::DEBUG))]
     async fn wait(self) -> Result<(), AgentError> {
         let Self::Running(status, channel) = self else {
             return Ok(());
         };
         std::mem::drop(channel);
-        status.wait().await
+
+        tracing::Span::current().record("status", format!("{status:?}"));
+        timeout(Duration::from_secs(5), status.wait()).await?
     }
 }
 
@@ -242,8 +245,6 @@ struct BackgroundTasks {
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
     mirror_handle: Option<MirrorHandle>,
-    // forever: BackgroundTask<i32>,
-    // dies: BackgroundTask<i32>,
 }
 
 struct ClientConnectionHandler {
@@ -849,24 +850,18 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
     mem::drop(cancel_guard);
 
-    let _ = timeout(
-        Duration::from_secs(args.exit_timeout.unwrap_or(5)),
-        async move {
-            tokio::join!(
-                bg_tasks.sniffer.wait().inspect_err(|error| {
-                    error!(%error, "start_agent -> Sniffer task failed");
-                }),
-                bg_tasks.stealer.wait().inspect_err(|error| {
-                    error!(%error, "start_agent -> Stealer task failed");
-                }),
-                bg_tasks.dns.wait().inspect_err(|error| {
-                    error!(%error, "start_agent -> DNS task failed");
-                }),
-            )
-        },
-    )
-    .await
-    .inspect_err(|fail| tracing::warn!(?fail, "Timed out waiting for the agent tasks to finish."));
+    let (sniffer, stealer, dns) = tokio::join!(
+        bg_tasks.sniffer.wait().inspect_err(|error| {
+            error!(%error, "start_agent -> Sniffer task failed");
+        }),
+        bg_tasks.stealer.wait().inspect_err(|error| {
+            error!(%error, "start_agent -> Stealer task failed");
+        }),
+        bg_tasks.dns.wait().inspect_err(|error| {
+            error!(%error, "start_agent -> DNS task failed");
+        }),
+    );
+    debug!(?sniffer, ?stealer, ?dns, "BackgroundTasks have finished.");
 
     trace!("start_agent -> Agent shutdown");
 

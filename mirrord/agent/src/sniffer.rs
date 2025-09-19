@@ -345,20 +345,6 @@ where
                         data: data_tx.subscribe(),
                     };
 
-                    #[cfg(test)]
-                    if identifier.source_port == 3128 {
-                        tracing::warn!(
-                            client_id,
-                            destination_port = identifier.dest_port,
-                            source_port = identifier.source_port,
-                            tcp_flags = tcp_packet.flags,
-                            bytes = tcp_packet.bytes.len(),
-                            "TEST-ONLY: Client queue of new sniffed TCP connections is full, dropping",
-                        );
-
-                        continue;
-                    }
-
                     match client_tx.try_send(connection) {
                         Ok(()) => {}
 
@@ -444,8 +430,7 @@ mod test {
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
         cancellation_token: CancellationToken,
-        #[allow(dead_code)]
-        runtime: BgTaskRuntime,
+        _runtime: BgTaskRuntime,
     }
 
     impl TestSnifferSetup {
@@ -493,7 +478,7 @@ mod test {
                 times_filter_changed,
                 next_client_id: 0,
                 cancellation_token,
-                runtime,
+                _runtime: runtime,
             }
         }
     }

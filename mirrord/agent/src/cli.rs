@@ -63,11 +63,6 @@ pub struct Args {
     /// cluster.
     #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
     pub ipv6: bool,
-
-    /// [`tokio::time::Timeout`] for waiting on `BackgroundTask`s to finish when the agent is
-    /// supposed to be exiting.
-    #[arg(long, env = envs::EXIT_TIMEOUT.name)]
-    pub exit_timeout: Option<u64>,
 }
 
 impl Args {

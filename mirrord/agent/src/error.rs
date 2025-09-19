@@ -64,6 +64,9 @@ pub(crate) enum AgentError {
 
     #[error("Failed to start a tokio runtime in the target's namespace: {0}")]
     RemoteRuntimeError(#[from] AgentRuntimeError),
+
+    #[error(transparent)]
+    Timeout(#[from] tokio::time::error::Elapsed),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;
