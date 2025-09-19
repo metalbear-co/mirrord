@@ -2062,10 +2062,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dns_resolve"
-version = "0.1.0"
-
-[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,13 +2347,6 @@ dependencies = [
  "toml 0.8.23",
  "uncased",
  "version_check",
-]
-
-[[package]]
-name = "fileops"
-version = "3.162.0"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -3503,48 +3492,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
-name = "issue1776"
-version = "3.162.0"
-dependencies = [
- "errno 0.3.13",
- "libc",
- "socket2 0.5.10",
-]
-
-[[package]]
-name = "issue1776portnot53"
-version = "3.161.0"
-dependencies = [
- "libc",
- "socket2 0.5.10",
-]
-
-[[package]]
-name = "issue1899"
-version = "3.162.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "issue2001"
-version = "3.162.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "issue2438"
-version = "0.1.0"
-dependencies = [
- "nix 0.29.0",
-]
-
-[[package]]
-name = "issue3248"
-version = "0.1.0"
-
-[[package]]
 name = "itertools"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3884,10 +3831,6 @@ name = "linux-raw-sys"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
-
-[[package]]
-name = "listen_ports"
-version = "3.162.0"
 
 [[package]]
 name = "litemap"
@@ -5046,10 +4989,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "outgoing"
-version = "3.162.0"
-
-[[package]]
 name = "outref"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5973,17 +5912,6 @@ dependencies = [
  "rustls-pki-types",
  "time",
  "yasna",
-]
-
-[[package]]
-name = "rebind0"
-version = "0.1.0"
-
-[[package]]
-name = "recv_from"
-version = "0.1.0"
-dependencies = [
- "socket2 0.6.0",
 ]
 
 [[package]]

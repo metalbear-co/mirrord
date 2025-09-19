@@ -4,23 +4,7 @@
 # All platforms: mirrord/* in members ensures all crates are available for explicit builds
 # This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
 [workspace]
-members = [
-    "mirrord/*",
-    "mirrord/layer/tests/apps/dns_resolve",
-    "mirrord/layer/tests/apps/fileops", 
-    "mirrord/layer/tests/apps/issue1776",
-    "mirrord/layer/tests/apps/issue1776portnot53",
-    "mirrord/layer/tests/apps/issue1899",
-    "mirrord/layer/tests/apps/issue2001",
-    "mirrord/layer/tests/apps/issue2438",
-    "mirrord/layer/tests/apps/issue3248",
-    "mirrord/layer/tests/apps/listen_ports",
-    "mirrord/layer/tests/apps/outgoing",
-    "mirrord/layer/tests/apps/rebind0",
-    "mirrord/layer/tests/apps/recv_from",
-    "tests",
-    "tests/rust-e2e-fileops",
-]
+members = ["mirrord/*", "tests", "tests/rust-e2e-fileops"]
 
 # Unix-specific workspace members
 default-members = [
