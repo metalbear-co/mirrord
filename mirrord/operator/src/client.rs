@@ -15,7 +15,7 @@ use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
-    credentials::LicenseValidity,
+    credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
@@ -414,6 +414,30 @@ where
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
+        let api_key: CiApiKey = Credentials::init::<MirrordOperatorCrd>(
+            self.client.clone(),
+            &format!(
+                "mirrord-ci@{}",
+                self.operator.spec.license.organization.as_str()
+            ),
+            None,
+        )
+        .await
+        .map_err(|error| {
+            OperatorApiError::ClientCertError(format!(
+                "failed to create credentials for CI: {error}"
+            ))
+        })?
+        .into();
+
+        let encoded = api_key.encode().map_err(|error| {
+            OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
+        })?;
+
+        Ok(encoded)
     }
 
     /// Creates a base [`Config`] for creating kube [`Client`]s.
