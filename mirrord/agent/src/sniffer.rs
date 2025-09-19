@@ -412,7 +412,7 @@ mod test {
     };
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
-    use tokio::{sync::mpsc, try_join};
+    use tokio::{sync::mpsc, time::sleep, try_join};
 
     use super::*;
     use crate::{
@@ -734,11 +734,17 @@ mod test {
         }
 
         // Wait until sniffer consumes all messages.
-        setup
+        let permit = setup
             .packet_tx
             .reserve_many(setup.packet_tx.max_capacity())
             .await
             .unwrap();
+        drop(permit);
+
+        // We're not in a F1 track, but we have race conditions here.
+        //
+        // See the same `sleep` in `client_lagging_on_new_connections` for more information.
+        sleep(Duration::from_millis(100)).await;
 
         let (message, log) = api.recv().await.unwrap();
         assert_eq!(message, DaemonTcp::Close(TcpClose { connection_id: 0 }),);
@@ -748,9 +754,6 @@ mod test {
 
     /// Simulates scenario where client does not read notifications about new connections fast
     /// enough. Client should miss new connections.
-    ///
-    /// There's a special `cfg(test)` case in [`TcpConnectionSniffer::handle_packet`] that skips
-    /// over a message if the `source_port: 3128` to simulate a full channel of sniffed connections.
     #[tokio::test]
     async fn client_lagging_on_new_connections() {
         let mut setup = TestSnifferSetup::new().await;
@@ -797,9 +800,16 @@ mod test {
             .reserve_many(setup.packet_tx.max_capacity())
             .await
             .unwrap();
-        std::mem::drop(permit);
+        drop(permit);
 
-        let mut last_i = 0;
+        // Due to different runtimes (the sniffer task is run in a different thread + runtime from
+        // the main test tokio runtime) we need to `sleep` here to avoid adding synchronization
+        // stuff just for a test.
+        //
+        // The issue here is that we may end up processing the message `source_port: 3128` that we
+        // want to skip to simulate a full channel of sniffed connections.
+        sleep(Duration::from_millis(100)).await;
+
         // Verify that we picked up `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` first connections.
         for i in 0..TcpSnifferApi::CONNECTION_CHANNEL_SIZE {
             let (msg, log) = api.recv().await.expect("Should have a message here!");
@@ -814,7 +824,6 @@ mod test {
                     local_address: dest_addr.into(),
                 })
             );
-            last_i = i;
         }
 
         // Send one more connection.
@@ -837,7 +846,6 @@ mod test {
 
         // Verify that we missed the last connections from the first batch.
         let (msg, log) = api.recv().await.unwrap();
-        tracing::info!("3128? {msg:?} and log {log:?} last_i {last_i:?}");
         assert_eq!(log, None);
         assert_eq!(
             msg,
