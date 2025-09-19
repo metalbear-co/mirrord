@@ -1,7 +1,11 @@
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    io::{Read, Write},
+};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{DateTime, NaiveDate, Utc};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 #[cfg(feature = "client")]
@@ -105,31 +109,52 @@ impl LicenseValidity for NaiveDate {
             .ok()
     }
 }
+
+/// Continuous Integration API Key versioned container.
 #[derive(Debug)]
 pub enum CiApiKey {
+    /// V1 API key carries exactly the same data as [`Credentials`].
     V1(Credentials),
 }
 
 impl CiApiKey {
     const V1_PREFIX: &str = "mci-v1:";
+
+    /// V1 encoding:
+    /// 1. Serialize [`Credentials`] with `bincode` (standard config).
+    /// 2. Compress with `zlib` with highest compression level (9).
+    /// 3. Encode with URL-safe base64 without padding.
+    /// 4. Prefix with `mci-v1:`, mirrord CI version 1.
     pub fn encode(&self) -> Result<String, ApiKeyError> {
         match self {
             CiApiKey::V1(credentials) => {
                 let bytes =
                     bincode::serde::encode_to_vec(credentials, bincode::config::standard())?;
+
+                let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+                compression_encoder.write_all(&bytes)?;
+                let compressed = compression_encoder.finish()?;
+
                 let encoded = format!(
                     "{}{}",
                     Self::V1_PREFIX,
-                    BASE64_URL_SAFE_NO_PAD.encode(bytes),
+                    BASE64_URL_SAFE_NO_PAD.encode(compressed),
                 );
                 Ok(encoded)
             }
         }
     }
 
+    /// Decoding a CI API key by first checking the prefix to determine the version.
+    /// Then follow the encoding process in reverse for each version.
     pub fn decode(encoded: &str) -> Result<Self, ApiKeyError> {
         if let Some(rest) = encoded.strip_prefix(Self::V1_PREFIX) {
-            let bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+            let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+
+            let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
+            let mut bytes = Vec::new();
+            compression_decoder.read_to_end(&mut bytes)?;
+
             let (credentials, _) =
                 bincode::serde::decode_from_slice(&bytes, bincode::config::standard())?;
 

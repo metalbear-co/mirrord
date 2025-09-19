@@ -40,6 +40,7 @@ chrono.workspace = true
 whoami = { version = "1", optional = true }
 home = { workspace = true, optional = true }
 pem.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 fs4 = { workspace = true, optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }

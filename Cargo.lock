@@ -4476,6 +4476,7 @@ dependencies = [
  "bcder",
  "bincode",
  "chrono",
+ "flate2",
  "fs4 0.13.1",
  "home",
  "k8s-openapi",

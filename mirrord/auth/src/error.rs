@@ -24,16 +24,20 @@ pub enum CredentialStoreError {
     Kube(#[from] kube::Error),
 }
 
+/// Errors from API key encoding and decoding operations.
 #[derive(Debug, Error)]
 pub enum ApiKeyError {
-    #[error("failed to decode api key: {0}")]
+    #[error("base64 decode error: {0}")]
     Base64Decode(#[from] base64::DecodeError),
 
-    #[error("failed to encode api key: {0}")]
+    #[error("bincode encode error: {0}")]
     BincodeEncode(#[from] bincode::error::EncodeError),
 
-    #[error("failed to decode api key: {0}")]
+    #[error("bincode decode error: {0}")]
     BincodeDecode(#[from] bincode::error::DecodeError),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 
     #[error("invalid api key format")]
     InvalidFormat,

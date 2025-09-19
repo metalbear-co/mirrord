@@ -7,12 +7,15 @@ use mirrord_progress::{Progress, ProgressTracker};
 
 use crate::{CiArgs, CiCommand, CliError, CliResult};
 
+/// Handle commands related to CI `mirrord ci ...`
 pub(crate) async fn ci_command(args: CiArgs) -> CliResult<()> {
     match args.command {
         CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file).await,
     }
 }
 
+/// Generate a new API key for CI usage by calling the operator API:
+/// `POST /mirrordoperators/:name/certificate`
 #[tracing::instrument(level = "trace", ret)]
 async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord ci api-key");
@@ -40,8 +43,7 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
             subtask.failure(Some(&format!("failed to create API key: {error}")));
         })?;
     subtask.success(Some(&format!(
-        r#"
-mirrord CI API key:
+        r#"mirrord CI API key:
 {api_key}
 
 Please store this securely! To use it in your CI/CD system, set it as the value of the
