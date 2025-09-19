@@ -75,34 +75,14 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
         }
     });
 
-// Safe conversions for socket descriptors to i64 for error handling and logging
-#[cfg(unix)]
-impl From<SocketDescriptor> for i64 {
-    fn from(socket: SocketDescriptor) -> Self {
-        socket as i64
-    }
+/// Helper function to safely convert socket descriptors to i64 for error handling and logging
+pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
+    socket as i64
 }
 
-#[cfg(windows)]
-impl From<SocketDescriptor> for i64 {
-    fn from(socket: SocketDescriptor) -> Self {
-        socket as i64
-    }
-}
-
-// Conversions from i64 back to SocketDescriptor (for cases where it's needed)
-#[cfg(unix)]
-impl From<i64> for SocketDescriptor {
-    fn from(value: i64) -> Self {
-        value as i32
-    }
-}
-
-#[cfg(windows)]
-impl From<i64> for SocketDescriptor {
-    fn from(value: i64) -> Self {
-        value as SOCKET
-    }
+/// Helper function to convert i64 back to SocketDescriptor (for cases where it's needed)
+pub fn i64_to_socket_descriptor(value: i64) -> SocketDescriptor {
+    value as SocketDescriptor
 }
 
 // Helper function to convert socket types to SocketKind

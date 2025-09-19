@@ -20,9 +20,8 @@ use mirrord_intproxy_protocol::{
     OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_layer_lib::socket::{
-    ConnectionThrough, OutgoingSelector,
+    CheckQueryResult, ConnectionThrough, DnsSelector, OutgoingSelector,
     dns::update_dns_reverse_mapping,
-    dns_selector::{CheckQueryResult, DnsSelector},
 };
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
@@ -163,7 +162,7 @@ impl DnsSelectorExt for DnsSelector {
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = type_.try_into()?;
+    let socket_kind = type_.into();
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -683,7 +682,7 @@ pub(super) fn connect(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_)?;
+            let kind = SocketKind::from(type_);
 
             Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
         }
@@ -887,7 +886,7 @@ pub(super) fn accept(
         layer_address: None,
     });
 
-    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.into());
 
     fill_address(address, address_len, remote_source.into())?;
 
@@ -1003,6 +1002,7 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
+    use crate::socket::ops::DnsSelectorExt;
     let node: String = rawish_node
         .bypass(Bypass::NullNode)?
         .to_str()
@@ -1150,6 +1150,7 @@ fn remote_hostname_string() -> Detour<CString> {
 /// issue is going on, assume that you might've triggered the UB.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
+    use crate::socket::ops::DnsSelectorExt;
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
         .to_str()

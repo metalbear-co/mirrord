@@ -168,7 +168,6 @@ where
             ))
         })?
         .make_request_with_response(request)
-        .map_err(|e| e.into())
 }
 
 /// Generic helper function to proxy a request that might have a large response to mirrord intproxy.

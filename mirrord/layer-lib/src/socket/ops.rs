@@ -14,7 +14,7 @@ use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
 
-use super::sockets::set_socket_state;
+use super::sockets::{set_socket_state, socket_descriptor_to_i64};
 use crate::{
     HookError, HookResult,
     error::ConnectError,
@@ -496,9 +496,10 @@ where
     let raw_destination = SockAddr::from(destination);
     trace!("destination {:?}", destination);
 
-    let user_socket_info = SOCKETS.lock()?.remove(&sockfd).ok_or_else(|| {
-        HookError::SocketNotFound(sockfd.into())
-    })?;
+    let user_socket_info = SOCKETS
+        .lock()?
+        .remove(&sockfd)
+        .ok_or_else(|| HookError::SocketNotFound(socket_descriptor_to_i64(sockfd)))?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]

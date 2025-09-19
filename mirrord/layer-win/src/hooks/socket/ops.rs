@@ -17,7 +17,6 @@ use mirrord_layer_lib::{
 };
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-use str_win;
 use winapi::{
     shared::{
         minwindef::INT,
@@ -349,10 +348,16 @@ where
                 )
             }
 
-            _ => Err(ConnectError::DisabledOutgoing(socket).into()),
+            _ => Err(ConnectError::DisabledOutgoing(
+                mirrord_layer_lib::socket::sockets::socket_descriptor_to_i64(socket),
+            )
+            .into()),
         },
 
-        _ => Err(ConnectError::DisabledOutgoing(socket).into()),
+        _ => Err(ConnectError::DisabledOutgoing(
+            mirrord_layer_lib::socket::sockets::socket_descriptor_to_i64(socket),
+        )
+        .into()),
     }
 }
 

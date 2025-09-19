@@ -63,7 +63,7 @@ impl LayerSetup {
     }
 
     pub fn layer_config(&self) -> &LayerConfig {
-        &CONFIG.get().expect("Layer config not initialized")
+        CONFIG.get().expect("Layer config not initialized")
     }
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {

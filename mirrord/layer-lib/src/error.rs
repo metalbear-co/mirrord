@@ -6,13 +6,14 @@
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(unix)]
+use std::ptr;
 use std::{
     env::VarError,
     io,
     net::{AddrParseError, SocketAddr},
     str::ParseBoolError,
     sync::{MutexGuard, PoisonError},
-    ptr,
 };
 
 #[cfg(unix)]
@@ -47,10 +48,10 @@ mod ignore_codes {
 
     #[cfg(windows)]
     const IGNORE_ERROR_CODES: [i32; 4] = [
-        winapi::um::winsock2::WSAEINPROGRESS as i32,
-        winapi::um::winsock2::WSAEAFNOSUPPORT as i32,
-        winapi::um::winsock2::WSAEADDRINUSE as i32,
-        winapi::um::winsock2::WSAEACCES as i32, // Using EACCES as equivalent to EPERM
+        winapi::um::winsock2::WSAEINPROGRESS,
+        winapi::um::winsock2::WSAEAFNOSUPPORT,
+        winapi::um::winsock2::WSAEADDRINUSE,
+        winapi::um::winsock2::WSAEACCES, // Using EACCES as equivalent to EPERM
     ];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
@@ -115,7 +116,7 @@ pub enum ConnectError {
     #[error("Fallback to original connection")]
     Fallback,
     #[error("Disabled outgoing connection")]
-    DisabledOutgoing(usize),
+    DisabledOutgoing(i64),
     #[error("Bypass port: {0}")]
     BypassPort(u16),
     #[error("Parameter missing: {0}")]
@@ -406,7 +407,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
                 _ => libc::EINVAL,
             },
             ResponseError::DnsLookup(dns_fail) => {
-                return match dns_fail.kind {
+                (match dns_fail.kind {
                     mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
                     // prevents an infinite loop that used to happen in some apps, don't know if
                     // this is the correct mapping.
@@ -415,7 +416,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
                     }
                     _ => libc::EAI_FAIL,
                     // TODO: Add more error kinds, next time we break protocol compatibility.
-                } as _;
+                } as _)
             }
             // for listen, EINVAL means "socket is already connected."
             // Will not happen, because this ResponseError is not return from any hook, so it
@@ -489,7 +490,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
                 _ => WSAEINVAL,
             },
             ResponseError::DnsLookup(dns_fail) => {
-                return match dns_fail.kind {
+                (match dns_fail.kind {
                     mirrord_protocol::ResolveErrorKindInternal::Timeout => WSATRY_AGAIN,
                     // prevents an infinite loop that used to happen in some apps, don't know if
                     // this is the correct mapping.
@@ -498,7 +499,7 @@ fn get_platform_errno(fail: HookError) -> u32 {
                     }
                     _ => WSANO_RECOVERY,
                     // TODO: Add more error kinds, next time we break protocol compatibility.
-                } as _;
+                } as _)
             }
             // for listen, EINVAL means "socket is already connected."
             // Will not happen, because this ResponseError is not return from any hook, so it
@@ -595,7 +596,7 @@ impl From<HookError> for i64 {
 
         #[cfg(windows)]
         unsafe {
-            winapi::um::errhandlingapi::SetLastError(errno as u32);
+            winapi::um::errhandlingapi::SetLastError(errno);
         }
 
         -1
