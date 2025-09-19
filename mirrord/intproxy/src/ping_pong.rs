@@ -163,7 +163,17 @@ impl RestartableBackgroundTask for PingPong {
 
                 ControlFlow::Continue(())
             }
-            _ => ControlFlow::Break(error),
+            _ => {
+                if self.max_reconnects == 0 {
+                    tracing::warn!(
+                        "no reconnect will be performed because agent is not connected via operator"
+                    );
+                } else {
+                    tracing::warn!(max_reconnects = %self.max_reconnects, "reached maximum amount of reconnects due to PongTimeout");
+                }
+
+                ControlFlow::Break(error)
+            }
         }
     }
 }

@@ -1,28 +1,28 @@
 #![allow(dead_code)]
 
-use crate::utils::TestProcess;
+use crate::utils::{application::GoVersion, TestProcess};
 
 #[derive(Debug)]
 pub enum FileOps {
     Python,
     Rust,
-    GoDir21,
-    GoDir22,
-    GoDir23,
-    GoStatfs,
+    GoDir(GoVersion),
+    GoStatfs(GoVersion),
 }
 
 impl FileOps {
-    pub fn command(&self) -> Vec<&str> {
+    pub fn command(&self) -> Vec<String> {
         match self {
-            FileOps::Python => {
-                vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
+            FileOps::Python => ["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
+                .map(String::from)
+                .to_vec(),
+            FileOps::Rust => ["../target/debug/rust-e2e-fileops"]
+                .map(String::from)
+                .to_vec(),
+            FileOps::GoDir(go_version) => vec![format!("go-e2e-dir/{go_version}.go_test_app")],
+            FileOps::GoStatfs(go_version) => {
+                vec![format!("go-e2e-statfs/{go_version}.go_test_app")]
             }
-            FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
-            FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
-            FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
-            FileOps::GoDir23 => vec!["go-e2e-dir/23.go_test_app"],
-            FileOps::GoStatfs => vec!["go-e2e-statfs/23.go_test_app"],
         }
     }
 

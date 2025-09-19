@@ -638,9 +638,12 @@ impl IncomingProxy {
         match message {
             IncomingProxyMessage::LayerRequest(message_id, layer_id, req) => match req {
                 IncomingRequest::PortSubscribe(subscribe) => {
-                    let msg = self
-                        .subscriptions
-                        .layer_subscribed(layer_id, message_id, subscribe);
+                    let msg = self.subscriptions.layer_subscribed(
+                        layer_id,
+                        message_id,
+                        subscribe,
+                        self.protocol_version.as_ref(),
+                    );
 
                     if let Some(msg) = msg {
                         message_bus.send(msg).await;
@@ -704,7 +707,9 @@ impl IncomingProxy {
                     tracing::info!(?subscription, "Resubscribing after connection refresh");
 
                     message_bus
-                        .send(ProxyMessage::ToAgent(subscription.resubscribe_message()))
+                        .send(ProxyMessage::ToAgent(
+                            subscription.resubscribe_message(self.protocol_version.as_ref()),
+                        ))
                         .await
                 }
             }

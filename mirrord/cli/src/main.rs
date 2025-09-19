@@ -646,6 +646,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
@@ -889,6 +890,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
             }
