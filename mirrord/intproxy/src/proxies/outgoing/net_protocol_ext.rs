@@ -1,14 +1,14 @@
 //! Utilities for handling multiple network protocol stacks within one
 //! [`OutgoingProxy`](super::OutgoingProxy).
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::{env, path::PathBuf};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use ::tokio::fs;
 use ::tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -16,7 +16,7 @@ use ::tokio::{
 };
 use bytes::BytesMut;
 use mirrord_intproxy_protocol::NetProtocol;
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
@@ -25,9 +25,9 @@ use mirrord_protocol::{
         udp::LayerUdpOutgoing,
     },
 };
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 mod tokio {
     pub mod net {
         pub struct UnixStream {}
@@ -107,7 +107,7 @@ impl NetProtocolExt for NetProtocol {
                     Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
                 }
             }
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             SocketAddress::Unix(..) => match self {
                 Self::Stream => {
                     let path = PreparedSocket::generate_uds_path().await?;
@@ -120,7 +120,7 @@ impl NetProtocolExt for NetProtocol {
                     panic!("layer requested outgoing datagrams over unix sockets");
                 }
             },
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -144,10 +144,10 @@ pub enum PreparedSocket {
 
 impl PreparedSocket {
     /// For unix listeners, relative to the temp dir.
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     async fn generate_uds_path() -> io::Result<PathBuf> {
         let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
         if !tmp_dir.exists() {
@@ -163,13 +163,13 @@ impl PreparedSocket {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
                 let addr = listener.local_addr()?;
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
                 SocketAddress::Unix(UnixAddr::Pathname(pathname))
             }
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             Self::UnixListener(_) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -190,12 +190,12 @@ impl PreparedSocket {
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
                 let (stream, _) = listener.accept().await?;
                 (InnerConnectedSocket::UnixStream(stream), true)
             }
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             Self::UnixListener(_) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -241,9 +241,9 @@ impl ConnectedSocket {
                 Ok(())
             }
             InnerConnectedSocket::TcpStream(stream) => stream.write_all(bytes).await,
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "unsupported InnerConnectedSocket",
@@ -272,14 +272,14 @@ impl ConnectedSocket {
                 self.buffer.clear();
                 Ok(bytes)
             }
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => {
                 stream.read_buf(&mut self.buffer).await?;
                 let bytes = self.buffer.to_vec();
                 self.buffer.clear();
                 Ok(bytes)
             }
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "unsupported InnerConnectedSocket",
@@ -295,10 +295,10 @@ impl ConnectedSocket {
     pub async fn shutdown(&mut self) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
-            #[cfg(not(windows))]
+            #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
-            #[cfg(windows)]
+            #[cfg(target_os = "windows")]
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "unsupported InnerConnectedSocket",

@@ -1,4 +1,3 @@
-#![cfg(target_os = "linux")]
 #![feature(try_blocks)]
 #![feature(error_reporter)]
 #![feature(try_with_capacity)]
@@ -9,8 +8,10 @@
 // TODO(alex): Get a big `Box` for the big variants.
 #![allow(clippy::large_enum_variant)]
 
+#[cfg(target_os = "linux")]
 use std::process::ExitCode;
 
+#[cfg(target_os = "linux")]
 use crate::{entrypoint::IPTABLES_DIRTY_EXIT_CODE, error::AgentError};
 
 mod cli;
@@ -41,4 +42,11 @@ async fn main() -> ExitCode {
         Err(AgentError::IPTablesDirty) => ExitCode::from(IPTABLES_DIRTY_EXIT_CODE),
         _ => ExitCode::FAILURE,
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    // mirrord agent is Linux-specific and does nothing on other platforms
+    println!("mirrord-agent is only supported on Linux");
+    std::process::exit(1);
 }

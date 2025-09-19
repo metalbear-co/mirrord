@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::{
     alloc::{self, Layout},
     mem::{self, size_of},
@@ -5,9 +6,12 @@ use std::{
     os::fd::AsRawFd,
 };
 
+#[cfg(unix)]
 use libc::{c_void, iovec};
+#[cfg(unix)]
 use socket2::SockAddr;
 
+#[cfg(unix)]
 unsafe fn address_from_raw(
     raw_address: *const libc::sockaddr,
     address_length: libc::socklen_t,
@@ -25,6 +29,7 @@ unsafe fn address_from_raw(
 }
 
 /// Test that C# `mongodb+srv` protocol can resolve DNS with udp `sendmsg` and `recvmsg`.
+#[cfg(unix)]
 fn main() {
     println!("test issue 1776: START");
 
@@ -87,4 +92,10 @@ fn main() {
     }
 
     println!("test issue 1776: SUCCESS");
+}
+
+#[cfg(not(unix))]
+fn main() {
+    // This test is Unix-specific and does nothing on other platforms
+    println!("issue1776 test skipped on non-Unix platforms");
 }

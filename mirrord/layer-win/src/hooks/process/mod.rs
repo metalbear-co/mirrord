@@ -8,7 +8,7 @@ use winapi::{
     um::winnt::{ACCESS_MASK, HANDLE},
 };
 
-use crate::apply_hook;
+use crate::{apply_hook, layer_setup};
 
 // https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1890
 type NtCreateProcessType = unsafe extern "system" fn(
@@ -27,7 +27,7 @@ unsafe extern "system" fn nt_create_process_hook(
     process_handle_ptr: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_proess: HANDLE,
+    parent_process: HANDLE,
     inherit_object_table: BOOLEAN,
     section_handle: HANDLE,
     debug_port: HANDLE,
@@ -39,7 +39,7 @@ unsafe extern "system" fn nt_create_process_hook(
             process_handle_ptr,
             desired_access,
             object_attributes_ptr,
-            parent_proess,
+            parent_process,
             inherit_object_table,
             section_handle,
             debug_port,
@@ -66,20 +66,27 @@ unsafe extern "system" fn nt_create_process_ex_hook(
     process_handle_ptr: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_proess: HANDLE,
+    parent_process: HANDLE,
     flags: ULONG,
     section_handle: HANDLE,
     debug_port: HANDLE,
     token_handle: HANDLE,
     reserved: ULONG,
 ) -> NTSTATUS {
+    // Configuration check for future use
+    let _env_enabled = &layer_setup().layer_config().feature.env;
+    let _fs_enabled = &layer_setup().layer_config().feature.fs;
+    let _network_enabled = &layer_setup().layer_config().feature.network;
+
+    // TODO: Implement process creation interception based on configuration
+    // For now, call the original function
+    let original = NT_CREATE_PROCESS_EX_ORIGINAL.get().unwrap();
     unsafe {
-        let original = NT_CREATE_PROCESS_EX_ORIGINAL.get().unwrap();
         original(
             process_handle_ptr,
             desired_access,
             object_attributes_ptr,
-            parent_proess,
+            parent_process,
             flags,
             section_handle,
             debug_port,

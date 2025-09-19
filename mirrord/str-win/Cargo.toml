@@ -1,6 +1,16 @@
 [package]
 name = "str-win"
 version = "0.1.0"
-edition = "2024"
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
 
 [dependencies]
