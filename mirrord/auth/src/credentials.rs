@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
@@ -9,7 +10,7 @@ use x509_certificate::{
 };
 use x509_certificate::{asn1time::Time, rfc5280};
 
-use crate::{certificate::Certificate, key_pair::KeyPair};
+use crate::{certificate::Certificate, error::ApiKeyError, key_pair::KeyPair};
 
 /// Client credentials container for authentication with the operator.
 /// Contains a local [`KeyPair`] and an optional [`Certificate`].
@@ -102,6 +103,46 @@ impl LicenseValidity for NaiveDate {
             .num_days()
             .try_into()
             .ok()
+    }
+}
+#[derive(Debug)]
+pub enum CiApiKey {
+    V1(Credentials),
+}
+
+impl CiApiKey {
+    const V1_PREFIX: &str = "mci-v1:";
+    pub fn encode(&self) -> Result<String, ApiKeyError> {
+        match self {
+            CiApiKey::V1(credentials) => {
+                let bytes =
+                    bincode::serde::encode_to_vec(credentials, bincode::config::standard())?;
+                let encoded = format!(
+                    "{}{}",
+                    Self::V1_PREFIX,
+                    BASE64_URL_SAFE_NO_PAD.encode(bytes),
+                );
+                Ok(encoded)
+            }
+        }
+    }
+
+    pub fn decode(encoded: &str) -> Result<Self, ApiKeyError> {
+        if let Some(rest) = encoded.strip_prefix(Self::V1_PREFIX) {
+            let bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+            let (credentials, _) =
+                bincode::serde::decode_from_slice(&bytes, bincode::config::standard())?;
+
+            return Ok(CiApiKey::V1(credentials));
+        }
+
+        Err(ApiKeyError::InvalidFormat)
+    }
+}
+
+impl From<Credentials> for CiApiKey {
+    fn from(credentials: Credentials) -> Self {
+        CiApiKey::V1(credentials)
     }
 }
 

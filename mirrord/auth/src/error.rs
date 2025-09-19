@@ -23,3 +23,18 @@ pub enum CredentialStoreError {
     #[error("certification request failed: {0}")]
     Kube(#[from] kube::Error),
 }
+
+#[derive(Debug, Error)]
+pub enum ApiKeyError {
+    #[error("failed to decode api key: {0}")]
+    Base64Decode(#[from] base64::DecodeError),
+
+    #[error("failed to encode api key: {0}")]
+    BincodeEncode(#[from] bincode::error::EncodeError),
+
+    #[error("failed to decode api key: {0}")]
+    BincodeDecode(#[from] bincode::error::DecodeError),
+
+    #[error("invalid api key format")]
+    InvalidFormat,
+}
