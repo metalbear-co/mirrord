@@ -1048,8 +1048,10 @@ pub(super) struct VpnArgs {
     #[arg(long, default_value = "/etc/resolver")]
     pub resolver_path: PathBuf,
 }
+
 #[derive(Args, Debug)]
 pub(super) struct CiArgs {
+    /// Command to use with `mirrord ci`.
     #[command(subcommand)]
     pub command: CiCommand,
 }
