@@ -43,7 +43,9 @@ use self::{
     },
     ops::{WSABufferData, log_connection_result},
     state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
-    utils::{ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin},
+    utils::{
+        ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, create_thread_local_hostent,
+    },
 };
 use crate::{apply_hook, layer_setup};
 
@@ -1181,9 +1183,9 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
     tracing::debug!("gethostname_detour called with namelen: {}", namelen);
     let original = GET_HOST_NAME_ORIGINAL.get().unwrap();
 
-    // IN namelen is not writable, we work on local variable we"ll ditch
-    let mut namelen_mut = namelen;
-    let mut namelen_ptr: *mut u32 = &mut namelen_mut;
+    // IN namelen is not writable, as a workaround we work on local variable we'll just ditch
+    let mut namelen_mut = namelen as u32;
+    let namelen_ptr: *mut u32 = &mut namelen_mut;
     unsafe {
         // gethostname is similar to hostname_ansi except:
         //     * different ret vals
@@ -1384,18 +1386,33 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         Ok(results) => {
             if !results.is_empty() {
                 // Use the first IP address from the results
-                let (_name, ip) = &results[0];
+                let (name, ip) = &results[0];
                 tracing::debug!(
                     "Remote DNS resolution successful: {} -> {}",
                     hostname_cstr,
                     ip
                 );
-                return &results[0];
+
+                // Create a proper HOSTENT structure from the resolved data using thread-local
+                // storage This mimics WinSock's behavior where each thread has its
+                // own HOSTENT buffer
+                match create_thread_local_hostent(name.clone(), *ip) {
+                    Ok(hostent_ptr) => return hostent_ptr,
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to create HOSTENT structure for {}: {:?}",
+                            hostname_cstr,
+                            e
+                        );
+                        // Fall back to original function
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "Remote DNS resolution returned empty results for {}",
+                    hostname_cstr
+                );
             }
-            tracing::warn!(
-                "Remote DNS resolution returned empty results for {}",
-                hostname_cstr
-            );
             // fallback to original
         }
         Err(e) => {

@@ -3,7 +3,19 @@
 use std::{alloc::Layout, mem, net::SocketAddr, ptr};
 
 use mirrord_layer_lib::error::{AddrInfoError, HookError, HookResult};
-use mirrord_protocol::error::{DnsLookupError, ResolveErrorKindInternal, ResponseError};
+use mirrord_protocol::{
+    dns::GetAddrInfoResponse, 
+    error::{DnsLookupError, ResolveErrorKindInternal, ResponseError},
+    outgoing::SocketAddress
+};
+use winapi::{
+    shared::{
+        minwindef::INT,
+        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
+        ws2ipdef::SOCKADDR_IN6,
+    },
+    um::winsock2::{HOSTENT, SOCK_STREAM},
+};
 
 /// Macro to safely allocate memory for Windows structures with error handling
 #[macro_export]
@@ -15,15 +27,11 @@ macro_rules! unsafe_alloc {
     }};
 }
 
-use mirrord_protocol::{dns::GetAddrInfoResponse, outgoing::SocketAddress};
-use winapi::{
-    shared::{
-        minwindef::INT,
-        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
-        ws2ipdef::SOCKADDR_IN6,
-    },
-    um::winsock2::{HOSTENT, SOCK_STREAM},
-};
+
+/// Thread-local storage for HOSTENT structures to mimic WinSock behavior
+thread_local! {
+    static THREAD_HOSTENT: std::cell::RefCell<Option<ManagedHostent>> = std::cell::RefCell::new(None);
+}
 
 /// Windows-specific extensions for SocketAddr trait, similar to SocketAddrExtUnix
 pub trait SocketAddrExtWin {

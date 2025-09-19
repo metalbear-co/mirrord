@@ -8,7 +8,6 @@ mod console;
 mod hooks;
 mod macros;
 pub mod process;
-mod setup;
 
 use std::{net::SocketAddr, thread};
 

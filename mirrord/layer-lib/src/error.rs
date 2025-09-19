@@ -12,6 +12,7 @@ use std::{
     net::{AddrParseError, SocketAddr},
     str::ParseBoolError,
     sync::{MutexGuard, PoisonError},
+    ptr,
 };
 
 #[cfg(unix)]
@@ -26,7 +27,9 @@ use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::{graceful_exit, windows::ConsoleError};
+use crate::graceful_exit;
+#[cfg(windows)]
+use crate::windows::ConsoleError;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -260,7 +263,7 @@ pub enum HookError {
     BincodeEncode(#[from] bincode::error::EncodeError),
 
     #[error("mirrord-layer: Socket not found `{0}`!")]
-    SocketNotFound(usize),
+    SocketNotFound(i64),
 
     #[error("mirrord-layer: Managed Socket not found on address `{0}`!")]
     ManagedSocketNotFound(SocketAddr),
@@ -450,6 +453,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::ConnectError(_) => libc::EFAULT,
         HookError::AddrInfoError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
+        HookError::HostnameResolveError(_) => libc::EFAULT,
     }
 }
 

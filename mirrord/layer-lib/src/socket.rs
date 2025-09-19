@@ -19,10 +19,8 @@ use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::NetProtocol;
+use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::outgoing::SocketAddress;
-#[cfg(unix)]
-pub use ops::sendmsg;
 // Re-export ops module items
 pub use ops::{
     ConnectFn, ConnectResult, SendtoFn, connect_outgoing, connect_outgoing_udp,
@@ -39,7 +37,7 @@ pub use sockets::{
 #[cfg(windows)]
 use winapi::shared::ws2def::{AF_INET, AF_INET6, SOCK_DGRAM, SOCK_STREAM};
 
-pub use crate::{ConnectError, HookResult};
+pub use crate::{ConnectError, HookResult, proxy_connection::make_proxy_request_no_response};
 
 /// Contains the addresses of a mirrord connected socket.
 ///
@@ -120,6 +118,23 @@ impl SocketKind {
     }
 }
 
+impl From<i32> for SocketKind {
+    fn from(socket_type: i32) -> Self {
+        // Mask out any flags (like SOCK_NONBLOCK, SOCK_CLOEXEC) to get the base socket type
+        let base_type = socket_type & 0xFF;
+
+        match base_type {
+            SOCK_STREAM => SocketKind::Tcp(socket_type),
+            SOCK_DGRAM => SocketKind::Udp(socket_type),
+            _ => {
+                // For unknown socket types, default to TCP
+                // This maintains backward compatibility
+                SocketKind::Tcp(socket_type)
+            }
+        }
+    }
+}
+
 impl From<SocketKind> for NetProtocol {
     fn from(kind: SocketKind) -> Self {
         match kind {
@@ -192,6 +207,24 @@ impl UserSocket {
             self.state,
             SocketState::Bound(_) | SocketState::Listening(_)
         )
+    }
+
+    /// Closes the socket and performs necessary cleanup.
+    /// If this socket was listening and bound to a port, notifies agent to stop
+    /// mirroring/stealing that port by sending PortUnsubscribe.
+    pub fn close(&self) {
+        if self.is_listening()
+            && let Some(bound) = self.bound_address()
+        {
+            let port_unsubscribe = PortUnsubscribe {
+                port: bound.address.port(),
+                listening_on: bound.address,
+            };
+
+            // Send unsubscribe request to stop port operations
+            // Ignore errors since we're cleaning up anyway
+            let _ = make_proxy_request_no_response(port_unsubscribe);
+        }
     }
 }
 

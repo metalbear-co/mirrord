@@ -42,7 +42,7 @@ pub type SOCK_ADDR_T = libc::sockaddr;
 pub type SOCK_ADDR_LEN_T = libc::socklen_t;
 
 macro_rules! connect_fn_def {
-    ($conv:expr) => {
+    ($conv:literal) => {
         unsafe extern $conv fn (
             sockfd: SocketDescriptor,
             addr: *const SOCK_ADDR_T,
@@ -55,7 +55,7 @@ macro_rules! connect_fn_def {
 #[cfg(windows)]
 pub type ConnectFn = connect_fn_def!("system");
 #[cfg(unix)]
-pub type ConnectFn = connect_fn_def!("c");
+pub type ConnectFn = connect_fn_def!("C");
 
 /// Result type for connect operations that preserves errno information
 #[derive(Debug)]
@@ -331,38 +331,6 @@ pub fn prepare_outgoing_address(address: SocketAddr) -> SocketAddress {
     address.into()
 }
 
-/// Version of connect_outgoing that performs the actual connect call when needed
-#[mirrord_layer_macro::instrument(
-    level = "debug",
-    ret,
-    skip(user_socket_info, proxy_request_fn, actual_connect_fn)
-)]
-pub fn connect_outgoing_with_call<P, F>(
-    sockfd: SocketDescriptor,
-    remote_address: SockAddr,
-    user_socket_info: Arc<UserSocket>,
-    protocol: NetProtocol,
-    proxy_request_fn: P,
-    actual_connect_fn: F,
-) -> HookResult<ConnectResult>
-where
-    P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
-    F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
-{
-    let connect_fn = |sockfd: SocketDescriptor, addr: SockAddr| -> ConnectResult {
-        ConnectResult::from(actual_connect_fn(sockfd, addr))
-    };
-
-    connect_outgoing(
-        sockfd,
-        remote_address,
-        user_socket_info,
-        protocol,
-        proxy_request_fn,
-        connect_fn,
-    )
-}
-
 /// Version of connect_outgoing for UDP that doesn't perform actual connect (semantic connection
 /// only)
 #[mirrord_layer_macro::instrument(level = "trace", ret, skip(user_socket_info, proxy_request_fn))]
@@ -528,10 +496,9 @@ where
     let raw_destination = SockAddr::from(destination);
     trace!("destination {:?}", destination);
 
-    let user_socket_info = SOCKETS
-        .lock()?
-        .remove(&sockfd)
-        .ok_or(HookError::SocketNotFound(sockfd))?;
+    let user_socket_info = SOCKETS.lock()?.remove(&sockfd).ok_or_else(|| {
+        HookError::SocketNotFound(sockfd.into())
+    })?;
 
     // we don't support unix sockets which don't use `connect`
     #[cfg(unix)]
@@ -557,7 +524,7 @@ where
             "layer-lib send_to -> non-DNS destination (port {}), checking for DNS patch",
             destination.port()
         );
-        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination.into())?;
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         sendto_fn(
             sockfd,

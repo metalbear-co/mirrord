@@ -32,7 +32,6 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
         #[cfg(unix)]
         {
             use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
-            use bincode::{Decode, Encode};
 
             std::env::var(SHARED_SOCKETS_ENV_VAR)
                 .ok()
@@ -75,6 +74,36 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
             Mutex::new(HashMap::new())
         }
     });
+
+// Safe conversions for socket descriptors to i64 for error handling and logging
+#[cfg(unix)]
+impl From<SocketDescriptor> for i64 {
+    fn from(socket: SocketDescriptor) -> Self {
+        socket as i64
+    }
+}
+
+#[cfg(windows)]
+impl From<SocketDescriptor> for i64 {
+    fn from(socket: SocketDescriptor) -> Self {
+        socket as i64
+    }
+}
+
+// Conversions from i64 back to SocketDescriptor (for cases where it's needed)
+#[cfg(unix)]
+impl From<i64> for SocketDescriptor {
+    fn from(value: i64) -> Self {
+        value as i32
+    }
+}
+
+#[cfg(windows)]
+impl From<i64> for SocketDescriptor {
+    fn from(value: i64) -> Self {
+        value as SOCKET
+    }
+}
 
 // Helper function to convert socket types to SocketKind
 #[cfg(windows)]

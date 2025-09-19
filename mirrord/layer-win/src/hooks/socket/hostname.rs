@@ -11,7 +11,7 @@ use std::sync::{LazyLock, Mutex};
 use mirrord_layer_lib::{
     error::{AddrInfoError, HookResult},
     proxy_connection::make_proxy_request_with_response,
-    socket::hostname::{get_remote_hostname, get_remote_netbios_name, HostnameResult},
+    socket::hostname::{HostnameResult, get_remote_hostname, get_remote_netbios_name},
 };
 use mirrord_protocol::dns::{AddressFamily, GetAddrInfoRequestV2, SockType};
 use winapi::{
@@ -33,12 +33,8 @@ use crate::layer_setup;
 pub static MANAGED_ADDRINFO: LazyLock<Mutex<std::collections::HashMap<usize, ManagedAddrInfoAny>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
-/// Maximum computer name length on Windows (GetComputerName API limit)
-pub const MAX_COMPUTERNAME_LENGTH: usize = 15;
-
 /// Reasonable buffer limit for hostname functions to prevent abuse
-///  // Allow for longer DNS names
-pub const REASONABLE_BUFFER_LIMIT: usize = 16 * 8;
+pub const REASONABLE_BUFFER_LIMIT: usize = 32 * 8; // 256 bytes
 
 /// Get hostname for specific Windows computer name type
 ///
@@ -230,8 +226,10 @@ where
 /// Helper function to check if a hostname matches our remote hostname
 pub fn is_remote_hostname(hostname: String) -> bool {
     // skip hostname enabled test for is_remote_hostname
-    get_remote_hostname(false).is_ok_and(|opt| opt.is_some_and(|remote_hostname| remote_hostname == hostname))
-        || get_remote_netbios_name().is_ok_and(|opt| opt.is_some_and(|remote_netbios| remote_netbios == hostname))
+    get_remote_hostname(false)
+        .is_ok_and(|opt| opt.is_some_and(|remote_hostname| remote_hostname == hostname))
+        || get_remote_netbios_name()
+            .is_ok_and(|opt| opt.is_some_and(|remote_netbios| remote_netbios == hostname))
 }
 
 /// Windows-specific implementation of GetAddrInfo using mirrord's remote DNS resolution.
