@@ -35,7 +35,8 @@ use crate::{
         ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
-    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
+    task::status::BgTaskStatus,
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod wait_body;

@@ -38,6 +38,9 @@ pub const JSON_LOG: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_JSON_LOG")
 /// Enables IPv6 support in the agent.
 pub const IPV6_SUPPORT: CheckedEnv<bool> = CheckedEnv::new("AGENT_IPV6_ENV");
 
+/// Timeout for waiting on `BackgroundTask`s to finish.
+pub const EXIT_TIMEOUT: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXIT_TIMEOUT");
+
 /// Sets a hard timeout on DNS queries.
 pub const DNS_TIMEOUT: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_AGENT_DNS_TIMEOUT");
 
