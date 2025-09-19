@@ -118,18 +118,19 @@ impl SocketKind {
     }
 }
 
-impl From<i32> for SocketKind {
-    fn from(socket_type: i32) -> Self {
+impl TryFrom<i32> for SocketKind {
+    type Error = i32;
+
+    fn try_from(socket_type: i32) -> Result<Self, Self::Error> {
         // Mask out any flags (like SOCK_NONBLOCK, SOCK_CLOEXEC) to get the base socket type
         let base_type = socket_type & 0xFF;
 
         match base_type {
-            SOCK_STREAM => SocketKind::Tcp(socket_type),
-            SOCK_DGRAM => SocketKind::Udp(socket_type),
+            SOCK_STREAM => Ok(SocketKind::Tcp(socket_type)),
+            SOCK_DGRAM => Ok(SocketKind::Udp(socket_type)),
             _ => {
-                // For unknown socket types, default to TCP
-                // This maintains backward compatibility
-                SocketKind::Tcp(socket_type)
+                // Return error for unknown socket types instead of defaulting
+                Err(socket_type)
             }
         }
     }

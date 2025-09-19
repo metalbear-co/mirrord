@@ -162,7 +162,7 @@ impl DnsSelectorExt for DnsSelector {
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = type_.into();
+    let socket_kind = type_.try_into().map_err(Bypass::Type)?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -682,7 +682,7 @@ pub(super) fn connect(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::from(type_);
+            let kind = SocketKind::try_from(type_).map_err(Bypass::Type)?;
 
             Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
         }
@@ -886,7 +886,7 @@ pub(super) fn accept(
         layer_address: None,
     });
 
-    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.into());
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into().map_err(Bypass::Type)?);
 
     fill_address(address, address_len, remote_source.into())?;
 
