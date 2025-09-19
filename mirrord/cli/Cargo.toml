@@ -67,6 +67,7 @@ home.workspace = true
 uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
+tower = { workspace = true, features = ["retry"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource"] }

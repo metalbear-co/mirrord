@@ -178,6 +178,7 @@ impl HttpFilterConfig {
     pub fn is_filter_set(&self) -> bool {
         self.header_filter.is_some()
             || self.path_filter.is_some()
+            || self.method_filter.is_some()
             || self.all_of.is_some()
             || self.any_of.is_some()
     }

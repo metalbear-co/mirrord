@@ -96,7 +96,7 @@ mod issue1317_tests {
             .join("../target/debug/issue1317")
             .to_string_lossy()
             .to_string();
-        let executable = vec![app_path.as_str()];
+        let executable = vec![app_path];
         let mut process = run_exec_with_target(
             executable,
             &service.pod_container_target(),

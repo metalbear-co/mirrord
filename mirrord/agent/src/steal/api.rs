@@ -29,10 +29,10 @@ use super::{Command, StealerCommand, StealerMessage};
 use crate::{
     AgentError,
     error::AgentResult,
-    http::filter::HttpFilter,
+    http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
     incoming::{
-        ConnError, IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider,
-        StolenHttp, StolenTcp,
+        ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
+        ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
     util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
@@ -203,6 +203,7 @@ impl TcpStealerApi {
             request_head,
             stream,
             response_provider,
+            redirector_config,
         } = request;
 
         if self
@@ -298,7 +299,10 @@ impl TcpStealerApi {
         self.incoming_streams.insert(connection_id, stream);
         self.connections.insert(
             connection_id,
-            ClientConnectionState::HttpRequestSent { response_provider },
+            ClientConnectionState::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            },
         );
 
         Ok(())
@@ -429,6 +433,7 @@ impl TcpStealerApi {
                     connection_id,
                     ClientConnectionState::HttpRequestSent {
                         response_provider: request.response_provider,
+                        redirector_config: request.redirector_config,
                     },
                 );
                 let message = if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
@@ -594,7 +599,10 @@ enum ClientConnectionState {
     /// TCP connection, client is sending data.
     Tcp { data_tx: mpsc::Sender<Bytes> },
     /// HTTP request sent, waiting for the response from the client.
-    HttpRequestSent { response_provider: ResponseProvider },
+    HttpRequestSent {
+        response_provider: ResponseProvider,
+        redirector_config: RedirectorTaskConfig,
+    },
     /// HTTP request sent, response received, client is sending response body frames.
     HttpResponseReceived { body_provider: ResponseBodyProvider },
     /// HTTP request finished, connection upgraded, client is sending data.
@@ -648,8 +656,11 @@ impl ClientConnectionState {
         B: IntoIterator<Item = InternalHttpBodyFrame>,
     {
         let state = std::mem::replace(self, Self::Closed);
-        let response_provider = match state {
-            Self::HttpRequestSent { response_provider } => response_provider,
+        let (response_provider, redirector_config) = match state {
+            Self::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            } => (response_provider, redirector_config),
             state => {
                 *self = state;
                 return;
@@ -658,9 +669,13 @@ impl ClientConnectionState {
 
         let parts = {
             let mut hyper_response = Response::new(());
+
             *hyper_response.status_mut() = response.internal_response.status;
             *hyper_response.headers_mut() = response.internal_response.headers;
             *hyper_response.version_mut() = response.internal_response.version;
+
+            Self::modify_response(&mut hyper_response, &redirector_config);
+
             hyper_response.into_parts().0
         };
 
@@ -681,6 +696,18 @@ impl ClientConnectionState {
                 body_provider.send_frame(frame.into()).await;
             }
             *self = Self::HttpResponseReceived { body_provider };
+        }
+    }
+
+    /// Used for applying transformations on the response returned
+    /// from the client. Currently just inserts the mirrord agent
+    /// header.
+    fn modify_response<T>(response: &mut Response<T>, redirector_config: &RedirectorTaskConfig) {
+        if redirector_config.inject_headers {
+            response.headers_mut().insert(
+                MIRRORD_AGENT_HTTP_HEADER_NAME,
+                http::HeaderValue::from_static("forwarded-to-client"),
+            );
         }
     }
 }

@@ -1,1 +1,0 @@
-Fixed cancellation of background tasks in the internal proxy.

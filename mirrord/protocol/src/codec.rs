@@ -8,6 +8,7 @@ use std::{
 use actix_codec::{Decoder, Encoder};
 use bincode::{Decode, Encode, error::DecodeError};
 use bytes::{Buf, BufMut, BytesMut};
+use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
@@ -176,7 +177,7 @@ pub enum FileResponse {
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone, Debug)]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -191,7 +192,7 @@ pub enum DaemonMessage {
     File(FileResponse),
     Pong,
     /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
-    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
+    GetEnvVarsResponse(RemoteResult<RemoteEnvVars>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     /// Pause is deprecated but we don't want to break protocol
     PauseTarget(crate::pause::DaemonPauseTarget),
@@ -203,6 +204,17 @@ pub enum DaemonMessage {
     ///
     /// Holds the unique id of this ping.
     OperatorPing(u128),
+}
+
+#[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]
+pub struct RemoteEnvVars(pub HashMap<String, String>);
+
+impl core::fmt::Debug for RemoteEnvVars {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("GetEnvVarsResponse")
+            .field(&"<REDACTED>")
+            .finish()
+    }
 }
 
 pub struct ProtocolCodec<I, O> {
