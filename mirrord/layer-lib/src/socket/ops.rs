@@ -362,7 +362,7 @@ where
     )
 }
 
-/// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
+/// Helps manually resolving DNS on port `53` with UDP, see `send_to` and `sendmsg`.
 ///
 /// This function is used for DNS resolution handling and socket address mapping. When sending
 /// UDP packets to non-port-53 destinations, it checks if the destination is one of our bound
@@ -450,13 +450,13 @@ pub type SendtoFn = unsafe extern "system" fn(
 /// ## DNS resolution on port `53`
 ///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
-/// connection to an interceptor socket (we don't [`connect`] this `sockfd`, just change the
-/// [`UserSocket`] state), and only then calls the actual [`sendto`] to send `raw_message` to
+/// connection to an interceptor socket (we don't `connect` this `sockfd`, just change the
+/// [`UserSocket`] state), and only then calls the actual `sendto` to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
 ///
-/// Once the [`UserSocket`] is in the [`Connected`] state, then any other [`sendto`] call with
-/// a [`None`] `raw_destination` will call the original [`sendto`] to the bound `address`. A
-/// similar logic applies to a [`Bound`] socket.
+/// Once the [`UserSocket`] is in the [`Connected`] state, then any other `sendto` call with
+/// a [`None`] `raw_destination` will call the original `sendto` to the bound `address`. A
+/// similar logic applies to a `Bound` socket.
 ///
 /// ## Usage
 ///
@@ -474,7 +474,7 @@ pub type SendtoFn = unsafe extern "system" fn(
 /// - `proxy_request_fn`: Function to make proxy requests
 ///
 /// ## Returns
-/// HookResult<isize>
+/// `HookResult<isize>`
 #[mirrord_layer_macro::instrument(
     level = "debug",
     ret,

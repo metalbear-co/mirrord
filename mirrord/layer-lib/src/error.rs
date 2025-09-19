@@ -182,7 +182,7 @@ pub enum SendToError {
 
 /// Errors that occur in the layer's hook functions, and will reach the user's application.
 ///
-/// These errors are converted to [`libc`] error codes, and are also used to [`Errno::set_raw`].
+/// These errors are converted to `libc` error codes, and are also used to `Errno::set_raw`.
 #[derive(Error, Debug)]
 pub enum HookError {
     #[error("mirrord-layer: `{0}`")]
@@ -285,7 +285,7 @@ pub enum HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
+/// handling [`ProxyToLayerMessage`].
 #[derive(Error, Debug)]
 pub enum LayerError {
     #[error("mirrord-layer: `{0}`")]

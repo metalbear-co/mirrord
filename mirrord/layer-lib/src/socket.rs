@@ -46,10 +46,10 @@ pub use crate::{ConnectError, HookResult, proxy_connection::make_proxy_request_n
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
     ///
-    /// Whenever the user calls [`getpeername`], this is the address we return to them.
+    /// Whenever the user calls `getpeername`, this is the address we return to them.
     ///
     /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
-    /// but use this address in the [`recvfrom`] handling of [`fill_address`].
+    /// but use this address in the `recvfrom` handling of `fill_address`.
     pub remote_address: SocketAddress,
 
     /// Local address (pod-wise)
@@ -72,7 +72,7 @@ pub struct Connected {
     pub layer_address: Option<SocketAddress>,
 }
 
-/// Represents a [`SocketState`] where the user made a [`bind`] call, and we intercepted it.
+/// Represents a [`SocketState`] where the user made a `bind` call, and we intercepted it.
 ///
 /// ## Details
 ///
@@ -539,8 +539,8 @@ pub trait ProtocolAndAddressFilterExt {
     ///
     /// This method may require a DNS resolution (when [`ProtocolAndAddressFilter::address`] is
     /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
-    /// flag is used, the method uses local resolution [`ToSocketAddrs`]. Otherwise, it uses
-    /// remote resolution [`remote_getaddrinfo`].
+    /// flag is used, the method uses local resolution `ToSocketAddrs`. Otherwise, it uses
+    /// remote resolution `remote_getaddrinfo`.
     /// Matches the outgoing connection request against this filter with optional DNS resolution
     fn matches_with_resolver<R: DnsResolver>(
         &self,
