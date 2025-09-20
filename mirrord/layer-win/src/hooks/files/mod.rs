@@ -1,13 +1,20 @@
 //! Module responsible for registering hooks targetting file operations syscalls.
 
-use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
+use std::{
+    ffi::c_void,
+    mem::{ManuallyDrop, MaybeUninit},
+    path::PathBuf,
+    sync::OnceLock,
+};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
 use phnt::ffi::{
-    FILE_BASIC_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_STANDARD_INFORMATION, PFILE_BASIC_INFORMATION, _IO_STATUS_BLOCK, _LARGE_INTEGER
+    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
+    FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_STANDARD_INFORMATION, IO_STATUS_BLOCK,
+    PFILE_BASIC_INFORMATION,
 };
 use str_win::u16_buffer_to_string;
 use winapi::{
@@ -24,7 +31,8 @@ use winapi::{
     um::{
         winbase::FILE_TYPE_DISK,
         winnt::{
-            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE
+            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_READ_DATA,
+            FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE,
         },
     },
 };
@@ -36,11 +44,13 @@ use crate::{
         managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
         util::{WindowsTime, remove_root_dir_from_path, try_xstat},
     },
+    process::memory::is_memory_valid,
 };
 
 pub mod managed_handle;
 pub mod util;
 
+/// Function responsible for turning a [`OBJECT_ATTRIBUTES`] structure into a [`String`].
 fn read_object_attributes_name(object_attributes: POBJECT_ATTRIBUTES) -> String {
     unsafe {
         let name_ustr = (*object_attributes).ObjectName;
@@ -69,6 +79,91 @@ type NtCreateFileType = unsafe extern "system" fn(
 ) -> NTSTATUS;
 static NT_CREATE_FILE_ORIGINAL: OnceLock<&NtCreateFileType> = OnceLock::new();
 
+// https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1963
+type NtReadFileType = unsafe extern "system" fn(
+    HANDLE,
+    HANDLE,
+    *mut c_void,
+    PVOID,
+    *mut _IO_STATUS_BLOCK,
+    PVOID,
+    ULONG,
+    PLARGE_INTEGER,
+    PULONG,
+) -> NTSTATUS;
+static NT_READ_FILE_ORIGINAL: OnceLock<&NtReadFileType> = OnceLock::new();
+
+// https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1978
+type NtWriteFileType = unsafe extern "system" fn(
+    HANDLE,
+    HANDLE,
+    *mut c_void,
+    PVOID,
+    *mut c_void,
+    PVOID,
+    ULONG,
+    PLARGE_INTEGER,
+    PULONG,
+) -> NTSTATUS;
+static NT_WRITE_FILE_ORIGINAL: OnceLock<&NtWriteFileType> = OnceLock::new();
+
+type NtSetInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut _IO_STATUS_BLOCK,
+    PVOID,
+    ULONG,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
+static NT_SET_INFORMATION_FILE_TYPE_ORIGINAL: OnceLock<&NtSetInformationFileType> = OnceLock::new();
+
+type NtQueryInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut _IO_STATUS_BLOCK,
+    PVOID,
+    ULONG,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
+static NT_QUERY_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryInformationFileType> = OnceLock::new();
+
+type NtQueryAttributesFileType =
+    unsafe extern "system" fn(POBJECT_ATTRIBUTES, PFILE_BASIC_INFORMATION) -> NTSTATUS;
+static NT_QUERY_ATTRIBUTES_FILE_ORIGINAL: OnceLock<&NtQueryAttributesFileType> = OnceLock::new();
+
+type NtQueryVolumeInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut c_void,
+    PVOID,
+    ULONG,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
+static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInformationFileType> =
+    OnceLock::new();
+
+type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
+static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
+
+
+type GetFileTypeType = unsafe extern "system" fn(HANDLE) -> DWORD;
+static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
+
+/// [`nt_create_file_hook`] is the function responsible for catching attempts to create a
+/// new file handle. In turn, it is also responsible for catching the attempt to create
+/// POSIX file descriptors through the Windows POSIX compatibility layer.
+///
+/// The mechanism is:
+/// - We try to run the `NtCreateFile` operation normally initially. Only should it fail with
+///   [`STATUS_OBJECT_PATH_NOT_FOUND`], then do we check if the path could possibly be a Linux path.
+/// - If the path is a Linux path, then we send an open request to the pod
+/// - And if it is succesful, we work to replicate the internal behavior of the `NtCreateFile`
+///   function, creating the same expectations for input,
+///
+/// Internally, this creates a "managed handle" (see [`MANAGED_HANDLES`]), and if there was a
+/// succesful open operation, we create a [`HandleContext`] for the file descriptor, which is
+/// initially filled in with relevant data, and may surely be modified later.
+/// 
+/// Another detail is that we make a xstat request to the remote pod to acquire the size of the file.
+/// 
+/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
@@ -100,20 +195,8 @@ unsafe extern "system" fn nt_create_file_hook(
 
         let name = read_object_attributes_name(object_attributes);
 
-        //println!(
-        //    "create_file: {name} {file_attributes} {share_access} {create_disposition}
-        // {create_options} -> {ret}"
-        //);
-
         // This is usually the case when a Linux path is provided.
         if ret == STATUS_OBJECT_PATH_NOT_FOUND {
-            // If no pointer for file handle, return.
-            if file_handle.is_null() {
-                // TODO(gabriela): implement VirtQuery to check if the vprot and stuff
-                // is proper, the Nt* apis do this too.
-                return STATUS_ACCESS_VIOLATION;
-            }
-
             // Try to get path.
             let linux_path = remove_root_dir_from_path(name);
 
@@ -128,6 +211,15 @@ unsafe extern "system" fn nt_create_file_hook(
             {
                 // TODO(gabriela): edit when supported!
                 return STATUS_OBJECT_PATH_NOT_FOUND;
+            }
+
+            // Check if pointer to handle is valid.
+            if file_handle.is_null() {
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            if !is_memory_valid(io_status_block) {
+                return STATUS_ACCESS_VIOLATION;
             }
 
             // Get open options.
@@ -199,9 +291,6 @@ unsafe extern "system" fn nt_create_file_hook(
                 // File could not be obtained for reasons, even if the
                 // network operation succeeded.
 
-                // TODO(gabriela): try to map some common errors to [`NTSTATUS`]-es
-                // to facillitate future bug investigations
-
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
@@ -210,20 +299,29 @@ unsafe extern "system" fn nt_create_file_hook(
     }
 }
 
-// https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1963
-type NtReadFileType = unsafe extern "system" fn(
-    HANDLE,
-    HANDLE,
-    *mut c_void,
-    PVOID,
-    *mut _IO_STATUS_BLOCK,
-    PVOID,
-    ULONG,
-    PLARGE_INTEGER,
-    PULONG,
-) -> NTSTATUS;
-static NT_READ_FILE_ORIGINAL: OnceLock<&NtReadFileType> = OnceLock::new();
-
+/// [`nt_read_file_hook`] is the function responsible for reading the contents of the acquired
+/// file descriptor from the pod.
+///
+/// The mechanism is:
+/// - We check if the `file` argument is present in the [`MANAGED_HANDLES`] structure, and, if it
+///   is, we then begin taking over execution.
+/// - Upon the first [`nt_read_file_hook`] request for the file handle, if some conditions are met,
+///   we make a request to read the entirety of the file descriptor into the [`HandleContext`], so
+///   that later it may be referred to again for various read configurations. This is a necessity,
+///   because otherwise, we'd have to, depending on the scenario, begin with a request to `seek` to
+///   the point in the file we're trying to read at. Moreso, it could be seen, depending on the
+///   context, as an optimizaqtion, to not throttle IO operations so much by doing a web request
+///   every time. This is still subject to change.
+/// - Once a buffer is obtained from the internal data, matching the beginning point in the file,
+///   and the desired length to be read, we copy the slice we made over our internal data, to the
+///   user-provided buffer, should all the preconditions for this be met.
+/// - If there is not a specified `byte_offset`, we assume the intent is to call the API until we've
+///   run out of content to read. Therefore, we maintain an internal cursor to which the minimum of
+///   `length` and remaining data in the [`HandleContext`] is added.
+/// - The internal cursor is reset if you do a read with a `byte_offset`. It can also be reset by
+///   `NtSetInformationFile` using `FilePositionInfo`.
+/// 
+/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -240,8 +338,11 @@ unsafe extern "system" fn nt_read_file_hook(
             && let Some(managed_handle) = handles.get(&file)
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
-            if buffer.is_null() {
-                // TODO(gabriela): VirtQuery buffer
+            if !is_memory_valid(buffer) {
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            if !is_memory_valid(io_status_block) {
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -295,10 +396,6 @@ unsafe extern "system" fn nt_read_file_hook(
             // Get a slice of the bytes.
             let bytes = &bytes[start_off..];
 
-            // Calculate target length for copy.
-            // TODO(gabriela): make sure the contiguous memory pages are all fine
-            // using VirtQuery, otherwise return
-            // STATUS_ACCCESS_VIOLATION.
             let len = usize::min(bytes.len(), length as _);
 
             // Otherwise, copy the remote received buffer (relative to
@@ -335,20 +432,6 @@ unsafe extern "system" fn nt_read_file_hook(
     }
 }
 
-// https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1978
-type NtWriteFileType = unsafe extern "system" fn(
-    HANDLE,
-    HANDLE,
-    *mut c_void,
-    PVOID,
-    *mut c_void,
-    PVOID,
-    ULONG,
-    PLARGE_INTEGER,
-    PULONG,
-) -> NTSTATUS;
-static NT_WRITE_FILE_ORIGINAL: OnceLock<&NtWriteFileType> = OnceLock::new();
-
 unsafe extern "system" fn nt_write_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -376,18 +459,18 @@ unsafe extern "system" fn nt_write_file_hook(
     }
 }
 
-type NtSetInformationFileType = unsafe extern "system" fn(
-    HANDLE,
-    *mut c_void,
-    PVOID,
-    ULONG,
-    FILE_INFORMATION_CLASS,
-) -> NTSTATUS;
-static NT_SET_INFORMATION_FILE_TYPE_ORIGINAL: OnceLock<&NtSetInformationFileType> = OnceLock::new();
-
+/// [`nt_set_information_file_hook`] is responsible for changing the internal state of
+/// [`HandleContext`], supporting a variety of entries defined in the [`FILE_INFORMATION_CLASS`],
+/// but not all. The current supported entries are:
+///
+/// - [`FILE_INFORMATION_CLASS::FileBasicInformation`]
+/// - [`FILE_INFORMATION_CLASS::FilePositionInformation`]
+///
+/// This status will be reflected in the [`HandleContext`], but also through
+/// `NtQueryInformationFile` (and therefore, `stat` POSIX operations.)
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut c_void,
+    io_status_block: *mut _IO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
     file_information_class: FILE_INFORMATION_CLASS,
@@ -397,6 +480,18 @@ unsafe extern "system" fn nt_set_information_file_hook(
             && let Some(managed_handle) = handles.get(&file)
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
+            if !is_memory_valid(file_information) {
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            if !is_memory_valid(io_status_block) {
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            // Always zero in my testing.
+            (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+            (*io_status_block).Information = 0;
+
             // The possible values are documented at the following link:
             // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetinformationfile
             match file_information_class {
@@ -450,7 +545,8 @@ unsafe extern "system" fn nt_set_information_file_hook(
                 _ => {}
             }
 
-            return STATUS_SUCCESS;
+            // i guess??? thanks windows
+            return STATUS_ACCESS_VIOLATION;
         }
 
         let original = NT_SET_INFORMATION_FILE_TYPE_ORIGINAL.get().unwrap();
@@ -464,68 +560,22 @@ unsafe extern "system" fn nt_set_information_file_hook(
     }
 }
 
-type NtQueryAttributesFileType =
-    unsafe extern "system" fn(POBJECT_ATTRIBUTES, PFILE_BASIC_INFORMATION) -> NTSTATUS;
-static NT_QUERY_ATTRIBUTES_FILE_ORIGINAL: OnceLock<&NtQueryAttributesFileType> = OnceLock::new();
-
-unsafe extern "system" fn nt_query_attributes_file_hook(
-    object_attributes: POBJECT_ATTRIBUTES,
-    file_basic_info: PFILE_BASIC_INFORMATION,
-) -> NTSTATUS {
-    unsafe {
-        // TODO: call hook
-
-        let original = NT_QUERY_ATTRIBUTES_FILE_ORIGINAL.get().unwrap();
-        original(object_attributes, file_basic_info)
-    }
-}
-type NtQueryVolumeInformationFileType = unsafe extern "system" fn(
-    HANDLE,
-    *mut c_void,
-    PVOID,
-    ULONG,
-    FILE_INFORMATION_CLASS,
-) -> NTSTATUS;
-static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInformationFileType> =
-    OnceLock::new();
-
-unsafe extern "system" fn nt_query_volume_information_file_hook(
-    file: HANDLE,
-    io_status_block: *mut c_void,
-    file_information: PVOID,
-    length: ULONG,
-    file_information_class: FILE_INFORMATION_CLASS,
-) -> NTSTATUS {
-    unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-        {
-            return STATUS_SUCCESS;
-        }
-
-        let original = NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL.get().unwrap();
-        original(
-            file,
-            io_status_block,
-            file_information,
-            length,
-            file_information_class,
-        )
-    }
-}
-
-type NtQueryInformationFileType = unsafe extern "system" fn(
-    HANDLE,
-    *mut c_void,
-    PVOID,
-    ULONG,
-    FILE_INFORMATION_CLASS,
-) -> NTSTATUS;
-static NT_QUERY_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryInformationFileType> = OnceLock::new();
-
+/// [`nt_query_information_file_hook`] is the function responsible for querying the state of
+/// [`HandleContext`] through the Nt API. This function supports a variety of the entries described
+/// in the [`FILE_INFORMATION_CLASS`] enum, but not all. The current supported entries are:
+///
+/// - [`FILE_INFORMATION_CLASS::FileBasicInformation`]
+/// - [`FILE_INFORMATION_CLASS::FilePositionInformation`]
+/// - [`FILE_INFORMATION_CLASS::FileStandardInformation`]
+/// - [`FILE_INFORMATION_CLASS::FileStatInformation`]
+/// - [`FILE_INFORMATION_CLASS::FileAllInformation`]
+///
+/// This information will be reflected, for example, during the invocation of the `stat` POSIX API.
+/// The path for that event, despite one of the misleading names above, is the
+/// [`FILE_INFORMATION_CLASS::FileAllInformation`] match arm.
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut c_void,
+    io_status_block: *mut _IO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
     file_information_class: FILE_INFORMATION_CLASS,
@@ -535,6 +585,14 @@ unsafe extern "system" fn nt_query_information_file_hook(
             && let Some(managed_handle) = handles.get(&file)
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
+            if !is_memory_valid(file_information) {
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            if !is_memory_valid(io_status_block) {
+                return STATUS_ACCESS_VIOLATION;
+            }
+
             match file_information_class {
                 // A FILE_BASIC_INFORMATION structure. The caller must have opened the file with
                 // the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
@@ -557,6 +615,11 @@ unsafe extern "system" fn nt_query_information_file_hook(
                         (*out_ptr).ChangeTime.QuadPart =
                             WindowsTime::from(handle_context.change_time).as_file_time_i64();
                         (*out_ptr).FileAttributes = handle_context.file_attributes;
+
+                        (*io_status_block).Information =
+                            std::mem::size_of::<FILE_BASIC_INFORMATION>() as _;
+                        (*io_status_block).__bindgen_anon_1.Status =
+                            ManuallyDrop::new(STATUS_SUCCESS);
                     }
 
                     return STATUS_SUCCESS;
@@ -564,9 +627,13 @@ unsafe extern "system" fn nt_query_information_file_hook(
                 // A FILE_POSITION_INFORMATION structure. The caller must have opened the file with
                 // the DesiredAccess FILE_READ_DATA or FILE_WRITE_DATA flag
                 // specified in the DesiredAccess parameter.
+                //
+                //
+                // NOTE(gabriela): the above is wrong and stupid, you just need read-attribs.
                 FILE_INFORMATION_CLASS::FilePositionInformation => {
-                    if (handle_context.desired_access & (FILE_READ_DATA) != 0)
-                        || (handle_context.desired_access & (FILE_WRITE_DATA) != 0)
+                    if (handle_context.desired_access & FILE_READ_DATA != 0)
+                        || (handle_context.desired_access & FILE_WRITE_DATA != 0)
+                        || (handle_context.desired_access & FILE_READ_ATTRIBUTES != 0)
                     {
                         // Length must be the same size as [`FILE_POSITION_INFORMATION`] length!
                         if length as usize != std::mem::size_of::<FILE_POSITION_INFORMATION>() {
@@ -575,12 +642,18 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         let out_ptr = file_information as *mut FILE_POSITION_INFORMATION;
                         (*out_ptr).CurrentByteOffset.QuadPart = handle_context.cursor as _;
+
+                        (*io_status_block).Information =
+                            std::mem::size_of::<FILE_POSITION_INFORMATION>() as _;
+                        (*io_status_block).__bindgen_anon_1.Status =
+                            ManuallyDrop::new(STATUS_SUCCESS);
                     }
 
                     return STATUS_SUCCESS;
-                },
-                // A FILE_STANDARD_INFORMATION structure. The caller can query this information as long as the file is open,
-                // without any particular requirements for DesiredAccess.
+                }
+                // A FILE_STANDARD_INFORMATION structure. The caller can query this information as
+                // long as the file is open, without any particular requirements for
+                // DesiredAccess.
                 FILE_INFORMATION_CLASS::FileStandardInformation => {
                     // Length must be the same size as [`FILE_STANDARD_INFORMATION`] length!
                     if length as usize != std::mem::size_of::<FILE_STANDARD_INFORMATION>() {
@@ -589,14 +662,20 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                     let out_ptr = file_information as *mut FILE_STANDARD_INFORMATION;
 
-                    (*out_ptr).AllocationSize.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
-                    (*out_ptr).EndOfFile.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).AllocationSize.QuadPart =
+                        i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).EndOfFile.QuadPart =
+                        i64::try_from(handle_context.data_xstat_size).unwrap();
                     (*out_ptr).NumberOfLinks = 0;
                     (*out_ptr).DeletePending = 0;
                     (*out_ptr).Directory = 0;
 
+                    (*io_status_block).Information =
+                        std::mem::size_of::<FILE_STANDARD_INFORMATION>() as _;
+                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+
                     return STATUS_SUCCESS;
-                },
+                }
                 // https://github.com/reactos/reactos/blob/9ab8761f2c76d437830195ebea2600e414ac4c73/dll/win32/kernelbase/wine/file.c#L3039
                 // Doesn't seem to be used in Windows 11
                 FILE_INFORMATION_CLASS::FileStatInformation => {
@@ -617,7 +696,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
                         ReparseTag: ULONG,
                         NumberOfLinks: ULONG,
                         EffectiveAccess: ACCESS_MASK,
-                    } 
+                    }
 
                     // Length must be the same size as [`FILE_STAT_INFORMATION`] length!
                     if length as usize != std::mem::size_of::<FILE_STAT_INFORMATION>() {
@@ -628,22 +707,96 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                     (*out_ptr).FileId.QuadPart = 0;
                     (*out_ptr).FileAttributes = handle_context.file_attributes;
-                    (*out_ptr).CreationTime.QuadPart = WindowsTime::from(handle_context.creation_time).as_file_time_i64();
-                    (*out_ptr).LastAccessTime.QuadPart = WindowsTime::from(handle_context.access_time).as_file_time_i64();
-                    (*out_ptr).LastWriteTime.QuadPart = WindowsTime::from(handle_context.write_time).as_file_time_i64();
-                    (*out_ptr).ChangeTime.QuadPart = WindowsTime::from(handle_context.change_time).as_file_time_i64();
-                    (*out_ptr).AllocationSize.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
-                    (*out_ptr).EndOfFile.QuadPart = i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).CreationTime.QuadPart =
+                        WindowsTime::from(handle_context.creation_time).as_file_time_i64();
+                    (*out_ptr).LastAccessTime.QuadPart =
+                        WindowsTime::from(handle_context.access_time).as_file_time_i64();
+                    (*out_ptr).LastWriteTime.QuadPart =
+                        WindowsTime::from(handle_context.write_time).as_file_time_i64();
+                    (*out_ptr).ChangeTime.QuadPart =
+                        WindowsTime::from(handle_context.change_time).as_file_time_i64();
+                    (*out_ptr).AllocationSize.QuadPart =
+                        i64::try_from(handle_context.data_xstat_size).unwrap();
+                    (*out_ptr).EndOfFile.QuadPart =
+                        i64::try_from(handle_context.data_xstat_size).unwrap();
                     (*out_ptr).ReparseTag = 0;
                     (*out_ptr).NumberOfLinks = 0;
                     (*out_ptr).EffectiveAccess = handle_context.desired_access;
 
+                    (*io_status_block).Information =
+                        std::mem::size_of::<FILE_STAT_INFORMATION>() as _;
+                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+
                     return STATUS_SUCCESS;
+                }
+                // NOTE(gabriela): well, this works as far as `GetFileInformationByHandle` is
+                // concerned, at least.
+                FILE_INFORMATION_CLASS::FileAllInformation => {
+                    // Length must be the same size as [`FILE_ALL_INFORMATION`] length!
+                    if length as usize != std::mem::size_of::<FILE_ALL_INFORMATION>() {
+                        return STATUS_ACCESS_VIOLATION;
+                    }
+
+                    let out_ptr = file_information as *mut FILE_ALL_INFORMATION;
+
+                    fn query_single<T>(handle: HANDLE, kind: FILE_INFORMATION_CLASS) -> Option<T> {
+                        let mut single: T = unsafe { MaybeUninit::zeroed().assume_init() };
+                        let mut io_status_block: IO_STATUS_BLOCK =
+                            unsafe { MaybeUninit::zeroed().assume_init() };
+
+                        let res = unsafe {
+                            nt_query_information_file_hook(
+                                handle,
+                                &mut io_status_block,
+                                std::ptr::from_mut(&mut single) as _,
+                                std::mem::size_of::<T>() as _,
+                                kind,
+                            )
+                        };
+                        if res != STATUS_SUCCESS
+                            || unsafe { io_status_block.__bindgen_anon_1.Status }
+                                != ManuallyDrop::new(STATUS_SUCCESS)
+                        {
+                            return None;
+                        }
+
+                        if std::mem::size_of::<T>() != io_status_block.Information as usize {
+                            return None;
+                        }
+
+                        Some(single)
+                    }
+
+                    fn query_all(handle: HANDLE) -> Option<FILE_ALL_INFORMATION> {
+                        let mut all_info: FILE_ALL_INFORMATION =
+                            unsafe { MaybeUninit::zeroed().assume_init() };
+
+                        all_info.BasicInformation =
+                            query_single(handle, FILE_INFORMATION_CLASS::FileBasicInformation)?;
+                        all_info.StandardInformation =
+                            query_single(handle, FILE_INFORMATION_CLASS::FileStandardInformation)?;
+                        all_info.PositionInformation =
+                            query_single(handle, FILE_INFORMATION_CLASS::FilePositionInformation)?;
+
+                        Some(all_info)
+                    }
+
+                    if let Some(all_info) = query_all(file) {
+                        (*out_ptr) = all_info;
+
+                        (*io_status_block).Information =
+                            std::mem::size_of::<FILE_ALL_INFORMATION>() as _;
+                        (*io_status_block).__bindgen_anon_1.Status =
+                            ManuallyDrop::new(STATUS_SUCCESS);
+
+                        return STATUS_SUCCESS;
+                    }
                 }
                 _ => {}
             }
 
-            return STATUS_SUCCESS;
+            // i guess??? thanks windows
+            return STATUS_ACCESS_VIOLATION;
         }
 
         let original = NT_QUERY_INFORMATION_FILE_ORIGINAL.get().unwrap();
@@ -657,9 +810,54 @@ unsafe extern "system" fn nt_query_information_file_hook(
     }
 }
 
-type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
-static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
+unsafe extern "system" fn nt_query_attributes_file_hook(
+    object_attributes: POBJECT_ATTRIBUTES,
+    file_basic_info: PFILE_BASIC_INFORMATION,
+) -> NTSTATUS {
+    unsafe {
+        // NOTE(gabriela): hasn't been needed yet, should be easy to implement! need to create
+        // handle and query!
 
+        let original = NT_QUERY_ATTRIBUTES_FILE_ORIGINAL.get().unwrap();
+        original(object_attributes, file_basic_info)
+    }
+}
+unsafe extern "system" fn nt_query_volume_information_file_hook(
+    file: HANDLE,
+    io_status_block: *mut c_void,
+    file_information: PVOID,
+    length: ULONG,
+    file_information_class: FILE_INFORMATION_CLASS,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+        {
+            // NOTE(gabriela): stub
+            return STATUS_SUCCESS;
+        }
+
+        let original = NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL.get().unwrap();
+        original(
+            file,
+            io_status_block,
+            file_information,
+            length,
+            file_information_class,
+        )
+    }
+}
+
+/// [`nt_close_hook`] is the function responsible for signaling to the remote pod that the file
+/// descriptor can now be closed, and it is also responsible of removing the [`HandleContext`] for
+/// `handle` from the [`MANAGED_HANDLES`] structure.
+///
+/// As a result, all future operations done on our [`HANDLE`] will be invalid.
+///
+/// Due to details of the [`MANAGED_HANDLES`] structure management, a [`HANDLE`] value can never be
+/// reclaimed, so all cases of reusage must be treated as a bug.
+/// 
+/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write()
@@ -685,9 +883,6 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
         original(handle)
     }
 }
-
-type GetFileTypeType = unsafe extern "system" fn(HANDLE) -> DWORD;
-static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 
 unsafe extern "system" fn get_file_type_hook(handle: HANDLE) -> DWORD {
     unsafe {

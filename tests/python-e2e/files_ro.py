@@ -17,8 +17,6 @@ class FileOpsTest(unittest.TestCase):
             open("/app/test.txt", "wb")
         with open("/app/test.txt", "r") as f:
             f.seek(0)
-            st = os.stat('/app/test.txt')
-            print(st)
             self.assertEqual(f.readline(), TEXT)
         with self.assertRaises(FileNotFoundError):
             open("/app/test.txt", "wb")
