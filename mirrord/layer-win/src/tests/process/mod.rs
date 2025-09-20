@@ -16,3 +16,5 @@ fn check_kernel32() {
         assert!(!base_address.is_null());
     }
 }
+
+mod memory;

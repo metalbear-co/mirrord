@@ -6,6 +6,7 @@ use str_win::{string_to_u8_buffer, string_to_u16_buffer};
 use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress};
 
 pub mod macros;
+pub mod memory;
 
 /// Obtains the base address of a module. `NULL` is returned if not found.
 ///

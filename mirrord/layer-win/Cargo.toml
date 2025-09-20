@@ -20,7 +20,7 @@ crate-type = ["cdylib"]
 mirrord-layer-lib = { path = "../layer-lib" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
-winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv", "timezoneapi"] }
+winapi = { version = "0.3.9", features = ["minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv", "timezoneapi", "memoryapi"] }
 windows-strings = { version = "0.4" }
 
 # Used for internal error type set-up
