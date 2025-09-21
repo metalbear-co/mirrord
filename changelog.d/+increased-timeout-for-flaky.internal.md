@@ -1,1 +1,0 @@
-Increased the timeout on the layer test `outgoing::outgoing_tcp_bound_socket` from 15 to 25 seconds to reduce chance of flakes on macOS.
