@@ -121,10 +121,12 @@ pub struct MirrordClusterSessionSpec {
     pub owner: MirrordClusterSessionOwner,
 
     /// Agent Limit
+    #[serde(default)]
     #[schemars(with = "String")]
     pub agent_limit: AgentLimit,
 
     /// State of concurrent steal
+    #[serde(default)]
     pub on_concurrent_steal: ConcurrentSteal,
 
     /// Session's [`Target`](mirrord_config::target::Target)
