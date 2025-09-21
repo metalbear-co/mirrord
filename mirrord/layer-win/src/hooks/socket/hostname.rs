@@ -136,8 +136,8 @@ where
 
                 // Add null terminator - safe because we verified buffer size above
                 *(lpBuffer.add(hostname_with_null.len())) = 0;
-                // Set actual length (excluding null terminator)
-                *nSize = (hostname_with_null.len() - 1) as u32;
+                // Set actual length
+                *nSize = hostname_with_null.len() as u32;
             }
             tracing::debug!("{} returning DNS hostname: {}", function_name, hostname);
             // TRUE - Success
@@ -200,8 +200,8 @@ where
                 std::ptr::copy_nonoverlapping(name_utf16.as_ptr(), lpBuffer, name_utf16.len());
                 // Add UTF-16 null terminator - safe because we verified buffer size above
                 *(lpBuffer.add(name_utf16.len())) = 0;
-                // Set actual length (excluding null terminator)
-                *nSize = (name_utf16.len() - 1) as u32;
+                // Set actual length
+                *nSize = name_utf16.len() as u32;
             }
             tracing::debug!("{} returning hostname: {}", function_name, hostname);
             // TRUE - Success
