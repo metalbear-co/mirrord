@@ -70,7 +70,7 @@ where
         .next()
         .await
         .ok_or_else(|| {
-            KubeApiError::AgentPodStartError("wach stream unexpectedly finished".to_owned())
+            KubeApiError::AgentPodStartError("watch stream unexpectedly finished".to_owned())
         })?
         .map_err(|err| KubeApiError::AgentPodStartError(format!("watch stream failed: {err}")))?;
 
@@ -104,7 +104,7 @@ where
         tokio::select! {
             _ = long_initialization_timer.tick() => {
                 pod_progress.warning(&format!(
-                    "agent pod initialization is taking longer than expected ({}s) - container state: '{}'",
+                    "agent pod startup is taking over {}s, container state: {}",
                     initialization_start.elapsed().as_secs(),
                     last_known_container_state
                 ));
@@ -128,21 +128,19 @@ where
                             "Running" => break,
                             "Failed" => {
                                 let message = format!(
-                                    "agent pod failed to initialize - '{}' ({})",
+                                    "agent pod failed ({}): {}",
+                                    status.reason.as_deref().unwrap_or("<unknown reason>"),
                                     status.message.as_deref().unwrap_or("<no message>"),
-                                    status.reason.as_deref().unwrap_or("<unknown reason>")
                                 );
                                 pod_progress.failure(Some(&message));
                                 return Err(KubeApiError::AgentPodStartError(message));
                             }
                             "Succeeded" => {
-                                pod_progress.failure(Some(
-                                    "agent pod terminated prematurely - this is a bug, please report it!",
-                                ));
+                                pod_progress.failure(Some("agent pod unexpectedly finished"));
                                 return Err(KubeApiError::AgentPodStartError("agent pod unexpectedly finished".to_owned()));
                             }
                             phase => {
-                                let message = format!("agent pod moved to an unhandled phase - '{phase}'");
+                                let message = format!("agent pod moved to an unexpected phase '{phase}'");
                                 pod_progress.failure(Some(&message));
                                 return Err(KubeApiError::AgentPodStartError(message));
                             },
@@ -156,8 +154,13 @@ where
 
                     Some(Ok(Event::Init | Event::InitDone)) => continue,
 
-                    Some(Err(_)) | None => {
-                            let message = "watch stream has failed".to_owned();
+                    Some(Err(error)) => {
+                            pod_progress.failure(Some("watch stream failed"));
+                            return Err(KubeApiError::AgentPodStartError(format!("watch stream failed: {error}")));
+                    }
+
+                    None => {
+                            let message = "watch stream unexpectedly finished".to_owned();
                             pod_progress.failure(Some(&message));
                             return Err(KubeApiError::AgentPodStartError(message));
                     }
