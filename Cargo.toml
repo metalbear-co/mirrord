@@ -4,31 +4,33 @@
 # All platforms: mirrord/* in members ensures all crates are available for explicit builds
 # This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
 [workspace]
-members = ["mirrord/*", "tests", "tests/rust-e2e-fileops"]
 
-# Unix-specific workspace members
-default-members = [
-    "mirrord/agent",
+members = [
+    "mirrord/*",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
-    "mirrord/analytics",
-    "mirrord/auth",
-    "mirrord/cli",
-    "mirrord/config",
-    "mirrord/console",
-    "mirrord/intproxy",
-    "mirrord/kube",
-    "mirrord/layer",
-    "mirrord/layer-lib",
-    "mirrord/macros",
-    "mirrord/operator",
-    "mirrord/progress",
-    "mirrord/protocol",
-    "mirrord/sip",
-    "mirrord/tls-util",
-    "mirrord/vpn",
+    "mirrord/layer/tests/apps/fileops",
+    "mirrord/layer/tests/apps/outgoing",
+    "mirrord/layer/tests/apps/listen_ports",
+    "mirrord/layer/tests/apps/dns_resolve",
+    "mirrord/layer/tests/apps/recv_from",
+    "mirrord/layer/tests/apps/issue1776",
+    "mirrord/layer/tests/apps/issue1776portnot53",
+    "mirrord/layer/tests/apps/issue1899",
+    "mirrord/layer/tests/apps/issue2001",
+    "mirrord/layer/tests/apps/issue2438",
+    "mirrord/layer/tests/apps/issue3248",
+    "mirrord/layer/tests/apps/rebind0",
+    "sample/rust",
+    "medschool",
+    "tests",
+    "tests/rust-e2e-fileops",
+    "tests/rust-unix-socket-client",
+    "tests/rust-bypassed-unix-socket",
+    "tests/issue1317",
+    "tests/rust-websockets",
+    "tests/rust-sqs-printer",
 ]
-
 resolver = "2"
 
 # latest commits on rustls suppress certificate verification
