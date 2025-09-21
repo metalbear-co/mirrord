@@ -127,12 +127,13 @@ impl HostnameResolver for UnixHostnameResolver {
         // Try to fetch hostname from remote /etc/hostname via ProxyConnection
         // hostnames should never exceed 256 bytes
         let hostname_bytes = read_remote_file_via_proxy("/etc/hostname", 256)?;
-        let hostname = String::from_utf8_lossy(&hostname_bytes);
+        let raw_hostname = String::from_utf8_lossy(&hostname_bytes).to_string();
+        let hostname = raw_hostname.trim_end().to_string();
         trace!(
             "UnixHostnameResolver: Successfully fetched hostname via proxy: {}",
             hostname
         );
-        Ok(Some(hostname.to_string()))
+        Ok(Some(hostname))
     }
 }
 
