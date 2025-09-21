@@ -453,6 +453,10 @@ pub(crate) enum CliError {
         You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
     ))]
     AgentPodDeleted,
+
+    #[error("Nested mirrord is not supported")]
+    #[diagnostic(help("Check your IDE and build settings and ensure you are not running mirrord within mirrord."))]
+    NestedExec,
 }
 
 impl CliError {
