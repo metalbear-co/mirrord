@@ -77,7 +77,7 @@ mod file_ops_tests {
         let python_command = std::env::var("MIRRORD_PYTHON_FILE").unwrap_or("python3".to_string());
 
         let service = basic_service.await;
-        let python_command = vec![
+        let python_command = [
             python_command.as_str(),
             "-B",
             "-m",
@@ -85,7 +85,6 @@ mod file_ops_tests {
             "-f",
             "python-e2e/files_ro.py",
         ]
-        .into_iter()
         .map(String::from)
         .to_vec();
 
