@@ -454,9 +454,11 @@ pub(crate) enum CliError {
     ))]
     AgentPodDeleted,
 
-    #[error("Nested mirrord is not supported")]
+    #[error("Detected mirrord being run within mirrord")]
     #[diagnostic(help(
-        "Check your IDE and build settings and ensure you are not running mirrord within mirrord."
+        "Running mirrord within mirrord is likely to fail or introduce severe slowness. \
+        If you are using a mirrord IDE plugin, please check that your build/run script \
+        does not invoke mirrord."
     ))]
     NestedExec,
 }
