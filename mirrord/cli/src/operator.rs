@@ -34,7 +34,7 @@ async fn get_last_version() -> CliResult<String, reqwest::Error> {
     Ok(response.operator)
 }
 
-/// Setup the operator into a file or to stdout, with explanation.
+/// Set up the operator into a file or to stdout, with explanation.
 async fn operator_setup(
     OperatorSetupParams {
         accept_tos,
@@ -47,11 +47,15 @@ async fn operator_setup(
         kafka_splitting,
         application_auto_pause,
         stateful_sessions,
+        mysql_branching,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
+    eprintln!(
+        "> WARNING: the operator setup command is deprecated, please use the Helm chart to set up the operator: https://github.com/metalbear-co/charts/"
+    );
     if !accept_tos {
         eprintln!(
-            "Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS"
+            "Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.com/legal/terms\nPass --accept-tos to accept the TOS"
         );
 
         return Ok(());
@@ -97,6 +101,7 @@ async fn operator_setup(
             kafka_splitting,
             application_auto_pause,
             stateful_sessions,
+            mysql_branching,
         });
 
         match file {

@@ -6,7 +6,9 @@ mod env_tests {
     use rstest::*;
 
     use crate::utils::{
-        application::env::EnvApp, kube_service::KubeService, run_command::run_exec_with_target,
+        application::{env::EnvApp, GoVersion},
+        kube_service::KubeService,
+        run_command::run_exec_with_target,
         services::basic_service,
     };
 
@@ -30,9 +32,9 @@ mod env_tests {
     pub async fn remote_env_vars_works(
         #[future] basic_service: KubeService,
         #[values(
-            EnvApp::Go21,
-            EnvApp::Go22,
-            EnvApp::Go23,
+            EnvApp::Go(GoVersion::GO_1_23),
+            EnvApp::Go(GoVersion::GO_1_24),
+            EnvApp::Go(GoVersion::GO_1_25),
             EnvApp::NodeInclude,
             EnvApp::NodeExclude
         )]

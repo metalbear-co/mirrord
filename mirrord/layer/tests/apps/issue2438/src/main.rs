@@ -4,13 +4,17 @@
 //! 2. Socket is first bound to an address `0.0.0.0:80`, that goes through `bind` detour completely
 //!    (socket **could not** later be used for port subscription)
 
+#[cfg(unix)]
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     os::fd::{FromRawFd, IntoRawFd},
 };
 
+#[cfg(unix)]
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, SockaddrStorage};
+
+#[cfg(unix)]
 fn main() {
     let bind_addresses: [SocketAddr; 2] =
         ["0.0.0.0:0".parse().unwrap(), "0.0.0.0:80".parse().unwrap()];
@@ -47,4 +51,10 @@ fn main() {
         assert_eq!(buf.as_slice(), message);
         println!("RECEIVED ECHO");
     }
+}
+
+#[cfg(not(unix))]
+fn main() {
+    // This test is Unix-specific and does nothing on other platforms
+    println!("issue2438 test skipped on non-Unix platforms");
 }

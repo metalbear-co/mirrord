@@ -1,7 +1,5 @@
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
-#[cfg(target_os = "windows")]
-use std::os::windows::ffi::OsStrExt;
 use std::{borrow::Cow, ffi::OsStr, fmt};
 
 /// Convenience trait that allows for producing a nice display of an std/tokio command.
@@ -23,14 +21,8 @@ impl CommandExt for std::process::Command {
             }
             #[cfg(target_os = "windows")]
             Some(value) => {
-                let name_utf16: Vec<u16> = OsStr::new(name).encode_wide().collect();
-                let value_utf16: Vec<u16> = OsStr::new(value).encode_wide().collect();
-
-                let mut buf = Vec::with_capacity(name_utf16.len() + value_utf16.len() + 1);
-                buf.extend(name_utf16);
-                buf.push(b'=' as u16);
-                buf.extend(value_utf16);
-                String::from_utf16_lossy(&buf)
+                // Create the environment string in the standard format
+                format!("{}={}", name.to_string_lossy(), value.to_string_lossy())
             }
             None => name.to_string_lossy().into_owned(),
         });

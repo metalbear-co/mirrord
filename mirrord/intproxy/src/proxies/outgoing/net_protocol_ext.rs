@@ -18,8 +18,6 @@ use bytes::BytesMut;
 use mirrord_intproxy_protocol::NetProtocol;
 #[cfg(not(target_os = "windows"))]
 use mirrord_protocol::outgoing::UnixAddr;
-#[cfg(not(target_os = "windows"))]
-use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
     outgoing::{

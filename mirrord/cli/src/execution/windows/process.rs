@@ -16,7 +16,7 @@ impl From<HandleWrapper> for File {
         unsafe {
             // SAFETY: Caller guarantees the HANDLE is valid and suitable for use as a stdio stream.
             let raw_handle = handle_wrapper.0;
-            return File::from_raw_handle(raw_handle.0 as RawHandle);
+            File::from_raw_handle(raw_handle.0 as RawHandle)
         }
     }
 }
@@ -24,7 +24,6 @@ impl From<HandleWrapper> for File {
 #[derive(Debug)]
 pub struct WindowsProcess {
     pub process_info: Win32Threading::PROCESS_INFORMATION,
-    #[allow(dead_code)]
     pub stdin: File,
     pub stdout: File,
     pub stderr: File,
@@ -44,11 +43,10 @@ impl WindowsProcess {
             File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
         );
 
-        // temporarily disable stdin as it causes hang on cleanup
-        // let mut stdin = std::mem::replace(
-        //     &mut self.stdin,
-        //     File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
-        // );
+        let mut stdin = std::mem::replace(
+            &mut self.stdin,
+            File::from(HandleWrapper(INVALID_HANDLE_VALUE)),
+        );
 
         let stdout_handle = tokio::task::spawn_blocking(move || {
             let mut buffer = [0; 4096];
@@ -57,15 +55,18 @@ impl WindowsProcess {
             loop {
                 match stdout.read(&mut buffer) {
                     Ok(0) => {
-                        break; // EOF
+                        // EOF
+                        break;
                     }
                     Ok(n) => {
-                        all_output.extend_from_slice(&buffer[..n]);
-                        // Immediately write to stdout
-                        if let Err(_) = io::stdout().write_all(&buffer[..n]) {
-                            break;
+                        if let Some(buffer_slice) = buffer.get(..n) {
+                            all_output.extend_from_slice(buffer_slice);
+                            // Immediately write to stdout
+                            if io::stdout().write_all(buffer_slice).is_err() {
+                                break;
+                            }
+                            let _ = io::stdout().flush();
                         }
-                        let _ = io::stdout().flush();
                     }
                     Err(_) => {
                         break;
@@ -84,10 +85,12 @@ impl WindowsProcess {
                         break; // EOF
                     }
                     Ok(n) => {
-                        if let Err(_) = io::stderr().write_all(&buffer[..n]) {
-                            break;
+                        if let Some(buffer_slice) = buffer.get(..n) {
+                            if io::stderr().write_all(buffer_slice).is_err() {
+                                break;
+                            }
+                            let _ = io::stderr().flush();
                         }
-                        let _ = io::stderr().flush();
                     }
                     Err(_) => {
                         break;
@@ -96,26 +99,27 @@ impl WindowsProcess {
             }
         });
 
-        // temporarily disable stdin as it causes hang on cleanup
-        // // Spawn a task to copy stdin
-        // let stdin_handle = tokio::task::spawn_blocking(move || {
-        //     let mut buffer = [0; 4096];
-        //     loop {
-        //         match stdin.read(&mut buffer) {
-        //             Ok(0) => {
-        //                 break; // EOF
-        //             }
-        //             Ok(n) => {
-        //                 if let Err(_) = io::stdin().read_exact(&mut buffer[..n]) {
-        //                     break;
-        //                 }
-        //             }
-        //             Err(_) => {
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // });
+        // Spawn a task to copy stdin
+        let stdin_handle = tokio::task::spawn_blocking(move || {
+            let mut buffer = [0; 4096];
+            loop {
+                match stdin.read(&mut buffer) {
+                    Ok(0) => {
+                        break; // EOF
+                    }
+                    Ok(n) => {
+                        if let Some(buffer_slice) = buffer.get_mut(..n)
+                            && io::stdin().read_exact(buffer_slice).is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+        });
 
         // Wait for the process to complete asynchronously
         let exit_code = tokio::task::spawn_blocking({
@@ -147,7 +151,7 @@ impl WindowsProcess {
         let _ = tokio::time::timeout(Duration::from_secs(10), async {
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;
-            // let _ = stdin_handle.await;
+            let _ = stdin_handle.await;
         })
         .await;
 
@@ -173,7 +177,7 @@ impl WindowsProcessExtSuspended for WindowsProcess {
         unsafe {
             // ResumeThread: If the function fails, the return value is (DWORD) -1
             if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread)
-                == (-1i32 as u32)
+                == u32::MAX
             {
                 return Err(windows::core::Error::from_win32());
             }

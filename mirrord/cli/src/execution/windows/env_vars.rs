@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    ffi::{OsStr, OsString},
-    os::windows::ffi::OsStrExt,
-};
+use std::{collections::HashMap, ffi::OsString};
+
+use str_win::string_to_u16_buffer;
 
 #[derive(Debug, Default)]
 pub struct EnvMap(pub HashMap<OsString, OsString>);
@@ -30,18 +28,16 @@ impl EnvMap {
         let mut block: Vec<u16> = Vec::new();
 
         for (key, val) in &self.0 {
-            let key: &OsStr = key.as_ref();
-            let mut entry: Vec<u16> = key.encode_wide().collect();
-            entry.push('=' as u16);
-            // if let Some(val) = val {
-            entry.extend(val.as_os_str().encode_wide());
-            // }
-            entry.push(0); // null-terminate each entry
+            // Create "key=value" string and convert to UTF-16 with null terminator
+            let env_entry = format!("{}={}", key.to_string_lossy(), val.to_string_lossy());
+            let entry_u16 = string_to_u16_buffer(&env_entry);
 
-            block.extend(entry);
+            // string_to_u16_buffer already includes null terminator
+            block.extend(entry_u16);
         }
 
-        block.push(0); // double-null terminate the entire block
+        // Double-null terminate the entire block
+        block.push(0);
         block
     }
 }

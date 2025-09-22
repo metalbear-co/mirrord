@@ -1,5 +1,7 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+#[cfg(target_os = "windows")]
+use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
@@ -30,9 +32,9 @@ const GENERAL_HELP: &str = r#"
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.com/slack and request help in #mirrord-help
 
->> Or email us at hi@metalbear.co
+>> Or email us at hi@metalbear.com
 
 "#;
 
@@ -40,9 +42,9 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our Slack https://metalbear.co/slack and request help in #mirrord-help
+>> Or join our Slack https://metalbear.com/slack and request help in #mirrord-help
 
->> Or email us at hi@metalbear.co
+>> Or email us at hi@metalbear.com
 
 "#;
 
@@ -214,7 +216,6 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
     InitialAgentCommFailed(String),
 
-    #[allow(dead_code)]
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     #[diagnostic(help(
         "Please open an issue on our GitHub repository with binary information:
@@ -243,7 +244,7 @@ pub(crate) enum CliError {
     ))]
     RosettaMissing(String),
 
-    #[allow(dead_code)]
+    #[cfg(target_os = "windows")]
     #[error("Failed to execute binary `{0}` with args {1:?}, env {2:?}")]
     #[diagnostic(help("MIRRORD_LAYER_FILE env var is missing"))]
     LayerFilePathMissing(String, Vec<String>, Vec<(String, String)>),
@@ -325,7 +326,7 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -344,17 +345,17 @@ pub(crate) enum CliError {
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
-    Please remember that some features are supported only when using mirrord operator (https://metalbear.co/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
+    Please remember that some features are supported only when using mirrord operator (https://metalbear.com/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]
     #[diagnostic(help(
-        "If the problem refers to mirrord operator license, visit https://app.metalbear.co to manage or renew your license.{GENERAL_HELP}"
+        "If the problem refers to mirrord operator license, visit https://app.metalbear.com to manage or renew your license.{GENERAL_HELP}"
     ))]
     OperatorApiForbidden(OperatorOperation, String),
 
     #[error(
-        "mirrord operator license expired. Visit https://app.metalbear.co to renew your license"
+        "mirrord operator license expired. Visit https://app.metalbear.com to renew your license"
     )]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorLicenseExpired,
@@ -376,7 +377,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.co/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
@@ -420,7 +421,6 @@ pub(crate) enum CliError {
     #[error("A null byte was found when trying to execute process: {0}")]
     ExecNulError(#[from] NulError),
 
-    #[allow(dead_code)]
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
 
@@ -446,7 +446,40 @@ pub(crate) enum CliError {
 
     #[error("Failed to copy the session target: {}", message.as_deref().unwrap_or("unknown reason"))]
     OperatorCopyTargetFailed { message: Option<String> },
+
+    #[error("operator operation timed out: {}", operation)]
+    OperatorOperationTimeout { operation: String },
+
+    #[error("Failed to setup mirrord startup retry config with `{0}`")]
+    #[diagnostic(help(
+        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not teh case in your config, then this might be a bug!"
+    ))]
+    InvalidBackoff(String),
+
+    #[error("Job Agent's Pod got deleted during initialization")]
+    #[diagnostic(help(
+        "This likely means that you don't have the required permissions to spawn it.
+        Look into your namespace's Pod Security admission controllers and try mirrord for Teams if the issue persists.
+        You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
+    ))]
+    AgentPodDeleted,
 }
+
+#[derive(Debug, Error, Diagnostic)]
+#[allow(dead_code)]
+pub(crate) enum ProcessExecError {
+    #[error("Executed process pid was not found: {0}")]
+    ProcessNotFound(u32, String),
+
+    #[error("Failed to inject DLL \"{0}\" into pid {1}: {2}")]
+    InjectionFailed(String, u32, String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Pipe Error: {0}")]
+    PipeError(#[from] windows_core::Error),
+}
+#[allow(dead_code)]
+pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
 
 impl CliError {
     /// Here we give more meaning to some errors, instead of just letting them pass as
@@ -471,6 +504,7 @@ impl CliError {
             {
                 Self::InvalidCertificate(error)
             }
+            KubeApiError::AgentPodDeleted => Self::AgentPodDeleted,
             error => fallback(error),
         }
     }
@@ -528,6 +562,10 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CopiedTargetFailed { message } => {
                 Self::OperatorCopyTargetFailed { message }
             }
+            OperatorApiError::OperationTimeout { operation } => Self::OperatorOperationTimeout {
+                operation: operation.to_string(),
+            },
+            OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
         }
     }
 }

@@ -1,5 +1,6 @@
 //! Module responsible for handling the Windows console for debugging.
 
+use mirrord_layer_lib::error::windows::{ConsoleError, ConsoleResult, WindowsError};
 use winapi::um::{
     consoleapi::AllocConsole,
     fileapi::{CreateFileA, OPEN_EXISTING},
@@ -11,14 +12,14 @@ use winapi::um::{
     },
 };
 
-use crate::error::{Error, Result, windows::WindowsError};
-
 /// Creates a new Windows console, for debugging purposes. Also responsible
 /// for redirecting `stdin`, `stdout` and `stderr`, to `CONIN$` and `CONOUT$`.
-pub fn create() -> Result<()> {
+pub fn create() -> ConsoleResult<()> {
     let ret = unsafe { AllocConsole() };
     if ret == 0 {
-        return Err(Error::FailedAllocatingConsole(WindowsError::last_error()));
+        return Err(ConsoleError::FailedAllocatingConsole(
+            WindowsError::last_error(),
+        ));
     }
 
     // Make stdout/stderr/stdin writes actually appear on console.
@@ -27,7 +28,7 @@ pub fn create() -> Result<()> {
     Ok(())
 }
 
-fn redirect_std_handles() -> Result<()> {
+fn redirect_std_handles() -> ConsoleResult<()> {
     unsafe {
         let out_handle = CreateFileA(
             c"CONOUT$".as_ptr() as _,
@@ -43,7 +44,7 @@ fn redirect_std_handles() -> Result<()> {
             SetStdHandle(STD_OUTPUT_HANDLE, out_handle);
             SetStdHandle(STD_ERROR_HANDLE, out_handle);
         } else {
-            return Err(Error::FailedRedirectingStdHandles(
+            return Err(ConsoleError::FailedRedirectingStdHandles(
                 WindowsError::last_error(),
             ));
         }
@@ -62,7 +63,7 @@ fn redirect_std_handles() -> Result<()> {
         if in_handle != INVALID_HANDLE_VALUE {
             SetStdHandle(STD_INPUT_HANDLE, in_handle);
         } else {
-            return Err(Error::FailedRedirectingStdHandles(
+            return Err(ConsoleError::FailedRedirectingStdHandles(
                 WindowsError::last_error(),
             ));
         }

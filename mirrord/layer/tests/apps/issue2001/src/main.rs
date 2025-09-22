@@ -1,6 +1,8 @@
+#[cfg(unix)]
 use std::ffi::{CStr, CString};
 
 /// Test the `readdir` and `readdir64` hooks.
+#[cfg(unix)]
 fn main() {
     println!("test issue 2001: START");
 
@@ -29,4 +31,10 @@ fn main() {
     }
 
     println!("test issue 2001: SUCCESS");
+}
+
+#[cfg(not(unix))]
+fn main() {
+    // This test is Unix-specific and does nothing on other platforms
+    println!("issue2001 test skipped on non-Unix platforms");
 }

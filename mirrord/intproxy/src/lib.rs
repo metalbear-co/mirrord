@@ -15,7 +15,9 @@ use error::UnexpectedAgentMessage;
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
-use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
+use mirrord_config::{
+    experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
+};
 use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
@@ -115,12 +117,14 @@ impl IntProxy {
         agent_conn: AgentConnection,
         listener: TcpListener,
         file_buffer_size: u64,
-        idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
         process_logging_interval: Duration,
+        experimental: &ExperimentalConfig,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
+
+        let agent_conn_reconnectable = agent_conn.reconnectable();
 
         let agent = background_tasks.register_restartable(
             agent_conn,
@@ -139,12 +143,19 @@ impl IntProxy {
         // to requests that have a requirement on the mirrord-protocol version.
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
-            PingPong::new(Self::PING_INTERVAL, Self::PING_PONG_MAX_RECONNECTS),
+            PingPong::new(
+                Self::PING_INTERVAL,
+                if agent_conn_reconnectable {
+                    Self::PING_PONG_MAX_RECONNECTS
+                } else {
+                    0
+                },
+            ),
             MainTaskId::PingPong,
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::default(),
+            SimpleProxy::new(experimental.dns_permission_error_fatal.unwrap_or_default()),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
@@ -154,7 +165,10 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let incoming = background_tasks.register(
-            IncomingProxy::new(idle_local_http_connection_timeout, https_delivery),
+            IncomingProxy::new(
+                Duration::from_millis(experimental.idle_local_http_connection_timeout),
+                https_delivery,
+            ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
         );
@@ -540,7 +554,7 @@ impl IntProxy {
             DaemonMessage::GetEnvVarsResponse(res) => {
                 self.task_txs
                     .simple
-                    .send(SimpleProxyMessage::GetEnvRes(res))
+                    .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
             message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
@@ -679,6 +693,7 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
     use mirrord_intproxy_protocol::{
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
@@ -690,7 +705,7 @@ mod test {
 
     use crate::{
         IntProxy,
-        agent_conn::{AgentConnection, ReconnectFlow},
+        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -713,15 +728,17 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
             4096,
             Default::default(),
-            Default::default(),
             Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -830,15 +847,17 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
             4096,
             Default::default(),
-            Default::default(),
             Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -922,15 +941,17 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
             4096,
             Default::default(),
-            Default::default(),
             Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
         );
         tokio::time::timeout(
             Duration::from_millis(200),

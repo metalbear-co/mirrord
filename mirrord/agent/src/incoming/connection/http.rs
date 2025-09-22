@@ -19,7 +19,7 @@ use super::{ConnectionInfo, IncomingStream};
 use crate::{
     http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
     incoming::{
-        IncomingStreamItem,
+        IncomingStreamItem, RedirectorTaskConfig,
         connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
     },
 };
@@ -38,18 +38,26 @@ pub struct RedirectedHttp {
     ///
     /// Thanks to this handle, this struct can be freely moved across runtimes.
     runtime_handle: Handle,
+
+    /// Configuration of the RedirectorTask that created this
+    redirector_config: RedirectorTaskConfig,
 }
 
 impl RedirectedHttp {
     /// Should be called in the target's Linux network namespace,
     /// as [`Handle::current()`] is stored in this struct.
     /// We might need to connect to the original destination in the future.
-    pub fn new(info: ConnectionInfo, request: ExtractedRequest) -> Self {
+    pub fn new(
+        info: ConnectionInfo,
+        request: ExtractedRequest,
+        redirector_config: RedirectorTaskConfig,
+    ) -> Self {
         Self {
             request,
             info,
             mirror_tx: None,
             runtime_handle: Handle::current(),
+            redirector_config,
         }
     }
 
@@ -107,6 +115,7 @@ impl RedirectedHttp {
                     .collect(),
                 body_finished: self.request.body_tail.is_none(),
             },
+            parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
         }
     }
@@ -152,6 +161,7 @@ impl RedirectedHttp {
                 response_tx: self.request.response_tx,
                 upgrade_tx,
             },
+            redirector_config: self.redirector_config,
         }
     }
 
@@ -159,7 +169,12 @@ impl RedirectedHttp {
     ///
     /// All data will be directed to the original destination.
     pub fn pass_through(self) {
-        let task = HttpTask::new(self.info, self.mirror_tx.into(), self.request);
+        let task = HttpTask::new(
+            self.info,
+            self.mirror_tx.into(),
+            self.request,
+            self.redirector_config,
+        );
         self.runtime_handle.spawn(task.run());
     }
 }
@@ -180,6 +195,7 @@ pub struct StolenHttp {
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
     pub response_provider: ResponseProvider,
+    pub redirector_config: RedirectorTaskConfig,
 }
 
 impl fmt::Debug for StolenHttp {
@@ -209,7 +225,9 @@ pub struct ResponseProvider {
 }
 
 impl ResponseProvider {
-    /// Sends the response to the original HTTP client.
+    /// Starts the response to the original HTTP client.
+    ///
+    /// Use this method only when you don't have the full body.
     ///
     /// Returns a [`ResponseBodyProvider`].
     pub fn send(self, parts: response::Parts) -> ResponseBodyProvider {
@@ -228,6 +246,30 @@ impl ResponseProvider {
             upgrade_tx: self.upgrade_tx,
             frame_tx,
         }
+    }
+
+    /// Sends the full response to the original HTTP client.
+    ///
+    /// Use this method *always* when you have the full body.
+    ///
+    /// Returns an optional channel to send data after an HTTP upgrade.
+    /// Dropping this channel will be interpreted as a write shutdown.
+    ///
+    /// # Rationale
+    ///
+    /// Sending all body immediately matters when handling gRPC error responses.
+    /// If we don't make all frames instantly available, hyper will not set END_STREAM flag on the
+    /// headers frame, and gRPC client will fail with something like "server closed connection with
+    /// RST_STREAM without sending trailers".
+    pub fn send_finished(
+        self,
+        response: Response<BoxBody<Bytes, hyper::Error>>,
+    ) -> Option<mpsc::Sender<Bytes>> {
+        let has_upgrade = response.status() == StatusCode::SWITCHING_PROTOCOLS;
+        let _ = self.response_tx.send(response);
+        let (data_tx, data_rx) = has_upgrade.then(|| mpsc::channel(8)).unzip();
+        let _ = self.upgrade_tx.send(data_rx);
+        data_tx
     }
 }
 
@@ -258,8 +300,17 @@ impl ResponseBodyProvider {
 pub struct MirroredHttp {
     pub info: ConnectionInfo,
     pub request_head: RequestHead,
+    /// The original request parts from ExtractedRequest, used for HTTP filtering
+    pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
+}
+
+impl MirroredHttp {
+    /// Returns a mutable reference to the request parts
+    pub fn parts_mut(&mut self) -> &mut request::Parts {
+        &mut self.parts
+    }
 }
 
 impl fmt::Debug for MirroredHttp {
@@ -267,6 +318,7 @@ impl fmt::Debug for MirroredHttp {
         f.debug_struct("MirroredHttp")
             .field("info", &self.info)
             .field("request_head", &self.request_head)
+            .field("parts", &self.parts)
             .finish()
     }
 }

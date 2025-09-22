@@ -18,8 +18,6 @@ use std::{
 #[cfg(not(target_os = "windows"))]
 use std::{ops::Not, os::unix::ffi::OsStrExt};
 
-#[cfg(not(target_os = "windows"))]
-use create::util::detach_io;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
@@ -34,6 +32,8 @@ use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
 
+#[cfg(not(target_os = "windows"))]
+use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
@@ -136,7 +136,6 @@ pub(crate) async fn proxy(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
-        Duration::from_millis(config.experimental.idle_local_http_connection_timeout),
         config
             .feature
             .network
@@ -145,6 +144,7 @@ pub(crate) async fn proxy(
             .or(config.feature.network.incoming.https_delivery)
             .unwrap_or_default(),
         process_logging_interval,
+        &config.experimental,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

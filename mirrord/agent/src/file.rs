@@ -184,6 +184,10 @@ impl FileManager {
                 let statfs_result = self.statfs(path);
                 Some(FileResponse::XstatFsV2(statfs_result))
             }
+            FileRequest::Rename(RenameRequest { old_path, new_path }) => {
+                let rename_result = self.rename(old_path, new_path);
+                Some(FileResponse::Rename(rename_result))
+            }
 
             // dir operations
             FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
@@ -711,6 +715,14 @@ impl FileManager {
         Ok(XstatFsResponseV2 {
             metadata: statfs.into(),
         })
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
+    pub(super) fn rename(&mut self, old_path: PathBuf, new_path: PathBuf) -> RemoteResult<()> {
+        let old_path = self.resolve_path(&old_path)?;
+        let new_path = self.resolve_path(&new_path)?;
+
+        Ok(std::fs::rename(old_path, new_path)?)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]

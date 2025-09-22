@@ -22,7 +22,7 @@
 			"command": "cargo",
 			"args": [
 				"build",
-				"-p", "mirrord", "-p", "layer-win", "-p", "target-dummy", "-p", "rust-e2e-fileops",
+				"-p", "mirrord", "-p", "mirrord-layer-win", "-p", "rust-e2e-fileops",
 				"--target", "x86_64-pc-windows-msvc"
 				// "--release" // uncomment if building in release mode
 			],
@@ -36,54 +36,6 @@
 			"group": {
 				"kind": "build",
 				"isDefault": true
-			}
-		},
-		{
-			"label": "cargo: build mirrord (msvc debug stack overflow)",
-			"type": "shell",
-			"command": "cargo",
-			"args": [
-				"build",
-				"-p", "mirrord", "-p", "layer-win", "-p", "target-dummy", "-p", "rust-e2e-fileops",
-				"--target", "x86_64-pc-windows-msvc"
-			],
-			"options": {
-				"env": {
-					"MIRRORD_DISABLE_VERSION_CHECK": "true",
-					"MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll",
-					"RUSTFLAGS": "-Z stack-protector=all -C overflow-checks=on -C debug-assertions=on",
-					"RUST_BACKTRACE": "full",
-					"RUST_MIN_STACK": "16777216"
-				}
-			},
-			"problemMatcher": "$rustc",
-			"group": {
-				"kind": "build",
-				"isDefault": false
-			}
-		},
-		{
-			"label": "cargo: build mirrord debug-overflow profile",
-			"type": "shell",
-			"command": "cargo",
-			"args": [
-				"build",
-				"--profile", "debug-overflow",
-				"-p", "mirrord", "-p", "layer-win", "-p", "target-dummy", "-p", "rust-e2e-fileops",
-				"--target", "x86_64-pc-windows-msvc"
-			],
-			"options": {
-				"env": {
-					"MIRRORD_DISABLE_VERSION_CHECK": "true",
-					"MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug-overflow/layer_win.dll",
-					"RUST_BACKTRACE": "full",
-					"RUST_MIN_STACK": "16777216"
-				}
-			},
-			"problemMatcher": "$rustc",
-			"group": {
-				"kind": "build",
-				"isDefault": false
 			}
 		},
 	]

@@ -1,12 +1,17 @@
 #![feature(vec_into_raw_parts)]
 #![warn(clippy::indexing_slicing)]
 
+#[cfg(unix)]
 extern crate alloc;
+#[cfg(unix)]
 use alloc::ffi::CString;
+#[cfg(unix)]
 use std::{fs::OpenOptions, os::unix::prelude::*};
 
+#[cfg(unix)]
 static FILE_PATH: &str = "/tmp/test_file.txt";
 
+#[cfg(unix)]
 fn pwrite() {
     println!(">> test_pwrite");
 
@@ -29,6 +34,7 @@ fn pwrite() {
 }
 
 // Test that fclose flushes correctly, no need to run remotely for all we care
+#[cfg(unix)]
 fn ffunctions() {
     println!(">> test_ffunctions");
 
@@ -44,7 +50,7 @@ fn ffunctions() {
 }
 
 // Rust compiles with newer libc on Linux that uses statx
-#[cfg(target_os = "macos")]
+#[cfg(all(unix, target_os = "macos"))]
 // Test that lstat works remotely
 fn lstat() {
     println!(">> test_lstat");
@@ -57,7 +63,7 @@ fn lstat() {
     assert_eq!(metadata.blocks(), 3);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(unix, target_os = "macos"))]
 // Test that stat works remotely
 fn stat() {
     println!(">> test_stat");
@@ -70,6 +76,7 @@ fn stat() {
     assert_eq!(metadata.blocks(), 7);
 }
 
+#[cfg(unix)]
 fn main() {
     pwrite();
     ffunctions();
@@ -80,4 +87,10 @@ fn main() {
     }
     // let close message get called
     std::thread::sleep(std::time::Duration::from_millis(10));
+}
+
+#[cfg(not(unix))]
+fn main() {
+    // This test is Unix-specific and does nothing on other platforms
+    println!("fileops test skipped on non-Unix platforms");
 }

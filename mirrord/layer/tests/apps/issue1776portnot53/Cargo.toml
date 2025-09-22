@@ -1,21 +1,21 @@
 [package]
 name = "issue1776portnot53"
-version.workspace = true
-authors.workspace = true
-description.workspace = true
-documentation.workspace = true
-readme.workspace = true
-homepage.workspace = true
-repository.workspace = true
-license.workspace = true
-keywords.workspace = true
-categories.workspace = true
-publish.workspace = true
-edition.workspace = true
+version = "3.161.0"
+authors = ["MetalBear <hi@metalbear.co>"]
+description = "Run a local process in the context of a cloud environment"
+documentation = "https://metalbear.co/mirrord/docs"
+readme = "README.md"
+homepage = "https://metalbear.co/mirrord"
+repository = "https://github.com/metalbear/mirrord"
+license = "MIT"
+publish = false
+edition = "2024"
 
 [lints]
 workspace = true
 
 [dependencies]
-libc.workspace = true
 socket2.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

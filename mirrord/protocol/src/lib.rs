@@ -58,8 +58,8 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 // windows features for protocol/file.rs in From<Metadata> for MetadataInternal
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
+#![cfg_attr(target_os = "windows", feature(windows_change_time))]
+#![cfg_attr(target_os = "windows", feature(windows_by_handle))]
 
 pub mod batched_body;
 pub mod codec;

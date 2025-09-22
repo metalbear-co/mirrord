@@ -16,6 +16,7 @@ pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
+pub mod retry;
 pub mod target;
 pub mod util;
 
@@ -49,6 +50,7 @@ use crate::{
         fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
     },
     internal_proxy::InternalProxyConfig,
+    retry::StartupRetryConfig,
     target::TargetConfig,
     util::VecOrSingle,
 };
@@ -382,6 +384,10 @@ pub struct LayerConfig {
     /// being added to.
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
+
+    /// ## startup_retry {#root-startup_retry}
+    #[config(nested)]
+    pub startup_retry: StartupRetryConfig,
 }
 
 impl LayerConfig {
@@ -718,6 +724,27 @@ impl LayerConfig {
             );
         }
 
+        if self.startup_retry.min_ms > self.startup_retry.max_ms {
+            return Err(ConfigError::InvalidValue {
+                name: "startup_retry.min_ms",
+                provided: self.startup_retry.min_ms.to_string(),
+                error: format!(
+                    "the value of startup_retry.min_ms `{}` cannot be greater than \
+                     the value of startup_retry.max_ms `{}`.",
+                    self.startup_retry.min_ms, self.startup_retry.max_ms
+                )
+                .into(),
+            });
+        }
+
+        if self.startup_retry.max_ms == 0 {
+            return Err(ConfigError::InvalidValue {
+                name: "startup_retry.max_ms",
+                provided: self.startup_retry.max_ms.to_string(),
+                error: "the value of startup_retry.max_ms has to be greater than 0.".into(),
+            });
+        }
+
         Ok(())
     }
 }
@@ -733,6 +760,7 @@ impl CollectAnalytics for &LayerConfig {
         (&self.agent).collect_analytics(analytics);
         (&self.feature).collect_analytics(analytics);
         (&self.experimental).collect_analytics(analytics);
+        (&self.startup_retry).collect_analytics(analytics);
     }
 }
 
@@ -1073,6 +1101,7 @@ mod tests {
                 copy_target: None,
                 hostname: None,
                 split_queues: None,
+                db_branches: None,
             }),
             container: None,
             operator: None,
@@ -1084,6 +1113,7 @@ mod tests {
             use_proxy: None,
             experimental: None,
             skip_sip: None,
+            startup_retry: None,
         };
 
         assert_eq!(config, expect);
