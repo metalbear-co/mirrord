@@ -7,8 +7,9 @@ use std::{
 
 use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
+use str_win::u16_buffer_to_string;
 use winapi::{
-    shared::minwindef::FILETIME,
+    shared::{minwindef::FILETIME, ntdef::POBJECT_ATTRIBUTES},
     um::{
         minwinbase::SYSTEMTIME,
         sysinfoapi::GetSystemTime,
@@ -20,6 +21,7 @@ use winapi::{
 // the global namespace for a path.
 const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
 
+/// Responsible for turning global namespace, default volume paths into Linux paths.
 pub fn remove_root_dir_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
     let mut path = path.as_ref();
 
@@ -56,6 +58,12 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
     }
 }
 
+/// Attempt to run seek on pod over file descriptor.
+///
+/// # Arguments
+///
+/// * `fd` - Remote (pod) fd for file.
+/// * `seek` - Enum to describe the seek configuration.
 pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
     let seek = make_proxy_request_with_response(SeekFileRequest {
         fd,
@@ -68,7 +76,20 @@ pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
     }
 }
 
-/// Structure to work with [`SYSTEMTIME`]-s. Supports conversions as well.
+/// Function responsible for turning a [`OBJECT_ATTRIBUTES`] structure into a [`String`].
+pub fn read_object_attributes_name(object_attributes: POBJECT_ATTRIBUTES) -> String {
+    unsafe {
+        let name_ustr = (*object_attributes).ObjectName;
+
+        let buf = (*name_ustr).Buffer;
+        let len = (*name_ustr).Length;
+
+        let name = &*std::ptr::slice_from_raw_parts(buf, len as _);
+        u16_buffer_to_string(name)
+    }
+}
+
+/// Type to work with Windows times.
 pub struct WindowsTime {
     time: SYSTEMTIME,
 }

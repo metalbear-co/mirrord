@@ -12,8 +12,7 @@ use mirrord_layer_lib::proxy_connection::{
     make_proxy_request_no_response, make_proxy_request_with_response,
 };
 use mirrord_protocol::file::{
-    CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
-    SeekFromInternal,
+    CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
 use phnt::ffi::{
     _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
@@ -25,7 +24,8 @@ use winapi::{
     shared::{
         minwindef::{DWORD, FILETIME},
         ntdef::{
-            HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID, ULONG,
+            FALSE, HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID,
+            ULONG,
         },
         ntstatus::{
             STATUS_ACCESS_VIOLATION, STATUS_END_OF_FILE, STATUS_OBJECT_PATH_NOT_FOUND,
@@ -45,26 +45,16 @@ use crate::{
     apply_hook,
     hooks::files::{
         managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
-        util::{WindowsTime, remove_root_dir_from_path, try_seek, try_xstat},
+        util::{
+            WindowsTime, read_object_attributes_name, remove_root_dir_from_path, try_seek,
+            try_xstat,
+        },
     },
     process::memory::is_memory_valid,
 };
 
 pub mod managed_handle;
 pub mod util;
-
-/// Function responsible for turning a [`OBJECT_ATTRIBUTES`] structure into a [`String`].
-fn read_object_attributes_name(object_attributes: POBJECT_ATTRIBUTES) -> String {
-    unsafe {
-        let name_ustr = (*object_attributes).ObjectName;
-
-        let buf = (*name_ustr).Buffer;
-        let len = (*name_ustr).Length;
-
-        let name = &*std::ptr::slice_from_raw_parts(buf, len as _);
-        u16_buffer_to_string(name)
-    }
-}
 
 // https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1611
 type NtCreateFileType = unsafe extern "system" fn(
@@ -165,6 +155,7 @@ static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
@@ -288,19 +279,20 @@ unsafe extern "system" fn nt_create_file_hook(
 /// The mechanism is:
 /// - We check if the `file` argument is present in the [`MANAGED_HANDLES`] structure, and, if it
 ///   is, we then begin taking over execution.
-/// - We try to, either, acquire the current seek head, or update to the user-desired seek head, which may be
-///   specified by the `byte_offset` structure's contents.
-/// - Once a buffer is obtained from the pod, it is matching the current seek head of the file,
-///   and the desired length to be read, we copy the slice we made over our newly returned buffer, to the
-///   user-provided buffer, should all the preconditions for this be met.
+/// - We try to, either, acquire the current seek head, or update to the user-desired seek head,
+///   which may be specified by the `byte_offset` structure's contents.
+/// - Once a buffer is obtained from the pod, it is matching the current seek head of the file, and
+///   the desired length to be read, we copy the slice we made over our newly returned buffer, to
+///   the user-provided buffer, should all the preconditions for this be met.
 /// - If there is not a specified `byte_offset`, we assume the intent is to call the API until we've
-///   run out of content to read. Therefore, we seek from current with the calculated length that was copied
-///   to the user provided buffer.
-/// - Otherwise, in the presence of a `byte_offset` structure, the seek head is reset. It can also be reset by
-///   `NtSetInformationFile` using `FilePositionInfo`.
+///   run out of content to read. Therefore, we seek from current with the calculated length that
+///   was copied to the user provided buffer.
+/// - Otherwise, in the presence of a `byte_offset` structure, the seek head is reset. It can also
+///   be reset by `NtSetInformationFile` using `FilePositionInfo`.
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -379,7 +371,9 @@ unsafe extern "system" fn nt_read_file_hook(
                     } else {
                         SeekFromInternal::Start(0)
                     },
-                ).is_some() {
+                )
+                .is_some()
+                {
                     return STATUS_SUCCESS;
                 } else {
                     return STATUS_UNEXPECTED_NETWORK_ERROR;
@@ -405,6 +399,7 @@ unsafe extern "system" fn nt_read_file_hook(
     }
 }
 
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_write_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -439,14 +434,16 @@ unsafe extern "system" fn nt_write_file_hook(
 /// - [`FILE_INFORMATION_CLASS::FileBasicInformation`]
 /// - [`FILE_INFORMATION_CLASS::FilePositionInformation`]
 ///
-/// In the case of attempts to set information with the `file_information_class` [`FILE_INFORMATION_CLASS::FilePositionInformation`],
-/// a request will be made to the pod, to update the seek head.
-/// 
+/// In the case of attempts to set information with the `file_information_class`
+/// [`FILE_INFORMATION_CLASS::FilePositionInformation`], a request will be made to the pod, to
+/// update the seek head.
+///
 /// This status will be reflected in the [`HandleContext`], but also through
 /// `NtQueryInformationFile` (and therefore, `stat` POSIX operations.)
-/// 
+///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -467,7 +464,7 @@ unsafe extern "system" fn nt_set_information_file_hook(
                 return STATUS_ACCESS_VIOLATION;
             }
 
-            // Always zero in my testing.
+            // NOTE(gabriela): In testing, this has always been the IoStatusBlock result.
             (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
             (*io_status_block).Information = 0;
 
@@ -520,16 +517,25 @@ unsafe extern "system" fn nt_set_information_file_hook(
                     if try_seek(
                         handle_context.fd,
                         SeekFromInternal::Start((*in_ptr).CurrentByteOffset.QuadPart as _),
-                    ).is_some() {
+                    )
+                    .is_some()
+                    {
                         return STATUS_SUCCESS;
                     } else {
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
-                _ => {}
+                _ => {
+                    tracing::info!(
+                        "Trying to set for file_information_class: {:?}, but it is not implemented! (file: {})",
+                        file_information_class,
+                        handle_context.path
+                    );
+                }
             }
 
-            // i guess??? thanks windows
+            // NOTE(gabriela): while there's no access violation in our case,
+            // this is the expected result through the NT API.
             return STATUS_ACCESS_VIOLATION;
         }
 
@@ -554,21 +560,24 @@ unsafe extern "system" fn nt_set_information_file_hook(
 /// - [`FILE_INFORMATION_CLASS::FileStatInformation`]
 /// - [`FILE_INFORMATION_CLASS::FileAllInformation`]
 ///
-/// In the case of trying to query information for a file with the `file_information_class` being one of
-/// [`FILE_INFORMATION_CLASS::FilePositionInformation`] and consequently, [`FILE_INFORMATION_CLASS::FileAllInformation`],
-/// a request will be made to the pod to query the current seek head.
-/// 
+/// In the case of trying to query information for a file with the `file_information_class` being
+/// one of [`FILE_INFORMATION_CLASS::FilePositionInformation`] and consequently,
+/// [`FILE_INFORMATION_CLASS::FileAllInformation`], a request will be made to the pod to query the
+/// current seek head.
+///
 /// In the case of trying to query information for a file with the `file_information_class`
-/// [`FILE_INFORMATION_CLASS::FileStatInformation`], [`FILE_INFORMATION_CLASS::FileStandardInformation`]
-/// and consequently [`FILE_INFORMATION_CLASS::FileAllInformation`], a request will be made to the pod to query
+/// [`FILE_INFORMATION_CLASS::FileStatInformation`],
+/// [`FILE_INFORMATION_CLASS::FileStandardInformation`] and consequently
+/// [`FILE_INFORMATION_CLASS::FileAllInformation`], a request will be made to the pod to query
 /// the content of the `stat` operation.
-/// 
+///
 /// This information will be reflected, for example, during the invocation of the `stat` POSIX API.
 /// The path for that event, despite one of the misleading names above, is the
 /// [`FILE_INFORMATION_CLASS::FileAllInformation`] match arm.
-/// 
+///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -669,8 +678,8 @@ unsafe extern "system" fn nt_query_information_file_hook(
                         (*out_ptr).AllocationSize.QuadPart = i64::try_from(metadata.size).unwrap();
                         (*out_ptr).EndOfFile.QuadPart = i64::try_from(metadata.size).unwrap();
                         (*out_ptr).NumberOfLinks = 0;
-                        (*out_ptr).DeletePending = 0;
-                        (*out_ptr).Directory = 0;
+                        (*out_ptr).DeletePending = FALSE;
+                        (*out_ptr).Directory = FALSE;
 
                         (*io_status_block).Information =
                             std::mem::size_of::<FILE_STANDARD_INFORMATION>() as _;
@@ -801,10 +810,17 @@ unsafe extern "system" fn nt_query_information_file_hook(
                         return STATUS_SUCCESS;
                     }
                 }
-                _ => {}
+                _ => {
+                    tracing::info!(
+                        "Trying to query for file_information_class: {:?}, but it is not implemented! (file: {})",
+                        file_information_class,
+                        handle_context.path
+                    );
+                }
             }
 
-            // i guess??? thanks windows
+            // NOTE(gabriela): while there's no access violation in our case,
+            // this is the expected result through the NT API.
             return STATUS_ACCESS_VIOLATION;
         }
 
@@ -819,6 +835,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
     }
 }
 
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_attributes_file_hook(
     object_attributes: POBJECT_ATTRIBUTES,
     file_basic_info: PFILE_BASIC_INFORMATION,
@@ -831,6 +848,8 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
         original(object_attributes, file_basic_info)
     }
 }
+
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut c_void,
@@ -868,6 +887,7 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write()
@@ -912,6 +932,26 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     // ----------------------------------------------------------------------------
     // TODO(gabriela): get rid of kernelbase hooks unless absolutely necessary, try
     // to keep stuff NT-level
+    //
+    // Staying at `Nt` level is a necessity in the attempt to catch every single
+    // user-mode level file access. That is as low-level as we can possibly go, and
+    // it means that there are no leaks (as far as no driver code, or manually
+    // crafted syscalls are involved).
+    //
+    // It also means that, if we handle logic at the lowest level correctly,
+    // the functionality will propagate to every single possible path of opening,
+    // reading, etc. a file. Which means, we will inherently support every single
+    // runtime (Rust, C#, Python, Node, ...) without any special logic involved
+    // (unless it somehow proves itself to be required.)
+    //
+    // Every single Win32 function that interacts with files, in one way or another
+    // defers itself to a NT function, making implementations at kernelbase level
+    // inherrently a risk of abstraction leaks, which is a bug. As a result, we
+    // treat that approach as simply incorrect.
+    //
+    // Implementations of NT level hooks should have behavior identical to the real
+    // NT function calls, and in turn automatically support it when kernelbase
+    // wraps around it, and depends on specific returns, etc.
     // ----------------------------------------------------------------------------
 
     apply_hook!(

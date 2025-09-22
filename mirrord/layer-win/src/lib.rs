@@ -5,6 +5,9 @@
 #![allow(clippy::too_many_arguments)]
 #![feature(slice_pattern)]
 
+#[cfg(test)]
+mod tests;
+
 mod console;
 mod hooks;
 mod macros;
