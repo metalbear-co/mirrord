@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, XstatRequest};
 use winapi::{
     shared::minwindef::FILETIME,
@@ -14,8 +15,6 @@ use winapi::{
         timezoneapi::{FileTimeToSystemTime, SystemTimeToFileTime},
     },
 };
-
-use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 
 // This prefix is a way to explicitly indicate that we're looking in
 // the global namespace for a path.

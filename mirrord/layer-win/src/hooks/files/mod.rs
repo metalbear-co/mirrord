@@ -8,6 +8,9 @@ use std::{
 };
 
 use minhook_detours_rs::guard::DetourGuard;
+use mirrord_layer_lib::proxy_connection::{
+    make_proxy_request_no_response, make_proxy_request_with_response,
+};
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
 };
@@ -36,7 +39,6 @@ use winapi::{
         },
     },
 };
-use mirrord_layer_lib::proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response};
 
 use crate::{
     apply_hook,
@@ -142,7 +144,6 @@ static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInforma
 type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
 static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 
-
 type GetFileTypeType = unsafe extern "system" fn(HANDLE) -> DWORD;
 static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 
@@ -160,10 +161,12 @@ static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 /// Internally, this creates a "managed handle" (see [`MANAGED_HANDLES`]), and if there was a
 /// succesful open operation, we create a [`HandleContext`] for the file descriptor, which is
 /// initially filled in with relevant data, and may surely be modified later.
-/// 
-/// Another detail is that we make a xstat request to the remote pod to acquire the size of the file.
-/// 
-/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+///
+/// Another detail is that we make a xstat request to the remote pod to acquire the size of the
+/// file.
+///
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
@@ -320,8 +323,9 @@ unsafe extern "system" fn nt_create_file_hook(
 ///   `length` and remaining data in the [`HandleContext`] is added.
 /// - The internal cursor is reset if you do a read with a `byte_offset`. It can also be reset by
 ///   `NtSetInformationFile` using `FilePositionInfo`.
-/// 
-/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+///
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -856,8 +860,9 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 ///
 /// Due to details of the [`MANAGED_HANDLES`] structure management, a [`HANDLE`] value can never be
 /// reclaimed, so all cases of reusage must be treated as a bug.
-/// 
-/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+///
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write()
