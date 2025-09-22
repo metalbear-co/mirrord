@@ -237,7 +237,7 @@ unsafe extern "system" fn nt_create_file_hook(
 
             // Try to get request.
             if req.is_err() {
-                eprintln!("WARNING: request for open file failed!");
+                tracing::error!("WARNING: request for open file failed!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
             let req = req.unwrap();
@@ -260,7 +260,7 @@ unsafe extern "system" fn nt_create_file_hook(
                     })
                 }
                 Err(e) => {
-                    eprintln!("{:?} {}", e, linux_path);
+                    tracing::error!("{:?} {}", e, linux_path);
                     None
                 }
             };

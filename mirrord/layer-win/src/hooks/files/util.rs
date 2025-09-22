@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
 use winapi::{
     shared::minwindef::FILETIME,

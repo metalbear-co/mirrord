@@ -129,7 +129,6 @@ fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
-        println!("Checking for debugger...");
         wait_for_debug!();
         unsafe { DebugBreak() };
     }
@@ -137,7 +136,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
         mirrord_start().expect("Failed call to mirrord_start");
-        println!("mirrord-layer-win fully initialized!");
+        tracing::info!("mirrord-layer-win fully initialized!");
     });
 
     TRUE
@@ -152,7 +151,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Release detour guard
     if let Err(e) = release_detour_guard() {
-        eprintln!(
+        tracing::error!(
             "Warning: Failed releasing detour guard during DLL detach: {}",
             e
         );
@@ -184,20 +183,18 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 fn mirrord_start() -> anyhow::Result<()> {
     // Create Windows console, and redirects std handles.
     if let Err(e) = console::create() {
-        println!("WARNING: couldn't initialize console: {:?}", e);
+        tracing::warn!("WARNING: couldn't initialize console: {:?}", e);
     }
 
-    println!("Console initialized");
-
     initialize_windows_proxy_connection()?;
-    println!("ProxyConnection initialized");
+    tracing::info!("ProxyConnection initialized");
 
     initialize_detour_guard()?;
-    println!("DetourGuard initialized");
+    tracing::info!("DetourGuard initialized");
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;
-    println!("Hooks initialized");
+    tracing::info!("Hooks initialized");
 
     Ok(())
 }
