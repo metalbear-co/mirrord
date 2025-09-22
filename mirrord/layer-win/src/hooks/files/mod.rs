@@ -36,10 +36,10 @@ use winapi::{
         },
     },
 };
+use mirrord_layer_lib::proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response};
 
 use crate::{
     apply_hook,
-    common::{make_proxy_request_no_response, make_proxy_request_with_response},
     hooks::files::{
         managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
         util::{WindowsTime, remove_root_dir_from_path, try_xstat},
@@ -831,7 +831,7 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 ) -> NTSTATUS {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
+            && let Some(_managed_handle) = handles.get(&file)
         {
             // NOTE(gabriela): stub
             return STATUS_SUCCESS;

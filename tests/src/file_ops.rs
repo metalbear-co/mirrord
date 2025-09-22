@@ -85,6 +85,7 @@ mod file_ops_tests {
             "-f",
             "python-e2e/files_ro.py",
         ]
+        .into_iter()
         .map(String::from)
         .to_vec();
 

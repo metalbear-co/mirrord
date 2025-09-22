@@ -15,7 +15,7 @@ use winapi::{
     },
 };
 
-use crate::common::make_proxy_request_with_response;
+use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 
 // This prefix is a way to explicitly indicate that we're looking in
 // the global namespace for a path.
