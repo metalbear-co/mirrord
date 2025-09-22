@@ -17,16 +17,19 @@ use mirrord_config::{
     target::Target,
 };
 use mirrord_intproxy_protocol::PortSubscription;
+use mirrord_layer_lib::{
+    setup::CONFIG,
+    socket::{DnsSelector, OutgoingSelector},
+};
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpFilter, HttpMethodFilter, StealType},
+    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
 };
 use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
     file::{filter::FileFilter, mapper::FileRemapper},
-    socket::{OutgoingSelector, dns_selector::DnsSelector},
 };
 
 /// Complete layer setup.
@@ -34,7 +37,7 @@ use crate::{
 /// the layer.
 #[derive(Debug)]
 pub struct LayerSetup {
-    config: LayerConfig,
+    // config: LayerConfig,
     file_filter: FileFilter,
     file_remapper: FileRemapper,
     debugger_ports: DebuggerPorts,
@@ -86,8 +89,10 @@ impl LayerSetup {
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
             .collect();
 
+        CONFIG.set(config).expect("Failed to set layer config");
+
         Self {
-            config,
+            // config,
             file_filter,
             file_remapper,
             debugger_ports,
@@ -103,15 +108,15 @@ impl LayerSetup {
     }
 
     pub fn layer_config(&self) -> &LayerConfig {
-        &self.config
+        CONFIG.get().expect("Layer config not initialized")
     }
 
     pub fn env_config(&self) -> &EnvConfig {
-        &self.config.feature.env
+        &self.layer_config().feature.env
     }
 
     pub fn fs_config(&self) -> &FsConfig {
-        &self.config.feature.fs
+        &self.layer_config().feature.fs
     }
 
     pub fn file_filter(&self) -> &FileFilter {
@@ -123,23 +128,23 @@ impl LayerSetup {
     }
 
     pub fn incoming_config(&self) -> &IncomingConfig {
-        &self.config.feature.network.incoming
+        &self.layer_config().feature.network.incoming
     }
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {
-        &self.config.feature.network.outgoing
+        &self.layer_config().feature.network.outgoing
     }
 
     pub fn experimental(&self) -> &ExperimentalConfig {
-        &self.config.experimental
+        &self.layer_config().experimental
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.config.feature.network.dns.enabled
+        self.layer_config().feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {
-        self.config
+        self.layer_config()
             .target
             .path
             .as_ref()
@@ -149,7 +154,7 @@ impl LayerSetup {
 
     #[cfg(target_os = "macos")]
     pub fn sip_binaries(&self) -> Vec<String> {
-        self.config
+        self.layer_config()
             .sip_binaries
             .as_deref()
             .map(<[_]>::to_vec)
@@ -158,7 +163,7 @@ impl LayerSetup {
 
     #[cfg(target_os = "macos")]
     pub fn skip_patch_binaries(&self) -> Vec<String> {
-        self.config.skip_sip.to_vec()
+        self.layer_config().skip_sip.to_vec()
     }
 
     pub fn is_debugger_port(&self, addr: &SocketAddr) -> bool {
@@ -195,33 +200,19 @@ impl LayerSetup {
     }
 }
 
-/// HTTP filter used by the layer with the `steal` feature.
+/// Settings for handling HTTP feature.
 #[derive(Debug)]
-pub enum StealHttpFilter {
-    /// No filter.
-    None,
-    /// More recent filter (header or path).
-    Filter(HttpFilter),
-}
-
-/// Settings for handling HTTP with the `steal` feature.
-#[derive(Debug)]
-pub struct StealHttpSettings {
+pub struct HttpSettings {
     /// The HTTP filter to use.
-    pub filter: StealHttpFilter,
+    pub filter: HttpFilter,
     /// Ports to filter HTTP on.
     pub ports: HashSet<Port>,
 }
 
-/// Operation mode for the `incoming` feature.
 #[derive(Debug)]
-pub enum IncomingMode {
-    /// The agent sends data to both the user application and the remote target.
-    /// Data coming from the layer is discarded.
-    Mirror,
-    /// The agent sends data only to the user application.
-    /// Data coming from the layer is sent to the agent.
-    Steal(StealHttpSettings),
+pub struct IncomingMode {
+    pub steal: bool,
+    pub http_settings: Option<HttpSettings>,
 }
 
 impl IncomingMode {
@@ -230,22 +221,28 @@ impl IncomingMode {
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
     fn new(config: &mut IncomingConfig) -> Self {
-        if !config.is_steal() {
-            return Self::Mirror;
+        let http_settings = config.http_filter.is_filter_set().then(|| {
+            let ports = config
+                .http_filter
+                .ports
+                .get_or_insert_default()
+                .iter()
+                .copied()
+                .collect();
+
+            let filter = Self::parse_http_filter(&config.http_filter);
+
+            HttpSettings { filter, ports }
+        });
+
+        Self {
+            steal: config.is_steal(),
+            http_settings,
         }
+    }
 
-        let ports = config
-            .http_filter
-            .ports
-            .get_or_insert_default()
-            .iter()
-            .copied()
-            .collect();
-
-        let http_filter_config = &config.http_filter;
-
-        // Matching all fields to make this check future-proof.
-        let filter = match http_filter_config {
+    fn parse_http_filter(http_filter_config: &HttpFilterConfig) -> HttpFilter {
+        match http_filter_config {
             HttpFilterConfig {
                 path_filter: Some(path),
                 header_filter: None,
@@ -253,9 +250,7 @@ impl IncomingMode {
                 all_of: None,
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(HttpFilter::Path(
-                Filter::new(path.into()).expect("invalid filter expression"),
-            )),
+            } => HttpFilter::Path(Filter::new(path.into()).expect("invalid filter expression")),
 
             HttpFilterConfig {
                 path_filter: None,
@@ -264,9 +259,7 @@ impl IncomingMode {
                 all_of: None,
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(HttpFilter::Header(
-                Filter::new(header.into()).expect("invalid filter expression"),
-            )),
+            } => HttpFilter::Header(Filter::new(header.into()).expect("invalid filter expression")),
 
             HttpFilterConfig {
                 path_filter: None,
@@ -275,9 +268,9 @@ impl IncomingMode {
                 all_of: None,
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(HttpFilter::Method(
+            } => HttpFilter::Method(
                 HttpMethodFilter::from_str(method).expect("invalid method filter string"),
-            )),
+            ),
 
             HttpFilterConfig {
                 path_filter: None,
@@ -286,7 +279,7 @@ impl IncomingMode {
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
-            } => StealHttpFilter::Filter(Self::make_composite_filter(true, filters)),
+            } => Self::make_composite_filter(true, filters),
 
             HttpFilterConfig {
                 path_filter: None,
@@ -295,21 +288,10 @@ impl IncomingMode {
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
-            } => StealHttpFilter::Filter(Self::make_composite_filter(false, filters)),
+            } => Self::make_composite_filter(false, filters),
 
-            HttpFilterConfig {
-                path_filter: None,
-                header_filter: None,
-                method_filter: None,
-                all_of: None,
-                any_of: None,
-                ports: _ports,
-            } => StealHttpFilter::None,
-
-            _ => panic!("multiple HTTP filters specified, this is a bug"),
-        };
-
-        Self::Steal(StealHttpSettings { filter, ports })
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
+        }
     }
 
     fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
@@ -333,16 +315,30 @@ impl IncomingMode {
 
     /// Returns [`PortSubscription`] request to be used for the given port.
     pub fn subscription(&self, port: Port) -> PortSubscription {
-        let Self::Steal(steal) = self else {
-            return PortSubscription::Mirror(port);
-        };
-
-        let steal_type = match &steal.filter {
-            _ if !steal.ports.contains(&port) => StealType::All(port),
-            StealHttpFilter::None => StealType::All(port),
-            StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
-        };
-
-        PortSubscription::Steal(steal_type)
+        if self.steal {
+            let steal_type = match &self.http_settings {
+                None => StealType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        StealType::FilteredHttpEx(port, settings.filter.clone())
+                    } else {
+                        StealType::All(port)
+                    }
+                }
+            };
+            PortSubscription::Steal(steal_type)
+        } else {
+            let mirror_type = match &self.http_settings {
+                None => MirrorType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
+                    } else {
+                        MirrorType::All(port)
+                    }
+                }
+            };
+            PortSubscription::Mirror(mirror_type)
+        }
     }
 }

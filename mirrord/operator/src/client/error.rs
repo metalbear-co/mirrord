@@ -3,6 +3,7 @@ use std::{fmt, num::ParseIntError};
 pub use http::Error as HttpError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
+use tower::retry::backoff::InvalidBackoff;
 
 use crate::crd::{NewOperatorFeature, kube_target::UnknownTargetType};
 
@@ -16,6 +17,7 @@ pub enum OperatorOperation {
     GettingStatus,
     SessionManagement,
     ListingTargets,
+    MysqlBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -28,6 +30,7 @@ impl fmt::Display for OperatorOperation {
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
+            Self::MysqlBranching => "mysql branching",
         };
 
         f.write_str(as_str)
@@ -77,6 +80,12 @@ pub enum OperatorApiError {
 
     #[error("copied target failed: {}", message.as_deref().unwrap_or("reason unknown"))]
     CopiedTargetFailed { message: Option<String> },
+
+    #[error("operation timed out: {}", operation)]
+    OperationTimeout { operation: OperatorOperation },
+
+    #[error(transparent)]
+    InvalidBackoff(#[from] InvalidBackoff),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

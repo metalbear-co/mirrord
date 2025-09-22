@@ -244,6 +244,8 @@
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+#[cfg(not(target_os = "windows"))]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
@@ -437,8 +439,8 @@ where
     .await
 }
 
-fn process_which(binary: &String) -> Result<std::path::PathBuf, CliError> {
-    which(&binary).map_err(|error| CliError::BinaryWhichError(binary.clone(), error.to_string()))
+fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -509,10 +511,11 @@ where
     // From CreateProcessW documentation:
     // lpApplicationName - This parameter must include the file name extension; no default extension
     // is assumed.
-    let binary_name = binary
-        .ends_with(".exe")
-        .then_some(binary.clone())
-        .unwrap_or_else(|| format!("{}.exe", binary));
+    let binary_name = if binary.ends_with(".exe") {
+        binary.clone()
+    } else {
+        format!("{}.exe", binary)
+    };
 
     let binary_path = process_which(&binary_name).map_err(|e| {
         error!("process_which failed: {:?}", e);
@@ -748,6 +751,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
@@ -764,7 +768,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
     result?;
 
-    let execution_result = Box::pin(async move {
+    Box::pin(async move {
         let res = exec_process(
             config,
             config_file_path.as_deref(),
@@ -780,9 +784,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
         }
         res
     })
-    .await;
-
-    execution_result
+    .await
 }
 
 async fn port_forward(
@@ -995,6 +997,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
             }

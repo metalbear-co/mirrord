@@ -32,7 +32,7 @@ base64.workspace = true
 bincode.workspace = true
 ctor = "0.2"
 dotenvy.workspace = true
-frida-gum = { version = "0.15", features = ["auto-download"] }
+frida-gum.workspace = true
 http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
@@ -41,7 +41,6 @@ num-traits = "0.2"
 rand.workspace = true
 regex.workspace = true
 socket2.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

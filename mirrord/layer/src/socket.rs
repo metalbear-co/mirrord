@@ -1,27 +1,12 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
-use std::{
-    collections::HashMap,
-    net::{SocketAddr, ToSocketAddrs},
-    sync::{Arc, LazyLock, Mutex},
-};
+use std::net::{SocketAddr, ToSocketAddrs};
 
-use base64::prelude::*;
-use bincode::{Decode, Encode};
-use hooks::FN_FCNTL;
 #[cfg(not(target_os = "windows"))]
-use libc::{c_int, sockaddr, socklen_t};
-use mirrord_config::feature::network::{
-    filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
-    outgoing::{OutgoingConfig, OutgoingFilterConfig},
-};
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+use libc::{sockaddr, socklen_t};
 // Re-export shared types from layer-lib
 pub(crate) use mirrord_layer_lib::socket::{
-    Bound, Connected, ConnectionThrough, DnsResolver, OutgoingSelector, SocketAddrExt, SocketKind,
-    SocketState, UserSocket, is_ignored_port,
+    Bound, Connected, DnsResolver, SocketKind, SocketState, UserSocket, is_ignored_port,
 };
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
@@ -30,7 +15,7 @@ use socket2::SockAddr;
 use tracing::warn;
 
 #[cfg(not(target_os = "windows"))]
-use crate::socket::ops::{REMOTE_DNS_REVERSE_MAPPING, remote_getaddrinfo};
+use crate::socket::ops::remote_getaddrinfo;
 use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
@@ -39,11 +24,8 @@ use crate::{
 
 #[cfg(target_os = "macos")]
 mod apple_dnsinfo;
-pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
-
-pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 
 /// Stores the [`UserSocket`]s created by the user.
 ///
@@ -51,95 +33,26 @@ pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 /// you're gonna have a bad time. The process hanging is the min you should expect, if you
 /// choose to ignore this warning.
 ///
-/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process through
-///   [`libc::execve`] (or any `exec*`), and the spawned children may want to use those sockets. As
-///   memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass parent sockets
-///   to child processes. The way we achieve this is by setting the [`SHARED_SOCKETS_ENV_VAR`] with
-///   an [`BASE64_URL_SAFE`] encoded version of our [`SOCKETS`]. The env var is set as
-///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
+/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process
+///   through [`libc::execve`] (or any `exec*`), and the spawned children may want to use those
+///   sockets. As memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass
+///   parent sockets to child processes. The way we achieve this is by setting the
+///   [`SHARED_SOCKETS_ENV_VAR`] with an [`BASE64_URL_SAFE`] encoded version of our
+///   [`SOCKETS`]. The env var is set as `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
 ///
-/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
-///   they're set with the cloexec flag, so that children processes don't end up using sockets that
-///   are exclusive for their parents.
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = LazyLock::new(|| {
-    std::env::var(SHARED_SOCKETS_ENV_VAR)
-        .ok()
-        .and_then(|encoded| {
-            BASE64_URL_SAFE
-                .decode(encoded.into_bytes())
-                .inspect_err(|error| {
-                    tracing::warn!(
-                        ?error,
-                        "failed decoding base64 value from {SHARED_SOCKETS_ENV_VAR}"
-                    )
-                })
-                .ok()
-        })
-        .and_then(|decoded| {
-            bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
-                &decoded,
-                bincode::config::standard(),
-            )
-            .inspect_err(|error| tracing::warn!(?error, "failed parsing shared sockets env value"))
-            .ok()
-        })
-        .map(|(fds_and_sockets, _)| {
-            Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
-                |(fd, socket)| {
-                    // Do not inherit sockets that are `FD_CLOEXEC`.
-                    if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
-                        Some((fd, Arc::new(socket)))
-                    } else {
-                        None
-                    }
-                },
-            )))
-        })
-        .unwrap_or_default()
-});
-
-// Unix-specific extensions for UserSocket
-impl UserSocket {
-    /// Inform internal proxy about closing a listening port.
-    #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
-    pub(crate) fn close(&self) {
-        if let Self {
-            state: SocketState::Listening(bound),
-            kind: SocketKind::Tcp(..),
-            ..
-        } = self
-        {
-            let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            });
-        }
-    }
-}
-
-// Unix-specific SocketKind conversion
-impl TryFrom<c_int> for SocketKind {
-    type Error = Bypass;
-
-    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
-        if (type_ & libc::SOCK_STREAM) > 0 {
-            Ok(SocketKind::Tcp(type_))
-        } else if (type_ & libc::SOCK_DGRAM) > 0 {
-            Ok(SocketKind::Udp(type_))
-        } else {
-            Err(Bypass::Type(type_))
-        }
-    }
-}
+/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check
+///   if they're set with the cloexec flag, so that children processes don't end up using
+///   sockets that are exclusive for their parents.
+// Re-export the unified SOCKETS from layer-lib
+pub(crate) use mirrord_layer_lib::socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS};
 
 /// Unix-specific DNS resolver implementation
-pub struct UnixDnsResolver;
+pub(crate) struct UnixDnsResolver;
 
 impl DnsResolver for UnixDnsResolver {
     type Error = HookError;
 
     fn resolve_hostname(
-        &self,
         hostname: &str,
         port: u16,
         family: i32,
@@ -176,69 +89,8 @@ impl DnsResolver for UnixDnsResolver {
         }
     }
 
-    fn remote_dns_enabled(&self) -> bool {
+    fn remote_dns_enabled() -> bool {
         crate::setup().remote_dns_enabled()
-    }
-}
-
-// Unix-specific extensions for OutgoingSelector with DNS resolution
-impl OutgoingSelector {
-    /// Unix-specific get_connection_through with full DNS resolution
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
-    pub(crate) fn get_connection_through(
-        &self,
-        address: SocketAddr,
-        protocol: NetProtocol,
-    ) -> HookResult<ConnectionThrough> {
-        let resolver = UnixDnsResolver;
-
-        let result = self.get_connection_through_with_resolver(address, protocol, &resolver)?;
-
-        // Apply Unix-specific address resolution for local connections
-        match result {
-            ConnectionThrough::Local(addr) => {
-                Self::get_local_address_to_connect(addr).map(ConnectionThrough::Local)
-            }
-            ConnectionThrough::Remote(addr) => Ok(ConnectionThrough::Remote(addr)),
-        }
-    }
-
-    /// Helper function that looks into the [`REMOTE_DNS_REVERSE_MAPPING`] for `address`, so we can
-    /// retrieve the hostname and resolve it locally (when applicable).
-    ///
-    /// - `address`: the [`SocketAddr`] that was passed to `connect`;
-    ///
-    /// We only get here when the [`OutgoingSelector::Remote`] matched nothing, or when the
-    /// [`OutgoingSelector::Local`] matched on something.
-    ///
-    /// Returns 1 of 2 possibilities:
-    ///
-    /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
-    /// return the first result
-    /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as is;
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
-    fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
-        // Aviram: I think this whole function and logic is weird but I really need to get
-        // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
-        // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
-        // it)
-        if address.ip().is_loopback() {
-            return Ok(address);
-        }
-
-        let cached = REMOTE_DNS_REVERSE_MAPPING
-            .lock()?
-            .get(&address.ip())
-            .cloned();
-        let Some(hostname) = cached else {
-            return Ok(address);
-        };
-
-        let _guard = DetourGuard::new();
-        (hostname, address.port())
-            .to_socket_addrs()?
-            .next()
-            .ok_or(HookError::DNSNoName)
     }
 }
 

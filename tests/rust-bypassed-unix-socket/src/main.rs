@@ -1,14 +1,18 @@
 #![warn(clippy::indexing_slicing)]
 
+#[cfg(unix)]
 use std::env;
 
+#[cfg(unix)]
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixListener, UnixStream},
 };
 
+#[cfg(unix)]
 const DEFAULT_SOCKET_ADDRESS: &str = "bypassed-unix-socket.sock";
 
+#[cfg(unix)]
 async fn server(listener: UnixListener) {
     let (mut stream, addr) = listener.accept().await.unwrap();
     println!("Incoming connection from {addr:?}");
@@ -17,6 +21,7 @@ async fn server(listener: UnixListener) {
     println!("Server echoed {n} bytes.");
 }
 
+#[cfg(unix)]
 async fn client(socket_path: String) {
     // Connect to that same socket.
     let mut stream = UnixStream::connect(socket_path).await.unwrap();
@@ -28,6 +33,7 @@ async fn client(socket_path: String) {
     assert_eq!(&answer_buf, buf)
 }
 
+#[cfg(unix)]
 #[tokio::main]
 async fn main() {
     let socket_path = env::args()
@@ -44,4 +50,10 @@ async fn main() {
 
     // Delete the socket file done, so it can be bound again in the next run.
     std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(not(unix))]
+fn main() {
+    // This test is Unix-specific and does nothing on other platforms
+    println!("rust-bypassed-unix-socket test skipped on non-Unix platforms");
 }

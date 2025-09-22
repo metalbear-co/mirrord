@@ -78,6 +78,10 @@ pub enum LayerTcp {
     /// Removes this `Port` from the sniffer's filter, the traffic won't be cloned to mirrord
     /// anymore.
     PortUnsubscribe(Port),
+
+    /// User is interested in mirroring traffic on this `Port`, so add it to the list of
+    /// ports that the sniffer is filtering.
+    PortSubscribeFilteredHttp(Port, HttpFilter),
 }
 
 /// Messages related to Tcp handler from server.
@@ -315,6 +319,23 @@ impl StealType {
     }
 }
 
+/// Describes the mirroring subscription to a port
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
+pub enum MirrorType {
+    /// Mirror all traffic to this port.
+    All(Port),
+    /// Mirror HTTP traffic matching a given filter - supporting more than once kind of filter
+    FilteredHttp(Port, HttpFilter),
+}
+
+impl MirrorType {
+    pub fn get_port(&self) -> Port {
+        let (MirrorType::All(port) | MirrorType::FilteredHttp(port, ..)) = self;
+        *port
+    }
+}
+
 /// Messages related to Steal Tcp handler from client.
 ///
 /// `PortSubscribe`, `PortUnsubscribe`, and `ConnectionUnsubscribe` variants are similar
@@ -472,6 +493,11 @@ pub static HTTP_METHOD_FILTER_VERSION: LazyLock<VersionReq> =
 /// 3. Passing HTTP requests in [`DaemonTcp`] when the client makes an unflitered port subscription
 pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.19.4".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows HTTP filtering in mirror mode
+/// using [`LayerTcp::PortSubscribeFilteredHttp`]
+pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

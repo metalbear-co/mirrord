@@ -1,7 +1,7 @@
-#[cfg(not(target_os = "windows"))]
-use std::io::Write;
 use std::{io, net::SocketAddr};
 
+#[cfg(not(target_os = "windows"))]
+use io::Write;
 use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
 use nix::libc;
@@ -55,6 +55,29 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
             redirect_fd_to_dev_null(fd);
         }
         Ok(())
+    }
+}
+
+/// "Reparent" this process to init by forking and then exiting in the
+/// parent. The child process will get reparented to init,
+/// and return from this function.
+///
+/// # Safety
+///
+/// This function forks the current process.
+/// If the current process uses multiple threads,
+/// it will be bound by [`signal-safety`](https://man7.org/linux/man-pages/man7/signal-safety.7.html) rules after returning from this function.
+#[cfg(unix)]
+pub(crate) unsafe fn reparent_to_init() -> Result<(), nix::Error> {
+    use std::process::exit;
+
+    use nix::unistd::{ForkResult, fork};
+
+    unsafe {
+        match fork()? {
+            ForkResult::Parent { .. } => exit(0),
+            ForkResult::Child => Ok(()),
+        }
     }
 }
 

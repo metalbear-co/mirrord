@@ -2,10 +2,12 @@
     any(target_arch = "x86_64", target_arch = "aarch64"),
     target_os = "linux"
 ))]
+use std::ffi::CStr;
+
 use nix::errno::Errno;
 use tracing::trace;
 
-use crate::{close_detour, file::hooks::*, socket::hooks::*};
+use crate::{close_detour, file::hooks::*, hooks::HookManager, socket::hooks::*};
 
 #[cfg_attr(
     all(target_os = "linux", target_arch = "x86_64"),
@@ -45,17 +47,38 @@ unsafe extern "C" fn c_abi_syscall6_handler(
             libc::SYS_close => close_detour(param1 as _) as i64,
             libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
 
-            _ if crate::setup().fs_config().is_active() => {
+            _ if crate::SETUP
+                .get()
+                .map_or_else(|| {
+                    trace!("c_abi_syscall6_handler: SETUP not initialized yet for syscall {}", syscall);
+                    false
+                }, |setup| {
+                    let is_active = setup.fs_config().is_active();
+                    trace!("c_abi_syscall6_handler: SETUP initialized, fs_config().is_active() = {} for syscall {}", is_active, syscall);
+                    is_active
+                }) =>
+            {
                 match syscall {
-                    libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    libc::SYS_read => {
+                        trace!("c_abi_syscall6_handler: handling SYS_read via mirrord");
+                        read_detour(param1 as _, param2 as _, param3 as _) as i64
+                    }
                     libc::SYS_pread64 => {
+                        trace!("c_abi_syscall6_handler: handling SYS_pread64 via mirrord");
                         pread_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
                     }
-                    libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                    libc::SYS_write => {
+                        trace!("c_abi_syscall6_handler: handling SYS_write via mirrord");
+                        write_detour(param1 as _, param2 as _, param3 as _) as i64
+                    }
                     libc::SYS_pwrite64 => {
+                        trace!("c_abi_syscall6_handler: handling SYS_pwrite64 via mirrord");
                         pwrite_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
                     }
-                    libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
+                    libc::SYS_lseek => {
+                        trace!("c_abi_syscall6_handler: handling SYS_lseek via mirrord");
+                        lseek_detour(param1 as _, param2 as _, param3 as _)
+                    }
                     // Note(syscall_linux.go)
                     // if flags == 0 {
                     // 	return faccessat(dirfd, path, mode)
@@ -66,6 +89,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     // Because people naturally expect syscall.Faccessat to act
                     // like C faccessat, we do the same.
                     libc::SYS_faccessat => {
+                        trace!("c_abi_syscall6_handler: handling SYS_faccessat via mirrord");
                         faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
                     }
                     // Stat hooks:
@@ -107,12 +131,16 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     libc::SYS_fsync => fsync_detour(param1 as _) as i64,
                     libc::SYS_fdatasync => fsync_detour(param1 as _) as i64,
                     libc::SYS_openat => {
+                        trace!("c_abi_syscall6_handler: handling SYS_openat via mirrord");
                         openat_detour(param1 as _, param2 as _, param3 as _, param4 as libc::c_int)
                             as i64
                     }
                     libc::SYS_getdents64 => {
                         getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
                     }
+                    #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+                    libc::SYS_rename => rename_detour(param1 as _, param2 as _) as i64,
+
                     #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
                     libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
                     libc::SYS_mkdirat => {
@@ -126,6 +154,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         unlinkat_detour(param1 as _, param2 as _, param3 as _) as i64
                     }
                     _ => {
+                        trace!("c_abi_syscall6_handler: unknown fs syscall {} bypassing to kernel", syscall);
                         let (Ok(result) | Err(result)) = syscalls::syscall!(
                             syscalls::Sysno::from(syscall as i32),
                             param1,
@@ -147,6 +176,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 }
             }
             _ => {
+                trace!("c_abi_syscall6_handler: syscall {} bypassing - either not fs-related or layer not ready", syscall);
                 let (Ok(result) | Err(result)) = syscalls::syscall!(
                     syscalls::Sysno::from(syscall as i32),
                     param1,
@@ -221,4 +251,24 @@ unsafe extern "C" fn raw_vfork_handler(
         let raw_errno = error.into_raw();
         -(raw_errno as i64)
     })
+}
+
+/// Extracts version of the Go runtime in the current process.
+fn get_go_runtime_version(hook_manager: &mut HookManager) -> Option<f32> {
+    let version_symbol = hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")?;
+    let version = unsafe {
+        let cstr = CStr::from_ptr(version_symbol.0 as _);
+        std::str::from_utf8_unchecked(cstr.to_bytes())
+    };
+    // buildVersion can look a bit complex:
+    // devel go1.25-ecc06f0 Wed Apr 9 00:32:10 2025 -0700
+    //
+    // We need to find the word starting with 'go', and parse the next 4 characters.
+    version
+        .split_ascii_whitespace()
+        .find_map(|chunk| chunk.strip_prefix("go"))
+        .and_then(|version| version.get(..4))
+        .and_then(|version| version.parse::<f32>().ok())
+        .unwrap_or_else(|| panic!("failed to parse Go runtime version {version:?}"))
+        .into()
 }

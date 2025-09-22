@@ -16,5 +16,5 @@ edition.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(unix)'.dependencies]
 libc.workspace = true

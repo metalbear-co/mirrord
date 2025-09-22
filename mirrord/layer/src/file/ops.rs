@@ -14,7 +14,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(not(target_os = "windows"))]
 use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]
@@ -24,8 +23,8 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest, WriteFileResponse,
-        XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
+        RenameRequest, SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest,
+        WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
     },
 };
 #[cfg(not(target_os = "windows"))]
@@ -809,6 +808,43 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     xstat(Some(Detour::Success(realpath.clone())), None, true)?;
 
     Detour::Success(realpath)
+}
+
+/// Renames a file/dir from `old_path` to `new_path`, replacing the original.
+///
+/// - When `fs.mapping` config is being used, we need to remap both `old_path` and `new_path`, so we
+///   cannot do the usual `common_path_check(...)?` on each path, as this would return only 1 of the
+///   paths remapped.
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> Detour<()> {
+    let old_path = common_path_check(old_path?, false);
+    let new_path = common_path_check(new_path?, false);
+
+    // We need to remap both `old_path` and `new_path` on bypass.
+    let (old_path, new_path) = match (old_path, new_path) {
+        (Detour::Success(old_path), Detour::Success(new_path)) => {
+            Detour::Success((old_path, new_path))
+        }
+        (
+            Detour::Bypass(Bypass::IgnoredFile(old_path)),
+            Detour::Bypass(Bypass::IgnoredFile(new_path)),
+        ) => Detour::Bypass(Bypass::IgnoredFiles(Some(old_path), Some(new_path))),
+        (Detour::Bypass(Bypass::IgnoredFile(old_path)), Detour::Success(..)) => {
+            Detour::Bypass(Bypass::IgnoredFiles(Some(old_path), None))
+        }
+        (Detour::Success(..), Detour::Bypass(Bypass::IgnoredFile(new_path))) => {
+            Detour::Bypass(Bypass::IgnoredFiles(None, Some(new_path)))
+        }
+        (old, new) => Detour::Success((old?, new?)),
+    }?;
+
+    let old_path = absolute_path(old_path);
+    let new_path = absolute_path(new_path);
+
+    Detour::Success(common::make_proxy_request_with_response(RenameRequest {
+        old_path,
+        new_path,
+    })??)
 }
 
 #[cfg(test)]

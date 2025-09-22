@@ -37,6 +37,8 @@ use tracing::{Level, debug, error, info, trace, warn};
 use crate::extract::extract_arm64;
 #[cfg(not(target_os = "windows"))]
 use crate::extract::extract_library;
+#[cfg(unix)]
+use crate::util::reparent_to_init;
 use crate::{
     CliResult,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
@@ -311,6 +313,11 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        #[cfg(unix)]
+        unsafe {
+            proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
+        }
+
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
         })?;
@@ -319,6 +326,18 @@ impl MirrordExecution {
         let _stderr_guard = watch_stderr(stderr, progress).await;
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
+
+        // Windows-Compatibility: this wait hangs after agent EnvVarsResponse
+        //  Skipping it works around the issue.
+        #[cfg(not(target_os = "windows"))]
+        {
+            // The pre_exec(reparent_to_init) causes the process to fork and our immediate child
+            // promptly exits (which is what we wait for here), reparenting our (now former)
+            // grandchild to init.
+            // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html for
+            // reference.
+            proxy_process.wait().await.unwrap();
+        }
 
         let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
@@ -642,7 +661,7 @@ impl MirrordExecution {
                 )),
             };
 
-            return result;
+            return result.map(Into::into);
         }
     }
 

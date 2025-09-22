@@ -22,7 +22,7 @@ default = []
 incluster = []
 # Enables connecting to the agent pod with kube's portforwarder.
 portforward = [
-    "dep:tokio-retry"
+  "dep:tokio-retry"
 ]
 
 [dependencies]
@@ -45,6 +45,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-retry = { workspace = true, optional = true }
+tower = { workspace = true, features = ["retry"] }
+http.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true

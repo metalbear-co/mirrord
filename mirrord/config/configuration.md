@@ -507,11 +507,17 @@ Defaults to `"ghcr.io/metalbear-co/mirrord-cli:<cli version>"`.
 
 Path of the mirrord-layer lib inside the specified mirrord-cli image.
 
-Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
-
 ### container.cli_prevent_cleanup {#container-cli_extra_args}
 
 Don't add `--rm` to sidecar command to prevent cleanup.
+
+### container.cli_tls_path {#container-cli_tls_path}
+
+When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you
+can specify the path where the certificate `.pem` file will be created, in the cli
+container.
+
+Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
 
 ### container.override_host_ip {#container-override_host_ip}
 
@@ -535,6 +541,22 @@ one bound as host.
   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
 
+### container.platform {#container-platform}
+
+Platform specification for the target container (e.g., "linux/amd64", "linux/arm64").
+
+When specified, the target container will run with this platform, while the internal proxy
+container will still run on the native platform and contain both architectures (x64/arm64).
+The LD_PRELOAD will automatically use the correct architecture.
+
+```json
+{
+  "container": {
+    "platform": "linux/amd64"
+  }
+}
+```
+
 ## experimental {#root-experimental}
 
 mirrord Experimental features.
@@ -554,15 +576,38 @@ correctly. This probably should be on by default but we want to gradually roll i
 <https://github.com/metalbear-co/mirrord/issues/2819>
 This option applies only on macOS.
 
+### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
+
+Whether to terminate the session when a permission denied error
+occurs during DNS resolution. This error often means that the Kubernetes cluster is
+hardened, and the mirrord-agent is not fully functional without `agent.privileged`
+enabled.
+
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
+
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
 
+### _experimental_ force_hook_connect {#experimental-force_hook_connect}
+
+Forces hooking all instances of the connect function.
+In very niche cases the connect function has multiple exports and this flag
+makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
+
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
 Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
+
+### _experimental_ hook_rename {#experimental-hook_rename}
+
+Enables hooking the `rename` function.
+
+Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
+`twig`, to create and rename temporary files.
 
 ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
 
@@ -613,7 +658,7 @@ Uses /dev/null for creating local fake files (should be better than using /tmp)
 ### _experimental_ vfork_emulation {#experimental-vfork_emulation}
 
 Enables vfork emulation within the mirrord-layer.
-Might solve rare stack corruption issues.  
+Might solve rare stack corruption issues.
 
 Note that for Go applications on ARM64, this feature is not yet supported,
 and this setting is ignored.
@@ -703,7 +748,7 @@ on process execution, delaying the layer startup and connection to the external 
 Controls mirrord features.
 
 See the
-[technical reference, Technical Reference](https://metalbear.co/mirrord/docs/reference/)
+[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)
 to learn more about what each feature does.
 
 The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options
@@ -756,33 +801,12 @@ have support for a shortened version, that you can see [here](#root-shortened).
 ## feature.copy_target {#feature-copy_target}
 
 Creates a new copy of the target. mirrord will use this copy instead of the original target
-(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.co/mirrord/docs/overview/teams/?utm_source=copytarget).
+(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
 
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
 
-Allows the user to target a pod created dynamically from the original [`target`](#target).
-The new pod inherits most of the original target's specification, e.g. labels.
-
-```json
-{
-  "feature": {
-    "copy_target": {
-      "scale_down": true,
-      "exclude_containers": ["my-container"],
-      "exclude_init_containers": ["my-init-container"]
-    }
-  }
-}
-```
-
-```json
-{
-  "feature": {
-    "copy_target": true
-  }
-}
-```
+Generated configuration for copy target feature.
 
 ### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
 
@@ -804,6 +828,102 @@ This option is compatible only with deployment targets.
     }
 ```
 
+## feature.db_branches {#feature-db_branches}
+
+Configuration for the database branching feature.
+
+A list of configurations for database branches.
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "name": "my-database-name",
+        "ttl_secs": 120,
+        "type": "mysql",
+        "version": "8.0",
+        "connection": {
+          "url": {
+            "type": "env",
+            "variable": "DB_CONNECTION_URL"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+Configuration for a database branch.
+
+Example:
+
+```json
+{
+  "id": "my-branch-db",
+  "name": "my-database-name",
+  "ttl_secs": 120,
+  "type": "mysql",
+  "version": "8.0",
+  "connection": {
+    "url": {
+      "type": "env",
+      "variable": "DB_CONNECTION_URL"
+    }
+  }
+}
+```
+
+### feature.db_branches.type {#feature-db_branches-type}
+
+Currently MySQL is the only supported database type.
+
+### feature.db_branches.connection {#feature-db_branches-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Example:
+
+A single complete connection URL stored in an environment variable accessible from
+the target pod template.
+
+```json
+{
+  "url": {
+    "type": "env",
+    "variable": "DB_CONNECTION_URL"
+  }
+}
+```
+
+### feature.db_branches.id {#feature-db_branches-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+### feature.db_branches.name {#feature-db_branches-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+### feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+### feature.db_branches.version {#feature-db_branches-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
 ## feature.env {#feature-env}
 
 Allows the user to set or override the local process' environment variables with the ones
@@ -818,7 +938,7 @@ Can be set to one of the options:
 Which environment variables to load from the remote pod are controlled by setting either
 [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 
-See the environment variables [reference](https://metalbear.co/mirrord/docs/reference/env/) for more details.
+See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
 
 ```json
 {
@@ -970,7 +1090,7 @@ The logic for choosing the behavior is as follows:
 4. If none of the above match, use the default behavior (mode).
 
 For more information, check the file operations
-[technical reference](https://metalbear.co/mirrord/docs/reference/fileops/).
+[technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
 
 ```json
 {
@@ -1053,7 +1173,7 @@ Should mirrord return the hostname of the target pod when calling `gethostname`
 
 Controls mirrord network operations.
 
-See the network traffic [reference](https://metalbear.co/mirrord/docs/reference/traffic/)
+See the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic/)
 for more details.
 
 ```json
@@ -1165,7 +1285,7 @@ Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
 
 Controls the incoming TCP traffic feature.
 
-See the incoming [reference](https://metalbear.co/mirrord/docs/reference/traffic/#incoming) for more
+See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more
 details.
 
 Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
@@ -1645,7 +1765,7 @@ or connects to other services over IPv6.
 
 Tunnel outgoing network operations through mirrord.
 
-See the outgoing [reference](https://metalbear.co/mirrord/docs/reference/traffic/#outgoing) for more
+See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more
 details.
 
 You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.
@@ -1796,6 +1916,8 @@ will be used, and your local application will not receive any messages from that
   }
 }
 ```
+
+More queue types might be added in the future.
 
 ## internal_proxy {#root-internal_proxy}
 
@@ -1998,6 +2120,51 @@ Defaults to `{ "skip_sip": "git" }`
 
 When specified, the given value will replace the default list rather than
 being added to.
+
+## startup_retry {#root-startup_retry}
+
+Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.
+for resolving the target or connecting to the mirrord Operator).
+
+If you're having cluster connectivity issues when **starting** mirrord, consider increasing
+[`max_retries`](#startup_retry-max_retries) and changing both
+[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry
+some of its initial Kubernetes API requests.
+
+```json
+{
+  "startup_retry": {
+    "min_ms": 500,
+    "max_ms": 5000,
+    "max_retries": 2,
+  }
+}
+```
+
+## startup_retry.max_ms {#startup_retry-max_ms}
+
+Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by
+mirrord during startup (e.g. for resolving the target or connecting to the mirrord
+Operator).
+
+Defaults to `5000` milliseconds.
+
+## startup_retry.max_retries {#startup_retry-max_retries}
+
+Sets the max amount of retries for Kubernetes API requests made by mirrord during startup
+(e.g. for resolving the target or connecting to the mirrord Operator).
+
+If you want to **disable** request retries, set this value to `0`.
+
+Defaults to `2`.
+
+## startup_retry.min_ms {#startup_retry-min_ms}
+
+Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by
+mirrord during startup (e.g. for resolving the target or connecting to the mirrord
+Operator).
+
+Defaults to `500` milliseconds.
 
 ## target {#root-target}
 

@@ -1,5 +1,3 @@
-#![cfg(target_os = "windows")]
-
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
@@ -11,9 +9,9 @@ pub fn fgets() {
     println!(">> test_fgets");
 
     let mut file = File::open(FILE_PATH).expect("Failed to open file");
-    let mut buffer = vec![0u8; 12];
+    let mut buffer = [0u8; 12];
 
-    file.read_exact(&mut buffer[..12])
+    file.read_exact(&mut buffer)
         .expect("Failed to read from file");
 }
 
@@ -26,7 +24,8 @@ pub fn pread() {
     // Seek to offset 1
     file.seek(SeekFrom::Start(1)).expect("Failed to seek");
 
-    file.read(&mut buffer).expect("Failed to read from file");
+    file.read_exact(&mut buffer)
+        .expect("Failed to read from file");
 }
 
 pub fn pwrite() {
