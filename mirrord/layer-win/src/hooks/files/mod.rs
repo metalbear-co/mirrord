@@ -197,9 +197,9 @@ unsafe extern "system" fn nt_create_file_hook(
                 return ret;
             }
             let linux_path = linux_path.unwrap();
-            if desired_access & (FILE_WRITE_DATA) != 0
-                || desired_access & (FILE_APPEND_DATA) != 0
-                || desired_access & (GENERIC_WRITE) != 0
+            if desired_access & FILE_WRITE_DATA != 0
+                || desired_access & FILE_APPEND_DATA != 0
+                || desired_access & GENERIC_WRITE != 0
             {
                 // TODO(gabriela): edit when supported!
                 return STATUS_OBJECT_PATH_NOT_FOUND;
@@ -207,10 +207,12 @@ unsafe extern "system" fn nt_create_file_hook(
 
             // Check if pointer to handle is valid.
             if file_handle.is_null() {
+                tracing::warn!("Invalid memory for file_handle variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
+                tracing::warn!("Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -236,7 +238,7 @@ unsafe extern "system" fn nt_create_file_hook(
             let managed_handle = match req {
                 Ok(file) => {
                     try_insert_handle(HandleContext {
-                        path: linux_path,
+                        path: linux_path.clone(),
                         fd: file.fd,
                         desired_access,
                         file_attributes,
@@ -251,7 +253,7 @@ unsafe extern "system" fn nt_create_file_hook(
                     })
                 }
                 Err(e) => {
-                    tracing::error!("{:?} {}", e, linux_path);
+                    tracing::error!("{:?} {}", e, linux_path.clone());
                     None
                 }
             };
@@ -259,12 +261,13 @@ unsafe extern "system" fn nt_create_file_hook(
             if managed_handle.is_some() {
                 // Write managed handle at the provided pointer
                 *file_handle = *managed_handle.unwrap();
-
+                tracing::info!("Succesfully opened remote file handle for {} ({:8x})", linux_path, *file_handle as usize);
                 return STATUS_SUCCESS;
             } else {
                 // File could not be obtained for reasons, even if the
                 // network operation succeeded.
 
+                tracing::info!("Failed opening remote file handle for {}", linux_path);
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
@@ -310,10 +313,12 @@ unsafe extern "system" fn nt_read_file_hook(
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             if !is_memory_valid(buffer) {
+                tracing::warn!("Invalid memory for buffer variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
+                tracing::warn!("Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -330,6 +335,7 @@ unsafe extern "system" fn nt_read_file_hook(
                 },
             );
             if cursor.is_none() {
+                tracing::error!("Failed seeking when reading file!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
             let cursor = cursor.unwrap();
@@ -376,11 +382,13 @@ unsafe extern "system" fn nt_read_file_hook(
                 {
                     return STATUS_SUCCESS;
                 } else {
+                    tracing::error!("Failed seeking when reading file!");
                     return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
             }
 
             // We didn't acquire any bytes.
+            tracing::error!("Pod did not return a buffer when reading file!");
             return STATUS_UNEXPECTED_NETWORK_ERROR;
         }
 
@@ -457,10 +465,12 @@ unsafe extern "system" fn nt_set_information_file_hook(
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             if !is_memory_valid(file_information) {
+                tracing::warn!("Invalid memory for file_information variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
+                tracing::warn!("Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -522,6 +532,7 @@ unsafe extern "system" fn nt_set_information_file_hook(
                     {
                         return STATUS_SUCCESS;
                     } else {
+                        tracing::error!("Failed seeking when updating file information!");
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -591,10 +602,12 @@ unsafe extern "system" fn nt_query_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             if !is_memory_valid(file_information) {
+                tracing::warn!("Invalid memory for file_information variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
+                tracing::warn!("Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -602,7 +615,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
                 // A FILE_BASIC_INFORMATION structure. The caller must have opened the file with
                 // the FILE_READ_ATTRIBUTES flag specified in the DesiredAccess parameter.
                 FILE_INFORMATION_CLASS::FileBasicInformation => {
-                    if handle_context.desired_access & (FILE_READ_ATTRIBUTES) != 0 {
+                    if handle_context.desired_access & FILE_READ_ATTRIBUTES != 0 {
                         // Length must be the same size as [`FILE_BASIC_INFORMATION`] length!
                         if length as usize != std::mem::size_of::<FILE_BASIC_INFORMATION>() {
                             return STATUS_ACCESS_VIOLATION;
@@ -625,6 +638,8 @@ unsafe extern "system" fn nt_query_information_file_hook(
                             std::mem::size_of::<FILE_BASIC_INFORMATION>() as _;
                         (*io_status_block).__bindgen_anon_1.Status =
                             ManuallyDrop::new(STATUS_SUCCESS);
+                    } else {
+                        tracing::warn!("Trying to query FileBasicInformation with the wrong desired_access");
                     }
 
                     return STATUS_SUCCESS;
@@ -636,10 +651,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
                 //
                 // NOTE(gabriela): the above is wrong and stupid, you just need read-attribs.
                 FILE_INFORMATION_CLASS::FilePositionInformation => {
-                    if (handle_context.desired_access & FILE_READ_DATA != 0)
-                        || (handle_context.desired_access & FILE_WRITE_DATA != 0)
-                        || (handle_context.desired_access & FILE_READ_ATTRIBUTES != 0)
-                    {
+                    if handle_context.desired_access & FILE_READ_ATTRIBUTES != 0 {
                         // Length must be the same size as [`FILE_POSITION_INFORMATION`] length!
                         if length as usize != std::mem::size_of::<FILE_POSITION_INFORMATION>() {
                             return STATUS_ACCESS_VIOLATION;
@@ -659,8 +671,11 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                             return STATUS_SUCCESS;
                         } else {
+                            tracing::error!("Failed seeking when querying file information!");
                             return STATUS_UNEXPECTED_NETWORK_ERROR;
                         }
+                    } else {
+                        tracing::warn!("Trying to query FilePositionInformation with the wrong desired_access");
                     }
                 }
                 // A FILE_STANDARD_INFORMATION structure. The caller can query this information as
@@ -688,6 +703,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
+                        tracing::error!("Failed xstat when querying file information!");
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -744,6 +760,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
+                        tracing::error!("Failed xstat when querying file information!");
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -808,6 +825,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
                             ManuallyDrop::new(STATUS_SUCCESS);
 
                         return STATUS_SUCCESS;
+                    } else {
+                        tracing::error!("Failed querying all information because one of the single queries failed!");
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
                 _ => {
@@ -903,6 +923,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
 
             if req.is_err() {
                 // Valid [`NTSTATUS`] to facillitate investigations later.
+                tracing::error!("Failed closing fd when closing file handle!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
 
@@ -943,6 +964,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     // reading, etc. a file. Which means, we will inherently support every single
     // runtime (Rust, C#, Python, Node, ...) without any special logic involved
     // (unless it somehow proves itself to be required.)
+    //
+    // We have already thoroughly tested this with Python and POSIX APIs.
     //
     // Every single Win32 function that interacts with files, in one way or another
     // defers itself to a NT function, making implementations at kernelbase level
