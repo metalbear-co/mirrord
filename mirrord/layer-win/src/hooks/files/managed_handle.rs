@@ -79,14 +79,6 @@ pub struct HandleContext {
     pub write_time: FILETIME,
     /// Change time as [`FILETIME`]
     pub change_time: FILETIME,
-    /// Data, in bytes.
-    /// NOTE(gabriela): should we do this, or seek + read on
-    /// every readfile?
-    pub data: Option<Vec<u8>>,
-    /// Data number of bytes.
-    pub data_xstat_size: usize,
-    /// File read cursor
-    pub cursor: usize,
 }
 
 /// Try to linearly insert a new [`MirrordHandle`] starting at [`MIRRORD_FIRST_MANAGED_HANDLE`].

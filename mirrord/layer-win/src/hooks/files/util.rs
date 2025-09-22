@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use mirrord_protocol::file::{MetadataInternal, XstatRequest};
+use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
 use winapi::{
     shared::minwindef::FILETIME,
     um::{
@@ -50,15 +50,21 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
         follow_symlink: true,
     });
 
-    // If the request failed, just return `None`.
-    if req.is_err() {
-        return None;
-    }
-    let req = req.unwrap();
-
     // If the response contains the `XstatResponse`, return the metadata.
     match req {
-        Ok(res) => Some(res.metadata),
+        Ok(Ok(res)) => Some(res.metadata),
+        _ => None,
+    }
+}
+
+pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
+    let seek = make_proxy_request_with_response(SeekFileRequest {
+        fd,
+        seek_from: seek,
+    });
+
+    match seek {
+        Ok(Ok(res)) => Some(res.result_offset),
         _ => None,
     }
 }

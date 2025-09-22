@@ -10,6 +10,7 @@ use std::{
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest,
+    SeekFromInternal,
 };
 use phnt::ffi::{
     _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
@@ -42,7 +43,7 @@ use crate::{
     common::{make_proxy_request_no_response, make_proxy_request_with_response},
     hooks::files::{
         managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
-        util::{WindowsTime, remove_root_dir_from_path, try_xstat},
+        util::{WindowsTime, remove_root_dir_from_path, try_seek, try_xstat},
     },
     process::memory::is_memory_valid,
 };
@@ -142,7 +143,6 @@ static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInforma
 type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
 static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 
-
 type GetFileTypeType = unsafe extern "system" fn(HANDLE) -> DWORD;
 static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 
@@ -160,10 +160,9 @@ static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 /// Internally, this creates a "managed handle" (see [`MANAGED_HANDLES`]), and if there was a
 /// succesful open operation, we create a [`HandleContext`] for the file descriptor, which is
 /// initially filled in with relevant data, and may surely be modified later.
-/// 
-/// Another detail is that we make a xstat request to the remote pod to acquire the size of the file.
-/// 
-/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+///
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
@@ -243,15 +242,6 @@ unsafe extern "system" fn nt_create_file_hook(
 
             let managed_handle = match req {
                 Ok(file) => {
-                    // Run Xstat over fd to get necessary data.
-                    let xstat = try_xstat(file.fd);
-
-                    if xstat.is_none() {
-                        eprintln!("WARNING: request for xstat file failed!");
-                        return STATUS_UNEXPECTED_NETWORK_ERROR;
-                    }
-                    let xstat = xstat.unwrap();
-
                     try_insert_handle(HandleContext {
                         path: linux_path,
                         fd: file.fd,
@@ -265,12 +255,6 @@ unsafe extern "system" fn nt_create_file_hook(
                         access_time: WindowsTime::current().as_file_time(),
                         write_time: WindowsTime::current().as_file_time(),
                         change_time: WindowsTime::current().as_file_time(),
-                        // Data will be retrieved on first read.
-                        data: None,
-                        // Xstat request contains the size of the remote file in this field,
-                        data_xstat_size: xstat.size as _,
-                        // Cursor is a detail to be maintained by reader, etc. Starts at 0.
-                        cursor: 0,
                     })
                 }
                 Err(e) => {
@@ -282,10 +266,7 @@ unsafe extern "system" fn nt_create_file_hook(
             if managed_handle.is_some() {
                 // Write managed handle at the provided pointer
                 *file_handle = *managed_handle.unwrap();
-                println!(
-                    "Succesfully wrote managed handle! {:8p}",
-                    *managed_handle.unwrap()
-                );
+
                 return STATUS_SUCCESS;
             } else {
                 // File could not be obtained for reasons, even if the
@@ -305,23 +286,19 @@ unsafe extern "system" fn nt_create_file_hook(
 /// The mechanism is:
 /// - We check if the `file` argument is present in the [`MANAGED_HANDLES`] structure, and, if it
 ///   is, we then begin taking over execution.
-/// - Upon the first [`nt_read_file_hook`] request for the file handle, if some conditions are met,
-///   we make a request to read the entirety of the file descriptor into the [`HandleContext`], so
-///   that later it may be referred to again for various read configurations. This is a necessity,
-///   because otherwise, we'd have to, depending on the scenario, begin with a request to `seek` to
-///   the point in the file we're trying to read at. Moreso, it could be seen, depending on the
-///   context, as an optimizaqtion, to not throttle IO operations so much by doing a web request
-///   every time. This is still subject to change.
-/// - Once a buffer is obtained from the internal data, matching the beginning point in the file,
-///   and the desired length to be read, we copy the slice we made over our internal data, to the
+/// - We try to, either, acquire the current seek head, or update to the user-desired seek head, which may be
+///   specified by the `byte_offset` structure's contents.
+/// - Once a buffer is obtained from the pod, it is matching the current seek head of the file,
+///   and the desired length to be read, we copy the slice we made over our newly returned buffer, to the
 ///   user-provided buffer, should all the preconditions for this be met.
 /// - If there is not a specified `byte_offset`, we assume the intent is to call the API until we've
-///   run out of content to read. Therefore, we maintain an internal cursor to which the minimum of
-///   `length` and remaining data in the [`HandleContext`] is added.
-/// - The internal cursor is reset if you do a read with a `byte_offset`. It can also be reset by
+///   run out of content to read. Therefore, we seek from current with the calculated length that was copied
+///   to the user provided buffer.
+/// - Otherwise, in the presence of a `byte_offset` structure, the seek head is reset. It can also be reset by
 ///   `NtSetInformationFile` using `FilePositionInfo`.
-/// 
-/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+///
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -346,75 +323,69 @@ unsafe extern "system" fn nt_read_file_hook(
                 return STATUS_ACCESS_VIOLATION;
             }
 
-            // If data is not present yet, read it once.
-            // NOTE(gabriela): should we either
-            // - do this
-            // - update to seek + read every time ReadFile happens?
-            if handle_context.data.is_none() {
-                let req = make_proxy_request_with_response(ReadFileRequest {
-                    remote_fd: handle_context.fd,
-                    buffer_size: handle_context.data_xstat_size as _,
-                });
-
-                if req.is_err() {
-                    return STATUS_UNEXPECTED_NETWORK_ERROR;
-                }
-
-                let req = req.unwrap();
-
-                match req {
-                    Ok(res) => {
-                        handle_context.data = Some(res.bytes.to_vec());
-                    }
-                    Err(e) => {
-                        eprintln!("{:?}", e);
-                        return STATUS_UNEXPECTED_NETWORK_ERROR;
-                    }
-                }
-            }
-
             // Update last access time to current time, as we are reading.
             handle_context.access_time = WindowsTime::current().as_file_time();
 
-            // Data must be guaranteed by the time we get here!
-            let bytes = handle_context.data.as_ref().unwrap();
-
-            if handle_context.cursor >= bytes.len() {
-                (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_END_OF_FILE);
-                (*io_status_block).Information = 0;
-
-                return STATUS_END_OF_FILE;
+            // Get cursor, or update cursor if we have a byte offset.
+            let cursor = try_seek(
+                handle_context.fd,
+                if byte_offset.is_null() {
+                    SeekFromInternal::Current(0)
+                } else {
+                    SeekFromInternal::Start(*(*byte_offset).QuadPart() as _)
+                },
+            );
+            if cursor.is_none() {
+                return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
+            let cursor = cursor.unwrap();
 
-            // Start offset if there's a byte offset.
-            let start_off = if byte_offset.is_null() {
-                handle_context.cursor
-            } else {
-                *(*byte_offset).QuadPart() as _
+            let bytes = match make_proxy_request_with_response(ReadFileRequest {
+                remote_fd: handle_context.fd,
+                buffer_size: length as _,
+            }) {
+                Ok(Ok(res)) => Some(res.bytes),
+                _ => None,
             };
 
-            // Get a slice of the bytes.
-            let bytes = &bytes[start_off..];
+            if let Some(bytes) = bytes {
+                if cursor as usize >= bytes.len() {
+                    (*io_status_block).__bindgen_anon_1.Status =
+                        ManuallyDrop::new(STATUS_END_OF_FILE);
+                    (*io_status_block).Information = 0;
 
-            let len = usize::min(bytes.len(), length as _);
+                    return STATUS_END_OF_FILE;
+                }
 
-            // Otherwise, copy the remote received buffer (relative to
-            // fd cursor) to the provided buffer, as far as we can.
-            std::ptr::copy(bytes.as_ptr(), buffer as _, len);
+                // Calculate maximum copyable size.
+                let len = usize::min(bytes.len(), length as _);
 
-            // We get this information over IRP normally, so need to replicate the
-            // structure in usermode
-            (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
-            (*io_status_block).Information = len as _;
+                // Copy the remote received buffer (relative to fd cursor) to the provided buffer,
+                // as far as we can.
+                std::ptr::copy(bytes.as_ptr(), buffer as _, len);
 
-            // Update or reset handle context cursor.
-            if byte_offset.is_null() {
-                handle_context.cursor += len;
-            } else {
-                handle_context.cursor = 0;
+                // We get this information over IRP normally, so need to replicate the
+                // structure in usermode
+                (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+                (*io_status_block).Information = len as _;
+
+                // Update or reset handle context cursor.
+                if try_seek(
+                    handle_context.fd,
+                    if byte_offset.is_null() {
+                        SeekFromInternal::Current(len as _)
+                    } else {
+                        SeekFromInternal::Start(0)
+                    },
+                ).is_some() {
+                    return STATUS_SUCCESS;
+                } else {
+                    return STATUS_UNEXPECTED_NETWORK_ERROR;
+                }
             }
 
-            return STATUS_SUCCESS;
+            // We didn't acquire any bytes.
+            return STATUS_UNEXPECTED_NETWORK_ERROR;
         }
 
         let original = NT_READ_FILE_ORIGINAL.get().unwrap();
@@ -466,8 +437,14 @@ unsafe extern "system" fn nt_write_file_hook(
 /// - [`FILE_INFORMATION_CLASS::FileBasicInformation`]
 /// - [`FILE_INFORMATION_CLASS::FilePositionInformation`]
 ///
+/// In the case of attempts to set information with the `file_information_class` [`FILE_INFORMATION_CLASS::FilePositionInformation`],
+/// a request will be made to the pod, to update the seek head.
+/// 
 /// This status will be reflected in the [`HandleContext`], but also through
 /// `NtQueryInformationFile` (and therefore, `stat` POSIX operations.)
+/// 
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -538,9 +515,14 @@ unsafe extern "system" fn nt_set_information_file_hook(
                     let in_ptr = file_information as *const FILE_POSITION_INFORMATION;
 
                     // Set CurrentByteOffset from FILE_POSITION_INFORMATION to handle context.
-                    handle_context.cursor = (*in_ptr).CurrentByteOffset.QuadPart as _;
-
-                    return STATUS_SUCCESS;
+                    if try_seek(
+                        handle_context.fd,
+                        SeekFromInternal::Start((*in_ptr).CurrentByteOffset.QuadPart as _),
+                    ).is_some() {
+                        return STATUS_SUCCESS;
+                    } else {
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
                 }
                 _ => {}
             }
@@ -570,9 +552,21 @@ unsafe extern "system" fn nt_set_information_file_hook(
 /// - [`FILE_INFORMATION_CLASS::FileStatInformation`]
 /// - [`FILE_INFORMATION_CLASS::FileAllInformation`]
 ///
+/// In the case of trying to query information for a file with the `file_information_class` being one of
+/// [`FILE_INFORMATION_CLASS::FilePositionInformation`] and consequently, [`FILE_INFORMATION_CLASS::FileAllInformation`],
+/// a request will be made to the pod to query the current seek head.
+/// 
+/// In the case of trying to query information for a file with the `file_information_class`
+/// [`FILE_INFORMATION_CLASS::FileStatInformation`], [`FILE_INFORMATION_CLASS::FileStandardInformation`]
+/// and consequently [`FILE_INFORMATION_CLASS::FileAllInformation`], a request will be made to the pod to query
+/// the content of the `stat` operation.
+/// 
 /// This information will be reflected, for example, during the invocation of the `stat` POSIX API.
 /// The path for that event, despite one of the misleading names above, is the
 /// [`FILE_INFORMATION_CLASS::FileAllInformation`] match arm.
+/// 
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -641,15 +635,22 @@ unsafe extern "system" fn nt_query_information_file_hook(
                         }
 
                         let out_ptr = file_information as *mut FILE_POSITION_INFORMATION;
-                        (*out_ptr).CurrentByteOffset.QuadPart = handle_context.cursor as _;
 
-                        (*io_status_block).Information =
-                            std::mem::size_of::<FILE_POSITION_INFORMATION>() as _;
-                        (*io_status_block).__bindgen_anon_1.Status =
-                            ManuallyDrop::new(STATUS_SUCCESS);
+                        if let Some(cursor) =
+                            try_seek(handle_context.fd, SeekFromInternal::Current(0))
+                        {
+                            (*out_ptr).CurrentByteOffset.QuadPart = cursor as _;
+
+                            (*io_status_block).Information =
+                                std::mem::size_of::<FILE_POSITION_INFORMATION>() as _;
+                            (*io_status_block).__bindgen_anon_1.Status =
+                                ManuallyDrop::new(STATUS_SUCCESS);
+
+                            return STATUS_SUCCESS;
+                        } else {
+                            return STATUS_UNEXPECTED_NETWORK_ERROR;
+                        }
                     }
-
-                    return STATUS_SUCCESS;
                 }
                 // A FILE_STANDARD_INFORMATION structure. The caller can query this information as
                 // long as the file is open, without any particular requirements for
@@ -662,19 +663,22 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                     let out_ptr = file_information as *mut FILE_STANDARD_INFORMATION;
 
-                    (*out_ptr).AllocationSize.QuadPart =
-                        i64::try_from(handle_context.data_xstat_size).unwrap();
-                    (*out_ptr).EndOfFile.QuadPart =
-                        i64::try_from(handle_context.data_xstat_size).unwrap();
-                    (*out_ptr).NumberOfLinks = 0;
-                    (*out_ptr).DeletePending = 0;
-                    (*out_ptr).Directory = 0;
+                    if let Some(metadata) = try_xstat(handle_context.fd) {
+                        (*out_ptr).AllocationSize.QuadPart = i64::try_from(metadata.size).unwrap();
+                        (*out_ptr).EndOfFile.QuadPart = i64::try_from(metadata.size).unwrap();
+                        (*out_ptr).NumberOfLinks = 0;
+                        (*out_ptr).DeletePending = 0;
+                        (*out_ptr).Directory = 0;
 
-                    (*io_status_block).Information =
-                        std::mem::size_of::<FILE_STANDARD_INFORMATION>() as _;
-                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+                        (*io_status_block).Information =
+                            std::mem::size_of::<FILE_STANDARD_INFORMATION>() as _;
+                        (*io_status_block).__bindgen_anon_1.Status =
+                            ManuallyDrop::new(STATUS_SUCCESS);
 
-                    return STATUS_SUCCESS;
+                        return STATUS_SUCCESS;
+                    } else {
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
                 }
                 // https://github.com/reactos/reactos/blob/9ab8761f2c76d437830195ebea2600e414ac4c73/dll/win32/kernelbase/wine/file.c#L3039
                 // Doesn't seem to be used in Windows 11
@@ -705,29 +709,32 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                     let out_ptr = file_information as *mut FILE_STAT_INFORMATION;
 
-                    (*out_ptr).FileId.QuadPart = 0;
-                    (*out_ptr).FileAttributes = handle_context.file_attributes;
-                    (*out_ptr).CreationTime.QuadPart =
-                        WindowsTime::from(handle_context.creation_time).as_file_time_i64();
-                    (*out_ptr).LastAccessTime.QuadPart =
-                        WindowsTime::from(handle_context.access_time).as_file_time_i64();
-                    (*out_ptr).LastWriteTime.QuadPart =
-                        WindowsTime::from(handle_context.write_time).as_file_time_i64();
-                    (*out_ptr).ChangeTime.QuadPart =
-                        WindowsTime::from(handle_context.change_time).as_file_time_i64();
-                    (*out_ptr).AllocationSize.QuadPart =
-                        i64::try_from(handle_context.data_xstat_size).unwrap();
-                    (*out_ptr).EndOfFile.QuadPart =
-                        i64::try_from(handle_context.data_xstat_size).unwrap();
-                    (*out_ptr).ReparseTag = 0;
-                    (*out_ptr).NumberOfLinks = 0;
-                    (*out_ptr).EffectiveAccess = handle_context.desired_access;
+                    if let Some(metadata) = try_xstat(handle_context.fd) {
+                        (*out_ptr).FileId.QuadPart = 0;
+                        (*out_ptr).FileAttributes = handle_context.file_attributes;
+                        (*out_ptr).CreationTime.QuadPart =
+                            WindowsTime::from(handle_context.creation_time).as_file_time_i64();
+                        (*out_ptr).LastAccessTime.QuadPart =
+                            WindowsTime::from(handle_context.access_time).as_file_time_i64();
+                        (*out_ptr).LastWriteTime.QuadPart =
+                            WindowsTime::from(handle_context.write_time).as_file_time_i64();
+                        (*out_ptr).ChangeTime.QuadPart =
+                            WindowsTime::from(handle_context.change_time).as_file_time_i64();
+                        (*out_ptr).AllocationSize.QuadPart = i64::try_from(metadata.size).unwrap();
+                        (*out_ptr).EndOfFile.QuadPart = i64::try_from(metadata.size).unwrap();
+                        (*out_ptr).ReparseTag = 0;
+                        (*out_ptr).NumberOfLinks = 0;
+                        (*out_ptr).EffectiveAccess = handle_context.desired_access;
 
-                    (*io_status_block).Information =
-                        std::mem::size_of::<FILE_STAT_INFORMATION>() as _;
-                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+                        (*io_status_block).Information =
+                            std::mem::size_of::<FILE_STAT_INFORMATION>() as _;
+                        (*io_status_block).__bindgen_anon_1.Status =
+                            ManuallyDrop::new(STATUS_SUCCESS);
 
-                    return STATUS_SUCCESS;
+                        return STATUS_SUCCESS;
+                    } else {
+                        return STATUS_UNEXPECTED_NETWORK_ERROR;
+                    }
                 }
                 // NOTE(gabriela): well, this works as far as `GetFileInformationByHandle` is
                 // concerned, at least.
@@ -856,8 +863,9 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 ///
 /// Due to details of the [`MANAGED_HANDLES`] structure management, a [`HANDLE`] value can never be
 /// reclaimed, so all cases of reusage must be treated as a bug.
-/// 
-/// All instances of a failed network operation are marked by the return value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+///
+/// All instances of a failed network operation are marked by the return value of
+/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write()
