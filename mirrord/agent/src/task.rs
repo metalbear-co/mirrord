@@ -106,9 +106,9 @@ impl BgTaskRuntime {
 impl Drop for BgTaskRuntime {
     #[tracing::instrument(level = Level::DEBUG)]
     fn drop(&mut self) {
-        if self.handle.metrics().num_alive_tasks() == 0 {
-            self.notify_drop.notify_one();
-        }
+        // if self.handle.metrics().num_alive_tasks() == 0 {
+        self.notify_drop.notify_one();
+        // }
     }
 }
 

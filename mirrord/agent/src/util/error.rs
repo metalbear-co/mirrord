@@ -6,7 +6,7 @@ use crate::namespace::NamespaceError;
 
 /// Errors that can occur when creating a [`BgTaskRuntime`](crate::task::BgTaskRuntime).
 #[derive(Error, Debug)]
-pub enum AgentRuntimeError {
+pub(crate) enum AgentRuntimeError {
     #[error("failed to spawn runtime thread: {0}")]
     ThreadSpawnError(#[source] io::Error),
     #[error(transparent)]
@@ -16,11 +16,3 @@ pub enum AgentRuntimeError {
     #[error("runtime thread panicked")]
     Panicked,
 }
-
-/// An error that occurs when polling a future spawned with
-/// [`BgTaskRuntime::spawn`](crate::task::BgTaskRuntime::spawn).
-///
-/// This error indicated that the future has panicked.
-#[derive(Debug, Error)]
-#[error("task panicked")]
-pub struct BgTaskPanicked;

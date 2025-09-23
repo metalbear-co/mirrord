@@ -936,7 +936,6 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
     let state = State::new(&args).await?;
-    let pid = state.container_pid();
     let with_mesh_exclusion = state.is_with_mesh_exclusion();
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
@@ -957,14 +956,8 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         },
     };
 
-    let Some(pid) = pid else {
-        return result;
-    };
-
-    let runtime =
-        BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, NamespaceType::Net))).await?;
-
-    runtime
+    state
+        .network_runtime
         .handle()
         .spawn(clear_iptable_chain(args.ipv6, with_mesh_exclusion))
         .await
@@ -976,6 +969,8 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
             task: "IPTablesCleaner",
             error: Arc::new(error),
         })?;
+
+    tracing::info!("runtime being dropped ...");
 
     result
 }

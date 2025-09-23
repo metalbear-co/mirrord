@@ -1,10 +1,13 @@
 use std::{error::Error, sync::Arc};
 
-use futures::{FutureExt, future::Shared};
-use tokio::{sync::oneshot, task::JoinHandle};
+use futures::{
+    FutureExt, TryFutureExt,
+    future::{BoxFuture, Shared},
+};
+use tokio::task::JoinHandle;
 use tracing::Level;
 
-use crate::{error::AgentError, util::error::BgTaskPanicked};
+use crate::error::AgentError;
 
 /// Converts a [`JoinHandle`] created from [`super::BgTaskRuntime::spawn`] into a [`BgTaskStatus`]
 /// so we can wait and see if the task has ended properly (or not).
@@ -25,7 +28,7 @@ pub(crate) struct BgTaskStatus {
     task_name: &'static str,
 
     /// Call `await` on this to get the result of the `BackgroundTask`.
-    result: Shared<oneshot::Receiver<Result<(), Arc<dyn Error + Send + Sync>>>>,
+    result: Shared<BoxFuture<'static, Result<(), Arc<dyn Error + Send + Sync>>>>,
 }
 
 impl BgTaskStatus {
@@ -35,19 +38,11 @@ impl BgTaskStatus {
     /// [`AgentError::BackgroundTaskFailed`].
     #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), err)]
     pub(crate) async fn wait(&self) -> Result<(), AgentError> {
-        let handle = tokio::runtime::Handle::current();
-        tracing::Span::current().record("rt", format!("{handle:?}"));
-        tracing::Span::current().record("rt_metrics", format!("{:?}", handle.metrics()));
-
         match self.result.clone().await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(AgentError::BackgroundTaskFailed {
+            Ok(()) => Ok(()),
+            Err(error) => Err(AgentError::BackgroundTaskFailed {
                 task: self.task_name,
                 error,
-            }),
-            Err(..) => Err(AgentError::BackgroundTaskFailed {
-                task: self.task_name,
-                error: Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>,
             }),
         }
     }
@@ -58,23 +53,15 @@ impl BgTaskStatus {
     /// not expected to finish yet, e.g. when we send a message to the `BackgroundTask` through its
     /// channel, and `send` returns an error.
     #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), ret)]
-    pub(crate) async fn wait_assert_running(&self) -> AgentError {
-        let handle = tokio::runtime::Handle::current();
-        tracing::Span::current().record("rt", format!("{handle:?}"));
-        tracing::Span::current().record("rt_metrics", format!("{:?}", handle.metrics()));
-
+    pub async fn wait_assert_running(&self) -> AgentError {
         match self.result.clone().await {
-            Ok(Ok(())) => AgentError::BackgroundTaskFailed {
+            Ok(()) => AgentError::BackgroundTaskFailed {
                 task: self.task_name,
                 error: Box::<dyn Error + Send + Sync>::from("task finished unexpectedly").into(),
             },
-            Ok(Err(error)) => AgentError::BackgroundTaskFailed {
+            Err(error) => AgentError::BackgroundTaskFailed {
                 task: self.task_name,
                 error,
-            },
-            Err(..) => AgentError::BackgroundTaskFailed {
-                task: self.task_name,
-                error: Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>,
             },
         }
     }
@@ -92,20 +79,12 @@ impl core::fmt::Debug for BgTaskStatus {
 impl IntoStatus for JoinHandle<()> {
     #[tracing::instrument(level = Level::DEBUG, ret)]
     fn into_status(self, task_name: &'static str) -> BgTaskStatus {
-        let (result_tx, result_rx) = oneshot::channel();
-
-        tokio::spawn(async move {
-            let result = match self.await {
-                Ok(()) => Ok(()),
-                Err(..) => Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>),
-            };
-
-            let _ = result_tx.send(result);
-        });
-
         BgTaskStatus {
             task_name,
-            result: result_rx.shared(),
+            result: self
+                .map_err(|join_error| Arc::new(join_error) as Arc<dyn Error + Send + Sync>)
+                .boxed()
+                .shared(),
         }
     }
 }
@@ -116,22 +95,17 @@ where
 {
     #[tracing::instrument(level = Level::DEBUG, ret)]
     fn into_status(self, task_name: &'static str) -> BgTaskStatus {
-        // let _guard = runtime.enter();
-        let (result_tx, result_rx) = oneshot::channel();
-
-        tokio::spawn(async move {
-            let result = match self.await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(Arc::new(e) as Arc<dyn Error + Send + Sync>),
-                Err(..) => Err(Arc::new(BgTaskPanicked) as Arc<dyn Error + Send + Sync>),
-            };
-
-            let _ = result_tx.send(result);
-        });
-
         BgTaskStatus {
             task_name,
-            result: result_rx.shared(),
+            result: self
+                .map_ok_or_else(
+                    |join_error| Err(Arc::new(join_error) as Arc<dyn Error + Send + Sync>),
+                    |result| {
+                        result.map_err(|error| Arc::new(error) as Arc<dyn Error + Send + Sync>)
+                    },
+                )
+                .boxed()
+                .shared(),
         }
     }
 }
