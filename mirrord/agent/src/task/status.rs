@@ -36,7 +36,7 @@ impl BgTaskStatus {
     ///
     /// Should the future fail or panic, this function will return
     /// [`AgentError::BackgroundTaskFailed`].
-    #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), err)]
+    #[tracing::instrument(level = Level::DEBUG, err)]
     pub(crate) async fn wait(&self) -> Result<(), AgentError> {
         match self.result.clone().await {
             Ok(()) => Ok(()),
@@ -52,7 +52,7 @@ impl BgTaskStatus {
     /// This function always returns [`AgentError::BackgroundTaskFailed`]. Use it when the task is
     /// not expected to finish yet, e.g. when we send a message to the `BackgroundTask` through its
     /// channel, and `send` returns an error.
-    #[tracing::instrument(level = Level::DEBUG, fields(rt, rt_metrics), ret)]
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub async fn wait_assert_running(&self) -> AgentError {
         match self.result.clone().await {
             Ok(()) => AgentError::BackgroundTaskFailed {
