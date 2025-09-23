@@ -15,10 +15,12 @@ use once_cell::sync::Lazy;
 use winapi::{
     shared::{
         minwindef::{FILETIME, ULONG},
-        ntdef::HANDLE,
+        ntdef::{HANDLE, POBJECT_ATTRIBUTES},
     },
     um::winnt::ACCESS_MASK,
 };
+
+use crate::hooks::files::util::{read_object_attributes_name, remove_root_dir_from_path};
 
 /// This is a [`HANDLE`] type. The values start with [`MIRRORD_FIRST_MANAGED_HANDLE`].
 /// To know what data is held behind this, look at [`HandleContext`].
@@ -101,4 +103,28 @@ pub fn try_insert_handle(handle_context: HandleContext) -> Option<MirrordHandle>
     } else {
         None
     }
+}
+
+/// Run `fn` closure over each handle whose path matches the `object_attributes`.
+pub fn for_each_handle_with_path(
+    object_attributes: POBJECT_ATTRIBUTES,
+    mut fun: impl FnMut(&MirrordHandle, &HandleContext),
+) -> bool {
+    let mut any = false;
+
+    let name = read_object_attributes_name(object_attributes);
+    if let Some(linux_name) = remove_root_dir_from_path(name) {
+        if let Ok(handles) = MANAGED_HANDLES.try_read() {
+            for (handle, handle_context) in handles.iter() {
+                if let Ok(handle_context) = handle_context.clone().try_read() {
+                    if handle_context.path == linux_name {
+                        fun(handle, &handle_context);
+                        any = true;
+                    }
+                }
+            }
+        }
+    }
+
+    any
 }

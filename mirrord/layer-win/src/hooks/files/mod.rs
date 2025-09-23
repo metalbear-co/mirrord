@@ -17,15 +17,14 @@ use mirrord_protocol::file::{
 use phnt::ffi::{
     _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
     FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_STANDARD_INFORMATION, IO_STATUS_BLOCK,
-    PFILE_BASIC_INFORMATION,
+    PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE,
 };
-use str_win::u16_buffer_to_string;
 use winapi::{
     shared::{
         minwindef::{DWORD, FILETIME},
         ntdef::{
-            FALSE, HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG, PVOID,
-            ULONG,
+            BOOLEAN, FALSE, HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG,
+            PVOID, ULONG,
         },
         ntstatus::{
             STATUS_ACCESS_VIOLATION, STATUS_END_OF_FILE, STATUS_OBJECT_PATH_NOT_FOUND,
@@ -35,8 +34,8 @@ use winapi::{
     um::{
         winbase::FILE_TYPE_DISK,
         winnt::{
-            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_READ_DATA,
-            FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, GENERIC_WRITE,
+            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_WRITE_ATTRIBUTES,
+            FILE_WRITE_DATA, GENERIC_WRITE, PSID,
         },
     },
 };
@@ -44,7 +43,9 @@ use winapi::{
 use crate::{
     apply_hook,
     hooks::files::{
-        managed_handle::{HandleContext, MANAGED_HANDLES, try_insert_handle},
+        managed_handle::{
+            HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
+        },
         util::{
             WindowsTime, read_object_attributes_name, remove_root_dir_from_path, try_seek,
             try_xstat,
@@ -109,6 +110,21 @@ type NtSetInformationFileType = unsafe extern "system" fn(
 ) -> NTSTATUS;
 static NT_SET_INFORMATION_FILE_TYPE_ORIGINAL: OnceLock<&NtSetInformationFileType> = OnceLock::new();
 
+type NtSetVolumeInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut _IO_STATUS_BLOCK,
+    PVOID,
+    ULONG,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
+static NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtSetVolumeInformationFileType> =
+    OnceLock::new();
+
+type NtSetQuotaInformationFileType =
+    unsafe extern "system" fn(HANDLE, *mut _IO_STATUS_BLOCK, PVOID, ULONG) -> NTSTATUS;
+static NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL: OnceLock<&NtSetQuotaInformationFileType> =
+    OnceLock::new();
+
 type NtQueryInformationFileType = unsafe extern "system" fn(
     HANDLE,
     *mut _IO_STATUS_BLOCK,
@@ -131,6 +147,60 @@ type NtQueryVolumeInformationFileType = unsafe extern "system" fn(
 ) -> NTSTATUS;
 static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInformationFileType> =
     OnceLock::new();
+
+type NtQueryQuotaInformationFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut _IO_STATUS_BLOCK,
+    PVOID,
+    ULONG,
+    BOOLEAN,
+    PVOID,
+    ULONG,
+    PSID,
+    BOOLEAN,
+) -> NTSTATUS;
+static NT_QUERY_QUOTA_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryQuotaInformationFileType> =
+    OnceLock::new();
+
+type NtDeleteFileType = unsafe extern "system" fn(POBJECT_ATTRIBUTES) -> NTSTATUS;
+static NT_DELETE_FILE_ORIGINAL: OnceLock<&NtDeleteFileType> = OnceLock::new();
+
+type NtDeviceIoControlFileType = unsafe extern "system" fn(
+    HANDLE,
+    HANDLE,
+    PIO_APC_ROUTINE,
+    PVOID,
+    *mut _IO_STATUS_BLOCK,
+    ULONG,
+    PVOID,
+    ULONG,
+    PVOID,
+    ULONG,
+) -> NTSTATUS;
+static NT_DEVICE_IO_CONTROL_FILE_ORIGINAL: OnceLock<&NtDeviceIoControlFileType> = OnceLock::new();
+
+type NtLockFileType = unsafe extern "system" fn(
+    HANDLE,
+    HANDLE,
+    PIO_APC_ROUTINE,
+    PVOID,
+    *mut _IO_STATUS_BLOCK,
+    PLARGE_INTEGER,
+    PLARGE_INTEGER,
+    ULONG,
+    BOOLEAN,
+    BOOLEAN,
+) -> NTSTATUS;
+static NT_LOCK_FILE_ORIGINAL: OnceLock<&NtLockFileType> = OnceLock::new();
+
+type NtUnlockFileType = unsafe extern "system" fn(
+    HANDLE,
+    *mut _IO_STATUS_BLOCK,
+    PLARGE_INTEGER,
+    PLARGE_INTEGER,
+    ULONG,
+) -> NTSTATUS;
+static NT_UNLOCK_FILE_ORIGINAL: OnceLock<&NtUnlockFileType> = OnceLock::new();
 
 type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
 static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
@@ -207,12 +277,12 @@ unsafe extern "system" fn nt_create_file_hook(
 
             // Check if pointer to handle is valid.
             if file_handle.is_null() {
-                tracing::warn!("Invalid memory for file_handle variable in hook");
+                tracing::warn!("nt_create_file_hook: Invalid memory for file_handle variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("Invalid memory for io_status_block variable in hook");
+                tracing::warn!("nt_create_file_hook: Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -230,7 +300,7 @@ unsafe extern "system" fn nt_create_file_hook(
 
             // Try to get request.
             if req.is_err() {
-                tracing::error!("WARNING: request for open file failed!");
+                tracing::error!("nt_create_file_hook: Request for open file failed!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
             let req = req.unwrap();
@@ -253,7 +323,7 @@ unsafe extern "system" fn nt_create_file_hook(
                     })
                 }
                 Err(e) => {
-                    tracing::error!("{:?} {}", e, linux_path.clone());
+                    tracing::warn!("nt_create_file_hook: {:?} {}", e, linux_path.clone());
                     None
                 }
             };
@@ -261,13 +331,17 @@ unsafe extern "system" fn nt_create_file_hook(
             if managed_handle.is_some() {
                 // Write managed handle at the provided pointer
                 *file_handle = *managed_handle.unwrap();
-                tracing::info!("Succesfully opened remote file handle for {} ({:8x})", linux_path, *file_handle as usize);
+                tracing::info!(
+                    "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
+                    linux_path,
+                    *file_handle as usize
+                );
                 return STATUS_SUCCESS;
             } else {
                 // File could not be obtained for reasons, even if the
                 // network operation succeeded.
 
-                tracing::info!("Failed opening remote file handle for {}", linux_path);
+                tracing::info!("nt_create_file_hook: Failed opening remote file handle for {}", linux_path);
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
@@ -313,12 +387,12 @@ unsafe extern "system" fn nt_read_file_hook(
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             if !is_memory_valid(buffer) {
-                tracing::warn!("Invalid memory for buffer variable in hook");
+                tracing::warn!("nt_read_file_hook: Invalid memory for buffer variable");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("Invalid memory for io_status_block variable in hook");
+                tracing::warn!("nt_read_file_hook: Invalid memory for io_status_block variable");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -335,7 +409,7 @@ unsafe extern "system" fn nt_read_file_hook(
                 },
             );
             if cursor.is_none() {
-                tracing::error!("Failed seeking when reading file!");
+                tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
             let cursor = cursor.unwrap();
@@ -382,13 +456,13 @@ unsafe extern "system" fn nt_read_file_hook(
                 {
                     return STATUS_SUCCESS;
                 } else {
-                    tracing::error!("Failed seeking when reading file!");
+                    tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
                     return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
             }
 
             // We didn't acquire any bytes.
-            tracing::error!("Pod did not return a buffer when reading file!");
+            tracing::error!("nt_read_file_hook: Pod did not return a buffer when reading file!");
             return STATUS_UNEXPECTED_NETWORK_ERROR;
         }
 
@@ -465,12 +539,12 @@ unsafe extern "system" fn nt_set_information_file_hook(
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             if !is_memory_valid(file_information) {
-                tracing::warn!("Invalid memory for file_information variable in hook");
+                tracing::warn!("nt_set_information_file_hook: Invalid memory for file_information variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("Invalid memory for io_status_block variable in hook");
+                tracing::warn!("nt_set_information_file_hook: Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -532,13 +606,13 @@ unsafe extern "system" fn nt_set_information_file_hook(
                     {
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("Failed seeking when updating file information!");
+                        tracing::error!("nt_set_information_file_hook: Failed seeking when updating file information!");
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
                 _ => {
                     tracing::info!(
-                        "Trying to set for file_information_class: {:?}, but it is not implemented! (file: {})",
+                        "nt_set_information_file_hook: Trying to set for file_information_class: {:?}, but it is not implemented! (file: {})",
                         file_information_class,
                         handle_context.path
                     );
@@ -558,6 +632,61 @@ unsafe extern "system" fn nt_set_information_file_hook(
             length,
             file_information_class,
         )
+    }
+}
+
+/// [`nt_set_volume_information_file_hook`] is not implemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_set_volume_information_file_hook(
+    file: HANDLE,
+    io_status_block: *mut _IO_STATUS_BLOCK,
+    file_information: PVOID,
+    length: ULONG,
+    file_information_class: FILE_INFORMATION_CLASS,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
+        {
+            tracing::warn!(
+                "nt_set_volume_information_file_hook: Not implemented! Failling back on original! (file: {})",
+                &handle_context.path
+            );
+        }
+
+        let original = NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL.get().unwrap();
+        original(
+            file,
+            io_status_block,
+            file_information,
+            length,
+            file_information_class,
+        )
+    }
+}
+
+/// [`nt_set_quota_information_file_hook`] is not implemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_set_quota_information_file_hook(
+    file: HANDLE,
+    io_status_block: *mut _IO_STATUS_BLOCK,
+    buffer: PVOID,
+    length: ULONG,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
+        {
+            tracing::warn!(
+                "nt_set_quota_information_file_hook: Not implemented! Failling back on original! (file: {})",
+                &handle_context.path
+            );
+        }
+
+        let original = NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL.get().unwrap();
+        original(file, io_status_block, buffer, length)
     }
 }
 
@@ -602,12 +731,12 @@ unsafe extern "system" fn nt_query_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             if !is_memory_valid(file_information) {
-                tracing::warn!("Invalid memory for file_information variable in hook");
+                tracing::warn!("nt_query_information_file_hook: Invalid memory for file_information variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("Invalid memory for io_status_block variable in hook");
+                tracing::warn!("nt_query_information_file_hook: Invalid memory for io_status_block variable in hook");
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -639,7 +768,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
                         (*io_status_block).__bindgen_anon_1.Status =
                             ManuallyDrop::new(STATUS_SUCCESS);
                     } else {
-                        tracing::warn!("Trying to query FileBasicInformation with the wrong desired_access");
+                        tracing::warn!(
+                            "nt_query_information_file_hook: Trying to query FileBasicInformation with the wrong desired_access"
+                        );
                     }
 
                     return STATUS_SUCCESS;
@@ -671,11 +802,13 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                             return STATUS_SUCCESS;
                         } else {
-                            tracing::error!("Failed seeking when querying file information!");
+                            tracing::error!("nt_query_information_file_hook: Failed seeking when querying file information!");
                             return STATUS_UNEXPECTED_NETWORK_ERROR;
                         }
                     } else {
-                        tracing::warn!("Trying to query FilePositionInformation with the wrong desired_access");
+                        tracing::warn!(
+                            "nt_query_information_file_hook: Trying to query FilePositionInformation with the wrong desired_access"
+                        );
                     }
                 }
                 // A FILE_STANDARD_INFORMATION structure. The caller can query this information as
@@ -703,7 +836,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("Failed xstat when querying file information!");
+                        tracing::error!("nt_query_information_file_hook: Failed xstat when querying file information!");
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -760,7 +893,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("Failed xstat when querying file information!");
+                        tracing::error!("nt_query_information_file_hook: Failed xstat when querying file information!");
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -826,13 +959,15 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("Failed querying all information because one of the single queries failed!");
+                        tracing::error!(
+                            "nt_query_information_file_hook: Failed querying all information because one of the single queries failed!"
+                        );
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
                 _ => {
                     tracing::info!(
-                        "Trying to query for file_information_class: {:?}, but it is not implemented! (file: {})",
+                        "nt_query_information_file_hook: Trying to query for file_information_class: {:?}, but it is not implemented! (file: {})",
                         file_information_class,
                         handle_context.path
                     );
@@ -855,20 +990,27 @@ unsafe extern "system" fn nt_query_information_file_hook(
     }
 }
 
+/// [`nt_query_attributes_file_hook`] is unimplemented!
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_attributes_file_hook(
     object_attributes: POBJECT_ATTRIBUTES,
     file_basic_info: PFILE_BASIC_INFORMATION,
 ) -> NTSTATUS {
     unsafe {
-        // NOTE(gabriela): hasn't been needed yet, should be easy to implement! need to create
-        // handle and query!
+        for_each_handle_with_path(object_attributes, |handle, handle_context| {
+            tracing::warn!(
+                "nt_query_attributes_file_hook: Function not implemented! (handle: {:08x}, file: {}) ",
+                handle.0 as usize,
+                &handle_context.path
+            );
+        });
 
         let original = NT_QUERY_ATTRIBUTES_FILE_ORIGINAL.get().unwrap();
         original(object_attributes, file_basic_info)
     }
 }
 
+/// [`nt_query_volume_information_file_hook`] is unimplemented!
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
@@ -879,9 +1021,13 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 ) -> NTSTATUS {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(_managed_handle) = handles.get(&file)
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
         {
-            // NOTE(gabriela): stub
+            tracing::warn!(
+                "nt_query_volume_information_file_hook: Function unimplemented, but necessary to return success for other functionality! (file: {})",
+                &handle_context.path
+            );
             return STATUS_SUCCESS;
         }
 
@@ -893,6 +1039,169 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
             length,
             file_information_class,
         )
+    }
+}
+
+/// [`nt_query_quota_information_file_hook`] is unimplemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_query_quota_information_file_hook(
+    file: HANDLE,
+    io_status_block: *mut _IO_STATUS_BLOCK,
+    buffer: PVOID,
+    length: ULONG,
+    return_single_entry: BOOLEAN,
+    sid_list: PVOID,
+    sid_list_length: ULONG,
+    start_sid: PSID,
+    restart_scan: BOOLEAN,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
+        {
+            tracing::warn!(
+                "nt_query_quota_information_file_hook: Not implemented! Failling back on original! (file: {})",
+                &handle_context.path
+            );
+        }
+
+        let original = NT_QUERY_QUOTA_INFORMATION_FILE_ORIGINAL.get().unwrap();
+        original(
+            file,
+            io_status_block,
+            buffer,
+            length,
+            return_single_entry,
+            sid_list,
+            sid_list_length,
+            start_sid,
+            restart_scan,
+        )
+    }
+}
+
+/// [`nt_delete_file_hook`] is unimplemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBUTES) -> NTSTATUS {
+    unsafe {
+        for_each_handle_with_path(object_attributes, |handle, handle_context| {
+            tracing::warn!(
+                "nt_delete_file_hook: Attempt to delete file that current handle ({:8x}) points to! Not implemented! Will fall back on original! (file: {})",
+                handle.0 as usize,
+                &handle_context.path
+            );
+        });
+
+        let original = NT_DELETE_FILE_ORIGINAL.get().unwrap();
+        original(object_attributes)
+    }
+}
+
+/// [`nt_device_io_control_file_hook`] is unimplemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_device_io_control_file_hook(
+    file: HANDLE,
+    event: HANDLE,
+    apc_routine: PIO_APC_ROUTINE,
+    apc_context: PVOID,
+    io_status_block: *mut _IO_STATUS_BLOCK,
+    io_control_code: ULONG,
+    input_buffer: PVOID,
+    input_buffer_length: ULONG,
+    output_buffer: PVOID,
+    output_buffer_length: ULONG,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
+        {
+            tracing::warn!(
+                "nt_device_io_control_file_hook: Not implemented! Failling back on original! (file: {})",
+                &handle_context.path
+            );
+        }
+
+        let original = NT_DEVICE_IO_CONTROL_FILE_ORIGINAL.get().unwrap();
+        original(
+            file,
+            event,
+            apc_routine,
+            apc_context,
+            io_status_block,
+            io_control_code,
+            input_buffer,
+            input_buffer_length,
+            output_buffer,
+            output_buffer_length,
+        )
+    }
+}
+
+/// [`nt_lock_file_hook`] is unimplemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_lock_file_hook(
+    file: HANDLE,
+    event: HANDLE,
+    apc_routine: PIO_APC_ROUTINE,
+    apc_context: PVOID,
+    io_status_block: *mut _IO_STATUS_BLOCK,
+    byte_offset: PLARGE_INTEGER,
+    length: PLARGE_INTEGER,
+    key: ULONG,
+    fail_immediately: BOOLEAN,
+    exclusive_lock: BOOLEAN,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
+        {
+            tracing::warn!(
+                "nt_lock_file_hook: Not implemented! Failling back on original! (file: {})",
+                &handle_context.path
+            );
+        }
+
+        let original = NT_LOCK_FILE_ORIGINAL.get().unwrap();
+        original(
+            file,
+            event,
+            apc_routine,
+            apc_context,
+            io_status_block,
+            byte_offset,
+            length,
+            key,
+            fail_immediately,
+            exclusive_lock,
+        )
+    }
+}
+
+/// [`nt_unlock_file_hook`] is unimplemented!
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn nt_unlock_file_hook(
+    file: HANDLE,
+    io_status_block: *mut _IO_STATUS_BLOCK,
+    byte_offset: PLARGE_INTEGER,
+    length: PLARGE_INTEGER,
+    key: ULONG,
+) -> NTSTATUS {
+    unsafe {
+        if let Ok(handles) = MANAGED_HANDLES.try_read()
+            && let Some(managed_handle) = handles.get(&file)
+            && let Ok(handle_context) = managed_handle.clone().try_read()
+        {
+            tracing::warn!(
+                "nt_unlock_file_hook: Not implemented! Failling back on original! (file: {})",
+                &handle_context.path
+            );
+        }
+
+        let original = NT_UNLOCK_FILE_ORIGINAL.get().unwrap();
+        original(file, io_status_block, byte_offset, length, key)
     }
 }
 
@@ -923,9 +1232,11 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
 
             if req.is_err() {
                 // Valid [`NTSTATUS`] to facillitate investigations later.
-                tracing::error!("Failed closing fd when closing file handle!");
+                tracing::error!("nt_close_hook: Failed closing fd when closing file handle!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
+
+            tracing::info!("nt_close_hook: Succesfully closed handle {:8x}", handle as usize);
 
             return STATUS_SUCCESS;
         }
@@ -935,6 +1246,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_file_type_hook(handle: HANDLE) -> DWORD {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
@@ -952,9 +1264,9 @@ unsafe extern "system" fn get_file_type_hook(handle: HANDLE) -> DWORD {
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
     // ----------------------------------------------------------------------------
     // TODO(gabriela): get rid of kernelbase hooks unless absolutely necessary, try
-    // to keep stuff NT-level
+    // to keep stuff NT level
     //
-    // Staying at `Nt` level is a necessity in the attempt to catch every single
+    // Staying at NT level is a necessity in the attempt to catch every single
     // user-mode level file access. That is as low-level as we can possibly go, and
     // it means that there are no leaks (as far as no driver code, or manually
     // crafted syscalls are involved).
@@ -998,37 +1310,10 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     apply_hook!(
         guard,
         "ntdll",
-        "NtWriteFile",
-        nt_write_file_hook,
-        NtWriteFileType,
-        NT_WRITE_FILE_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
         "NtSetInformationFile",
         nt_set_information_file_hook,
         NtSetInformationFileType,
         NT_SET_INFORMATION_FILE_TYPE_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
-        "NtQueryAttributesFile",
-        nt_query_attributes_file_hook,
-        NtQueryAttributesFileType,
-        NT_QUERY_ATTRIBUTES_FILE_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
-        "NtQueryVolumeInformationFile",
-        nt_query_volume_information_file_hook,
-        NtQueryVolumeInformationFileType,
-        NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1057,6 +1342,103 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         GetFileTypeType,
         GET_FILE_TYPE_ORIGINAL
     )?;
+
+    // ----------------------------------------------------------------------------
+    // NOTE(gabriela): the following hooks are unimplemented!
+    // They're only here to trace missing logic! Please move above once they're
+    // implemented!
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtWriteFile",
+        nt_write_file_hook,
+        NtWriteFileType,
+        NT_WRITE_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtSetVolumeInformationFile",
+        nt_set_volume_information_file_hook,
+        NtSetVolumeInformationFileType,
+        NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtSetQuotaInformationFile",
+        nt_set_quota_information_file_hook,
+        NtSetQuotaInformationFileType,
+        NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtQueryVolumeInformationFile",
+        nt_query_volume_information_file_hook,
+        NtQueryVolumeInformationFileType,
+        NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtQueryAttributesFile",
+        nt_query_attributes_file_hook,
+        NtQueryAttributesFileType,
+        NT_QUERY_ATTRIBUTES_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtQueryQuotaInformationFile",
+        nt_query_quota_information_file_hook,
+        NtQueryQuotaInformationFileType,
+        NT_QUERY_QUOTA_INFORMATION_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtDeleteFile",
+        nt_delete_file_hook,
+        NtDeleteFileType,
+        NT_DELETE_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtDeviceIoControlFile",
+        nt_device_io_control_file_hook,
+        NtDeviceIoControlFileType,
+        NT_DEVICE_IO_CONTROL_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtLockFile",
+        nt_lock_file_hook,
+        NtLockFileType,
+        NT_LOCK_FILE_ORIGINAL
+    )?;
+
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtUnlockFile",
+        nt_unlock_file_hook,
+        NtUnlockFileType,
+        NT_UNLOCK_FILE_ORIGINAL
+    )?;
+
+    // ----------------------------------------------------------------------------
 
     Ok(())
 }
