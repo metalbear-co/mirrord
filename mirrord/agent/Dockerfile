@@ -49,7 +49,8 @@ RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.to
 RUN cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
-FROM ghcr.io/metalbear-co/ci-agent-runtime:5f18d0ff6e10b3478231d00f256c33b3a22714e7
-COPY --from=builder /mirrord-agent /
+FROM gcr.io/distroless/base-nossl-debian12
 
+RUN apt update && apt install -y iptables iproute2 conntrack-tools
+COPY --from=builder /mirrord-agent /
 CMD ["./mirrord-agent"]
