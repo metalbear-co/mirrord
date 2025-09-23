@@ -222,7 +222,11 @@ impl<Command> BackgroundTask<Command> {
         };
         std::mem::drop(channel);
 
-        tracing::Span::current().record("status", format!("{status:?}"));
+        let current_span = tracing::Span::current();
+        if current_span.is_disabled().not() {
+            current_span.record("status", format!("{status:?}"));
+        }
+
         timeout(Duration::from_secs(5), status.wait()).await?
     }
 }
