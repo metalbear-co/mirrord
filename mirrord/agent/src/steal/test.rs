@@ -528,6 +528,7 @@ struct TestSetup {
     stealer_status: BgTaskStatus,
     tls: Option<SimpleStore>,
     conn_tx: DummyConnectionTx,
+    _runtime: BgTaskRuntime,
 }
 
 impl TestSetup {
@@ -568,6 +569,7 @@ impl TestSetup {
             stealer_status,
             tls: tls_setup,
             conn_tx,
+            _runtime: local_bg_task_runtime,
         }
     }
 }
