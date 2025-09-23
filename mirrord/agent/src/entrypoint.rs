@@ -82,8 +82,8 @@ struct State {
     ephemeral: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
-    /// [`tokio::runtime`] that should be used for network operations.
-    network_runtime: BgTaskRuntime,
+    /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
+    network_runtime: Arc<BgTaskRuntime>,
 }
 
 impl State {
@@ -159,7 +159,7 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
-            network_runtime,
+            network_runtime: Arc::new(network_runtime),
         })
     }
 
