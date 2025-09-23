@@ -389,6 +389,10 @@ pub async fn two_users(
         is invalid, and `count_temp_queues` might need to be updated."
     );
 
+    println!("Verifying correct Prometheus metrics.");
+    sqs_test_resources.verify_prometheus_metrics().await;
+    println!("Prometheus metrics verified.");
+
     // TODO: verify queue tags.
 
     println!("Killing test clients (local mirrord runs).");

@@ -622,6 +622,8 @@ fn print_config<P>(
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
+    ensure_not_nested()?;
+
     let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -912,6 +914,14 @@ fn main() -> miette::Result<()> {
     });
 
     res.map_err(Into::into)
+}
+
+/// Make sure we're not running nested inside another mirrord exec
+fn ensure_not_nested() -> CliResult<()> {
+    match std::env::var(mirrord_config::LayerConfig::RESOLVED_CONFIG_ENV) {
+        Ok(_) => Err(CliError::NestedExec),
+        Err(_) => Ok(()),
+    }
 }
 
 async fn prompt_outdated_version(progress: &ProgressTracker) {
