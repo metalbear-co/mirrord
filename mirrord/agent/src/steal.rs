@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use mirrord_protocol::{LogMessage, Port};
 use tokio::sync::mpsc::Sender;
 
@@ -52,4 +54,5 @@ enum StealerMessage {
     StolenHttp(StolenHttp),
     Log(LogMessage),
     PortSubscribed(Port),
+    BypassedHttp(SocketAddr),
 }

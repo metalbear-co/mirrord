@@ -115,7 +115,7 @@ impl TcpStealerTask {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, ret)]
+    #[tracing::instrument(level = Level::TRACE)]
     async fn handle_stolen_traffic(
         clients: &HashMap<ClientId, Client>,
         traffic: StolenTraffic,
@@ -172,7 +172,15 @@ impl TcpStealerTask {
                 let message = if client.protocol_version.matches(&protocol_version_req) {
                     StealerMessage::StolenHttp(http.steal())
                 } else {
+                    let _ = client
+                        .message_tx
+                        .send(StealerMessage::BypassedHttp(
+                            http.info().original_destination,
+                        ))
+                        .await;
+
                     http.pass_through();
+
                     StealerMessage::Log(LogMessage::error(format!(
                         "An HTTP request was not stolen due to mirrord-protocol version requirement: {}",
                         protocol_version_req,
@@ -241,6 +249,15 @@ impl TcpStealerTask {
                 .message_tx
                 .send(StealerMessage::StolenHttp(http.steal()))
                 .await;
+        } else if let Some(client) = filters.iter().next().and_then(|(id, _)| clients.get(id)) {
+            let _ = client
+                .message_tx
+                .send(StealerMessage::BypassedHttp(
+                    http.info().original_destination,
+                ))
+                .await;
+
+            http.pass_through();
         } else {
             http.pass_through();
         }

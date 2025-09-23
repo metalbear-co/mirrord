@@ -100,6 +100,7 @@ pub enum DaemonTcp {
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
     HttpRequestChunked(ChunkedRequest),
     NewConnectionV2(NewTcpConnectionV2),
+    HttpBypassedRequest(SocketAddr),
 }
 
 /// Contents of a chunked message from server.
@@ -498,6 +499,9 @@ pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
 /// using [`LayerTcp::PortSubscribeFilteredHttp`]
 pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
+
+pub static MIRRORD_HTTP_BYPASSED_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

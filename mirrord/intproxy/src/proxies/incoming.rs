@@ -623,6 +623,12 @@ impl IncomingProxy {
                     message_bus.send(msg).await;
                 }
             }
+            DaemonTcp::HttpBypassedRequest(original_destination) => {
+                tracing::trace!(
+                    ?original_destination,
+                    "HTTP request for this destination was bypassed."
+                );
+            }
         }
 
         Ok(())

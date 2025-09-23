@@ -395,6 +395,7 @@ impl DumpSession {
                     DaemonMessage::Tcp(message),
                 ));
             }
+            DaemonTcp::HttpBypassedRequest(..) => {}
         }
 
         Ok(())

@@ -16,7 +16,10 @@ use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{SafeIpTables, error::IPTablesError};
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage,
+    tcp::{DaemonTcp, MIRRORD_HTTP_BYPASSED_VERSION},
+};
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
@@ -461,13 +464,42 @@ impl ClientConnectionHandler {
     }
 
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
     async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
         if matches!(&response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
             return Ok(());
         }
 
-        self.connection.send(response).await.map_err(Into::into)
+        let send = match &response {
+            DaemonMessage::TcpSteal(DaemonTcp::HttpBypassedRequest(..))
+                if self
+                    .protocol_version
+                    .matches(&MIRRORD_HTTP_BYPASSED_VERSION)
+                    .not() =>
+            {
+                false
+            }
+            DaemonMessage::TcpSteal(..)
+            | DaemonMessage::Close(_)
+            | DaemonMessage::Tcp(..)
+            | DaemonMessage::TcpOutgoing(..)
+            | DaemonMessage::UdpOutgoing(..)
+            | DaemonMessage::LogMessage(..)
+            | DaemonMessage::File(..)
+            | DaemonMessage::Pong
+            | DaemonMessage::GetEnvVarsResponse(..)
+            | DaemonMessage::GetAddrInfoResponse(..)
+            | DaemonMessage::PauseTarget(..)
+            | DaemonMessage::SwitchProtocolVersionResponse(..)
+            | DaemonMessage::Vpn(..)
+            | DaemonMessage::OperatorPing(_) => true,
+        };
+
+        if send {
+            self.connection.send(response).await.map_err(Into::into)
+        } else {
+            Ok(())
+        }
     }
 
     /// Handles incoming messages from the connected client (`mirrord-layer`).

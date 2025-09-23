@@ -167,6 +167,9 @@ impl TcpStealerApi {
                         },
                         StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => self.handle_connection(tcp)?,
+                        StealerMessage::BypassedHttp(original_destination) => {
+                            self.queued_messages.push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpBypassedRequest(original_destination)));
+                        },
                     }
                 }
 
