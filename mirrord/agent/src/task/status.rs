@@ -36,7 +36,7 @@ impl BgTaskStatus {
     ///
     /// Should the future fail or panic, this function will return
     /// [`AgentError::BackgroundTaskFailed`].
-    #[tracing::instrument(level = Level::DEBUG, err)]
+    #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     pub(crate) async fn wait(&self) -> Result<(), AgentError> {
         match self.result.clone().await {
             Ok(()) => Ok(()),

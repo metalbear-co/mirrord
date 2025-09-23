@@ -393,7 +393,7 @@ impl ClientConnectionHandler {
     /// Starts a loop that handles client connection and state.
     ///
     /// Breaks upon receiver/sender drop.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
             select! {
