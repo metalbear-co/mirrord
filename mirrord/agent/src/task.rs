@@ -51,7 +51,6 @@ impl BgTaskRuntime {
         let notify_cloned = notify_drop.clone();
 
         let thread_logic = move || {
-            tracing::info!("thread_logic ->");
             if let Some(RuntimeNamespace {
                 target_pid,
                 namespace_type,
@@ -65,7 +64,6 @@ impl BgTaskRuntime {
             let rt_result = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
-            tracing::info!("thread_logic -> rt_result {rt_result:?}");
             let rt = match rt_result {
                 Ok(rt) => rt,
                 Err(error) => {
@@ -74,12 +72,10 @@ impl BgTaskRuntime {
                 }
             };
 
-            tracing::info!("thread_logic -> result_tx.send");
             if result_tx.send(Ok(rt.handle().clone())).is_err() {
                 return;
             }
 
-            tracing::info!("thread_logic -> rt.block_on");
             rt.block_on(notify_cloned.notified());
         };
 
@@ -93,15 +89,8 @@ impl BgTaskRuntime {
                 handle,
                 notify_drop,
             }),
-            Ok(Err(error)) => {
-                tracing::info!("something went wrong on ok {error:?}");
-                Err(error)
-            }
-            Err(fail) => {
-                tracing::info!("here we just panic {fail:?}");
-
-                Err(AgentRuntimeError::Panicked)
-            }
+            Ok(Err(error)) => Err(error),
+            Err(..) => Err(AgentRuntimeError::Panicked),
         }
     }
 
