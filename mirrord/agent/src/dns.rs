@@ -89,7 +89,7 @@ impl DnsWorker {
     /// # Note
     ///
     /// `pid` is used to find the correct path of `etc` directory.
-    #[tracing::instrument(level = Level::DEBUG)]
+    #[tracing::instrument(level = Level::TRACE)]
     pub(crate) fn new(
         pid: Option<u64>,
         request_rx: Receiver<DnsCommand>,

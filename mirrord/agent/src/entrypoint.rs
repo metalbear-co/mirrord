@@ -974,8 +974,6 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
             error: Arc::new(error),
         })?;
 
-    tracing::info!("runtime being dropped ...");
-
     result
 }
 
