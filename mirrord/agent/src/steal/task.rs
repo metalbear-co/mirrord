@@ -22,7 +22,7 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
+    incoming::{BypassedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -172,13 +172,6 @@ impl TcpStealerTask {
                 let message = if client.protocol_version.matches(&protocol_version_req) {
                     StealerMessage::StolenHttp(http.steal())
                 } else {
-                    let _ = client
-                        .message_tx
-                        .send(StealerMessage::BypassedHttp(
-                            http.info().original_destination,
-                        ))
-                        .await;
-
                     http.pass_through();
 
                     StealerMessage::Log(LogMessage::error(format!(
@@ -244,17 +237,28 @@ impl TcpStealerTask {
             )))).await;
         }
 
+        tracing::info!(?filters, ?send_to, "Do we get here?");
         if let Some(client) = send_to {
             let _ = client
                 .message_tx
                 .send(StealerMessage::StolenHttp(http.steal()))
                 .await;
-        } else if let Some(client) = filters.iter().next().and_then(|(id, _)| clients.get(id)) {
+        } else if let Some((parts, client)) = filters.iter().find_map(|(id, http_filter)| {
+            let parts = http.parts_mut();
+            let client = clients.get(id);
+            http_filter
+                .matches(parts)
+                .not()
+                .then(|| parts.clone())
+                .zip(client)
+        }) {
+            tracing::info!(?client, ?http, "No filter matched, so we're bypassing it.");
             let _ = client
                 .message_tx
-                .send(StealerMessage::BypassedHttp(
-                    http.info().original_destination,
-                ))
+                .send(StealerMessage::BypassedHttp(BypassedHttp {
+                    info: http.info().clone(),
+                    parts,
+                }))
                 .await;
 
             http.pass_through();

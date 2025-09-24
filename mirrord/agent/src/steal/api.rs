@@ -8,6 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
+use http::request::Parts;
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::Response;
 use mirrord_protocol::{
@@ -31,8 +32,8 @@ use crate::{
     error::AgentResult,
     http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
     incoming::{
-        ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
-        ResponseProvider, StolenHttp, StolenTcp,
+        BypassedHttp, ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig,
+        ResponseBodyProvider, ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
     util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
@@ -167,8 +168,36 @@ impl TcpStealerApi {
                         },
                         StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => self.handle_connection(tcp)?,
-                        StealerMessage::BypassedHttp(original_destination) => {
-                            self.queued_messages.push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpBypassedRequest(original_destination)));
+                        StealerMessage::BypassedHttp(
+                            BypassedHttp {
+                            info,
+                            parts:
+                                Parts {
+                                    method,
+                                    uri,
+                                    version,
+                                    headers,
+                                    ..
+                                },
+                        }) => {
+                            tracing::info!(?info, "Have a bypassed request!");
+                            let bypassed = HttpRequest {
+                                internal_request: InternalHttpRequest {
+                                    method: method.into(),
+                                    uri: uri.into(),
+                                    headers: headers.into(),
+                                    version: version.into(),
+                                    body: Default::default(),
+                                },
+                                connection_id: 0,
+                                request_id: 0,
+                                port: 0,
+                            };
+
+                            self.queued_messages.push_back(DaemonMessage::TcpSteal(
+                                DaemonTcp::HttpBypassedRequest(bypassed),
+                            ));
+
                         },
                     }
                 }

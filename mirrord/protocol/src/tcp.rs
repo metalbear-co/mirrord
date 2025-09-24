@@ -100,7 +100,7 @@ pub enum DaemonTcp {
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
     HttpRequestChunked(ChunkedRequest),
     NewConnectionV2(NewTcpConnectionV2),
-    HttpBypassedRequest(SocketAddr),
+    HttpBypassedRequest(HttpRequest<Payload>),
 }
 
 /// Contents of a chunked message from server.

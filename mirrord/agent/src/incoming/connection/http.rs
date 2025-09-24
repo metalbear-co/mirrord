@@ -188,6 +188,12 @@ impl fmt::Debug for RedirectedHttp {
     }
 }
 
+#[derive(Debug)]
+pub struct BypassedHttp {
+    pub info: ConnectionInfo,
+    pub parts: request::Parts,
+}
+
 /// Steal handle to a redirected HTTP request.
 pub struct StolenHttp {
     pub info: ConnectionInfo,
