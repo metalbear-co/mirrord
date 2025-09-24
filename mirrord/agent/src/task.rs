@@ -24,11 +24,12 @@ pub(super) mod status;
 /// `BackgroundTaskFailed { task: "TcpSnifferTask", error: BgTaskPanicked }`, this means that
 /// the runtime was dropped before the `BackgroundTask` could start.
 ///
+/// Because of the custom [`Drop`] implementation, this struct should not implement [`Clone`].
+///
 /// We keep the client connection (main loop) runtime separate from the background tasks to avoid
 /// potentially blocking the agent from exiting if some background task hangs. When the agent
 /// doesn't exit properly (i.e. it stays alive in the cluster, and the user has to manually kill
 /// it), we cannot start another agent due to the dirty iptables check.
-#[derive(Clone)]
 pub(crate) struct BgTaskRuntime {
     target_pid: Option<u64>,
     handle: Handle,
