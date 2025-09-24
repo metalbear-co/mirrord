@@ -120,8 +120,8 @@ print_step "Installing Python and test dependencies..."
 sudo apt install -y python3 python3-pip python3-dev python3-venv
 pip3 install --break-system-packages flask fastapi uvicorn[standard]
 
-# Install Go versions (matching CI: 1.21, 1.22, 1.23)
-print_step "Installing Go versions (1.21, 1.22, 1.23)..."
+# Install Go versions (matching CI: 1.23, 1.24, 1.25)
+print_step "Installing Go versions (1.23, 1.24, 1.25)..."
 
 # Function to install Go version
 install_go_version() {
@@ -140,9 +140,9 @@ install_go_version() {
 }
 
 # Install Go versions
-install_go_version "1.21.6"
-install_go_version "1.22.6" 
-install_go_version "1.23.3"
+install_go_version "1.23.12"
+install_go_version "1.24.7"
+install_go_version "1.25.1"
 
 # Create Go version switcher script
 print_step "Creating Go version switcher..."
@@ -169,13 +169,12 @@ switch_go() {
     go version
 }
 
-# Default to Go 1.21
-switch_go "1.21.6"
-
+# Default to Go 1.23
+switch_go "1.23.12"
 # Aliases for easy switching
-alias go21="switch_go 1.21.6"
-alias go22="switch_go 1.22.6" 
-alias go23="switch_go 1.23.3"
+alias go23="switch_go 1.23.12"
+alias go24="switch_go 1.24.7"
+alias go25="switch_go 1.25.1"
 EOF
 
 # Add Go switcher to bashrc
@@ -270,17 +269,17 @@ if [ -f "scripts/build_go_apps.sh" ]; then
     # Source the Go version script to get aliases
     source ~/.go-version
     
-    # Build with Go 1.21
-    switch_go "1.21.6"
-    ../../../scripts/build_go_apps.sh 21
-    
-    # Build with Go 1.22  
-    switch_go "1.22.6"
-    ../../../scripts/build_go_apps.sh 22
-    
     # Build with Go 1.23
-    switch_go "1.23.3"
+    switch_go "1.23.12"
     ../../../scripts/build_go_apps.sh 23
+    
+    # Build with Go 1.24
+    switch_go "1.24.7"
+    ../../../scripts/build_go_apps.sh 24
+    
+    # Build with Go 1.25
+    switch_go "1.25.1"
+    ../../../scripts/build_go_apps.sh 25
     
     cd - > /dev/null
 fi
@@ -298,13 +297,13 @@ cargo clippy -p mirrord-layer -- -D warnings
 # Test basic Go compilation
 print_step "Testing Go compilation..."
 source ~/.go-version
-switch_go "1.21.6"
+switch_go "1.23.12"
 go version
 
 print_step "✅ CI environment setup complete!"
 echo ""
 echo "🔧 Available commands:"
-echo "  go21, go22, go23  - Switch between Go versions"
+echo "  go23, go24, go25  - Switch between Go versions"
 echo "  mirrord_test_env   - Set mirrord test environment variables"
 echo ""
 echo "🧪 Run integration tests:"

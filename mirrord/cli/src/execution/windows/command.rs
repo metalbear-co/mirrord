@@ -76,7 +76,24 @@ impl WindowsCommand {
         self
     }
 
-    pub fn envs<K: Into<String>, V: Into<String>>(mut self, envs: HashMap<K, V>) -> Self {
+    pub fn envs<K, V>(mut self, envs: HashMap<K, V>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let mut envs: HashMap<String, String> = envs
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into()))
+            .collect();
+
+        // add WSLENV=KEY1:KEY2:... env-var for WSL environment variable propagation support
+        // this is needed when executing bash which is not aware of the envvars without it.
+        // see https://devblogs.microsoft.com/commandline/share-environment-vars-between-wsl-and-windows/
+        if !envs.contains_key("WSLENV") {
+            let wsl_env_value = envs.keys().cloned().collect::<Vec<_>>().join(":");
+            envs.insert("WSLENV".to_string(), wsl_env_value);
+        }
+
         self.envs = EnvMap::from(envs);
         self
     }
