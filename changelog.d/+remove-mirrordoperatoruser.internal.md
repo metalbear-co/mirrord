@@ -1,0 +1,1 @@
+Removed legacy `MirrordOperatorUser` CRD.
