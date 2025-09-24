@@ -31,6 +31,7 @@ use crate::crd::{
     MirrordOperatorCrd, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
+    patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
     session::MirrordClusterSession,
@@ -684,7 +685,41 @@ impl OperatorClusterRole {
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
+            PolicyRule {
+                api_groups: Some(vec![MirrordClusterWorkloadPatch::group(&()).into_owned()]),
+                resources: Some(vec![
+                    MirrordClusterWorkloadPatch::plural(&()).into_owned(),
+                    MirrordClusterWorkloadPatchRequest::plural(&()).into_owned(),
+                    format!("{}/status", MirrordClusterWorkloadPatchRequest::plural(&())),
+                ]),
+                verbs: vec!["*".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
+                resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
+                verbs: vec![
+                    "delete".to_owned(),
+                    "deletecollection".to_owned(),
+                    "list".to_owned(),
+                ],
+                ..Default::default()
+            },
         ];
+
+        if options.kafka_splitting || options.sqs_splitting {
+            rules.push(PolicyRule {
+                api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
+                resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
+                verbs: vec![
+                    "create".to_owned(),
+                    "get".to_owned(),
+                    "update".to_owned(),
+                    "patch".to_owned(),
+                ],
+                ..Default::default()
+            });
+        }
 
         if options.kafka_splitting {
             rules.extend([
@@ -770,17 +805,6 @@ impl OperatorClusterRole {
                     api_groups: Some(vec![ConfigMap::group(&()).into_owned()]),
                     resources: Some(vec![ConfigMap::plural(&()).into_owned()]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
-                    ..Default::default()
-                },
-                // For creating MutatingWebhooks for changing pods in an ArgoCD-compatible way.
-                PolicyRule {
-                    api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
-                    resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
-                    verbs: vec![
-                        "create".to_owned(),
-                        "delete".to_owned(),
-                        "deletecollection".to_owned(),
-                    ],
                     ..Default::default()
                 },
             ]);

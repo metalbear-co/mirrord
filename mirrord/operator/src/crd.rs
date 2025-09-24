@@ -23,6 +23,7 @@ pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mysql_branching;
+pub mod patch;
 pub mod policy;
 pub mod profile;
 pub mod session;
