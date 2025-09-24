@@ -267,19 +267,20 @@ pub mod client {
     use crate::error::CredentialStoreError;
 
     #[derive(Serialize, Debug, Clone)]
-    #[serde(rename = "camelCase")]
+    #[serde(rename_all = "camelCase")]
     struct CertificateSigningRequest {
         csr: String,
         usage: CertificateUsage,
     }
 
     #[derive(Deserialize, Debug, Clone)]
+    #[serde(rename_all = "camelCase")]
     struct CertificateSigningResponse {
         certificate: Certificate,
     }
 
     #[derive(Serialize, Debug, Clone)]
-    #[serde(rename = "camelCase")]
+    #[serde(rename_all = "camelCase")]
     enum CertificateUsage {
         #[allow(unused)]
         Regular,
@@ -455,7 +456,7 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
     #[test]
     fn v1_ci_api_key_encode_decode() {
         // This credential is generated using a test root issuer
-        const V1_API_KEY: &str = "mci-v1:eNptU8uSqzYUXGRHFf9w967U2PgRs8hCgMBikGzeiB0Pm4cFlwEzDP6AfE3-MJuIyU3VpHJVpc2R1Oruc_qvP375dVkKNBD5pkLHQzpSgQc_q6KAEVLpU1VBeS7AhBRQ8O2Bk1LgPo6ADjSFYPc4WTbVAtvWNDVWfHgvXCnYIz0YRSGJ7CIwgmduKE8EgzE3gjk7mV0m-YVnsDoO98_YgwlWCgNsfKgWk2MHiongg11dJRCFtGFrpDss29rTqcwIrv3p7ME9ruETa3gbftay_9Zq0GLXn9BENVH4ZKZ8PJLInNOtebdC0tlQt11XseLoXgThvstVxY8jssbqNCn81asUjIoNNGQrkSjcy8domrIi2SsyxMX7xjeSGQarZA_PB4Z37jy-d_M19F_P3L1iKgq45t4pANDIkjZMFHJDH2gTlFklD0lIWNoSZklsjJujAm5HWFz131Dr7DPDr86Vyc-54laZk4gwVE0V9yHUd9GWMBo5T1R__8AaGFBLNrQlddawKTfYe8rkLlbRAdVUoiHdnL1sbXlgS2v0EAWiwensbioikdry6BaHWMIG2uEGbmiFBtTIcyzpYxJ15Ve0tA2GVF045LxzNJyqcxOX6YkrUE0pjsxnEsoj51ThefeBazpidUFjY7Z1yrQhLNb_Uc1VcN2LiqyNWVahQ9zoA5-FRcmi7MZ_KKn06NImv6WhfI9druZO-Gs-O3BByFqnixtW89sMtevJKuht8fiLw3VqMO6g_U6lYM5VecoaeeI811fbtkThOpubTNLbBRtzhB_9npZ-2zbYrDM7lXtSGbgf1y29NJe-TVKZ0ENlHwb5TRR6M0pWfZu9Xev-tD1KG-MOUQ7rZqfnVr7rYtldteq0rVYvWbQC17n5jkXhM1SQaD8J2p9fYnhxUMBPvr1C-m8MdagCG3KCP4iqCKKTw4B7HNX7sbwweEQ9fDm9vb08PI8WRPXhQVNvD-yiUiOiULgQ8EimaeXe7Px-4Q5RSw6UZij1WzM62th5Zzj0_SFrGQO_fyH7fzp_A7b4Vbg";
+        const V1_API_KEY: &str = "mci-v1:eNptk8uSqzYURQeZucr_cOddqWug_RpkgEBg2Ui-mKc0M2DzsKDxA8vwAfma_GEmEZ2bqk4lVDE5krb22kfnz99_-XX8ALQR-WbAg48sZOg-_KxOJxghgw6GoRf7XBcI6Ln8fX0DcnxjsW7pJiDYWwnHpWbouqZpMBDAS-6p4RxZYTedHGM3D-1wyGwwIBh2mR326WbbpmqQ-zavWDQfmA-PGOS2rgTQyMXBDcEWwQc_eSCcTpKaz5B14Knmik2RElwFYu_DOa7ggE2sRZ-19N-1Sm-wFwgkqDmdfDoDr8cx3vaJtr04EWldaLmeBxwWX_IwmreZAQIWkxk2hADy1E4NO-DqJnLBUircLkW9otYyq8u-uxKuXf2o3T-TxNHZ221V3doz9y4fj8VeppeLPIczmR3QdRo7qsKnk8y27rQOi7Rc348R4UlDuKPyjtUroJ9XMD9ZS9Qc5qkdlPtyK9clcQP6Y0w4KkUpc4is91gjnMaHAVUfL2zqd9QQhTakSmsuMps_E75umYEWqKIqjaiy99OZ4-sardBjOiEmFHtPKYlKKsenGo6wim30jmuo0BLdUb3umWp1x7gtvqolTXhPjNFDJjtHI1Hua1YkG0lgbFUWb4djtO6kpxL37y9c0Q4boxrvUu1QJDXhzPqbWlJI7pEibRhPS7RgtXWXb2EkGcnO8oaCqo82qbNzEq0vzJM0FyJPy7cDR4W0ObSs5pXczVEzE05Oz2PGXxKuEpvLBN0nVcM-M9YirddC-pydXNeZTk79VklVqxm1sVT42W8x9tt19VPlaE0X3wo96L3OfXNesVWYm0iL1-ytdpZwOsn9-vKyiWPtdruVusFqejW-X3dK9dHPmuhHso_i1Sa5Knfqzc5miRJP7KaTz6GCxPyfQfvjyxj-OKBQrnzbQfrPGFrQ0F0oDf40aiCICAjQq69n_Sp87wZrEcAhUbNr8Vhuh_j0XLl8lefAshM3loY9qJ-U4xyxpw1OGvu4364VyxYX5erfVLUX9vn6HS0W8Txod0762xez_7XzFwspVos";
 
         let api_key = CiApiKey::decode(V1_API_KEY).expect("decode api key");
         let CiApiKey::V1(credentials) = &api_key;
