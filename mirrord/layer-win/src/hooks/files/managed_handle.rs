@@ -120,15 +120,17 @@ pub fn for_each_handle_with_path(
 
     let name = read_object_attributes_name(object_attributes);
     if let Some(linux_name) = remove_root_dir_from_path(name)
-        && let Ok(handles) = MANAGED_HANDLES.try_read() {
-            for (handle, handle_context) in handles.iter() {
-                if let Ok(handle_context) = handle_context.clone().try_read()
-                    && handle_context.path == linux_name {
-                        fun(handle, &handle_context);
-                        any = true;
-                    }
+        && let Ok(handles) = MANAGED_HANDLES.try_read()
+    {
+        for (handle, handle_context) in handles.iter() {
+            if let Ok(handle_context) = handle_context.clone().try_read()
+                && handle_context.path == linux_name
+            {
+                fun(handle, &handle_context);
+                any = true;
             }
         }
+    }
 
     any
 }

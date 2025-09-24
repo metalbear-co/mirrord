@@ -15,13 +15,14 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
-    FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION, FILE_STANDARD_INFORMATION, IO_STATUS_BLOCK,
-    PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE,
+    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION,
+    FILE_BASIC_INFORMATION, FILE_FS_DEVICE_INFORMATION, FILE_INFORMATION_CLASS,
+    FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS,
+    IO_STATUS_BLOCK, PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE,
 };
 use winapi::{
     shared::{
-        minwindef::{DWORD, FILETIME},
+        minwindef::FILETIME,
         ntdef::{
             BOOLEAN, FALSE, HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PULONG,
             PVOID, ULONG,
@@ -32,7 +33,7 @@ use winapi::{
         },
     },
     um::{
-        winbase::FILE_TYPE_DISK,
+        winioctl::FILE_DEVICE_VIRTUAL_DISK,
         winnt::{
             ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_ATTRIBUTES, FILE_WRITE_ATTRIBUTES,
             FILE_WRITE_DATA, GENERIC_WRITE, PSID,
@@ -110,13 +111,8 @@ type NtSetInformationFileType = unsafe extern "system" fn(
 ) -> NTSTATUS;
 static NT_SET_INFORMATION_FILE_TYPE_ORIGINAL: OnceLock<&NtSetInformationFileType> = OnceLock::new();
 
-type NtSetVolumeInformationFileType = unsafe extern "system" fn(
-    HANDLE,
-    *mut _IO_STATUS_BLOCK,
-    PVOID,
-    ULONG,
-    FILE_INFORMATION_CLASS,
-) -> NTSTATUS;
+type NtSetVolumeInformationFileType =
+    unsafe extern "system" fn(HANDLE, *mut _IO_STATUS_BLOCK, PVOID, ULONG, FSINFOCLASS) -> NTSTATUS;
 static NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtSetVolumeInformationFileType> =
     OnceLock::new();
 
@@ -138,13 +134,8 @@ type NtQueryAttributesFileType =
     unsafe extern "system" fn(POBJECT_ATTRIBUTES, PFILE_BASIC_INFORMATION) -> NTSTATUS;
 static NT_QUERY_ATTRIBUTES_FILE_ORIGINAL: OnceLock<&NtQueryAttributesFileType> = OnceLock::new();
 
-type NtQueryVolumeInformationFileType = unsafe extern "system" fn(
-    HANDLE,
-    *mut c_void,
-    PVOID,
-    ULONG,
-    FILE_INFORMATION_CLASS,
-) -> NTSTATUS;
+type NtQueryVolumeInformationFileType =
+    unsafe extern "system" fn(HANDLE, *mut _IO_STATUS_BLOCK, PVOID, ULONG, FSINFOCLASS) -> NTSTATUS;
 static NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL: OnceLock<&NtQueryVolumeInformationFileType> =
     OnceLock::new();
 
@@ -204,9 +195,6 @@ static NT_UNLOCK_FILE_ORIGINAL: OnceLock<&NtUnlockFileType> = OnceLock::new();
 
 type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
 static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
-
-type GetFileTypeType = unsafe extern "system" fn(HANDLE) -> DWORD;
-static GET_FILE_TYPE_ORIGINAL: OnceLock<&GetFileTypeType> = OnceLock::new();
 
 /// [`nt_create_file_hook`] is the function responsible for catching attempts to create a
 /// new file handle. In turn, it is also responsible for catching the attempt to create
@@ -619,10 +607,10 @@ unsafe extern "system" fn nt_set_information_file_hook(
                     }
                 }
                 _ => {
-                    tracing::info!(
+                    tracing::warn!(
                         "nt_set_information_file_hook: Trying to set for file_information_class: {:?}, but it is not implemented! (file: {})",
                         file_information_class,
-                        handle_context.path
+                        &handle_context.path
                     );
                 }
             }
@@ -650,7 +638,7 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
     io_status_block: *mut _IO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
-    file_information_class: FILE_INFORMATION_CLASS,
+    fs_info_class: FSINFOCLASS,
 ) -> NTSTATUS {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
@@ -658,8 +646,9 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_set_volume_information_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                "nt_set_volume_information_file_hook: Not implemented! Failling back on original! (file: {}, FSINFOCLASS: {:?})",
+                &handle_context.path,
+                fs_info_class
             );
         }
 
@@ -669,7 +658,7 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
             io_status_block,
             file_information,
             length,
-            file_information_class,
+            fs_info_class,
         )
     }
 }
@@ -984,7 +973,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
                     }
                 }
                 _ => {
-                    tracing::info!(
+                    tracing::warn!(
                         "nt_query_information_file_hook: Trying to query for file_information_class: {:?}, but it is not implemented! (file: {})",
                         file_information_class,
                         handle_context.path
@@ -1028,25 +1017,74 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     }
 }
 
-/// [`nt_query_volume_information_file_hook`] is unimplemented!
+/// [`nt_query_volume_information_file_hook`] is the function responsible for querying
+/// the volume on which a file we manage finds itself in. The type of information being queried
+/// is distinguished by the [`FSINFOCLASS`] value. The current supported entries are:
+///
+/// - [`FSINFOCLASS::FileFsDeviceInformation`]
+///
+/// This is responsible to support functions such as `kernelbase!GetFileType`.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
-    io_status_block: *mut c_void,
+    io_status_block: *mut _IO_STATUS_BLOCK,
     file_information: PVOID,
     length: ULONG,
-    file_information_class: FILE_INFORMATION_CLASS,
+    fs_info_class: FSINFOCLASS,
 ) -> NTSTATUS {
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
             && let Some(managed_handle) = handles.get(&file)
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
-            tracing::warn!(
-                "nt_query_volume_information_file_hook: Function unimplemented, but necessary to return success for other functionality! (file: {})",
-                &handle_context.path
-            );
-            return STATUS_SUCCESS;
+            if !is_memory_valid(file_information) {
+                tracing::warn!(
+                    "nt_query_volume_information_file_hook: Invalid memory for file_information variable in hook"
+                );
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            if !is_memory_valid(io_status_block) {
+                tracing::warn!(
+                    "nt_query_volume_information_file_hook: Invalid memory for io_status_block variable in hook"
+                );
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            match fs_info_class {
+                FSINFOCLASS::FileFsDeviceInformation => {
+                    // Length must be the same size as [`FILE_FS_DEVICE_INFORMATION`] length!
+                    if length as usize != std::mem::size_of::<FILE_FS_DEVICE_INFORMATION>() {
+                        return STATUS_ACCESS_VIOLATION;
+                    }
+
+                    let out_ptr = file_information as *mut FILE_FS_DEVICE_INFORMATION;
+
+                    // NOTE(gabriela): kernelbase!GetFileType says DeviceType
+                    // 36 (according to ntddk.h, FILE_DEVICE_VIRTUAL_DISK (0x24)) returns
+                    // the FILE_TYPE 1 (FILE_TYPE_DISK) which has worked this far.
+                    (*out_ptr).DeviceType = FILE_DEVICE_VIRTUAL_DISK;
+                    // NOTE(gabriela): update once write support!
+                    (*out_ptr).Characteristics = FILE_READ_ONLY_DEVICE;
+
+                    (*io_status_block).Information =
+                        std::mem::size_of::<FILE_FS_DEVICE_INFORMATION>() as _;
+                    (*io_status_block).__bindgen_anon_1.Status = ManuallyDrop::new(STATUS_SUCCESS);
+
+                    return STATUS_SUCCESS;
+                }
+                _ => {
+                    tracing::warn!(
+                        "nt_query_volume_information_file_hook: Trying to query for FSINFOCLASS: {:?}, but it is not implemented! (file: {})",
+                        fs_info_class,
+                        &handle_context.path
+                    );
+                }
+            }
+
+            // NOTE(gabriela): while there's no access violation in our case,
+            // this is the expected result through the NT API.
+            return STATUS_ACCESS_VIOLATION;
         }
 
         let original = NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL.get().unwrap();
@@ -1055,7 +1093,7 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
             io_status_block,
             file_information,
             length,
-            file_information_class,
+            fs_info_class,
         )
     }
 }
@@ -1267,25 +1305,9 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn get_file_type_hook(handle: HANDLE) -> DWORD {
-    unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && handles.contains_key(&handle)
-        {
-            // TODO(gabriela): come back to this again, remove this hook
-            return FILE_TYPE_DISK;
-        }
-
-        let original = GET_FILE_TYPE_ORIGINAL.get().unwrap();
-        original(handle)
-    }
-}
-
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
     // ----------------------------------------------------------------------------
-    // TODO(gabriela): get rid of kernelbase hooks unless absolutely necessary, try
-    // to keep stuff NT level
+    // ~NOTE(gabriela):
     //
     // Staying at NT level is a necessity in the attempt to catch every single
     // user-mode level file access. That is as low-level as we can possibly go, and
@@ -1349,19 +1371,19 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     apply_hook!(
         guard,
         "ntdll",
-        "NtClose",
-        nt_close_hook,
-        NtCloseType,
-        NT_CLOSE_ORIGINAL
+        "NtQueryVolumeInformationFile",
+        nt_query_volume_information_file_hook,
+        NtQueryVolumeInformationFileType,
+        NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
     )?;
 
     apply_hook!(
         guard,
-        "kernelbase",
-        "GetFileType",
-        get_file_type_hook,
-        GetFileTypeType,
-        GET_FILE_TYPE_ORIGINAL
+        "ntdll",
+        "NtClose",
+        nt_close_hook,
+        NtCloseType,
+        NT_CLOSE_ORIGINAL
     )?;
 
     // ----------------------------------------------------------------------------
@@ -1394,15 +1416,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         nt_set_quota_information_file_hook,
         NtSetQuotaInformationFileType,
         NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
-        "NtQueryVolumeInformationFile",
-        nt_query_volume_information_file_hook,
-        NtQueryVolumeInformationFileType,
-        NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
     )?;
 
     apply_hook!(
