@@ -1,14 +1,17 @@
 //! Utility functions for Windows socket operations
-
 use std::{
     alloc::Layout,
+    convert::TryFrom,
     ffi::CString,
     mem,
     net::{IpAddr, SocketAddr},
     ptr,
 };
 
-use mirrord_layer_lib::error::{AddrInfoError, HookError, HookResult};
+use mirrord_layer_lib::error::{
+    AddrInfoError, HookError, HookResult,
+    windows::{WindowsError, WindowsResult},
+};
 use mirrord_protocol::{
     dns::GetAddrInfoResponse,
     error::{DnsLookupError, ResolveErrorKindInternal, ResponseError},
@@ -17,10 +20,12 @@ use mirrord_protocol::{
 use winapi::{
     shared::{
         minwindef::INT,
-        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
+        ws2def::{
+            ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN, SOCKADDR_STORAGE,
+        },
         ws2ipdef::SOCKADDR_IN6,
     },
-    um::winsock2::{HOSTENT, SOCK_STREAM},
+    um::winsock2::{HOSTENT, SOCK_STREAM, WSAEFAULT},
 };
 
 /// Macro to safely allocate memory for Windows structures with error handling
@@ -38,50 +43,49 @@ thread_local! {
     static THREAD_HOSTENT: std::cell::RefCell<Option<ManagedHostent>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Windows-specific extensions for SocketAddr trait, similar to SocketAddrExtUnix
+/// Windows-specific extensions for socket address handling on Windows
 pub trait SocketAddrExtWin {
     /// Converts a raw Windows SOCKADDR pointer into a more _Rusty_ type
     fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self>
     where
         Self: Sized;
 
-    /// Convert to Windows SOCKADDR and write directly to output buffers with validation
-    unsafe fn to_windows_sockaddr_checked(
-        &self,
-        name: *mut SOCKADDR,
-        namelen: *mut INT,
-    ) -> Result<(), String>;
+    /// Copies the socket address data into a Windows SOCKADDR structure for API calls
+    fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()>;
+
+    /// Creates an owned SOCKADDR representation of this address
+    fn to_sockaddr(&self) -> WindowsResult<(SOCKADDR_STORAGE, INT)> {
+        let mut storage: SOCKADDR_STORAGE = unsafe { mem::zeroed() };
+        let mut len = mem::size_of::<SOCKADDR_STORAGE>() as INT;
+        self.copy_to(&mut storage as *mut _ as *mut SOCKADDR, &mut len)?;
+        Ok((storage, len))
+    }
 }
 
 impl SocketAddrExtWin for SocketAddr {
     fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<SocketAddr> {
         unsafe { sockaddr_to_socket_addr(raw_address, address_length) }
     }
-
-    unsafe fn to_windows_sockaddr_checked(
-        &self,
-        name: *mut SOCKADDR,
-        namelen: *mut INT,
-    ) -> Result<(), String> {
-        // Validate input parameters
-        if name.is_null() {
-            return Err("name pointer is null".to_string());
-        }
-        if namelen.is_null() {
-            return Err("namelen pointer is null".to_string());
-        }
-
-        // Use the socketaddr_to_windows_sockaddr function but convert error
-        match unsafe { socketaddr_to_windows_sockaddr(self, name, namelen) } {
-            Ok(()) => Ok(()),
-            Err(error_code) => Err(format!(
-                "Windows sockaddr conversion failed with error code: {}",
-                error_code
-            )),
-        }
+    fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
+        unsafe { socketaddr_to_windows_sockaddr(self, name, namelen) }
     }
 }
 
+impl SocketAddrExtWin for SocketAddress {
+    fn try_from_raw(raw_address: *const SOCKADDR, address_length: INT) -> Option<Self> {
+        SocketAddr::try_from_raw(raw_address, address_length).map(SocketAddress::from)
+    }
+    fn copy_to(&self, name: *mut SOCKADDR, namelen: *mut INT) -> WindowsResult<()> {
+        let std_addr =
+            SocketAddr::try_from(self.clone()).map_err(|_| WindowsError::WinSock(WSAEFAULT))?;
+        std_addr.copy_to(name, namelen)
+    }
+    fn to_sockaddr(&self) -> WindowsResult<(SOCKADDR_STORAGE, INT)> {
+        let std_addr =
+            SocketAddr::try_from(self.clone()).map_err(|_| WindowsError::WinSock(WSAEFAULT))?;
+        std_addr.to_sockaddr()
+    }
+}
 /// Helper function to convert Windows SOCKADDR to Rust SocketAddr
 unsafe fn sockaddr_to_socket_addr(addr: *const SOCKADDR, addrlen: INT) -> Option<SocketAddr> {
     if addr.is_null() || addrlen < mem::size_of::<SOCKADDR_IN>() as INT {
@@ -113,90 +117,29 @@ unsafe fn sockaddr_to_socket_addr(addr: *const SOCKADDR, addrlen: INT) -> Option
     }
 }
 
-/// Windows-specific extension trait for SocketAddress conversion
-pub trait SocketAddressExtWin {
-    /// Convert to Windows SOCKADDR structure
-    unsafe fn to_sockaddr(&self) -> Result<(SOCKADDR, INT), String>;
-
-    /// Convert to Windows SOCKADDR and write directly to output buffers with validation
-    unsafe fn to_sockaddr_checked(
-        &self,
-        name: *mut SOCKADDR,
-        namelen: *mut INT,
-    ) -> Result<(), String>;
-}
-
-impl SocketAddressExtWin for SocketAddress {
-    unsafe fn to_sockaddr(&self) -> Result<(SOCKADDR, INT), String> {
-        unsafe { socket_address_to_sockaddr(self) }
-    }
-
-    unsafe fn to_sockaddr_checked(
-        &self,
-        name: *mut SOCKADDR,
-        namelen: *mut INT,
-    ) -> Result<(), String> {
-        // Validate input parameters
-        if name.is_null() {
-            return Err("name pointer is null".to_string());
-        }
-        if namelen.is_null() {
-            return Err("namelen pointer is null".to_string());
-        }
-
-        // Convert the address
-        let (sockaddr, size) = unsafe { self.to_sockaddr()? };
-
-        // Check buffer size
-        if unsafe { *namelen } < size {
-            return Err(format!(
-                "Buffer too small: need {} bytes, have {}",
-                size,
-                unsafe { *namelen }
-            ));
-        }
-
-        // Copy data to output buffer
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                &sockaddr as *const _ as *const u8,
-                name as *mut u8,
-                size as usize,
-            );
-            *namelen = size;
-        }
-
-        Ok(())
-    }
-}
-
 /// Convert SocketAddr to Windows SOCKADDR for address return functions
 pub unsafe fn socketaddr_to_windows_sockaddr(
     addr: &SocketAddr,
     name: *mut SOCKADDR,
     namelen: *mut INT,
-) -> Result<(), i32> {
+) -> WindowsResult<()> {
     if name.is_null() || namelen.is_null() {
-        // WSAEFAULT
-        return Err(10014);
+        return Err(WindowsError::WinSock(WSAEFAULT));
     }
 
-    // Additional safety check for namelen dereference
     let name_len_value = unsafe { *namelen };
     if name_len_value < 0 {
-        // WSAEFAULT - invalid length
-        return Err(10014);
+        return Err(WindowsError::WinSock(WSAEFAULT));
     }
 
     match addr {
         SocketAddr::V4(addr_v4) => {
-            let size = std::mem::size_of::<SOCKADDR_IN>() as INT;
+            let size = mem::size_of::<SOCKADDR_IN>() as INT;
             if name_len_value < size {
-                // WSAEFAULT - buffer too small
-                return Err(10014);
+                return Err(WindowsError::WinSock(WSAEFAULT));
             }
 
-            let mut sockaddr_in: SOCKADDR_IN = unsafe { std::mem::zeroed() };
+            let mut sockaddr_in: SOCKADDR_IN = unsafe { mem::zeroed() };
             sockaddr_in.sin_family = AF_INET as u16;
             sockaddr_in.sin_port = addr_v4.port().to_be();
             unsafe {
@@ -215,13 +158,12 @@ pub unsafe fn socketaddr_to_windows_sockaddr(
             Ok(())
         }
         SocketAddr::V6(addr_v6) => {
-            let size = std::mem::size_of::<SOCKADDR_IN6>() as INT;
+            let size = mem::size_of::<SOCKADDR_IN6>() as INT;
             if name_len_value < size {
-                // WSAEFAULT - buffer too small
-                return Err(10014);
+                return Err(WindowsError::WinSock(WSAEFAULT));
             }
 
-            let mut sockaddr_in6: SOCKADDR_IN6 = unsafe { std::mem::zeroed() };
+            let mut sockaddr_in6: SOCKADDR_IN6 = unsafe { mem::zeroed() };
             sockaddr_in6.sin6_family = AF_INET6 as u16;
             sockaddr_in6.sin6_port = addr_v6.port().to_be();
             sockaddr_in6.sin6_flowinfo = addr_v6.flowinfo();
@@ -247,35 +189,6 @@ pub unsafe fn socketaddr_to_windows_sockaddr(
         }
     }
 }
-
-/// Convert a mirrord SocketAddress to a Windows SOCKADDR for API calls
-pub unsafe fn socket_address_to_sockaddr(
-    layer_addr: &SocketAddress,
-) -> Result<(SOCKADDR, INT), String> {
-    let std_addr = match std::net::SocketAddr::try_from(layer_addr.clone()) {
-        Ok(addr) => addr,
-        Err(e) => {
-            return Err(format!("Failed to convert layer address: {:?}", e));
-        }
-    };
-
-    match std_addr {
-        std::net::SocketAddr::V4(addr_v4) => {
-            let mut sockaddr_in: SOCKADDR_IN = unsafe { std::mem::zeroed() };
-            sockaddr_in.sin_family = AF_INET as u16;
-            sockaddr_in.sin_port = addr_v4.port().to_be();
-            unsafe {
-                *sockaddr_in.sin_addr.S_un.S_addr_mut() = u32::from(*addr_v4.ip()).to_be();
-            }
-            let sockaddr = unsafe { std::mem::transmute::<SOCKADDR_IN, SOCKADDR>(sockaddr_in) };
-            Ok((sockaddr, std::mem::size_of::<SOCKADDR_IN>() as INT))
-        }
-        std::net::SocketAddr::V6(_) => {
-            Err("IPv6 not yet implemented for layer address".to_string())
-        }
-    }
-}
-
 /// RAII wrapper for Windows HOSTENT structure that automatically cleans up on drop
 #[derive(Debug)]
 pub struct ManagedHostent {
@@ -888,7 +801,7 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
 
                     (
                         sockaddr_in_ptr as *mut SOCKADDR,
-                        std::mem::size_of::<SOCKADDR_IN>() as INT,
+                        mem::size_of::<SOCKADDR_IN>() as INT,
                         AF_INET,
                     )
                 }
@@ -908,7 +821,7 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
 
                     (
                         sockaddr_in6_ptr as *mut SOCKADDR,
-                        std::mem::size_of::<SOCKADDR_IN6>() as INT,
+                        mem::size_of::<SOCKADDR_IN6>() as INT,
                         AF_INET6,
                     )
                 }

@@ -26,7 +26,7 @@ use winapi::{
 };
 use windows_strings::PCWSTR;
 
-use crate::{hooks::socket::utils::SocketAddressExtWin, layer_setup};
+use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
 
 /// Wrapper around Windows WSABUF array for safe buffer handling
 #[derive(Debug)]
@@ -173,7 +173,7 @@ impl DnsResolver for WindowsDnsResolver {
 /// - Non-zero error code on failure (address unreachable or resolution failed)
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub fn check_address_reachability(remote_addr: &SocketAddress, socket: SOCKET) -> i32 {
-    let Ok((sock_addr_raw, sock_addr_len)) = (unsafe { remote_addr.to_sockaddr() }) else {
+    let Ok((sock_addr_storage, sock_addr_len)) = remote_addr.to_sockaddr() else {
         tracing::debug!(
             "check_address_reachability -> address conversion failed for socket {}",
             socket
@@ -188,7 +188,7 @@ pub fn check_address_reachability(remote_addr: &SocketAddress, socket: SOCKET) -
 
     let result = unsafe {
         winapi::um::ws2tcpip::GetNameInfoW(
-            &sock_addr_raw as *const SOCKADDR,
+            &sock_addr_storage as *const _ as *const SOCKADDR,
             sock_addr_len,
             node_buffer.as_mut_ptr(),
             node_buffer.len() as u32,

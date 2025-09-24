@@ -13,7 +13,7 @@ use std::{net::SocketAddr, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
-    error::{ConnectError, HookError, HookResult, SendToError},
+    error::{ConnectError, HookError, HookResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     socket::{
         Bound, ConnectResult, SocketDescriptor, SocketKind, SocketState, get_bound_address,
@@ -30,7 +30,8 @@ use winapi::{
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
     um::winsock2::{
-        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, fd_set, timeval,
+        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, WSASetLastError, fd_set,
+        timeval,
     },
     // ws2tcpip::{GetNameInfoW, socklen_t},
 };
@@ -43,9 +44,7 @@ use self::{
     },
     ops::{WSABufferData, log_connection_result},
     state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
-    utils::{
-        ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, create_thread_local_hostent,
-    },
+    utils::{ManagedAddrInfoAny, SocketAddrExtWin, create_thread_local_hostent},
 };
 use crate::{apply_hook, layer_setup};
 
@@ -553,40 +552,67 @@ unsafe extern "system" fn getsockname_detour(
 
     // Check if this socket is managed by mirrord and get its bound address
     if let Some(bound_addr) = get_bound_address(s) {
-        // Return the bound address for bound/listening sockets
-        if !name.is_null() && !namelen.is_null() {
-            match unsafe { bound_addr.to_windows_sockaddr_checked(name, namelen) } {
-                Ok(()) => {
-                    tracing::trace!(
-                        "getsockname_detour -> returned mirrord bound address: {}",
-                        bound_addr
-                    );
-                    // Success
-                    return 0;
-                }
-                Err(error_code) => {
-                    tracing::debug!(
-                        "getsockname_detour -> failed to convert bound address: error {}",
-                        error_code
-                    );
-                    return SOCKET_ERROR;
-                }
+        match bound_addr.copy_to(name, namelen) {
+            Ok(()) => {
+                tracing::trace!(
+                    "getsockname_detour -> returned mirrord bound address: {}",
+                    bound_addr
+                );
+
+                return 0;
+            }
+
+            Err(err) => {
+                tracing::debug!(
+                    "getsockname_detour -> failed to convert bound address, error: {}",
+                    err
+                );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getsockname_detour -> unexpected windows error converting bound address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
+                return SOCKET_ERROR;
             }
         }
     } else if let Some((_, local_addr, layer_addr)) = get_connected_addresses(s) {
         // Return the layer address for connected sockets if available, otherwise local address
         let addr_to_return = layer_addr.as_ref().unwrap_or(&local_addr);
-        match unsafe { addr_to_return.to_sockaddr_checked(name, namelen) } {
+        match addr_to_return.copy_to(name, namelen) {
             Ok(()) => {
                 tracing::trace!("getsockname_detour -> returned mirrord local address");
                 // Success
                 return 0;
             }
-            Err(e) => {
+
+            Err(err) => {
                 tracing::debug!(
                     "getsockname_detour -> failed to convert layer address: {}",
-                    e
+                    err
                 );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getsockname_detour -> unexpected windows error converting layer address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
                 return SOCKET_ERROR;
             }
         }
@@ -615,17 +641,33 @@ unsafe extern "system" fn getpeername_detour(
     // Check if this socket is managed and get connected addresses
     if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
         // Return the remote address for connected sockets
-        match unsafe { remote_addr.to_sockaddr_checked(name, namelen) } {
+
+        match remote_addr.copy_to(name, namelen) {
             Ok(()) => {
                 tracing::trace!("getpeername_detour -> returned mirrord remote address");
                 // Success
                 return 0;
             }
-            Err(e) => {
+
+            Err(err) => {
                 tracing::debug!(
                     "getpeername_detour -> failed to convert remote address: {}",
-                    e
+                    err
                 );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getpeername_detour -> unexpected windows error converting remote address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
                 return SOCKET_ERROR;
             }
         }
