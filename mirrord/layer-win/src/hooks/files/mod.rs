@@ -277,12 +277,16 @@ unsafe extern "system" fn nt_create_file_hook(
 
             // Check if pointer to handle is valid.
             if file_handle.is_null() {
-                tracing::warn!("nt_create_file_hook: Invalid memory for file_handle variable in hook");
+                tracing::warn!(
+                    "nt_create_file_hook: Invalid memory for file_handle variable in hook"
+                );
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("nt_create_file_hook: Invalid memory for io_status_block variable in hook");
+                tracing::warn!(
+                    "nt_create_file_hook: Invalid memory for io_status_block variable in hook"
+                );
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -296,7 +300,7 @@ unsafe extern "system" fn nt_create_file_hook(
             let Ok(req) = make_proxy_request_with_response(OpenFileRequest {
                 path: PathBuf::from(&linux_path),
                 open_options,
-            }) else  {
+            }) else {
                 tracing::error!("nt_create_file_hook: Request for open file failed!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             };
@@ -338,7 +342,10 @@ unsafe extern "system" fn nt_create_file_hook(
                 // File could not be obtained for reasons, even if the
                 // network operation succeeded.
 
-                tracing::info!("nt_create_file_hook: Failed opening remote file handle for {}", linux_path);
+                tracing::info!(
+                    "nt_create_file_hook: Failed opening remote file handle for {}",
+                    linux_path
+                );
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
@@ -505,8 +512,8 @@ unsafe extern "system" fn nt_write_file_hook(
 }
 
 /// [`nt_set_information_file_hook`] is responsible for changing the internal state of
-/// [`HandleContext`], supporting a variety of entries defined in the [`FILE_INFORMATION_CLASS`],
-/// but not all. The current supported entries are:
+/// [`HandleContext`], and also the remote file descriptor state, supporting a variety of entries
+/// defined in the [`FILE_INFORMATION_CLASS`], but not all. The current supported entries are:
 ///
 /// - [`FILE_INFORMATION_CLASS::FileBasicInformation`]
 /// - [`FILE_INFORMATION_CLASS::FilePositionInformation`]
@@ -534,12 +541,16 @@ unsafe extern "system" fn nt_set_information_file_hook(
             && let Ok(mut handle_context) = managed_handle.clone().try_write()
         {
             if !is_memory_valid(file_information) {
-                tracing::warn!("nt_set_information_file_hook: Invalid memory for file_information variable in hook");
+                tracing::warn!(
+                    "nt_set_information_file_hook: Invalid memory for file_information variable in hook"
+                );
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("nt_set_information_file_hook: Invalid memory for io_status_block variable in hook");
+                tracing::warn!(
+                    "nt_set_information_file_hook: Invalid memory for io_status_block variable in hook"
+                );
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -601,7 +612,9 @@ unsafe extern "system" fn nt_set_information_file_hook(
                     {
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("nt_set_information_file_hook: Failed seeking when updating file information!");
+                        tracing::error!(
+                            "nt_set_information_file_hook: Failed seeking when updating file information!"
+                        );
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -726,12 +739,16 @@ unsafe extern "system" fn nt_query_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             if !is_memory_valid(file_information) {
-                tracing::warn!("nt_query_information_file_hook: Invalid memory for file_information variable in hook");
+                tracing::warn!(
+                    "nt_query_information_file_hook: Invalid memory for file_information variable in hook"
+                );
                 return STATUS_ACCESS_VIOLATION;
             }
 
             if !is_memory_valid(io_status_block) {
-                tracing::warn!("nt_query_information_file_hook: Invalid memory for io_status_block variable in hook");
+                tracing::warn!(
+                    "nt_query_information_file_hook: Invalid memory for io_status_block variable in hook"
+                );
                 return STATUS_ACCESS_VIOLATION;
             }
 
@@ -797,7 +814,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                             return STATUS_SUCCESS;
                         } else {
-                            tracing::error!("nt_query_information_file_hook: Failed seeking when querying file information!");
+                            tracing::error!(
+                                "nt_query_information_file_hook: Failed seeking when querying file information!"
+                            );
                             return STATUS_UNEXPECTED_NETWORK_ERROR;
                         }
                     } else {
@@ -831,7 +850,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("nt_query_information_file_hook: Failed xstat when querying file information!");
+                        tracing::error!(
+                            "nt_query_information_file_hook: Failed xstat when querying file information!"
+                        );
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -888,7 +909,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                         return STATUS_SUCCESS;
                     } else {
-                        tracing::error!("nt_query_information_file_hook: Failed xstat when querying file information!");
+                        tracing::error!(
+                            "nt_query_information_file_hook: Failed xstat when querying file information!"
+                        );
                         return STATUS_UNEXPECTED_NETWORK_ERROR;
                     }
                 }
@@ -1231,7 +1254,10 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
 
-            tracing::info!("nt_close_hook: Succesfully closed handle {:8x}", handle as usize);
+            tracing::info!(
+                "nt_close_hook: Succesfully closed handle {:8x}",
+                handle as usize
+            );
 
             return STATUS_SUCCESS;
         }
