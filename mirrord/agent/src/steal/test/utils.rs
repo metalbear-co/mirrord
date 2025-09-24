@@ -40,7 +40,8 @@ use crate::{
         HttpVersion, body::RolledBackBody, extract_requests::ExtractedRequests, sender::HttpSender,
     },
     steal::{StealerCommand, TcpStealerApi},
-    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
+    task::status::BgTaskStatus,
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 /// TCP protocols used in steal tests.
