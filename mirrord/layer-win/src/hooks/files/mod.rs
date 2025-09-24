@@ -2,7 +2,7 @@
 
 use std::{
     ffi::c_void,
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::ManuallyDrop,
     path::PathBuf,
     sync::OnceLock,
 };
@@ -17,8 +17,7 @@ use mirrord_protocol::file::{
 use phnt::ffi::{
     _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION,
     FILE_BASIC_INFORMATION, FILE_FS_DEVICE_INFORMATION, FILE_INFORMATION_CLASS,
-    FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS,
-    IO_STATUS_BLOCK, PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE,
+    FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE,
 };
 use winapi::{
     shared::{
@@ -914,10 +913,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                     let out_ptr = file_information as *mut FILE_ALL_INFORMATION;
 
-                    fn query_single<T>(handle: HANDLE, kind: FILE_INFORMATION_CLASS) -> Option<T> {
-                        let mut single: T = unsafe { MaybeUninit::zeroed().assume_init() };
-                        let mut io_status_block: IO_STATUS_BLOCK =
-                            unsafe { MaybeUninit::zeroed().assume_init() };
+                    fn query_single<T: Default>(handle: HANDLE, kind: FILE_INFORMATION_CLASS) -> Option<T> {
+                        let mut single = T::default();
+                        let mut io_status_block =_IO_STATUS_BLOCK::default();
 
                         let res = unsafe {
                             nt_query_information_file_hook(
@@ -943,8 +941,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
                     }
 
                     fn query_all(handle: HANDLE) -> Option<FILE_ALL_INFORMATION> {
-                        let mut all_info: FILE_ALL_INFORMATION =
-                            unsafe { MaybeUninit::zeroed().assume_init() };
+                        let mut all_info = FILE_ALL_INFORMATION::default();
 
                         all_info.BasicInformation =
                             query_single(handle, FILE_INFORMATION_CLASS::FileBasicInformation)?;

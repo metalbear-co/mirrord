@@ -106,11 +106,11 @@ pub fn try_insert_handle(handle_context: HandleContext) -> Option<MirrordHandle>
 }
 
 /// Run `fun` closure over each handle whose path matches the `object_attributes`.
-///
+/// 
 /// # Arguments
-///
-/// * `object_attributes` - The function should be used in the context of NT hooks where you're
-///   provided a [`POBJECT_ATTRIBUTES`] structure instead of a [`HANDLE`].
+/// 
+/// * `object_attributes` - The function should be used in the context of NT hooks where
+///    you're provided a [`POBJECT_ATTRIBUTES`] structure instead of a [`HANDLE`].
 /// * `fun` - Anything but.
 pub fn for_each_handle_with_path(
     object_attributes: POBJECT_ATTRIBUTES,
@@ -119,15 +119,15 @@ pub fn for_each_handle_with_path(
     let mut any = false;
 
     let name = read_object_attributes_name(object_attributes);
-    if let Some(linux_name) = remove_root_dir_from_path(name)
-        && let Ok(handles) = MANAGED_HANDLES.try_read()
-    {
-        for (handle, handle_context) in handles.iter() {
-            if let Ok(handle_context) = handle_context.clone().try_read()
-                && handle_context.path == linux_name
-            {
-                fun(handle, &handle_context);
-                any = true;
+    if let Some(linux_name) = remove_root_dir_from_path(name) {
+        if let Ok(handles) = MANAGED_HANDLES.try_read() {
+            for (handle, handle_context) in handles.iter() {
+                if let Ok(handle_context) = handle_context.clone().try_read() {
+                    if handle_context.path == linux_name {
+                        fun(handle, &handle_context);
+                        any = true;
+                    }
+                }
             }
         }
     }
