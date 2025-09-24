@@ -31,6 +31,7 @@ use crate::crd::{
     MirrordOperatorCrd, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
+    patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
     session::MirrordClusterSession,
@@ -682,6 +683,16 @@ impl OperatorClusterRole {
                 api_groups: Some(vec![PodTemplate::group(&()).into_owned()]),
                 resources: Some(vec![PodTemplate::plural(&()).into_owned()]),
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![MirrordClusterWorkloadPatch::group(&()).into_owned()]),
+                resources: Some(vec![
+                    MirrordClusterWorkloadPatch::plural(&()).into_owned(),
+                    MirrordClusterWorkloadPatchRequest::plural(&()).into_owned(),
+                    format!("{}/status", MirrordClusterWorkloadPatchRequest::plural(&())),
+                ]),
+                verbs: vec!["*".to_owned()],
                 ..Default::default()
             },
         ];
