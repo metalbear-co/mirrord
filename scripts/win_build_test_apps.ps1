@@ -41,8 +41,12 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Write-Host 'Chocolatey already installed.'
 }
 
-Write-Host 'Installing dependencies: nodejs, go, python3'
-choco install -y nodejs go python3
+Write-Host 'Installing dependencies: nodejs, go, python3, curl'
+choco install -y nodejs go python3 curl
+
+Write-Host 'Installing Python packages required by tests'
+python -m pip install --upgrade pip
+python -m pip install uvicorn fastapi flask
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $testsDir = Join-Path $repoRoot 'tests'
@@ -84,4 +88,49 @@ try {
     Pop-Location
 }
 
-Write-Host 'Finished installing test app frameworks.'
+$buildScripts = @(
+    @{ Path = Join-Path $repoRoot 'scripts/build_c_apps.sh'; Description = 'C test applications'; },
+    @{ Path = Join-Path $repoRoot 'scripts/build_go_apps.sh'; Description = 'Go test applications'; }
+)
+
+$bashCommand = Get-Command bash -ErrorAction SilentlyContinue
+$requiresWslPath = $false
+if ($bashCommand -and $bashCommand.Source -match 'system32\\bash.exe') {
+    $requiresWslPath = $true
+    $wslCommand = Get-Command wsl -ErrorAction SilentlyContinue
+    if (-not $wslCommand) {
+        Write-Error "WSL bash detected but Windows Subsystem for Linux is not enabled. Please follow https://learn.microsoft.com/windows/wsl/install to install WSL."
+        exit 1
+    }
+}
+
+foreach ($buildScript in $buildScripts) {
+    $scriptPath = $buildScript.Path
+    if (-not (Test-Path $scriptPath)) {
+        Write-Warning "Skipping $($buildScript.Description) build; script not found at $scriptPath"
+        continue
+    }
+
+    if (-not $bashCommand) {
+        Write-Warning "Skipping $($buildScript.Description) build; 'bash' command not available"
+        continue
+    }
+
+    $posixPath = $scriptPath -replace '\\', '/'
+    if ($requiresWslPath) {
+        $wslOutput = & wsl wslpath -a "$scriptPath"
+        if ($LASTEXITCODE -eq 0 -and $wslOutput) {
+            $posixPath = $wslOutput.Trim()
+        } else {
+            Write-Warning "Failed to convert $scriptPath to WSL path, using POSIX path $posixPath"
+        }
+    }
+
+    Write-Host "Running $($buildScript.Description) build script..."
+    & bash $posixPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Script $scriptPath failed with exit code $LASTEXITCODE"
+    }
+}
+
+Write-Host 'Finished building test apps.'

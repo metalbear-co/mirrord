@@ -32,7 +32,6 @@ use nix::{
     sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
 };
 use socket2::SockAddr;
-#[cfg(debug_assertions)]
 use tracing::Level;
 use tracing::{error, trace};
 
@@ -150,7 +149,7 @@ pub trait DnsSelectorExt {
 
 /// Unix-specific extensions for DnsSelector
 impl DnsSelectorExt for DnsSelector {
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn check_query(&self, node: &str, port: u16) -> Detour<()> {
         match self.check_query_result(node, port) {
             CheckQueryResult::Local => Detour::Bypass(Bypass::LocalDns),
@@ -256,7 +255,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address)
+#[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret, skip(raw_address)
 )]
 pub(super) fn bind(
     sockfd: c_int,
