@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.163.0](https://github.com/metalbear-co/mirrord/tree/3.163.0) - 2025-09-19
+
+
+### Added
+
+- Improved UX when spawning the agent pod fails or takes a long time
+  [#3578](https://github.com/metalbear-co/mirrord/issues/3578)
+- Added a configuration option to automatically inject `Mirrord-Agent` header
+  into responses to HTTP requests served by the mirrord-agent.
+  The header indicates whether the request was handled by the local
+  or the remote app. Header can be enabled with `agent.inject_headers`.
+
+
+### Fixed
+
+- Fixed compatibility issues with Go 1.25.
+
+
+### Internal
+
+- Improved mirrord-agent docs.
+- Increased the timeout on the layer test `outgoing::outgoing_tcp_bound_socket`
+  from 15 to 25 seconds to reduce chance of flakes on macOS.
+- Update CI to use newer versions of node and express.
+
 ## [3.162.0](https://github.com/metalbear-co/mirrord/tree/3.162.0) - 2025-09-16
 
 
