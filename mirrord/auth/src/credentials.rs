@@ -261,9 +261,30 @@ impl DateValidityExt for rfc5280::Validity {
 #[cfg(feature = "client")]
 pub mod client {
     use kube::{Api, Client, Resource, api::PostParams};
+    use serde::Serialize;
 
     use super::*;
     use crate::error::CredentialStoreError;
+
+    #[derive(Serialize, Debug, Clone)]
+    #[serde(rename = "camelCase")]
+    struct CertificateSigningRequest {
+        csr: String,
+        usage: CertificateUsage,
+    }
+
+    #[derive(Deserialize, Debug, Clone)]
+    struct CertificateSigningResponse {
+        certificate: Certificate,
+    }
+
+    #[derive(Serialize, Debug, Clone)]
+    #[serde(rename = "camelCase")]
+    enum CertificateUsage {
+        #[allow(unused)]
+        Regular,
+        Ci,
+    }
 
     impl Credentials {
         /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
@@ -289,6 +310,7 @@ pub mod client {
 
             let api: Api<R> = Api::all(client);
 
+            // TODO: Use `/certificates` endpoint once all operator instances are >= 3.127.0
             let certificate: Certificate = api
                 .create_subresource(
                     "certificate",
@@ -300,6 +322,45 @@ pub mod client {
 
             Ok(Credentials {
                 certificate,
+                key_pair,
+            })
+        }
+
+        /// Generate a new key pair, create a [`rfc2986::CertificationRequest`] for CI usage
+        /// and send it to the operator.
+        pub async fn init_ci<R>(
+            client: Client,
+            common_name: &str,
+        ) -> Result<Self, CredentialStoreError>
+        where
+            R: Resource + Clone + Debug,
+            R: for<'de> Deserialize<'de>,
+            R::DynamicType: Default,
+        {
+            let key_pair = KeyPair::new_random()?;
+
+            let csr = Self::certificate_request(common_name, &key_pair)?
+                .encode_pem()
+                .map_err(X509CertificateError::from)?;
+            let certificate_request = CertificateSigningRequest {
+                csr,
+                usage: CertificateUsage::Ci,
+            };
+
+            let api: Api<R> = Api::all(client);
+
+            let response: CertificateSigningResponse = api
+                .create_subresource(
+                    "certificates",
+                    "operator",
+                    &PostParams::default(),
+                    serde_json::to_vec(&certificate_request)
+                        .expect("to bytes serialization shouldn't fail"),
+                )
+                .await?;
+
+            Ok(Credentials {
+                certificate: response.certificate,
                 key_pair,
             })
         }
@@ -394,7 +455,7 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
     #[test]
     fn v1_ci_api_key_encode_decode() {
         // This credential is generated using a test root issuer
-        const V1_API_KEY: &str = "mci-v1:eNptk8uSmzoQhhdnRxXvkP3UqTFgZsziLAQIELZgMBgQOy62DBbEYxvL5pnOG2YTeZJUTSpRlTbd6tb_9eWb_c-_j2NCFwVfLLhOkIMskMAPqyxhhCw8WRbYhhRwZAIqbgI8k-JTkQMH2GaA4wVfRcROo8i2rcLcwAON1VRHTjrKUplHNHXTqXHNCcF0bNz0Xnv-sVY3NHFZV2T6VCSwxCZ1gbKBFuXrKDV9BC9sG5upLFU9myFnzWot4t6-DnC34WECddzBCdtYyz5s9e-2Dgw43nDEiS1LH8rM26XM_Xul-YdVFhwj6ERxbK6K_EDTTD82lrkp8mCGLc5NEbVU09GMgI0icJIlZYaqO4GJf9w3zqnSFgYPr-d3e07rZqv1Srr4anoT6f330AIR5ZRCKGpnAkDylaowWWpc50z6dF-3xrnMAlYNAVupbCz6hQl2C0i3zisa1nrtbtqw9YVfEA_mvcwDhlreijpkzjzXAkby9YS6rzdsgzMaAoUMQVf3jDcuu1bMOBYWekEdUUlGlDCpZ6sEaKRDF1kKbMjDWGkDNehWCdFwhlXsojnuoUJadEa9cS9UZyxzgfkpWzWk58p6aGhE50jG27Av9pUnCCxfLXJ_KjNjFJpafJ_fcEdGbD2ysbHW1vuqD1jh_KAWFIL7QVEPBatb9FL0zlnMwoPkQbYTP-yJejlWfbOrMuNQxILmEIhoMTvwkaEe1seiZ514zdAw-9Ut_uiWaLT3rM-eYlA2T6fzNemiRLFSBeb2vXzTDSMYlrI0zZWw0bqKpWTvh3TKXyq81JPSKqPbczvX-65b8u3u_amhr8PVSiude7L0sRIwsP-yJv9_WqK3NUqF58sSkl9L5EAxFFAI_CnUQhD5RaK9cD6ba-9TRovTyhkVRK9okXvAiYnydh1zV4e3-HqUJRpDsDQay130JryXgrxUjee32j69LukT8rz8ol_S3RKsF6rfkv8-if1TznfBtD2g";
+        const V1_API_KEY: &str = "mci-v1:eNptU8uSqzYUXGRHFf9w967U2PgRs8hCgMBikGzeiB0Pm4cFlwEzDP6AfE3-MJuIyU3VpHJVpc2R1Oruc_qvP375dVkKNBD5pkLHQzpSgQc_q6KAEVLpU1VBeS7AhBRQ8O2Bk1LgPo6ADjSFYPc4WTbVAtvWNDVWfHgvXCnYIz0YRSGJ7CIwgmduKE8EgzE3gjk7mV0m-YVnsDoO98_YgwlWCgNsfKgWk2MHiongg11dJRCFtGFrpDss29rTqcwIrv3p7ME9ruETa3gbftay_9Zq0GLXn9BENVH4ZKZ8PJLInNOtebdC0tlQt11XseLoXgThvstVxY8jssbqNCn81asUjIoNNGQrkSjcy8domrIi2SsyxMX7xjeSGQarZA_PB4Z37jy-d_M19F_P3L1iKgq45t4pANDIkjZMFHJDH2gTlFklD0lIWNoSZklsjJujAm5HWFz131Dr7DPDr86Vyc-54laZk4gwVE0V9yHUd9GWMBo5T1R__8AaGFBLNrQlddawKTfYe8rkLlbRAdVUoiHdnL1sbXlgS2v0EAWiwensbioikdry6BaHWMIG2uEGbmiFBtTIcyzpYxJ15Ve0tA2GVF045LxzNJyqcxOX6YkrUE0pjsxnEsoj51ThefeBazpidUFjY7Z1yrQhLNb_Uc1VcN2LiqyNWVahQ9zoA5-FRcmi7MZ_KKn06NImv6WhfI9druZO-Gs-O3BByFqnixtW89sMtevJKuht8fiLw3VqMO6g_U6lYM5VecoaeeI811fbtkThOpubTNLbBRtzhB_9npZ-2zbYrDM7lXtSGbgf1y29NJe-TVKZ0ENlHwb5TRR6M0pWfZu9Xev-tD1KG-MOUQ7rZqfnVr7rYtldteq0rVYvWbQC17n5jkXhM1SQaD8J2p9fYnhxUMBPvr1C-m8MdagCG3KCP4iqCKKTw4B7HNX7sbwweEQ9fDm9vb08PI8WRPXhQVNvD-yiUiOiULgQ8EimaeXe7Px-4Q5RSw6UZij1WzM62th5Zzj0_SFrGQO_fyH7fzp_A7b4Vbg";
 
         let api_key = CiApiKey::decode(V1_API_KEY).expect("decode api key");
         let CiApiKey::V1(credentials) = &api_key;

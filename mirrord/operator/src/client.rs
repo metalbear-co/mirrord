@@ -417,13 +417,12 @@ where
     }
 
     pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
-        let api_key: CiApiKey = Credentials::init::<MirrordOperatorCrd>(
+        let api_key: CiApiKey = Credentials::init_ci::<MirrordOperatorCrd>(
             self.client.clone(),
             &format!(
                 "mirrord-ci@{}",
                 self.operator.spec.license.organization.as_str()
             ),
-            None,
         )
         .await
         .map_err(|error| {

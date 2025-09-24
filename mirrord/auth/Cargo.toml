@@ -26,6 +26,7 @@ client = [
 	"dep:k8s-openapi",
 	"dep:kube",
 	"dep:reqwest",
+	"dep:serde_json",
 	"dep:serde_yaml",
 	"dep:thiserror",
 	"dep:tokio",
@@ -45,6 +46,7 @@ fs4 = { workspace = true, optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = { workspace = true, optional = true }
