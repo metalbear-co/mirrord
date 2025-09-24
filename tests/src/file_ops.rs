@@ -67,18 +67,9 @@ mod file_ops_tests {
         #[notrace]
         basic_service: KubeService,
     ) {
-        // NOTE(gabriela): Windows loves to use it's "App execution alias" functionality
-        // for python binaries
-        // ```
-        // PS C:\dev\rust\mirrord\tests> $(Get-Command python3).path
-        // C:\Users\gabriela\AppData\Local\Microsoft\WindowsApps\python3.exe
-        // ```
-        // So this should be overrideable in this context.
-        let python_command = std::env::var("MIRRORD_PYTHON_FILE").unwrap_or("python3".to_string());
-
         let service = basic_service.await;
         let python_command = [
-            python_command.as_str(),
+            "python",
             "-B",
             "-m",
             "unittest",

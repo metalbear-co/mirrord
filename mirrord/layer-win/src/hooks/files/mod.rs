@@ -293,20 +293,18 @@ unsafe extern "system" fn nt_create_file_hook(
             };
 
             // Try to open the file on the pod.
-            let req = make_proxy_request_with_response(OpenFileRequest {
+            let Ok(req) = make_proxy_request_with_response(OpenFileRequest {
                 path: PathBuf::from(&linux_path),
                 open_options,
-            });
-
-            // Try to get request.
-            if req.is_err() {
+            }) else  {
                 tracing::error!("nt_create_file_hook: Request for open file failed!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
-            }
-            let req = req.unwrap();
+            };
 
             let managed_handle = match req {
                 Ok(file) => {
+                    let current_time = WindowsTime::current().as_file_time();
+
                     try_insert_handle(HandleContext {
                         path: linux_path.clone(),
                         fd: file.fd,
@@ -315,11 +313,10 @@ unsafe extern "system" fn nt_create_file_hook(
                         share_access,
                         create_disposition,
                         create_options,
-                        // Initialize following variables to current time. Update later.
-                        creation_time: WindowsTime::current().as_file_time(),
-                        access_time: WindowsTime::current().as_file_time(),
-                        write_time: WindowsTime::current().as_file_time(),
-                        change_time: WindowsTime::current().as_file_time(),
+                        creation_time: current_time,
+                        access_time: current_time,
+                        write_time: current_time,
+                        change_time: current_time,
                     })
                 }
                 Err(e) => {
@@ -400,19 +397,17 @@ unsafe extern "system" fn nt_read_file_hook(
             handle_context.access_time = WindowsTime::current().as_file_time();
 
             // Get cursor, or update cursor if we have a byte offset.
-            let cursor = try_seek(
+            let Some(cursor) = try_seek(
                 handle_context.fd,
                 if byte_offset.is_null() {
                     SeekFromInternal::Current(0)
                 } else {
                     SeekFromInternal::Start(*(*byte_offset).QuadPart() as _)
                 },
-            );
-            if cursor.is_none() {
+            ) else {
                 tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
-            }
-            let cursor = cursor.unwrap();
+            };
 
             let bytes = match make_proxy_request_with_response(ReadFileRequest {
                 remote_fd: handle_context.fd,
