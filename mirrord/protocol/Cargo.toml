@@ -40,6 +40,3 @@ strum_macros.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 nix = { workspace = true, features = ["fs"] }
-
-[features]
-windows_build = []
