@@ -13,6 +13,7 @@ use tracing::{debug, error, trace};
 use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
+#[cfg(windows)]
 use winapi::um::winsock2::{WSAEINPROGRESS, WSAEINTR};
 
 use super::sockets::{set_socket_state, socket_descriptor_to_i64};
