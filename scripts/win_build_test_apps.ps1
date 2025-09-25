@@ -18,7 +18,8 @@ function Invoke-GoBuild {
         if ($exitCode -ne 0) {
             throw "go build exited with code $exitCode in directory $DirectoryName for output $OutputName using toolchain $GoToolchain"
         }
-    } finally {
+    }
+    finally {
         if ($GoToolchain) {
             if ($null -eq $previousToolchain) {
                 Remove-Item Env:GOTOOLCHAIN -ErrorAction SilentlyContinue
@@ -27,6 +28,20 @@ function Invoke-GoBuild {
             }
         }
     }
+}
+
+function Convert-ToWslPath {
+    param(
+        [string]$WindowsPath
+    )
+
+    if ($WindowsPath -match '^[A-Za-z]:\\') {
+        $driveLetter = $WindowsPath.Substring(0, 1).ToLower()
+        $relativePath = $WindowsPath.Substring(2) -replace '\\', '/'
+        return "/mnt/$driveLetter$relativePath"
+    }
+
+    return $WindowsPath -replace '\\', '/'
 }
 
 $ErrorActionPreference = 'Stop'
@@ -89,20 +104,67 @@ try {
 }
 
 $buildScripts = @(
-    @{ Path = Join-Path $repoRoot 'scripts/build_c_apps.sh'; Description = 'C test applications'; },
-    @{ Path = Join-Path $repoRoot 'scripts/build_go_apps.sh'; Description = 'Go test applications'; }
+    @{ Path = Join-Path $repoRoot 'scripts/build_c_apps.sh'; Description = 'C test applications'; Arguments = @('out.c_test_app') },
+    @{ Path = Join-Path $repoRoot 'scripts/build_go_apps.sh'; Description = 'Go test applications'; Arguments = @('25') }
 )
 
-$bashCommand = Get-Command bash -ErrorAction SilentlyContinue
-$requiresWslPath = $false
-if ($bashCommand -and $bashCommand.Source -match 'system32\\bash.exe') {
-    $requiresWslPath = $true
-    $wslCommand = Get-Command wsl -ErrorAction SilentlyContinue
-    if (-not $wslCommand) {
-        Write-Error "WSL bash detected but Windows Subsystem for Linux is not enabled. Please follow https://learn.microsoft.com/windows/wsl/install to install WSL."
-        exit 1
-    }
+$wslCommand = Get-Command wsl -ErrorAction SilentlyContinue
+if (-not $wslCommand) {
+    throw "WSL is required to build native test applications. Follow the setup guide at https://learn.microsoft.com/windows/wsl/install"
 }
+
+Write-Host 'Ensuring Go is available inside WSL...'
+$ensureGoScript = @'
+set -euo pipefail
+install_dir="$HOME/.mirrord-go"
+if command -v go >/dev/null 2>&1; then
+    exit 0
+fi
+if [ -x "$install_dir/current/bin/go" ]; then
+    exit 0
+fi
+GO_VERSION="go1.25.1"
+ARCHIVE="${GO_VERSION}.linux-amd64.tar.gz"
+TMP_DIR="$(mktemp -d)"
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+cd "$TMP_DIR"
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSLo go.tgz "https://go.dev/dl/$ARCHIVE"
+elif command -v wget >/dev/null 2>&1; then
+    wget -qO go.tgz "https://go.dev/dl/$ARCHIVE"
+else
+    echo "WSL is missing curl or wget; cannot install Go." >&2
+    exit 1
+fi
+tar -xzf go.tgz
+mkdir -p "$install_dir"
+rm -rf "$install_dir/$GO_VERSION"
+mv go "$install_dir/$GO_VERSION"
+ln -sfn "$install_dir/$GO_VERSION" "$install_dir/current"
+'@
+
+$ensureGoScript = $ensureGoScript -replace "`r`n", "`n"
+$tempGoScript = [System.IO.Path]::GetTempFileName()
+try {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tempGoScript, $ensureGoScript, $utf8NoBom)
+    $tempGoScriptWsl = Convert-ToWslPath -WindowsPath $tempGoScript
+    & wsl --exec /bin/bash $tempGoScriptWsl
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to provision Go inside WSL'
+    }
+} finally {
+    Remove-Item $tempGoScript -ErrorAction SilentlyContinue
+}
+
+$wslHome = (& wsl --exec /bin/bash -lc 'printf %s "$HOME"')
+if ([string]::IsNullOrWhiteSpace($wslHome)) {
+    throw 'Failed to resolve WSL home directory'
+}
+
+$wslBasePath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+$goPathPrefix = "PATH=$wslHome/.mirrord-go/current/bin:$wslBasePath"
 
 foreach ($buildScript in $buildScripts) {
     $scriptPath = $buildScript.Path
@@ -111,26 +173,32 @@ foreach ($buildScript in $buildScripts) {
         continue
     }
 
-    if (-not $bashCommand) {
-        Write-Warning "Skipping $($buildScript.Description) build; 'bash' command not available"
-        continue
+    $arguments = @()
+    if ($buildScript.ContainsKey('Arguments')) {
+        $arguments = $buildScript.Arguments
     }
 
-    $posixPath = $scriptPath -replace '\\', '/'
-    if ($requiresWslPath) {
-        $wslOutput = & wsl wslpath -a "$scriptPath"
-        if ($LASTEXITCODE -eq 0 -and $wslOutput) {
-            $posixPath = $wslOutput.Trim()
-        } else {
-            Write-Warning "Failed to convert $scriptPath to WSL path, using POSIX path $posixPath"
-        }
-    }
-
+    $wslScriptPath = Convert-ToWslPath -WindowsPath $scriptPath
+    $wslArgs = @('--exec', 'env', $goPathPrefix, '/bin/bash', $wslScriptPath) + $arguments
     Write-Host "Running $($buildScript.Description) build script..."
-    & bash $posixPath
+    & wsl @wslArgs
+
     if ($LASTEXITCODE -ne 0) {
         throw "Script $scriptPath failed with exit code $LASTEXITCODE"
     }
+}
+
+$ciScript = Join-Path $repoRoot 'scripts/win_wsl_setup_ci_env.sh'
+if (Test-Path $ciScript) {
+    Write-Host 'Running WSL CI environment setup script...'
+    $ciScriptWsl = Convert-ToWslPath -WindowsPath $ciScript
+    $ciArgs = @('--exec', 'env', $goPathPrefix, '/bin/bash', $ciScriptWsl)
+    & wsl @ciArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw 'win_wsl_setup_ci_env.sh failed with exit code ' + $LASTEXITCODE
+    }
+} else {
+    Write-Warning 'win_wsl_setup_ci_env.sh not found; skipping WSL environment initialization.'
 }
 
 Write-Host 'Finished building test apps.'
