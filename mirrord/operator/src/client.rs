@@ -406,25 +406,6 @@ where
         Ok(())
     }
 
-    pub fn check_operator_version<P>(&self, progress: &P) -> bool
-    where
-        P: Progress,
-    {
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION"))
-            .expect("Something went wrong when parsing mirrord version!");
-
-        if self.operator.spec.operator_version > mirrord_version {
-            let message = format!(
-                "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
-                mirrord_version, self.operator.spec.operator_version
-            );
-            progress.warning(&message);
-            false
-        } else {
-            true
-        }
-    }
-
     /// Returns a reference to the operator resource fetched from the cluster.
     pub fn operator(&self) -> &MirrordOperatorCrd {
         &self.operator

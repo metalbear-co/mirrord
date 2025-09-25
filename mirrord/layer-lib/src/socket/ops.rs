@@ -1,6 +1,6 @@
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
-use std::{net::SocketAddr, sync::Arc};
+use std::{convert::TryFrom, net::SocketAddr, sync::Arc};
 
 #[cfg(unix)]
 use libc::{AF_UNIX, c_void, sockaddr, socklen_t};
@@ -13,8 +13,12 @@ use tracing::{debug, error, trace};
 use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
+#[cfg(windows)]
+use winapi::um::winsock2::{WSAEINPROGRESS, WSAEINTR};
 
 use super::sockets::{set_socket_state, socket_descriptor_to_i64};
+#[cfg(windows)]
+use crate::error::windows::WindowsError;
 use crate::{
     HookError, HookResult,
     error::ConnectError,
@@ -77,8 +81,6 @@ impl ConnectResult {
             }
             #[cfg(windows)]
             {
-                const WSAEINTR: i32 = 10004;
-                const WSAEINPROGRESS: i32 = 10036;
                 error != WSAEINTR && error != WSAEINPROGRESS
             }
         })
@@ -119,24 +121,29 @@ impl From<ConnectResult> for i32 {
 }
 
 // Platform-specific error handling
-#[cfg(unix)]
 fn get_last_error() -> i32 {
-    unsafe { *libc::__errno_location() }
+    #[cfg(unix)]
+    unsafe {
+        *libc::__errno_location()
+    }
+
+    #[cfg(windows)]
+    match WindowsError::wsa_last_error() {
+        WindowsError::WinSock(code) => code,
+        _ => unreachable!(),
+    }
 }
 
-#[cfg(unix)]
 fn set_last_error(error: i32) {
-    unsafe { *libc::__errno_location() = error };
-}
+    #[cfg(unix)]
+    unsafe {
+        *libc::__errno_location() = error
+    };
 
-#[cfg(windows)]
-fn get_last_error() -> i32 {
-    unsafe { winapi::um::winsock2::WSAGetLastError() }
-}
-
-#[cfg(windows)]
-fn set_last_error(error: i32) {
-    unsafe { winapi::um::winsock2::WSASetLastError(error) };
+    #[cfg(windows)]
+    unsafe {
+        winapi::um::winsock2::WSASetLastError(error)
+    };
 }
 
 /// Common logic for outgoing connections that can be used by platform-specific implementations.

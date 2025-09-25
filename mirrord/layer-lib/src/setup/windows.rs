@@ -3,22 +3,21 @@
 /// until it becomes layer's LayerSetup
 use std::{net::SocketAddr, sync::OnceLock};
 
-use anyhow;
-use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::network::outgoing::OutgoingConfig,
-    target::Target,
-};
+use mirrord_config::{LayerConfig, feature::network::outgoing::OutgoingConfig, target::Target};
 
 use crate::{
+    error::{LayerError, LayerResult},
     setup::CONFIG,
     socket::{DnsSelector, OutgoingSelector},
 };
 
 static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
-pub fn init_setup(config: LayerConfig) -> anyhow::Result<()> {
-    let state = LayerSetup::new(config);
-    SETUP.set(state).expect("Failed to set layer setup");
+pub fn init_setup(config: LayerConfig, proxy_address: SocketAddr) -> LayerResult<()> {
+    let state = LayerSetup::new(config, proxy_address);
+    SETUP.set(state).map_err(|_| {
+        LayerError::GlobalAlreadyInitialized("Layer setup already initialized".into())
+    })?;
     Ok(())
 }
 
@@ -39,20 +38,10 @@ pub struct LayerSetup {
 }
 
 impl LayerSetup {
-    pub fn new(config: LayerConfig) -> Self {
+    pub fn new(config: LayerConfig, proxy_address: SocketAddr) -> Self {
         let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
-
         let dns_selector = DnsSelector::from(&config.feature.network.dns);
-
-        let proxy_address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-            .expect("missing internal proxy address")
-            .parse::<SocketAddr>()
-            .expect("malformed internal proxy address");
-
         let local_hostname = !config.feature.hostname;
-
-        CONFIG.set(config).expect("Failed to set layer config");
-
         Self {
             // config,
             outgoing_selector,

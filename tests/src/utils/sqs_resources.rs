@@ -18,6 +18,7 @@ use aws_sdk_sqs::types::{
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
 use futures_util::FutureExt;
+use http_body_util::BodyExt;
 use k8s_openapi::{
     api::{
         apps::v1::Deployment,
@@ -28,7 +29,10 @@ use k8s_openapi::{
     },
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
-use kube::{api::PostParams, Api, Client, Resource};
+use kube::{
+    api::{ListParams, PostParams},
+    Api, Client, Resource, ResourceExt,
+};
 use mirrord_operator::{
     crd::{
         MirrordSqsSession, MirrordWorkloadQueueRegistry, MirrordWorkloadQueueRegistrySpec,
@@ -37,6 +41,7 @@ use mirrord_operator::{
     },
     setup::OPERATOR_NAME,
 };
+use regex::Regex;
 use serde::Serialize;
 
 use super::{get_test_resource_label_map, port_forwarder::PortForwarder, watch::Watcher};
@@ -142,6 +147,97 @@ impl SqsTestResources {
                 return;
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    fn get_required_metrics_strings(&self) -> Vec<String> {
+        vec![
+            format!(
+                r#"mirrord_read_sqs_messages_count{{original_queue="{}"}} 6"#,
+                self.queue1.url
+            ),
+            format!(
+                r#"mirrord_read_sqs_messages_count{{original_queue="{}"}} 6"#,
+                self.queue2.url
+            ),
+            format!(
+                r#"mirrord_unmatched_sqs_messages_count{{original_queue="{}"}} 2"#,
+                self.queue1.url
+            ),
+            format!(
+                r#"mirrord_unmatched_sqs_messages_count{{original_queue="{}"}} 2"#,
+                self.queue2.url
+            ),
+        ]
+    }
+
+    fn get_required_metrics_patterns(&self) -> Vec<String> {
+        vec![
+            format!(
+                r#"mirrord_sqs_messages_forwarded_to_user_count\{{k8s_user=".*",local_username=".*",original_queue="{}"\}} 4"#,
+                self.queue1.url
+            ),
+            format!(
+                r#"mirrord_sqs_messages_forwarded_to_user_count\{{k8s_user=".*",local_username=".*",original_queue="{}"\}} 4"#,
+                self.queue2.url
+            ),
+        ]
+    }
+
+    pub async fn verify_prometheus_metrics(&self) {
+        const METRICS_PORT: u16 = 9000;
+        let pod_api = kube::Api::<Pod>::namespaced(self.kube_client.clone(), "mirrord");
+        let lp = ListParams {
+            label_selector: Some("app=mirrord-operator".to_string()),
+            ..Default::default()
+        };
+        let pods = pod_api.list(&lp).await.unwrap();
+        let operator_pod = pods
+            .items
+            .first()
+            .expect("No operator pod found to get metrics from");
+        println!("Operator pod: {:?}", operator_pod);
+        let mut port_forward = pod_api
+            .portforward(&operator_pod.name_unchecked(), &[METRICS_PORT])
+            .await
+            .unwrap();
+        let stream = port_forward.take_stream(METRICS_PORT).unwrap();
+
+        let (mut sender, connection) =
+            hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
+                .await
+                .unwrap();
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                println!("Error in connection: {e:?}");
+            }
+        });
+
+        let http_req = hyper::Request::builder()
+            .uri("/metrics")
+            .header("Connection", "close")
+            .header("Host", "localhost")
+            .method("GET")
+            .body(http_body_util::Empty::<hyper::body::Bytes>::new())
+            .unwrap();
+
+        let (parts, body) = sender
+            .send_request(http_req)
+            .await
+            .inspect_err(|e| eprintln!("GETting metrics from operator failed: {e}"))
+            .unwrap()
+            .into_parts();
+        assert_eq!(parts.status, 200);
+
+        let body_bytes = body.collect().await.unwrap().to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes).unwrap();
+        println!("Metrics (for prometheus):\n{}", body_str);
+        for s in self.get_required_metrics_strings() {
+            assert!(body_str.contains(&s));
+        }
+        for pattern in self.get_required_metrics_patterns() {
+            let regex = Regex::new(&pattern).unwrap();
+            assert!(regex.is_match(body_str));
         }
     }
 }

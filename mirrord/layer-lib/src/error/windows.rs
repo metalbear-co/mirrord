@@ -23,30 +23,25 @@ pub enum ConsoleError {
 }
 pub type ConsoleResult<T> = Result<T, ConsoleError>;
 
-pub struct WindowsError {
+pub enum WindowsError {
     /// Usually returned by [`winapi::umm::errhandlingapi::GetLastError`].
-    error: u32,
+    Windows(u32),
+    /// Usually returned by Winsock functions. [`winapi::um::winsock2::WSAGetLastError`].
+    WinSock(i32),
 }
+pub type WindowsResult<T, E = WindowsError> = Result<T, E>;
 
 impl WindowsError {
-    /// Generate new [`WindowsError`] from Windows system error code.
-    ///
-    /// # Arguments
-    ///
-    /// * `error` - Windows system error code.
-    pub fn new(error: u32) -> Self {
-        Self { error }
-    }
-
     /// Generate a new [`WindowsError`] from [`GetLastError`].
     pub fn last_error() -> Self {
         let error = unsafe { GetLastError() };
-        Self { error }
+        Self::Windows(error)
     }
 
-    /// Get raw Windows system error code.
-    pub fn get_error(&self) -> u32 {
-        self.error
+    /// Generate a new [`WindowsError`] from [`WSAGetLastError`].
+    pub fn wsa_last_error() -> Self {
+        let error = unsafe { winapi::um::winsock2::WSAGetLastError() };
+        Self::WinSock(error)
     }
 
     /// Returns an en-US string of a Windows system error code.
@@ -54,7 +49,7 @@ impl WindowsError {
     /// # Arguments
     ///
     /// * `error` - Windows system error code.
-    pub fn format_windows_error_code(error: u32) -> Option<String> {
+    pub fn format_error_code(error: u32) -> Option<String> {
         let mut buf: [u16; 256] = [0; 256];
 
         // Use MAKELANGID macro to get en-US language ID.
@@ -87,13 +82,11 @@ impl WindowsError {
 
     /// Returns an en-US string of our Windows system error code.
     pub fn get_formatted_error(&self) -> Option<String> {
-        Self::format_windows_error_code(self.error)
-    }
-}
-
-impl From<u32> for WindowsError {
-    fn from(val: u32) -> Self {
-        WindowsError::new(val)
+        let err: u32 = match self {
+            Self::Windows(code) => *code,
+            Self::WinSock(code) => *code as _,
+        };
+        Self::format_error_code(err)
     }
 }
 
@@ -114,11 +107,5 @@ impl Debug for WindowsError {
             self.get_formatted_error()
                 .unwrap_or("Not a valid Windows error code".into())
         ))
-    }
-}
-
-impl PartialEq for WindowsError {
-    fn eq(&self, other: &Self) -> bool {
-        self.error == other.error
     }
 }
