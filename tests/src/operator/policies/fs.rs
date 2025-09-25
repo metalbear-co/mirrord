@@ -39,6 +39,7 @@ pub async fn create_namespaced_fs_policy_and_try_file_open(
                 require_profile: Default::default(),
                 profile_allowlist: Default::default(),
                 applies_to_copy_targets: Default::default(),
+                split_queues: Default::default(),
             },
         ),
         &service.namespace,
