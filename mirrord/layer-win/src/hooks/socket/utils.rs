@@ -360,13 +360,8 @@ impl Drop for ManagedHostent {
         if !hostent.h_name.is_null() {
             // Calculate the length of the null-terminated string
             let hostname_len = unsafe {
-                let mut len = 0;
-                let mut ptr = hostent.h_name;
-                while *ptr != 0 {
-                    len += 1;
-                    ptr = ptr.add(1);
-                }
-                len + 1 // Include null terminator
+                let ptr = hostent.h_name;
+                (0..).take_while(|&i| *ptr.offset(i) != 0).count() + 1
             };
 
             if let Ok(layout) = Layout::from_size_align(hostname_len, 1) {
@@ -606,7 +601,10 @@ impl WindowsAddrInfo for ADDRINFOA {
     unsafe fn free_canonname(canonname: Self::CanonName) {
         if !canonname.is_null() {
             unsafe {
-                let _ = std::ffi::CString::from_raw(canonname);
+                let ptr = canonname;
+                let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
+                let layout = Layout::array::<u16>(len + 1).unwrap();
+                std::alloc::dealloc(canonname as *mut u8, layout);
             }
         }
     }
@@ -649,10 +647,9 @@ impl WindowsAddrInfo for ADDRINFOW {
     }
 
     fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
-        // Convert UTF-8 string to UTF-16 wide string
-        let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-        let layout =
-            std::alloc::Layout::array::<u16>(wide.len()).map_err(AddrInfoError::LayoutError)?;
+        let mut wide: Vec<u16> = s.encode_utf16().collect();
+        wide.push(0);
+        let layout = Layout::array::<u16>(wide.len()).map_err(AddrInfoError::LayoutError)?;
         let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
         if ptr.is_null() {
             return Err(AddrInfoError::NullPointer);
@@ -691,17 +688,10 @@ impl WindowsAddrInfo for ADDRINFOW {
     unsafe fn free_canonname(canonname: Self::CanonName) {
         if !canonname.is_null() {
             unsafe {
-                // For wide strings, we need to find the length first
-                let mut len = 0;
-                let mut current = canonname;
-                while *current != 0 {
-                    len += 1;
-                    current = current.add(1);
-                }
-                if len > 0 {
-                    let layout = std::alloc::Layout::array::<u16>(len + 1).unwrap();
-                    std::alloc::dealloc(canonname as *mut u8, layout);
-                }
+                let ptr = canonname;
+                let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
+                let layout = Layout::array::<u16>(len + 1).unwrap();
+                std::alloc::dealloc(canonname as *mut u8, layout);
             }
         }
     }

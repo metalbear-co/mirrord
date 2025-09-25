@@ -259,6 +259,7 @@ use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
+use libc::EXIT_FAILURE;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -558,7 +559,7 @@ where
     let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
         error!("Process failed: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        1
+        EXIT_FAILURE
     });
     std::process::exit(exit_code);
 }

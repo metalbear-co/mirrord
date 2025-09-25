@@ -4,9 +4,10 @@ use std::{
     time::Duration,
 };
 
+use libc::EXIT_FAILURE;
 use windows::Win32::{
     Foundation::{HANDLE, INVALID_HANDLE_VALUE},
-    System::Threading::{self as Win32Threading, WaitForSingleObject},
+    System::Threading::{self as Win32Threading, ResumeThread, WaitForSingleObject},
 };
 
 pub struct HandleWrapper(pub HANDLE);
@@ -139,13 +140,13 @@ impl WindowsProcess {
                     {
                         exit_code as i32
                     } else {
-                        1
+                        EXIT_FAILURE
                     }
                 }
             }
         })
         .await
-        .unwrap_or(1);
+        .unwrap_or(EXIT_FAILURE);
 
         // Wait for I/O tasks to complete
         let _ = tokio::time::timeout(Duration::from_secs(10), async {
@@ -176,9 +177,7 @@ impl WindowsProcessExtSuspended for WindowsProcess {
     fn resume(&self) -> windows::core::Result<()> {
         unsafe {
             // ResumeThread: If the function fails, the return value is (DWORD) -1
-            if ::windows::Win32::System::Threading::ResumeThread(self.process_info.hThread)
-                == u32::MAX
-            {
+            if ResumeThread(self.process_info.hThread) == u32::MAX {
                 return Err(windows::core::Error::from_win32());
             }
         }

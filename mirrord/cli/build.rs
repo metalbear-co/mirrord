@@ -18,7 +18,7 @@ fn recheck_and_setup_layer_file() {
                 .ancestors()
                 .nth(3)
                 .expect("Failed extracting build directory from OUT_DIR");
-            let layer = build_dir.join("layer_win.dll");
+            let layer = build_dir.join("mirrord_layer_win.dll");
 
             println!(
                 "cargo:rustc-env=MIRRORD_LAYER_FILE={}",

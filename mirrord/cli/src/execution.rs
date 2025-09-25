@@ -35,14 +35,13 @@ use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
-#[cfg(not(target_os = "windows"))]
-use crate::extract::extract_library;
 #[cfg(unix)]
 use crate::util::reparent_to_init;
 use crate::{
     CliResult,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
+    extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
 };
 
@@ -199,8 +198,6 @@ impl MirrordExecution {
         P: Progress,
     {
         // Extract Layer from exe
-        // currently disabled for windows
-        #[cfg(not(target_os = "windows"))]
         let lib_path = extract_library(None, progress, true)?;
 
         if !config.use_proxy {

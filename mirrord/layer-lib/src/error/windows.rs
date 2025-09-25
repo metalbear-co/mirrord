@@ -26,7 +26,7 @@ pub type ConsoleResult<T> = Result<T, ConsoleError>;
 pub enum WindowsError {
     /// Usually returned by [`winapi::umm::errhandlingapi::GetLastError`].
     Windows(u32),
-    // Usually returned by Winsock functions. [`winapi::um::winsock2::WSAGetLastError`].
+    /// Usually returned by Winsock functions. [`winapi::um::winsock2::WSAGetLastError`].
     WinSock(i32),
 }
 pub type WindowsResult<T, E = WindowsError> = Result<T, E>;
