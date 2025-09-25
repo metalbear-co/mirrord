@@ -68,7 +68,6 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
-libc.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource"] }
@@ -84,6 +83,7 @@ xmas-elf = "0.10"
 str-win = { path = "../str-win" }
 windows.workspace = true
 dll-syringe.workspace = true
+libc.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
