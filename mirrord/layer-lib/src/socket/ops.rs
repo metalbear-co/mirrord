@@ -152,7 +152,7 @@ fn get_last_error() -> i32 {
 fn set_last_error(error: i32) {
     #[cfg(unix)]
     unsafe {
-        *__errno_location() = error
+        *errno_location() = error
     };
 
     #[cfg(windows)]
