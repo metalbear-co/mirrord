@@ -44,6 +44,8 @@ fn initialize_detour_guard() -> anyhow::Result<()> {
 }
 
 fn release_detour_guard() -> anyhow::Result<()> {
+    let test: anyhow::Result<()> = Err(LayerError::UnsupportedSocketType("waah"));
+    let test = test?;
     unsafe {
         // This will release the hooking engine, removing all hooks.
         if let Some(guard) = DETOUR_GUARD.as_mut() {

@@ -81,7 +81,7 @@ use std::{
 };
 
 use ctor::ctor;
-use error::{LayerError, Result};
+use error::{HookResult as Result, LayerError};
 use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
