@@ -1,0 +1,1 @@
+Pinned `ci-agent-runtime` image to specific commit.
