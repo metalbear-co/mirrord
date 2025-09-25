@@ -647,8 +647,7 @@ impl WindowsAddrInfo for ADDRINFOW {
     }
 
     fn string_to_canonname(s: String) -> Result<Self::CanonName, AddrInfoError> {
-        let mut wide: Vec<u16> = s.encode_utf16().collect();
-        wide.push(0);
+        let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
         let layout = Layout::array::<u16>(wide.len()).map_err(AddrInfoError::LayoutError)?;
         let ptr = unsafe { std::alloc::alloc(layout) as *mut u16 };
         if ptr.is_null() {

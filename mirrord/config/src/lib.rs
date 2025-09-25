@@ -1230,7 +1230,8 @@ mod tests {
     fn encode_and_decode_advanced_config() {
         let mut cfg_context = ConfigContext::default();
 
-        let advanced_config: String = format!(r#"
+        let advanced_config: String = format!(
+            r#"
         {{
             "accept_invalid_certificates": false,
             "target": {{
@@ -1254,7 +1255,9 @@ mod tests {
                     }}
                 }}
             }}
-        }}"#, USER_ENVVAR);
+        }}"#,
+            USER_ENVVAR
+        );
         // this config includes template variables, so it needs to be rendered first
         let mut template_engine = Tera::default();
         template_engine
@@ -1279,5 +1282,4 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     const USER_ENVVAR: &str = "USERNAME";
-
 }
