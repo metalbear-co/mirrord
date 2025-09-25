@@ -42,7 +42,7 @@ macro_rules! replace {
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
-         -> $crate::error::Result<$detour_type> {
+         -> anyhow::Result<$detour_type> {
             let replaced =
                 hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void)?;
             let original_fn: $detour_type = std::mem::transmute(replaced);
@@ -100,7 +100,7 @@ macro_rules! replace_with_fallback {
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
-         -> $crate::error::Result<$detour_type> {
+         -> anyhow::Result<$detour_type> {
             let replaced =
                 hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void)?;
             let original_fn: $detour_type = std::mem::transmute(replaced);

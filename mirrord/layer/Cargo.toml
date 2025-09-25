@@ -28,6 +28,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",
 ] }
 
+anyhow.workspace = true
 base64.workspace = true
 bincode.workspace = true
 ctor = "0.2"
