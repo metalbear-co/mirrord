@@ -278,9 +278,9 @@ impl MirrordExecution {
             );
         }
 
+        let lib_path = lib_path.to_string_lossy().into_owned();
         #[cfg(not(target_os = "windows"))]
         {
-            let lib_path = lib_path.to_string_lossy().into_owned();
             // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
             // If already exists, we append.
             if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
@@ -288,6 +288,10 @@ impl MirrordExecution {
             } else {
                 env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
             };
+        }
+        #[cfg(target_os = "windows")]
+        {
+            unsafe { std::env::set_var("MIRRORD_LAYER_FILE", lib_path) };
         }
 
         let encoded_config = config.encode()?;
