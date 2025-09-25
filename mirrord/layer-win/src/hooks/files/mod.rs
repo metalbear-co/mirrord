@@ -1,11 +1,6 @@
 //! Module responsible for registering hooks targetting file operations syscalls.
 
-use std::{
-    ffi::c_void,
-    mem::ManuallyDrop,
-    path::PathBuf,
-    sync::OnceLock,
-};
+use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::proxy_connection::{
@@ -15,9 +10,10 @@ use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
 use phnt::ffi::{
-    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION,
-    FILE_BASIC_INFORMATION, FILE_FS_DEVICE_INFORMATION, FILE_INFORMATION_CLASS,
-    FILE_POSITION_INFORMATION, FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION, PIO_APC_ROUTINE,
+    _IO_STATUS_BLOCK, _LARGE_INTEGER, FILE_ALL_INFORMATION, FILE_BASIC_INFORMATION,
+    FILE_FS_DEVICE_INFORMATION, FILE_INFORMATION_CLASS, FILE_POSITION_INFORMATION,
+    FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION,
+    PIO_APC_ROUTINE,
 };
 use winapi::{
     shared::{
@@ -913,9 +909,12 @@ unsafe extern "system" fn nt_query_information_file_hook(
 
                     let out_ptr = file_information as *mut FILE_ALL_INFORMATION;
 
-                    fn query_single<T: Default>(handle: HANDLE, kind: FILE_INFORMATION_CLASS) -> Option<T> {
+                    fn query_single<T: Default>(
+                        handle: HANDLE,
+                        kind: FILE_INFORMATION_CLASS,
+                    ) -> Option<T> {
                         let mut single = T::default();
-                        let mut io_status_block =_IO_STATUS_BLOCK::default();
+                        let mut io_status_block = _IO_STATUS_BLOCK::default();
 
                         let res = unsafe {
                             nt_query_information_file_hook(

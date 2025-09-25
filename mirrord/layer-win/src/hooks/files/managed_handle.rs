@@ -106,11 +106,11 @@ pub fn try_insert_handle(handle_context: HandleContext) -> Option<MirrordHandle>
 }
 
 /// Run `fun` closure over each handle whose path matches the `object_attributes`.
-/// 
+///
 /// # Arguments
-/// 
-/// * `object_attributes` - The function should be used in the context of NT hooks where
-///    you're provided a [`POBJECT_ATTRIBUTES`] structure instead of a [`HANDLE`].
+///
+/// * `object_attributes` - The function should be used in the context of NT hooks where you're
+///   provided a [`POBJECT_ATTRIBUTES`] structure instead of a [`HANDLE`].
 /// * `fun` - Anything but.
 pub fn for_each_handle_with_path(
     object_attributes: POBJECT_ATTRIBUTES,
