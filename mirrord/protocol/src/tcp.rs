@@ -507,7 +507,7 @@ pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
 
 pub static MIRRORD_HTTP_REQUEST_BYPASSED_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
