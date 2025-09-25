@@ -31,6 +31,7 @@ mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
+mod task;
 mod util;
 mod vpn;
 

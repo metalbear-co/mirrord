@@ -46,11 +46,8 @@ use crate::{
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerApi},
-    util::{
-        ClientId,
-        protocol_version::ClientProtocolVersion,
-        remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
-    },
+    task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod setup;
@@ -85,12 +82,13 @@ struct State {
     ephemeral: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
-    /// [`tokio::runtime`] that should be used for network operations.
-    network_runtime: BgTaskRuntime,
+    /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
+    network_runtime: Arc<BgTaskRuntime>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub async fn new(args: &Args) -> AgentResult<State> {
         let tls_connector = args
             .operator_tls_cert_pem
@@ -135,11 +133,13 @@ impl State {
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
-            Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
-                RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
-            ),
-            None | Some(..) => BgTaskRuntime::Local,
-        };
+            Some(pid) if ephemeral.not() => {
+                BgTaskRuntime::spawn(Some(RuntimeNamespace::new(pid, NamespaceType::Net)))
+            }
+
+            None | Some(..) => BgTaskRuntime::spawn(None),
+        }
+        .await?;
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) => pid.to_string(),
@@ -159,7 +159,7 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
-            network_runtime,
+            network_runtime: Arc::new(network_runtime),
         })
     }
 
@@ -205,6 +205,7 @@ impl State {
             && envs::IN_SERVICE_MESH.from_env_or_default()
     }
 }
+
 enum BackgroundTask<Command> {
     Running(BgTaskStatus, Sender<Command>),
     Disabled,
@@ -214,12 +215,19 @@ impl<Command> BackgroundTask<Command> {
     /// Waits for the task to finish, and returns its result.
     ///
     /// If the task is [`BackgroundTask::Disabled`], returns [`Ok`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), fields(status), err(level = Level::DEBUG))]
     async fn wait(self) -> Result<(), AgentError> {
         let Self::Running(status, channel) = self else {
             return Ok(());
         };
         std::mem::drop(channel);
-        status.wait().await
+
+        let current_span = tracing::Span::current();
+        if current_span.is_disabled().not() {
+            current_span.record("status", format!("{status:?}"));
+        }
+
+        timeout(Duration::from_secs(5), status.wait()).await?
     }
 }
 
@@ -389,7 +397,7 @@ impl ClientConnectionHandler {
     /// Starts a loop that handles client connection and state.
     ///
     /// Breaks upon receiver/sender drop.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
             select! {
@@ -637,8 +645,6 @@ pub async fn notify_client_about_dirty_iptables(
 /// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
-    trace!("start_agent -> Starting agent with args: {args:?}");
-
     // Prepares a TCP listener for accepting client connections.
     let setup_listener = |ipv6: bool| -> AgentResult<TcpListener> {
         let (socket, ip) = if ipv6 {
@@ -675,6 +681,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     if state.container_pid().is_some() {
         let leftover_rules = state
             .network_runtime
+            .handle()
             .spawn(async move {
                 let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
                 let rules_v4 = SafeIpTables::list_mirrord_rules(
@@ -734,6 +741,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     } else {
         BackgroundTask::Disabled
     };
+
     let (stealer, mirror_handle) = match state.container_pid() {
         None => (BackgroundTask::Disabled, None),
         Some(pid) => {
@@ -755,7 +763,9 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             )
         }
     };
+
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
+
     let bg_tasks = BackgroundTasks {
         sniffer,
         stealer,
@@ -844,24 +854,18 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
     mem::drop(cancel_guard);
 
-    let BackgroundTasks {
-        sniffer,
-        stealer,
-        dns,
-        ..
-    } = bg_tasks;
-
-    let _ = tokio::join!(
-        sniffer.wait().inspect_err(|error| {
+    let (sniffer, stealer, dns) = tokio::join!(
+        bg_tasks.sniffer.wait().inspect_err(|error| {
             error!(%error, "start_agent -> Sniffer task failed");
         }),
-        stealer.wait().inspect_err(|error| {
+        bg_tasks.stealer.wait().inspect_err(|error| {
             error!(%error, "start_agent -> Stealer task failed");
         }),
-        dns.wait().inspect_err(|error| {
+        bg_tasks.dns.wait().inspect_err(|error| {
             error!(%error, "start_agent -> DNS task failed");
         }),
     );
+    debug!(?sniffer, ?stealer, ?dns, "BackgroundTasks have finished.");
 
     trace!("start_agent -> Agent shutdown");
 
@@ -936,7 +940,6 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
     let state = State::new(&args).await?;
-    let pid = state.container_pid();
     let with_mesh_exclusion = state.is_with_mesh_exclusion();
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
@@ -957,12 +960,9 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         },
     };
 
-    let Some(pid) = pid else {
-        return result;
-    };
-
-    let runtime = RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?;
-    runtime
+    state
+        .network_runtime
+        .handle()
         .spawn(clear_iptable_chain(args.ipv6, with_mesh_exclusion))
         .await
         .map_err(|error| AgentError::BackgroundTaskFailed {

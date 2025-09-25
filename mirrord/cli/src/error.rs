@@ -463,6 +463,14 @@ pub(crate) enum CliError {
         You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
     ))]
     AgentPodDeleted,
+
+    #[error("Detected mirrord being run within mirrord")]
+    #[diagnostic(help(
+        "Running mirrord within mirrord is likely to fail or introduce severe slowness. \
+        If you are using a mirrord IDE plugin, please check that your build/run script \
+        does not invoke mirrord."
+    ))]
+    NestedExec,
 }
 
 #[derive(Debug, Error, Diagnostic)]
