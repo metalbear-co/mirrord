@@ -18,7 +18,7 @@ use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{SafeIpTables, error::IPTablesError};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage,
-    tcp::{DaemonTcp, MIRRORD_HTTP_BYPASSED_VERSION},
+    tcp::{DaemonTcp, MIRRORD_HTTP_REQUEST_BYPASSED_VERSION},
 };
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -479,10 +479,10 @@ impl ClientConnectionHandler {
         }
 
         let send = match &response {
-            DaemonMessage::TcpSteal(DaemonTcp::HttpBypassedRequest(..))
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestBypassed(..))
                 if self
                     .protocol_version
-                    .matches(&MIRRORD_HTTP_BYPASSED_VERSION)
+                    .matches(&MIRRORD_HTTP_REQUEST_BYPASSED_VERSION)
                     .not() =>
             {
                 false

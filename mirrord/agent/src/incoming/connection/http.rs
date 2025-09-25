@@ -2,13 +2,14 @@ use std::fmt;
 
 use bytes::Bytes;
 use futures::StreamExt;
+use http::request::Parts;
 use http_body_util::{StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
-use mirrord_protocol::tcp::InternalHttpBodyFrame;
+use mirrord_protocol::tcp::{HttpRequestBypassed, InternalHttpBodyFrame};
 use tokio::{
     runtime::Handle,
     sync::{broadcast, mpsc, oneshot},
@@ -188,10 +189,45 @@ impl fmt::Debug for RedirectedHttp {
     }
 }
 
+/// Internal tcp stealer message.
+///
+/// Whenever the agent receives an `HTTP` request, and its running with a
+/// `PortSubscription::Filtered`, if **none** of the `HttpFilter`s match on this request, then
+/// the request is considered bypassed (it's passed to the original target, instead of redirected by
+/// mirrord).
+///
+/// Converted to [`HttpRequestBypassed`] when we send this from the agent to a client.
 #[derive(Debug)]
 pub struct BypassedHttp {
+    /// Bunch of addresses that we have for this request, used to provide more information for the
+    /// operator's `mirrord_bypassed_requests_count` metrics.
     pub info: ConnectionInfo,
+
+    /// Request information, also used for the operator's `mirrord_bypassed_requests_count`
+    /// metrics.
     pub parts: request::Parts,
+}
+
+impl From<BypassedHttp> for HttpRequestBypassed {
+    fn from(
+        BypassedHttp {
+            info,
+            parts:
+                Parts {
+                    method,
+                    uri,
+                    headers,
+                    ..
+                },
+        }: BypassedHttp,
+    ) -> Self {
+        HttpRequestBypassed {
+            method: method.into(),
+            uri: uri.into(),
+            headers: headers.into(),
+            original_destination: info.original_destination,
+        }
+    }
 }
 
 /// Steal handle to a redirected HTTP request.

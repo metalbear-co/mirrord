@@ -237,7 +237,6 @@ impl TcpStealerTask {
             )))).await;
         }
 
-        tracing::info!(?filters, ?send_to, "Do we get here?");
         if let Some(client) = send_to {
             let _ = client
                 .message_tx
@@ -252,7 +251,8 @@ impl TcpStealerTask {
                 .then(|| parts.clone())
                 .zip(client)
         }) {
-            tracing::info!(?client, ?http, "No filter matched, so we're bypassing it.");
+            // Only used by the operator to count bypassed requests, so we can just send it to
+            // whatever client, and have it ignored by mirrord.
             let _ = client
                 .message_tx
                 .send(StealerMessage::BypassedHttp(BypassedHttp {
