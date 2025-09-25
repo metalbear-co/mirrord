@@ -1,18 +1,18 @@
 #[cfg(target_os = "linux")]
 use core::ffi::{c_size_t, c_ssize_t};
-// test file not compatible for windows
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::ffi::OsStrExt;
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{borrow::Borrow, ffi::CString, ptr, slice, time::Duration};
+use std::{
+    borrow::Borrow,
+    ffi::CString,
+    os::unix::{ffi::OsStrExt, io::RawFd},
+    ptr, slice,
+    time::Duration,
+};
 
-#[cfg(not(target_os = "windows"))]
 use libc::{
     self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
     iovec, off_t, size_t, ssize_t, stat, statfs,
@@ -26,7 +26,6 @@ use mirrord_protocol::file::{
     FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
     WriteFileResponse,
 };
-#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 use num_traits::Bounded;
 use tracing::trace;
@@ -1285,10 +1284,7 @@ pub(crate) unsafe extern "C" fn readlink_detour(
     unsafe {
         read_link(raw_path.checked_into())
             .map(|ReadLinkFileResponse { path }| {
-                #[cfg(not(target_os = "windows"))]
                 let path_bytes = path.as_os_str().as_bytes();
-                #[cfg(target_os = "windows")]
-                let path_bytes = OsStr::new(path).encode_wide();
 
                 let path_ptr = path_bytes.as_ptr();
                 let out_buffer = out_buffer.cast();

@@ -1,6 +1,7 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
+    collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     ops::Not,
@@ -10,7 +11,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
@@ -18,10 +19,6 @@ use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
-};
-use mirrord_layer_lib::socket::{
-    CheckQueryResult, ConnectionThrough, DnsSelector, OutgoingSelector,
-    dns::update_dns_reverse_mapping,
 };
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
@@ -43,8 +40,15 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    socket::{SocketAddrExtUnix, UnixDnsResolver},
 };
+
+/// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
+/// [`remote_getaddrinfo`].
+///
+/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
+/// [`connect`] with, so we can resolve it locally when neccessary.
+pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -118,51 +122,10 @@ impl From<ConnectResult> for i32 {
     }
 }
 
-// Unix-specific extensions for OutgoingSelector
-// Provides convenience functions for the OutgoingSelector when running on Unix platforms.
-trait OutgoingSelectorUnixExt {
-    /// Get connection through using the Unix DNS resolver
-    ///
-    /// This is a convenience function that uses the Unix DNS resolver.
-    fn get_connection_through(
-        &self,
-        address: std::net::SocketAddr,
-        protocol: NetProtocol,
-    ) -> HookResult<ConnectionThrough>;
-}
-
-impl OutgoingSelectorUnixExt for OutgoingSelector {
-    fn get_connection_through(
-        &self,
-        address: std::net::SocketAddr,
-        protocol: NetProtocol,
-    ) -> HookResult<ConnectionThrough> {
-        self.get_connection_through_with_resolver::<UnixDnsResolver>(address, protocol)
-    }
-}
-
-/// DNS selector for Unix layer
-pub trait DnsSelectorExt {
-    /// Bypasses queries that should be done locally (Unix-specific method).
-    /// Returns Detour<()> which is used by the Unix layer's detour system.
-    fn check_query(&self, node: &str, port: u16) -> Detour<()>;
-}
-
-/// Unix-specific extensions for DnsSelector
-impl DnsSelectorExt for DnsSelector {
-    #[tracing::instrument(level = "trace", ret)]
-    fn check_query(&self, node: &str, port: u16) -> Detour<()> {
-        match self.check_query_result(node, port) {
-            CheckQueryResult::Local => Detour::Bypass(Bypass::LocalDns),
-            CheckQueryResult::Remote => Detour::Success(()),
-        }
-    }
-}
-
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = type_.try_into().map_err(Bypass::Type)?;
+    let socket_kind = type_.try_into()?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -256,7 +219,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret, skip(raw_address)
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address)
 )]
 pub(super) fn bind(
     sockfd: c_int,
@@ -533,7 +496,6 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let OutgoingConnectResponse {
             layer_address,
             in_cluster_address,
-            ..
         } = response;
 
         // Connect to the interceptor socket that is listening.
@@ -684,7 +646,7 @@ pub(super) fn connect(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_).map_err(Bypass::Type)?;
+            let kind = SocketKind::try_from(type_)?;
 
             Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
         }
@@ -888,13 +850,7 @@ pub(super) fn accept(
         layer_address: None,
     });
 
-    let new_socket = UserSocket::new(
-        domain,
-        type_,
-        protocol,
-        state,
-        type_.try_into().map_err(Bypass::Type)?,
-    );
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
     fill_address(address, address_len, remote_source.into())?;
 
@@ -911,15 +867,15 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
     }
 }
 
-/// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed
-/// by `fd` ([`UserSocket`], or [`file::ops::RemoteFile`]).
+/// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed by `fd`
+/// ([`UserSocket`], or [`file::ops::RemoteFile`]).
 ///
 /// - `SWITCH_MAP`:
 ///
 /// Indicates that we're switching the `fd` from [`SOCKETS`] to [`OPEN_FILES`] (or vice-versa).
 ///
-/// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and
-/// [`dup3_detour`]. Extra relevant for node on macos.
+/// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and [`dup3_detour`].
+/// Extra relevant for node on macos.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut sockets = SOCKETS.lock()?;
@@ -951,8 +907,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// # Note
 ///
-/// This function updates the mapping in `REMOTE_DNS_REVERSE_MAPPING` using
-/// [`update_dns_reverse_mapping`].
+/// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn remote_getaddrinfo(
     node: String,
@@ -982,9 +937,9 @@ pub(super) fn remote_getaddrinfo(
     })?
     .0?;
 
-    // Update the unified DNS reverse mapping
+    let mut remote_dns_reverse_mapping = REMOTE_DNS_REVERSE_MAPPING.lock()?;
     addr_info_list.iter().for_each(|lookup| {
-        update_dns_reverse_mapping(lookup.ip, lookup.name.clone());
+        remote_dns_reverse_mapping.insert(lookup.ip, lookup.name.clone());
     });
 
     Ok(addr_info_list
@@ -1010,7 +965,6 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    use crate::socket::ops::DnsSelectorExt;
     let node: String = rawish_node
         .bypass(Bypass::NullNode)?
         .to_str()
@@ -1158,7 +1112,6 @@ fn remote_hostname_string() -> Detour<CString> {
 /// issue is going on, assume that you might've triggered the UB.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
-    use crate::socket::ops::DnsSelectorExt;
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
         .to_str()
@@ -1622,21 +1575,31 @@ fn create_dns_resolver_t(
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
-    let resolver = Box::from_raw(resolver);
+    unsafe {
+        let resolver = Box::from_raw(resolver);
 
-    let nameservers = Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
+        let nameservers = Vec::from_raw_parts(
+            resolver.nameserver,
+            resolver.n_nameserver as usize,
+            resolver.n_nameserver as usize,
+        );
 
-    for nameserver in nameservers {
-        let _ = Box::from_raw(nameserver);
+        for nameserver in nameservers {
+            let _ = Box::from_raw(nameserver);
+        }
+
+        let searchs = Vec::from_raw_parts(
+            resolver.search,
+            resolver.n_search as usize,
+            resolver.n_search as usize,
+        );
+
+        for search in searchs {
+            let _ = CString::from_raw(search);
+        }
+
+        let _ = CString::from_raw(resolver.options);
     }
-
-    let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
-
-    for search in searchs {
-        let _ = CString::from_raw(search);
-    }
-
-    let _ = CString::from_raw(resolver.options);
 }
 
 /// reconstruct a macos specific [`dns_config_t`] api from parsing the `/etc/resolv.conf` file from
