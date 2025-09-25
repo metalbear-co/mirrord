@@ -1,4 +1,4 @@
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 use std::{
     any,
@@ -90,9 +90,9 @@ impl<V: EnvValue> CheckedEnv<V> {
     pub fn try_from_env(self) -> Result<Option<V>, V::FromReprError> {
         match std::env::var_os(self.name) {
             Some(repr) => {
-                #[cfg(not(windows))]
+                #[cfg(not(target_os = "windows"))]
                 let value = V::from_repr(repr.as_bytes())?;
-                #[cfg(windows)]
+                #[cfg(target_os = "windows")]
                 let value = V::from_repr(repr.as_encoded_bytes())?;
                 Ok(Some(value))
             }

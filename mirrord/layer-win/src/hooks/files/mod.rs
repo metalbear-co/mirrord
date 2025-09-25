@@ -3,21 +3,9 @@
 use std::{ffi::c_void, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use str_win::u16_buffer_to_string;
-use winapi::{
-    shared::ntdef::{HANDLE, NTSTATUS, PLARGE_INTEGER, PULONG, PVOID, ULONG},
-    um::fileapi::GetFinalPathNameByHandleW,
-};
+use winapi::shared::ntdef::{HANDLE, NTSTATUS, PLARGE_INTEGER, PULONG, PVOID, ULONG};
 
 use crate::apply_hook;
-
-fn get_file_name_by_handle(handle: HANDLE) -> String {
-    let mut name = [0u16; 260];
-    let name_len =
-        unsafe { GetFinalPathNameByHandleW(handle, name.as_mut_ptr(), name.len() as u32, 0) };
-
-    u16_buffer_to_string(&name[..=name_len as usize])
-}
 
 // https://github.com/winsiderss/phnt/blob/fc1f96ee976635f51faa89896d1d805eb0586350/ntioapi.h#L1963
 type NtReadFileType = unsafe extern "system" fn(
@@ -45,10 +33,6 @@ unsafe extern "system" fn nt_read_file_hook(
     key: PULONG,
 ) -> NTSTATUS {
     unsafe {
-        if !file.is_null() {
-            println!("nt_read_file_hook: {}", get_file_name_by_handle(file));
-        }
-
         let original = NT_READ_FILE_ORIGINAL.get().unwrap();
         original(
             file,
@@ -90,10 +74,6 @@ unsafe extern "system" fn nt_write_file_hook(
     key: PULONG,
 ) -> NTSTATUS {
     unsafe {
-        if !file.is_null() {
-            println!("nt_write_file_hook: {}", get_file_name_by_handle(file));
-        }
-
         let original = NT_WRITE_FILE_ORIGINAL.get().unwrap();
         original(
             file,

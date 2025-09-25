@@ -1,11 +1,12 @@
 #![deny(missing_docs)]
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStringExt;
 use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    os::unix::ffi::OsStringExt,
     path::PathBuf,
     str::FromStr,
 };
@@ -283,10 +284,11 @@ impl ExecParams {
             );
         }
         if let Some(fs_mode) = self.fs_mode {
-            envs.insert(
-                "MIRRORD_FILE_MODE".as_ref(),
-                Cow::Owned(OsString::from_vec(fs_mode.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let file_mode = OsString::from_vec(fs_mode.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let file_mode = OsString::from(fs_mode.to_string());
+            envs.insert("MIRRORD_FILE_MODE".as_ref(), Cow::Owned(file_mode));
         }
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
@@ -484,17 +486,21 @@ impl AgentParams {
             );
         }
         if let Some(agent_ttl) = &self.agent_ttl {
-            envs.insert(
-                "MIRRORD_AGENT_TTL".as_ref(),
-                Cow::Owned(OsString::from_vec(agent_ttl.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let agent_ttl = OsString::from_vec(agent_ttl.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_ttl = OsString::from(agent_ttl.to_string());
+            envs.insert("MIRRORD_AGENT_TTL".as_ref(), Cow::Owned(agent_ttl));
         }
         if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            #[cfg(not(target_os = "windows"))]
+            let agent_startup_timeout =
+                OsString::from_vec(agent_startup_timeout.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_startup_timeout = OsString::from(agent_startup_timeout.to_string());
             envs.insert(
                 "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),
-                Cow::Owned(OsString::from_vec(
-                    agent_startup_timeout.to_string().into_bytes(),
-                )),
+                Cow::Owned(agent_startup_timeout),
             );
         }
         if self.ephemeral_container {

@@ -1,2 +1,19 @@
 [unstable]
 bindeps = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.debug-overflow]
+inherits = "dev"
+opt-level = 0
+debug = 2  # full debug info
+overflow-checks = true
+debug-assertions = true
+incremental = false
+
+[target.'cfg(windows)']
+rustflags = [
+    "-C", "link-args=/STACK:8388608",  # STACKSIZE=8MB
+]

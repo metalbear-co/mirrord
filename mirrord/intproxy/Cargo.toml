@@ -49,6 +49,9 @@ tokio-util.workspace = true
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rand.workspace = true
 
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+rand.workspace = true
+
 [dev-dependencies]
 rcgen.workspace = true
 rstest.workspace = true

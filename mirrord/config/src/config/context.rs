@@ -1,4 +1,4 @@
-#[cfg(not(windows))]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::HashMap,
@@ -95,10 +95,10 @@ impl ConfigContext {
     ///
     /// This is the only way we should read environment when generating or verifying configuration.
     pub fn get_env(&self, name: &str) -> Result<String, VarError> {
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         let name = OsStr::from_bytes(name.as_bytes());
 
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         let name = OsStr::new(name);
 
         let os_value = match self.env_override.get(name) {
@@ -107,9 +107,9 @@ impl ConfigContext {
             None => std::env::var_os(name).ok_or(VarError::NotPresent),
         }?;
 
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         let s = std::str::from_utf8(os_value.as_bytes()).map(ToString::to_string);
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         let s = os_value.clone().into_string();
 
         s.map_err(|_| VarError::NotUnicode(os_value))
