@@ -506,6 +506,7 @@ pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
 pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that sends the [`DaemonTcp::HttpRequestBypassed`] message.
 pub static MIRRORD_HTTP_REQUEST_BYPASSED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
 
