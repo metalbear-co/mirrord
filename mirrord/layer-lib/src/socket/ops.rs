@@ -120,11 +120,26 @@ impl From<ConnectResult> for i32 {
     }
 }
 
+#[cfg(unix)]
+unsafe fn errno_location() -> *mut libc::c_int {
+    unsafe {
+        #[cfg(target_os = "macos")]
+        {
+            libc::__error()
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            libc::__errno_location()
+        }
+    }
+}
+
 // Platform-specific error handling
 fn get_last_error() -> i32 {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location()
+        *errno_location()
     }
 
     #[cfg(windows)]
@@ -137,7 +152,7 @@ fn get_last_error() -> i32 {
 fn set_last_error(error: i32) {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location() = error
+        *__errno_location() = error
     };
 
     #[cfg(windows)]
