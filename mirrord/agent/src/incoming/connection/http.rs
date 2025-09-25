@@ -222,9 +222,9 @@ impl From<BypassedHttp> for HttpRequestBypassed {
         }: BypassedHttp,
     ) -> Self {
         HttpRequestBypassed {
-            method: method.into(),
-            uri: uri.into(),
-            headers: headers.into(),
+            method,
+            uri,
+            headers,
             original_destination: info.original_destination,
         }
     }
