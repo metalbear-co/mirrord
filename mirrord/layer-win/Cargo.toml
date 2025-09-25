@@ -33,6 +33,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 libc = "0.2.175"
+[target.'cfg(windows)'.dependencies]
 phnt = "0.1.2"
 
 # Additional dependencies for proxy connection
