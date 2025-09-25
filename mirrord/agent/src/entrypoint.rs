@@ -472,7 +472,7 @@ impl ClientConnectionHandler {
     }
 
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
-    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
         if matches!(&response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
             return Ok(());
