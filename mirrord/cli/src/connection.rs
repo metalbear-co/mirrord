@@ -56,14 +56,6 @@ where
         }
     };
 
-    let mut version_cmp_subtask = operator_subtask.subtask("checking version compatibility");
-    let compatible = api.check_operator_version(&version_cmp_subtask);
-    if compatible {
-        version_cmp_subtask.success(Some("operator version compatible"));
-    } else {
-        version_cmp_subtask.failure(Some("operator version may not be compatible"));
-    }
-
     let mut license_subtask = operator_subtask.subtask("checking license");
     match api.check_license_validity(&license_subtask) {
         Ok(()) => license_subtask.success(Some("operator license valid")),
