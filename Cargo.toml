@@ -1,7 +1,5 @@
-# Cross compilable mirrord workspace
-# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
-# On Unix: Default cargo build will build the Unix-compatible crates
-# All platforms: mirrord/* in members ensures all crates are available for explicit builds
+# Workspace build is unix-only currently
+# For windows, build specific packages
 # This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
 [workspace]
 

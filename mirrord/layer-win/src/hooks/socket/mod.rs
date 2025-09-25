@@ -13,7 +13,7 @@ use std::{net::SocketAddr, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
-    error::{ConnectError, HookError, HookResult, SendToError},
+    error::{ConnectError, HookError, HookResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     socket::{
         Bound, ConnectResult, SocketDescriptor, SocketKind, SocketState, get_bound_address,
@@ -25,16 +25,19 @@ use mirrord_layer_lib::{
 use socket2::SockAddr;
 use winapi::{
     shared::{
-        minwindef::INT,
-        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
+        minwindef::{BOOL, INT},
+        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA, ERROR_SUCCESS},
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
     um::winsock2::{
-        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, fd_set, timeval,
+        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAEFAULT, WSAGetLastError, WSASetLastError,
+        fd_set, timeval,
     },
     // ws2tcpip::{GetNameInfoW, socklen_t},
 };
 use windows_strings::{PCSTR, PCWSTR};
+
+const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS as i32;
 
 use self::{
     hostname::{
@@ -43,9 +46,7 @@ use self::{
     },
     ops::{WSABufferData, log_connection_result},
     state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
-    utils::{
-        ManagedAddrInfoAny, SocketAddrExtWin, SocketAddressExtWin, create_thread_local_hostent,
-    },
+    utils::{ManagedAddrInfoAny, SocketAddrExtWin, create_thread_local_hostent},
 };
 use crate::{apply_hook, layer_setup};
 
@@ -107,7 +108,7 @@ static FREE_ADDR_INFO_W_ORIGINAL: OnceLock<&FreeAddrInfoWType> = OnceLock::new()
 type GetComputerNameAType = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
 static GET_COMPUTER_NAME_A_ORIGINAL: OnceLock<&GetComputerNameAType> = OnceLock::new();
 
-type GetComputerNameWType = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *mut u32) -> i32;
+type GetComputerNameWType = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
 static GET_COMPUTER_NAME_W_ORIGINAL: OnceLock<&GetComputerNameWType> = OnceLock::new();
 
 // Additional hostname functions that Python might use
@@ -116,7 +117,7 @@ type GetComputerNameExAType =
 static GET_COMPUTER_NAME_EX_A_ORIGINAL: OnceLock<&GetComputerNameExAType> = OnceLock::new();
 
 type GetComputerNameExWType =
-    unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> i32;
+    unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
 static GET_COMPUTER_NAME_EX_W_ORIGINAL: OnceLock<&GetComputerNameExWType> = OnceLock::new();
 
 type WSAStartupType = unsafe extern "system" fn(wVersionRequested: u16, lpWSAData: *mut u8) -> i32;
@@ -343,7 +344,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
                     let original = BIND_ORIGINAL.get().unwrap();
                     let result = unsafe { original(s, name, namelen) };
 
-                    if result == 0 {
+                    if result == ERROR_SUCCESS_I32 {
                         // Success - update socket state using SocketManager
                         let bound = Bound {
                             requested_address: bound_addr,
@@ -393,7 +394,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
                 let original = LISTEN_ORIGINAL.get().unwrap();
                 let result = unsafe { original(s, backlog) };
 
-                if result == 0 {
+                if result == ERROR_SUCCESS_I32 {
                     // Success - update socket state to listening using SocketManager
                     if is_socket_in_state(s, |state| matches!(state, SocketState::Bound(_))) {
                         // Get the bound state and transition to listening
@@ -440,6 +441,18 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         tracing::debug!("connect_detour -> socket {} is not managed", s);
     }
 
+    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+        Some(addr) => addr,
+        None => {
+            tracing::error!(
+                "connect_detour -> failed to convert raw sockaddr for socket {}",
+                s
+            );
+            return SOCKET_ERROR;
+        }
+    };
+    let raw_addr = SockAddr::from(socket_addr);
+
     let connect_fn = |s: SocketDescriptor, addr: SockAddr| {
         let original = CONNECT_ORIGINAL.get().unwrap();
         let result = unsafe { original(s, addr.as_ptr() as *const _, addr.len()) };
@@ -447,9 +460,6 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
         ConnectResult::from(result)
     };
 
-    let raw_addr = SockAddr::from(
-        SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
-    );
     match ops::attempt_proxy_connection(s, name, namelen, "connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
@@ -553,40 +563,67 @@ unsafe extern "system" fn getsockname_detour(
 
     // Check if this socket is managed by mirrord and get its bound address
     if let Some(bound_addr) = get_bound_address(s) {
-        // Return the bound address for bound/listening sockets
-        if !name.is_null() && !namelen.is_null() {
-            match unsafe { bound_addr.to_windows_sockaddr_checked(name, namelen) } {
-                Ok(()) => {
-                    tracing::trace!(
-                        "getsockname_detour -> returned mirrord bound address: {}",
-                        bound_addr
-                    );
-                    // Success
-                    return 0;
-                }
-                Err(error_code) => {
-                    tracing::debug!(
-                        "getsockname_detour -> failed to convert bound address: error {}",
-                        error_code
-                    );
-                    return SOCKET_ERROR;
-                }
+        match bound_addr.copy_to(name, namelen) {
+            Ok(()) => {
+                tracing::trace!(
+                    "getsockname_detour -> returned mirrord bound address: {}",
+                    bound_addr
+                );
+
+                return ERROR_SUCCESS_I32;
+            }
+
+            Err(err) => {
+                tracing::debug!(
+                    "getsockname_detour -> failed to convert bound address, error: {}",
+                    err
+                );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getsockname_detour -> unexpected windows error converting bound address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
+                return SOCKET_ERROR;
             }
         }
     } else if let Some((_, local_addr, layer_addr)) = get_connected_addresses(s) {
         // Return the layer address for connected sockets if available, otherwise local address
         let addr_to_return = layer_addr.as_ref().unwrap_or(&local_addr);
-        match unsafe { addr_to_return.to_sockaddr_checked(name, namelen) } {
+        match addr_to_return.copy_to(name, namelen) {
             Ok(()) => {
                 tracing::trace!("getsockname_detour -> returned mirrord local address");
                 // Success
-                return 0;
+                return ERROR_SUCCESS_I32;
             }
-            Err(e) => {
+
+            Err(err) => {
                 tracing::debug!(
                     "getsockname_detour -> failed to convert layer address: {}",
-                    e
+                    err
                 );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getsockname_detour -> unexpected windows error converting layer address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
                 return SOCKET_ERROR;
             }
         }
@@ -615,17 +652,33 @@ unsafe extern "system" fn getpeername_detour(
     // Check if this socket is managed and get connected addresses
     if let Some((remote_addr, _, _)) = get_connected_addresses(s) {
         // Return the remote address for connected sockets
-        match unsafe { remote_addr.to_sockaddr_checked(name, namelen) } {
+
+        match remote_addr.copy_to(name, namelen) {
             Ok(()) => {
                 tracing::trace!("getpeername_detour -> returned mirrord remote address");
                 // Success
-                return 0;
+                return ERROR_SUCCESS_I32;
             }
-            Err(e) => {
+
+            Err(err) => {
                 tracing::debug!(
                     "getpeername_detour -> failed to convert remote address: {}",
-                    e
+                    err
                 );
+
+                match err {
+                    WindowsError::WinSock(error_code) => unsafe {
+                        WSASetLastError(error_code);
+                    },
+
+                    WindowsError::Windows(error_code) => {
+                        tracing::warn!(
+                            "getpeername_detour -> unexpected windows error converting remote address: error {}",
+                            error_code
+                        );
+                    }
+                };
+
                 return SOCKET_ERROR;
             }
         }
@@ -648,7 +701,7 @@ unsafe extern "system" fn wsa_startup_detour(wVersionRequested: u16, lpWSAData: 
     let original = WSA_STARTUP_ORIGINAL.get().unwrap();
     let result = unsafe { original(wVersionRequested, lpWSAData) };
 
-    if result != 0 {
+    if result != ERROR_SUCCESS_I32 {
         tracing::warn!("WSAStartup failed with error: {}", result);
     }
 
@@ -785,9 +838,18 @@ unsafe extern "system" fn wsa_connect_detour(
         ConnectResult::from(result)
     };
 
-    let raw_addr = SockAddr::from(
-        SocketAddr::try_from_raw(name, namelen).expect("Failed to convert raw sockaddr"),
-    );
+    let socket_addr = match SocketAddr::try_from_raw(name, namelen) {
+        Some(addr) => addr,
+        None => {
+            tracing::error!(
+                "wsa_connect_detour -> failed to convert raw sockaddr for socket {}",
+                s
+            );
+            return SOCKET_ERROR;
+        }
+    };
+    let raw_addr = SockAddr::from(socket_addr);
+
     match ops::attempt_proxy_connection(s, name, namelen, "wsa_connect_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
@@ -1099,7 +1161,7 @@ unsafe extern "system" fn wsa_send_to_detour(
                 )
             };
 
-            if result == 0 {
+            if result == ERROR_SUCCESS_I32 {
                 // Success - update bytes sent if caller provided pointer
                 unsafe { *lpNumberOfBytesSent = bytes_sent };
                 Ok(result.try_into().unwrap())
@@ -1124,7 +1186,7 @@ unsafe extern "system" fn wsa_send_to_detour(
                     sendto_result
                 );
                 // WSASendTo returns 0 on success
-                0
+                ERROR_SUCCESS_I32
             }
             Err(_) => {
                 // On error, fall back to original function
@@ -1199,7 +1261,7 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
             ERROR_BUFFER_OVERFLOW,
             // If no error occurs, gethostname returns zero. Otherwise, it returns SOCKET_ERROR
             //  and a specific error code can be retrieved by calling WSAGetLastError.
-            (0, SOCKET_ERROR),
+            (ERROR_SUCCESS_I32, SOCKET_ERROR),
         )
     }
 }
@@ -1226,7 +1288,7 @@ unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *
 
 /// Windows kernel32 hook for GetComputerNameW
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: *mut u32) -> i32 {
+unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: *mut u32) -> BOOL {
     let original = GET_COMPUTER_NAME_W_ORIGINAL.get().unwrap();
     unsafe {
         handle_hostname_unicode(
@@ -1294,7 +1356,7 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
     name_type: u32,
     lpBuffer: *mut u16,
     nSize: *mut u32,
-) -> i32 {
+) -> BOOL {
     use winapi::um::sysinfoapi::*;
     let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
 
@@ -1355,8 +1417,6 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
             "gethostbyname: intercepting resolution for our hostname: {}",
             hostname_cstr
         );
-        // TODO - return intproxy ip? for now let it resolve,
-        //  it should work from local/remote
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
@@ -1462,12 +1522,17 @@ unsafe extern "system" fn getaddrinfo_detour(
             Ok(managed_addr_info) => {
                 // Store the managed result pointer and move the object to MANAGED_ADDRINFO
                 let addr_ptr = managed_addr_info.as_ptr();
-                MANAGED_ADDRINFO
-                    .lock()
-                    .expect("MANAGED_ADDRINFO lock failed")
-                    .insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
+                let mut managed = match MANAGED_ADDRINFO.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        tracing::error!("MANAGED_ADDRINFO lock failed: {}", poisoned);
+                        return WSAEFAULT;
+                    }
+                };
+                managed.insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
                 *out_addr_info = addr_ptr;
-                0 // Success
+                // Success
+                ERROR_SUCCESS_I32
             }
             Err(_) => {
                 // Fall back to original Windows getaddrinfo
@@ -1517,12 +1582,15 @@ unsafe extern "system" fn getaddrinfow_detour(
             // Store the managed result pointer and move the object to MANAGED_ADDRINFO
             let result_ptr = managed_result.as_ptr();
             unsafe { *result = result_ptr };
-            MANAGED_ADDRINFO
-                .lock()
-                .expect("MANAGED_ADDRINFO lock failed")
-                .insert(result_ptr as usize, ManagedAddrInfoAny::W(managed_result));
-            // Success
-            return 0;
+            let mut managed = match MANAGED_ADDRINFO.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    tracing::error!("MANAGED_ADDRINFO lock failed: {}", poisoned);
+                    return WSAEFAULT;
+                }
+            };
+            managed.insert(result_ptr as usize, ManagedAddrInfoAny::W(managed_result));
+            return ERROR_SUCCESS_I32;
         }
         Err(e) => {
             tracing::warn!(
@@ -1735,7 +1803,7 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
     // Only clean up mirrord state if the close was successful
-    if res == 0 {
+    if res == ERROR_SUCCESS_I32 {
         remove_socket(s);
     }
     res
@@ -1779,11 +1847,11 @@ unsafe extern "system" fn getsockopt_detour(
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
-    tracing::info!("HOOK INIT DEBUG: Initializing socket hooks");
+    println!("HOOK INIT DEBUG: Initializing socket hooks");
     let enabled_remote_dns = layer_setup().remote_dns_enabled();
 
     // Register core socket operations
-    tracing::info!("HOOK INIT DEBUG: Installing socket hook");
+    println!("HOOK INIT DEBUG: Installing socket hook");
     apply_hook!(
         guard,
         "ws2_32",

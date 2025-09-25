@@ -380,7 +380,7 @@ impl From<frida_gum::Error> for LayerError {
     }
 }
 
-pub type Result<T, E = LayerError> = std::result::Result<T, E>;
+pub type LayerResult<T, E = LayerError> = std::result::Result<T, E>;
 pub type HookResult<T, E = HookError> = std::result::Result<T, E>;
 pub type ProxyResult<T, E = ProxyError> = std::result::Result<T, E>;
 

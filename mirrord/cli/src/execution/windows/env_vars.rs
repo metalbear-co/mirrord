@@ -20,24 +20,37 @@ where
     }
 }
 
-// pub trait EnvExt {
-//     fn to_windows_env_block(&self) -> Vec<u16>;
-// }
 impl EnvMap {
     pub fn to_windows_env_block(&self) -> Vec<u16> {
+        let mut entries: Vec<(String, String, String)> = self
+            .0
+            .iter()
+            .map(|(key, val)| {
+                let key_string = key.to_string_lossy().into_owned();
+                let lower_key = key_string.to_lowercase();
+                let value_string = val.to_string_lossy().into_owned();
+                (lower_key, key_string, value_string)
+            })
+            .collect();
+
+        // The Windows environment block is expected to be sorted case-insensitively.
+        entries.sort_by(|(lower_a, key_a, _), (lower_b, key_b, _)| {
+            lower_a.cmp(lower_b).then_with(|| key_a.cmp(key_b))
+        });
+
         let mut block: Vec<u16> = Vec::new();
 
-        for (key, val) in &self.0 {
-            // Create "key=value" string and convert to UTF-16 with null terminator
-            let env_entry = format!("{}={}", key.to_string_lossy(), val.to_string_lossy());
+        for (_, key, value) in entries {
+            let env_entry = format!("{key}={value}");
             let entry_u16 = string_to_u16_buffer(&env_entry);
-
-            // string_to_u16_buffer already includes null terminator
             block.extend(entry_u16);
         }
 
-        // Double-null terminate the entire block
+        if block.is_empty() {
+            block.push(0);
+        }
         block.push(0);
+
         block
     }
 }

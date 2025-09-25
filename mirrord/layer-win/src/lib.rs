@@ -19,15 +19,14 @@ use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 pub use mirrord_layer_lib::setup::windows::layer_setup;
 use mirrord_layer_lib::{
-    error::LayerError,
+    error::{LayerError, LayerResult},
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
-    setup::windows::init_setup,
+    setup::{CONFIG, windows::init_setup},
 };
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        debugapi::DebugBreak,
         processthreadsapi::GetCurrentProcessId,
         winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
@@ -76,7 +75,7 @@ fn init_tracing() {
     }
 }
 
-fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
+fn initialize_windows_proxy_connection() -> LayerResult<()> {
     init_tracing();
 
     // Create Windows-specific process info
@@ -98,13 +97,6 @@ fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
         .parse::<SocketAddr>()
         .map_err(LayerError::MalformedIntProxyAddr)?;
 
-    // Read and initialize configuration
-    let config = mirrord_config::util::read_resolved_config()
-        .map_err(|e| anyhow::anyhow!("Failed to read mirrord configuration: {}", e))?;
-
-    // Initialize layer setup with the configuration
-    init_setup(config)?;
-
     // Set up session request.
     let session = mirrord_intproxy_protocol::NewSessionRequest {
         parent_layer: None,
@@ -113,11 +105,19 @@ fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
 
     // Use a default timeout of 30 seconds
     let timeout = std::time::Duration::from_secs(30);
-
     let new_connection = ProxyConnection::new(address, session, timeout)?;
-    PROXY_CONNECTION
-        .set(new_connection)
-        .expect("Could not initialize PROXY_CONNECTION");
+    PROXY_CONNECTION.set(new_connection).map_err(|_| {
+        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized".into())
+    })?;
+
+    // Read and initialize configuration
+    let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
+    CONFIG.set(config.clone()).map_err(|_| {
+        LayerError::GlobalAlreadyInitialized("Layer config already initialized".into())
+    })?;
+
+    // Initialize layer setup with the configuration
+    init_setup(config, address)?;
 
     Ok(())
 }
@@ -133,7 +133,6 @@ fn initialize_windows_proxy_connection() -> anyhow::Result<()> {
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
         wait_for_debug!();
-        unsafe { DebugBreak() };
     }
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
