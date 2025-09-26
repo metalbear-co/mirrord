@@ -268,9 +268,6 @@ impl OperatorSetup for Operator {
         writer.write_all(b"---\n")?;
         MirrordProfile::crd().to_writer(&mut writer)?;
 
-        writer.write_all(b"---\n")?;
-        MirrordClusterOperatorUserCredential::crd().to_writer(&mut writer)?;
-
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
             MirrordWorkloadQueueRegistry::crd().to_writer(&mut writer)?;
