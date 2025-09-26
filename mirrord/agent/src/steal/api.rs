@@ -168,6 +168,11 @@ impl TcpStealerApi {
                         },
                         StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => self.handle_connection(tcp)?,
+                        StealerMessage::BypassedHttp(bypassed_http) => {
+                            self.queued_messages.push_back(DaemonMessage::TcpSteal(
+                                DaemonTcp::HttpRequestBypassed(bypassed_http.into()),
+                            ));
+                        },
                     }
                 }
 

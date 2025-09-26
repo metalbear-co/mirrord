@@ -3,7 +3,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::{
     http::filter::HttpFilter,
-    incoming::{StolenHttp, StolenTcp},
+    incoming::{BypassedHttp, StolenHttp, StolenTcp},
     util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -52,4 +52,5 @@ enum StealerMessage {
     StolenHttp(StolenHttp),
     Log(LogMessage),
     PortSubscribed(Port),
+    BypassedHttp(BypassedHttp),
 }
