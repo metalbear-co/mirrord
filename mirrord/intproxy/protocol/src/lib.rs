@@ -14,7 +14,7 @@ use mirrord_protocol::{
     dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::SocketAddress,
-    tcp::StealType,
+    tcp::{MirrorType, StealType},
 };
 
 #[cfg(feature = "codec")]
@@ -192,8 +192,8 @@ pub struct PortSubscribe {
 pub enum PortSubscription {
     /// Wrapped [`StealType`] specifies how to execute port mirroring.
     Steal(StealType),
-    /// All data coming to the wrapped [`Port`] should be copied and sent to the layer.
-    Mirror(Port),
+    /// Wrapped [`MirrorType`] specifies how to execute port mirroring.
+    Mirror(MirrorType),
 }
 
 /// A request to stop proxying incoming connections.
@@ -491,4 +491,11 @@ impl_request!(
     res = RemoteResult<HashMap<String, String>>,
     req_path = LayerToProxyMessage::GetEnv,
     res_path = ProxyToLayerMessage::GetEnv,
+);
+
+impl_request!(
+    req = RenameRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Rename,
+    res_path = ProxyToLayerMessage::File => FileResponse::Rename,
 );

@@ -404,15 +404,24 @@ mod test {
 
     use api::TcpSnifferApi;
     use mirrord_protocol::{
-        ConnectionId, LogLevel, ToPayload,
-        tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+        ConnectionId, DaemonMessage, LogLevel, LogMessage, ToPayload,
+        tcp::{
+            DaemonTcp, HttpFilter as ProtocolHttpFilter, LayerTcp, NewTcpConnectionV1, TcpClose,
+            TcpData,
+        },
     };
     use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
-    use tokio::sync::mpsc;
+    use tokio::{sync::mpsc, time::sleep, try_join};
 
     use super::*;
-    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus};
+    use crate::{
+        mirror::TcpMirrorApi,
+        task::{
+            BgTaskRuntime,
+            status::{BgTaskStatus, IntoStatus},
+        },
+    };
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -420,6 +429,8 @@ mod test {
         packet_tx: Sender<(TcpSessionDirectionId, TcpPacketData)>,
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
+        cancellation_token: CancellationToken,
+        _runtime: BgTaskRuntime,
     }
 
     impl TestSnifferSetup {
@@ -436,8 +447,8 @@ mod test {
             self.times_filter_changed.load(Ordering::Relaxed)
         }
 
-        fn new() -> Self {
-            let (packet_tx, packet_rx) = mpsc::channel(128);
+        async fn new() -> Self {
+            let (packet_tx, packet_rx) = mpsc::channel(TcpSnifferApi::CONNECTION_CHANNEL_SIZE);
             let (command_tx, command_rx) = mpsc::channel(16);
             let times_filter_changed = Arc::new(AtomicUsize::default());
 
@@ -453,8 +464,11 @@ mod test {
                 clients_closed: Default::default(),
             };
 
-            let task_status = BgTaskRuntime::Local
-                .spawn(sniffer.start(CancellationToken::new()))
+            let cancellation_token = CancellationToken::new();
+            let runtime = BgTaskRuntime::spawn(None).await.unwrap();
+            let task_status = runtime
+                .handle()
+                .spawn(sniffer.start(cancellation_token.clone()))
                 .into_status("TcpSnifferTask");
 
             Self {
@@ -463,6 +477,8 @@ mod test {
                 packet_tx,
                 times_filter_changed,
                 next_client_id: 0,
+                cancellation_token,
+                _runtime: runtime,
             }
         }
     }
@@ -470,7 +486,7 @@ mod test {
     /// Simulates two sniffed connections, only one matching client's subscription.
     #[tokio::test]
     async fn one_client() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
         api.handle_client_message(LayerTcp::PortSubscribe(80))
@@ -554,6 +570,11 @@ mod test {
         let (message, log) = api.recv().await.unwrap();
         assert_eq!(message, DaemonTcp::Close(TcpClose { connection_id: 0 }),);
         assert_eq!(log, None);
+
+        setup.cancellation_token.cancel();
+        tokio::join!(setup.task_status.wait())
+            .0
+            .expect("We should have cancelled the sniffer task!");
     }
 
     /// Tests that [`TcpCapture`] filter is replaced only when needed.
@@ -564,7 +585,7 @@ mod test {
     /// test does some sleeping to give the sniffer time to process.
     #[tokio::test]
     async fn filter_replace() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
 
         let mut api_1 = setup.get_api().await;
         let mut api_2 = setup.get_api().await;
@@ -643,7 +664,7 @@ mod test {
     /// connection being closed.
     #[tokio::test]
     async fn client_lagging_on_data() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
         api.handle_client_message(LayerTcp::PortSubscribe(80))
@@ -713,11 +734,17 @@ mod test {
         }
 
         // Wait until sniffer consumes all messages.
-        setup
+        let permit = setup
             .packet_tx
             .reserve_many(setup.packet_tx.max_capacity())
             .await
             .unwrap();
+        drop(permit);
+
+        // We're not in a F1 track, but we have race conditions here.
+        //
+        // See the same `sleep` in `client_lagging_on_new_connections` for more information.
+        sleep(Duration::from_millis(100)).await;
 
         let (message, log) = api.recv().await.unwrap();
         assert_eq!(message, DaemonTcp::Close(TcpClose { connection_id: 0 }),);
@@ -729,7 +756,7 @@ mod test {
     /// enough. Client should miss new connections.
     #[tokio::test]
     async fn client_lagging_on_new_connections() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
         let mut api = setup.get_api().await;
 
         api.handle_client_message(LayerTcp::PortSubscribe(80))
@@ -752,6 +779,7 @@ mod test {
                 source_port: 3000 + idx as u16,
                 dest_port: 80,
             });
+
         for session in session_ids {
             setup
                 .packet_tx
@@ -772,11 +800,19 @@ mod test {
             .reserve_many(setup.packet_tx.max_capacity())
             .await
             .unwrap();
-        std::mem::drop(permit);
+        drop(permit);
+
+        // Due to different runtimes (the sniffer task is run in a different thread + runtime from
+        // the main test tokio runtime) we need to `sleep` here to avoid adding synchronization
+        // stuff just for a test.
+        //
+        // The issue here is that we may end up processing the message `source_port: 3128` that we
+        // want to skip to simulate a full channel of sniffed connections.
+        sleep(Duration::from_millis(100)).await;
 
         // Verify that we picked up `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` first connections.
         for i in 0..TcpSnifferApi::CONNECTION_CHANNEL_SIZE {
-            let (msg, log) = api.recv().await.unwrap();
+            let (msg, log) = api.recv().await.expect("Should have a message here!");
             assert_eq!(log, None);
             assert_eq!(
                 msg,
@@ -787,7 +823,7 @@ mod test {
                     source_port: 3000 + i as u16,
                     local_address: dest_addr.into(),
                 })
-            )
+            );
         }
 
         // Send one more connection.
@@ -821,6 +857,13 @@ mod test {
                 local_address: dest_addr.into(),
             }),
         );
+
+        setup.cancellation_token.cancel();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            try_join!(setup.task_status.wait()).unwrap()
+        })
+        .await
+        .expect("We should have cancelled the sniffer task!");
     }
 
     /// Verifies that [`TcpConnectionSniffer`] reacts to [`TcpSnifferApi`] being dropped
@@ -829,7 +872,7 @@ mod test {
     #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_client_closed() {
-        let mut setup = TestSnifferSetup::new();
+        let mut setup = TestSnifferSetup::new().await;
 
         let mut api = setup.get_api().await;
 
@@ -862,5 +905,39 @@ mod test {
                 other => panic!("unexpected times filter changed {other}"),
             }
         }
+    }
+
+    /// Test that sniffer mode properly ignores HTTP filters in subscriptions.
+    #[tokio::test]
+    async fn test_sniffer_ignores_http_filter() {
+        let mut setup = TestSnifferSetup::new().await;
+        let api = setup.get_api().await;
+        let mut tcp_mirror_api = TcpMirrorApi::sniffer(api);
+
+        let filter = ProtocolHttpFilter::Header(
+            mirrord_protocol::tcp::Filter::new("x-filter: yes".to_string()).unwrap(),
+        );
+        let message = LayerTcp::PortSubscribeFilteredHttp(80, filter);
+
+        tcp_mirror_api.handle_client_message(message).await.unwrap();
+        let message_1 = tcp_mirror_api.recv().await.unwrap();
+        let message_2 = tcp_mirror_api.recv().await.unwrap();
+        assert!(
+            [&message_1, &message_2].into_iter().any(|message| matches!(
+                message,
+                DaemonMessage::LogMessage(LogMessage {
+                    level: LogLevel::Warn,
+                    ..
+                }),
+            )),
+            "TcpMirrorApi should emit a warning"
+        );
+        assert!(
+            [&message_1, &message_2].into_iter().any(|message| matches!(
+                message,
+                DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(80))),
+            )),
+            "TcpMirrorApi should accept the subscription"
+        );
     }
 }

@@ -18,10 +18,7 @@ use super::{
     AgentResult,
     messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
 };
-use crate::{
-    error::AgentError,
-    util::{ClientId, remote_runtime::BgTaskStatus},
-};
+use crate::{error::AgentError, task::status::BgTaskStatus, util::ClientId};
 
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate
@@ -171,6 +168,14 @@ impl TcpSnifferApi {
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> AgentResult<()> {
         match message {
             LayerTcp::PortSubscribe(port) => {
+                let (tx, rx) = oneshot::channel();
+                self.send_command(SnifferCommandInner::Subscribe(port, tx))
+                    .await?;
+                self.subscriptions_in_progress.push(rx);
+                Ok(())
+            }
+
+            LayerTcp::PortSubscribeFilteredHttp(port, _) => {
                 let (tx, rx) = oneshot::channel();
                 self.send_command(SnifferCommandInner::Subscribe(port, tx))
                     .await?;

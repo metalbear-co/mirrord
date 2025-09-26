@@ -1,11 +1,12 @@
 #![deny(missing_docs)]
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStringExt;
 use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    os::unix::ffi::OsStringExt,
     path::PathBuf,
     str::FromStr,
 };
@@ -30,7 +31,7 @@ use thiserror::Error;
     about,
     long_about = r#"
 Encountered an issue? Have a feature request?
-Join our Slack at https://metalbear.co/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.co"#
+Join our Slack at https://metalbear.com/slack , create a GitHub issue at https://github.com/metalbear-co/mirrord/issues/new/choose, or email as at hi@metalbear.com"#
 )]
 pub(super) struct Cli {
     #[command(subcommand)]
@@ -283,10 +284,11 @@ impl ExecParams {
             );
         }
         if let Some(fs_mode) = self.fs_mode {
-            envs.insert(
-                "MIRRORD_FILE_MODE".as_ref(),
-                Cow::Owned(OsString::from_vec(fs_mode.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let file_mode = OsString::from_vec(fs_mode.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let file_mode = OsString::from(fs_mode.to_string());
+            envs.insert("MIRRORD_FILE_MODE".as_ref(), Cow::Owned(file_mode));
         }
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
@@ -484,17 +486,21 @@ impl AgentParams {
             );
         }
         if let Some(agent_ttl) = &self.agent_ttl {
-            envs.insert(
-                "MIRRORD_AGENT_TTL".as_ref(),
-                Cow::Owned(OsString::from_vec(agent_ttl.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let agent_ttl = OsString::from_vec(agent_ttl.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_ttl = OsString::from(agent_ttl.to_string());
+            envs.insert("MIRRORD_AGENT_TTL".as_ref(), Cow::Owned(agent_ttl));
         }
         if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            #[cfg(not(target_os = "windows"))]
+            let agent_startup_timeout =
+                OsString::from_vec(agent_startup_timeout.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_startup_timeout = OsString::from(agent_startup_timeout.to_string());
             envs.insert(
                 "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),
-                Cow::Owned(OsString::from_vec(
-                    agent_startup_timeout.to_string().into_bytes(),
-                )),
+                Cow::Owned(agent_startup_timeout),
             );
         }
         if self.ephemeral_container {
@@ -696,7 +702,8 @@ pub(super) enum OperatorCommand {
     /// This will install the operator, which requires a seat based license to be used.
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.
-    #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
+    // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
+    #[clap(hide(true))]
     Setup(#[clap(flatten)] OperatorSetupParams),
     /// Print operator status
     Status {
@@ -719,7 +726,7 @@ pub(super) enum OperatorCommand {
 
 #[derive(Args, Debug)]
 pub(super) struct OperatorSetupParams {
-    /// ToS can be read here <https://metalbear.co/legal/terms>
+    /// ToS can be read here <https://metalbear.com/legal/terms>
     #[arg(long)]
     pub(super) accept_tos: bool,
 
@@ -780,6 +787,12 @@ pub(super) struct OperatorSetupParams {
         hide = true
     )]
     pub(super) stateful_sessions: bool,
+
+    /// Enable MySQL database branching.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a mysql branching component.
+    #[arg(long, visible_alias = "mysql", default_value_t = false)]
+    pub(super) mysql_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.

@@ -20,12 +20,15 @@ mirrord-agent-env.path = "../env"
 
 async-trait = "0.1"
 enum_dispatch.workspace = true
-iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 fancy-regex.workspace = true
-nix = { workspace = true, features = ["user"] }
-rand.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "process", "rt"] }
 tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
+nix = { workspace = true, features = ["user"] }
+caps = "0.5"
+
 
 [dev-dependencies]
 mockall = "0.13"

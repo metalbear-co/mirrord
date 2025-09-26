@@ -124,6 +124,8 @@ impl IntProxy {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
 
+        let agent_conn_reconnectable = agent_conn.reconnectable();
+
         let agent = background_tasks.register_restartable(
             agent_conn,
             MainTaskId::AgentConnection,
@@ -141,7 +143,14 @@ impl IntProxy {
         // to requests that have a requirement on the mirrord-protocol version.
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
-            PingPong::new(Self::PING_INTERVAL, Self::PING_PONG_MAX_RECONNECTS),
+            PingPong::new(
+                Self::PING_INTERVAL,
+                if agent_conn_reconnectable {
+                    Self::PING_PONG_MAX_RECONNECTS
+                } else {
+                    0
+                },
+            ),
             MainTaskId::PingPong,
             Self::CHANNEL_SIZE,
         );
@@ -545,7 +554,7 @@ impl IntProxy {
             DaemonMessage::GetEnvVarsResponse(res) => {
                 self.task_txs
                     .simple
-                    .send(SimpleProxyMessage::GetEnvRes(res))
+                    .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
             message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
@@ -696,7 +705,7 @@ mod test {
 
     use crate::{
         IntProxy,
-        agent_conn::{AgentConnection, ReconnectFlow},
+        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -719,7 +728,7 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
@@ -838,7 +847,7 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,
@@ -932,7 +941,7 @@ mod test {
         let agent_conn = AgentConnection {
             agent_rx,
             agent_tx,
-            reconnect: ReconnectFlow::Break,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
             agent_conn,

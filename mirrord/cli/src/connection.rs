@@ -32,7 +32,7 @@ pub(crate) struct AgentConnection {
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
-    config: &mut LayerConfig,
+    layer_config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
     branch_name: Option<String>,
@@ -42,27 +42,19 @@ where
     R: Reporter,
 {
     let mut operator_subtask = progress.subtask("checking operator");
-    if config.operator == Some(false) {
+    if layer_config.operator == Some(false) {
         operator_subtask.success(Some("operator disabled"));
         return Ok(None);
     }
 
-    let api = match OperatorApi::try_new(config, analytics, progress).await? {
+    let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
-        None if config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
+        None if layer_config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
         None => {
             operator_subtask.success(Some("operator not found"));
             return Ok(None);
         }
     };
-
-    let mut version_cmp_subtask = operator_subtask.subtask("checking version compatibility");
-    let compatible = api.check_operator_version(&version_cmp_subtask);
-    if compatible {
-        version_cmp_subtask.success(Some("operator version compatible"));
-    } else {
-        version_cmp_subtask.failure(Some("operator version may not be compatible"));
-    }
 
     let mut license_subtask = operator_subtask.subtask("checking license");
     match api.check_license_validity(&license_subtask) {
@@ -70,7 +62,7 @@ where
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
 
-            if config.operator == Some(true) {
+            if layer_config.operator == Some(true) {
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
@@ -81,22 +73,26 @@ where
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
     let api = api
-        .prepare_client_cert(analytics, progress)
+        .prepare_client_cert(analytics, progress, layer_config)
         .await
         .into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));
 
     let target = ResolvedTarget::new(
         api.client(),
-        &config.target.path.clone().unwrap_or(Target::Targetless),
-        config.target.namespace.as_deref(),
+        &layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless),
+        layer_config.target.namespace.as_deref(),
     )
     .await
     .map_err(CliError::OperatorTargetResolution)?;
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
-        .connect_in_new_session(target, config, &session_subtask, branch_name)
+        .connect_in_new_session(target, layer_config, &session_subtask, branch_name)
         .await?;
     session_subtask.success(Some("session started"));
 
@@ -247,11 +243,11 @@ where
                 let mut actions = HashSet::new();
                 actions.insert(IdeAction::Link {
                     label: "Get started (read the docs)".to_string(),
-                    link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
+                    link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
                 });
                 actions.insert(IdeAction::Link {
                     label: "Try it now".to_string(),
-                    link: "https://app.metalbear.co/".to_string(),
+                    link: "https://app.metalbear.com/".to_string(),
                 });
 
                 actions
@@ -260,7 +256,7 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
     Ok(())
 }
 
@@ -277,11 +273,11 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Get started (read the docs)".to_string(),
-                link: "https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
+                link: "https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
             });
             actions.insert(IdeAction::Link {
                 label: "Try it now".to_string(),
-                link: "https://app.metalbear.co/".to_string(),
+                link: "https://app.metalbear.com/".to_string(),
             });
 
             actions
@@ -290,6 +286,6 @@ where
     // This is CLI Only because the extensions also implement this check with better messaging.
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
-    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.co/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
 }

@@ -8,7 +8,7 @@ use crate::user_data::UserData;
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
 const NEWSLETTER_SIGNUP_URL: &str =
-    "https://metalbear.co/newsletter?utm_medium=cli&utm_source=newsletter";
+    "https://metalbear.com/newsletter?utm_medium=cli&utm_source=newsletter";
 
 /// How many times mirrord can be run before inviting the user to sign up to the newsletter the
 /// first time.
@@ -83,7 +83,9 @@ fn get_open_command() -> Command {
 /// terminal as a fallback.
 #[cfg(target_os = "windows")]
 fn get_open_command() -> Command {
-    Command::new("cmd.exe").arg("/C").arg("start").arg("")
+    let mut command = Command::new("cmd.exe");
+    command.arg("/C").arg("start").arg("");
+    command
 }
 
 /// Attempts to open the mirrord newsletter sign-up page in the default browser.

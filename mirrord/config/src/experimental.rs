@@ -109,12 +109,21 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ vfork_emulation {#experimental-vfork_emulation}
     ///
     /// Enables vfork emulation within the mirrord-layer.
-    /// Might solve rare stack corruption issues.  
+    /// Might solve rare stack corruption issues.
     ///
     /// Note that for Go applications on ARM64, this feature is not yet supported,
     /// and this setting is ignored.
     #[config(default = true)]
     pub vfork_emulation: bool,
+
+    /// ### _experimental_ hook_rename {#experimental-hook_rename}
+    ///
+    /// Enables hooking the `rename` function.
+    ///
+    /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
+    /// `twig`, to create and rename temporary files.
+    #[config(default = false)]
+    pub hook_rename: bool,
 
     /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
     ///
@@ -127,6 +136,14 @@ pub struct ExperimentalConfig {
     /// Defaults to `false` in mfT.
     #[config(default = None)]
     pub dns_permission_error_fatal: Option<bool>,
+
+    /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
+    ///
+    /// Forces hooking all instances of the connect function.
+    /// In very niche cases the connect function has multiple exports and this flag
+    /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
+    #[config(default = false)]
+    pub force_hook_connect: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -146,5 +163,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         if let Some(dns_permission_error_fatal) = self.dns_permission_error_fatal {
             analytics.add("dns_permission_error_fatal", dns_permission_error_fatal);
         }
+        analytics.add("force_hook_connect", self.force_hook_connect);
     }
 }

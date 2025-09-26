@@ -10,6 +10,7 @@ use crate::utils::services::service_for_mirrord_ls;
 use crate::utils::{kube_client, run_command::run_ls};
 
 /// Test for the `mirrord ls` command.
+#[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn mirrord_ls() {

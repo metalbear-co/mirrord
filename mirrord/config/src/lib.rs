@@ -16,6 +16,7 @@ pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
+pub mod retry;
 pub mod target;
 pub mod util;
 
@@ -49,12 +50,16 @@ use crate::{
         fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
     },
     internal_proxy::InternalProxyConfig,
+    retry::StartupRetryConfig,
     target::TargetConfig,
     util::VecOrSingle,
 };
 
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
+
+/// Environment variable to indicate towards layer to wait for debugger.
+pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -379,6 +384,10 @@ pub struct LayerConfig {
     /// being added to.
     #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
     pub skip_sip: VecOrSingle<String>,
+
+    /// ## startup_retry {#root-startup_retry}
+    #[config(nested)]
+    pub startup_retry: StartupRetryConfig,
 }
 
 impl LayerConfig {
@@ -715,6 +724,27 @@ impl LayerConfig {
             );
         }
 
+        if self.startup_retry.min_ms > self.startup_retry.max_ms {
+            return Err(ConfigError::InvalidValue {
+                name: "startup_retry.min_ms",
+                provided: self.startup_retry.min_ms.to_string(),
+                error: format!(
+                    "the value of startup_retry.min_ms `{}` cannot be greater than \
+                     the value of startup_retry.max_ms `{}`.",
+                    self.startup_retry.min_ms, self.startup_retry.max_ms
+                )
+                .into(),
+            });
+        }
+
+        if self.startup_retry.max_ms == 0 {
+            return Err(ConfigError::InvalidValue {
+                name: "startup_retry.max_ms",
+                provided: self.startup_retry.max_ms.to_string(),
+                error: "the value of startup_retry.max_ms has to be greater than 0.".into(),
+            });
+        }
+
         Ok(())
     }
 }
@@ -730,6 +760,7 @@ impl CollectAnalytics for &LayerConfig {
         (&self.agent).collect_analytics(analytics);
         (&self.feature).collect_analytics(analytics);
         (&self.experimental).collect_analytics(analytics);
+        (&self.startup_retry).collect_analytics(analytics);
     }
 }
 
@@ -1070,6 +1101,7 @@ mod tests {
                 copy_target: None,
                 hostname: None,
                 split_queues: None,
+                db_branches: None,
             }),
             container: None,
             operator: None,
@@ -1081,6 +1113,7 @@ mod tests {
             use_proxy: None,
             experimental: None,
             skip_sip: None,
+            startup_retry: None,
         };
 
         assert_eq!(config, expect);
@@ -1197,10 +1230,38 @@ mod tests {
     fn encode_and_decode_advanced_config() {
         let mut cfg_context = ConfigContext::default();
 
+        let advanced_config: String = format!(
+            r#"
+        {{
+            "accept_invalid_certificates": false,
+            "target": {{
+                "path": "pod/test-service-abcdefg-abcd",
+                "namespace": "default"
+            }},
+            "feature": {{
+                "env": true,
+                "fs": "write",
+                "network": {{
+                    "dns": false,
+                    "incoming": {{
+                        "mode": "steal",
+                        "http_filter": {{
+                            "header_filter": "x-intercept: {{ get_env(name=\"{}\") }}"
+                        }}
+                    }},
+                    "outgoing": {{
+                        "tcp": true,
+                        "udp": false
+                    }}
+                }}
+            }}
+        }}"#,
+            USER_ENVVAR
+        );
         // this config includes template variables, so it needs to be rendered first
         let mut template_engine = Tera::default();
         template_engine
-            .add_raw_template("main", ADVANCED_CONFIG)
+            .add_raw_template("main", &advanced_config)
             .unwrap();
         let rendered = template_engine
             .render("main", &tera::Context::new())
@@ -1216,30 +1277,9 @@ mod tests {
         assert_eq!(decoded, resolved_config);
     }
 
-    const ADVANCED_CONFIG: &str = r#"
-    {
-        "accept_invalid_certificates": false,
-        "target": {
-            "path": "pod/test-service-abcdefg-abcd",
-            "namespace": "default"
-        },
-        "feature": {
-            "env": true,
-            "fs": "write",
-            "network": {
-                "dns": false,
-                "incoming": {
-                    "mode": "steal",
-                    "http_filter": {
-                        "header_filter": "x-intercept: {{ get_env(name="USER") }}"
-                    }
-                },
-                "outgoing": {
-                    "tcp": true,
-                    "udp": false
-                }
-            }
-        }
-    }
-"#;
+    #[cfg(not(target_os = "windows"))]
+    const USER_ENVVAR: &str = "USER";
+
+    #[cfg(target_os = "windows")]
+    const USER_ENVVAR: &str = "USERNAME";
 }

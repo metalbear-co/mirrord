@@ -2,10 +2,12 @@
     any(target_arch = "x86_64", target_arch = "aarch64"),
     target_os = "linux"
 ))]
+use std::ffi::CStr;
+
 use nix::errno::Errno;
 use tracing::trace;
 
-use crate::{close_detour, file::hooks::*, socket::hooks::*};
+use crate::{close_detour, file::hooks::*, hooks::HookManager, socket::hooks::*};
 
 #[cfg_attr(
     all(target_os = "linux", target_arch = "x86_64"),
@@ -114,6 +116,9 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
                     }
                     #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+                    libc::SYS_rename => rename_detour(param1 as _, param2 as _) as i64,
+
+                    #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
                     libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
                     libc::SYS_mkdirat => {
                         mkdirat_detour(param1 as _, param2 as _, param3 as _) as i64
@@ -221,4 +226,24 @@ unsafe extern "C" fn raw_vfork_handler(
         let raw_errno = error.into_raw();
         -(raw_errno as i64)
     })
+}
+
+/// Extracts version of the Go runtime in the current process.
+fn get_go_runtime_version(hook_manager: &mut HookManager) -> Option<f32> {
+    let version_symbol = hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")?;
+    let version = unsafe {
+        let cstr = CStr::from_ptr(version_symbol.0 as _);
+        std::str::from_utf8_unchecked(cstr.to_bytes())
+    };
+    // buildVersion can look a bit complex:
+    // devel go1.25-ecc06f0 Wed Apr 9 00:32:10 2025 -0700
+    //
+    // We need to find the word starting with 'go', and parse the next 4 characters.
+    version
+        .split_ascii_whitespace()
+        .find_map(|chunk| chunk.strip_prefix("go"))
+        .and_then(|version| version.get(..4))
+        .and_then(|version| version.parse::<f32>().ok())
+        .unwrap_or_else(|| panic!("failed to parse Go runtime version {version:?}"))
+        .into()
 }

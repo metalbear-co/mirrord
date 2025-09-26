@@ -8,6 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::Response;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
@@ -28,13 +29,14 @@ use super::{Command, StealerCommand, StealerMessage};
 use crate::{
     AgentError,
     error::AgentResult,
-    http::filter::HttpFilter,
+    http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
     incoming::{
-        ConnError, IncomingStream, IncomingStreamItem, ResponseBodyProvider, ResponseProvider,
-        StolenHttp, StolenTcp,
+        ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
+        ResponseProvider, StolenHttp, StolenTcp,
     },
     steal::api::wait_body::WaitForFullBody,
-    util::{ClientId, protocol_version::ClientProtocolVersion, remote_runtime::BgTaskStatus},
+    task::status::BgTaskStatus,
+    util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod wait_body;
@@ -202,6 +204,7 @@ impl TcpStealerApi {
             request_head,
             stream,
             response_provider,
+            redirector_config,
         } = request;
 
         if self
@@ -297,7 +300,10 @@ impl TcpStealerApi {
         self.incoming_streams.insert(connection_id, stream);
         self.connections.insert(
             connection_id,
-            ClientConnectionState::HttpRequestSent { response_provider },
+            ClientConnectionState::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            },
         );
 
         Ok(())
@@ -428,6 +434,7 @@ impl TcpStealerApi {
                     connection_id,
                     ClientConnectionState::HttpRequestSent {
                         response_provider: request.response_provider,
+                        redirector_config: request.redirector_config,
                     },
                 );
                 let message = if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
@@ -528,8 +535,7 @@ impl TcpStealerApi {
                 };
                 let response =
                     response.map_body(|body| std::iter::once(InternalHttpBodyFrame::Data(body)));
-                connection.send_response(response).await;
-                connection.send_response_frame(None).await;
+                connection.send_response(response, true).await;
             }
 
             LayerTcpSteal::HttpResponseFramed(response) => {
@@ -540,8 +546,7 @@ impl TcpStealerApi {
                     return Ok(());
                 };
                 let response = response.map_body(|body| body.0);
-                connection.send_response(response).await;
-                connection.send_response_frame(None).await;
+                connection.send_response(response, true).await;
             }
 
             LayerTcpSteal::HttpResponseChunked(response) => match response {
@@ -552,7 +557,7 @@ impl TcpStealerApi {
                     let Some(connection) = self.connections.get_mut(&response.connection_id) else {
                         return Ok(());
                     };
-                    connection.send_response(response).await;
+                    connection.send_response(response, false).await;
                 }
                 ChunkedResponse::Body(body) => {
                     if body.request_id != 0 {
@@ -595,7 +600,10 @@ enum ClientConnectionState {
     /// TCP connection, client is sending data.
     Tcp { data_tx: mpsc::Sender<Bytes> },
     /// HTTP request sent, waiting for the response from the client.
-    HttpRequestSent { response_provider: ResponseProvider },
+    HttpRequestSent {
+        response_provider: ResponseProvider,
+        redirector_config: RedirectorTaskConfig,
+    },
     /// HTTP request sent, response received, client is sending response body frames.
     HttpResponseReceived { body_provider: ResponseBodyProvider },
     /// HTTP request finished, connection upgraded, client is sending data.
@@ -644,30 +652,64 @@ impl ClientConnectionState {
         }
     }
 
-    async fn send_response<B>(&mut self, response: HttpResponse<B>)
+    async fn send_response<B>(&mut self, response: HttpResponse<B>, body_finished: bool)
     where
         B: IntoIterator<Item = InternalHttpBodyFrame>,
     {
         let state = std::mem::replace(self, Self::Closed);
-        let response_provider = match state {
-            Self::HttpRequestSent { response_provider } => response_provider,
+        let (response_provider, redirector_config) = match state {
+            Self::HttpRequestSent {
+                response_provider,
+                redirector_config,
+            } => (response_provider, redirector_config),
             state => {
                 *self = state;
                 return;
             }
         };
 
-        let mut hyper_response = Response::new(());
-        *hyper_response.status_mut() = response.internal_response.status;
-        *hyper_response.headers_mut() = response.internal_response.headers;
-        *hyper_response.version_mut() = response.internal_response.version;
-        let (parts, _) = hyper_response.into_parts();
+        let parts = {
+            let mut hyper_response = Response::new(());
 
-        let body_provider = response_provider.send(parts);
-        for frame in response.internal_response.body {
-            body_provider.send_frame(frame.into()).await;
+            *hyper_response.status_mut() = response.internal_response.status;
+            *hyper_response.headers_mut() = response.internal_response.headers;
+            *hyper_response.version_mut() = response.internal_response.version;
+
+            Self::modify_response(&mut hyper_response, &redirector_config);
+
+            hyper_response.into_parts().0
+        };
+
+        if body_finished {
+            let body = InternalHttpBody(response.internal_response.body.into_iter().collect())
+                .map_err(|_| unreachable!());
+            let body = BoxBody::new(body);
+            let response = Response::from_parts(parts, body);
+            match response_provider.send_finished(response) {
+                Some(data_tx) => *self = Self::HttpUpgraded { data_tx },
+                None => {
+                    *self = Self::Closed;
+                }
+            }
+        } else {
+            let body_provider = response_provider.send(parts);
+            for frame in response.internal_response.body {
+                body_provider.send_frame(frame.into()).await;
+            }
+            *self = Self::HttpResponseReceived { body_provider };
         }
-        *self = Self::HttpResponseReceived { body_provider };
+    }
+
+    /// Used for applying transformations on the response returned
+    /// from the client. Currently just inserts the mirrord agent
+    /// header.
+    fn modify_response<T>(response: &mut Response<T>, redirector_config: &RedirectorTaskConfig) {
+        if redirector_config.inject_headers {
+            response.headers_mut().insert(
+                MIRRORD_AGENT_HTTP_HEADER_NAME,
+                http::HeaderValue::from_static("forwarded-to-client"),
+            );
+        }
     }
 }
 

@@ -211,7 +211,9 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::GetEnvRes(res) => {
                     let (message_id, layer_id) =
                         self.get_env_reqs.pop_front().ok_or_else(|| {
-                            UnexpectedAgentMessage(DaemonMessage::GetEnvVarsResponse(res.clone()))
+                            UnexpectedAgentMessage(DaemonMessage::GetEnvVarsResponse(
+                                res.clone().map(Into::into),
+                            ))
                         })?;
                     message_bus
                         .send(ToLayer {

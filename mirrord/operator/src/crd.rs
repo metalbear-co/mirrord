@@ -3,7 +3,6 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -23,6 +22,8 @@ pub mod copy_target;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod mysql_branching;
+pub mod patch;
 pub mod policy;
 pub mod profile;
 pub mod session;
@@ -379,6 +380,7 @@ pub enum NewOperatorFeature {
     LayerReconnect,
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
+    MySqlBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -402,6 +404,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingDirect => {
                 "SQS queue splitting without copy target"
             }
+            NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -598,6 +601,7 @@ pub struct WorkloadQueueRegistryStatus {
     status = "WorkloadQueueRegistryStatus",
     namespaced
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
@@ -605,6 +609,13 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
+
+    /// Timeout for waiting until workload patch takes effect, that is - at least one pod reads
+    /// from the main temporary queue.
+    ///
+    /// Specified in seconds. Defaults to 120s.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workload_restart_timeout: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -716,32 +727,4 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
-}
-
-/// Describes an operator user.
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "MirrordOperatorUser",
-    root = "MirrordOperatorUser"
-)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrordOperatorUserSpec {
-    /// Unique ID.
-    pub user_id: String,
-    /// Last seen local username.
-    pub last_username: String,
-    /// Last seen hostname.
-    pub last_hostname: String,
-    /// Last seen Kubernetes username.
-    pub last_k8s_username: String,
-    /// Most recent session activity.
-    pub last_seen: DateTime<Utc>,
-    /// Total session count.
-    pub total_sessions_count: u64,
-    /// Total session duration.
-    pub total_sessions_duration_seconds: u64,
-    /// Last session's target.
-    pub last_target: String,
 }

@@ -240,11 +240,12 @@
 #![allow(clippy::large_enum_variant)]
 // TODO(alex): Get a big `Box` for the big variants.
 #![allow(clippy::result_large_err)]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
-use std::{
-    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
-    time::Duration,
-};
+use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+#[cfg(not(target_os = "windows"))]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
@@ -258,6 +259,8 @@ use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
+#[cfg(target_os = "windows")]
+use libc::EXIT_FAILURE;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -313,6 +316,8 @@ mod wsl;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
+#[cfg(target_os = "windows")]
+use crate::execution::windows::command::WindowsCommand;
 use crate::{
     newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
 };
@@ -355,15 +360,18 @@ where
         })
         .collect::<Vec<_>>();
 
-    let execution_info = MirrordExecution::start_internal(
-        &mut config,
-        #[cfg(target_os = "macos")]
-        Some(&args.binary),
-        #[cfg(target_os = "macos")]
-        Some(binary_args.as_slice()),
-        &mut sub_progress,
-        analytics,
-    )
+    let execution_info = Box::pin(async {
+        MirrordExecution::start_internal(
+            &mut config,
+            #[cfg(target_os = "macos")]
+            Some(&args.binary),
+            #[cfg(target_os = "macos")]
+            Some(binary_args.as_slice()),
+            &mut sub_progress,
+            analytics,
+        )
+        .await
+    })
     .await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
@@ -379,7 +387,7 @@ where
     };
 
     #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
+    let (_did_sip_patch, binary) = (false, args.binary.clone());
 
     let mut env_vars: HashMap<String, String> = vars().collect();
     env_vars.extend(execution_info.environment.clone());
@@ -394,15 +402,9 @@ where
         .map(Clone::clone)
         .collect::<Vec<_>>();
 
-    // since execvpe doesn't exist on macOS, resolve path with which and use execve
-    let binary_path = match which(&binary) {
-        Ok(pathbuf) => pathbuf,
-        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
-    };
-    let path = CString::new(binary_path.as_os_str().as_bytes())?;
-
     sub_progress.success(Some("ready to launch process"));
 
+    #[cfg(not(target_os = "windows"))]
     if config.experimental.browser_extension_config {
         browser::init_browser_extension(&config.feature.network, progress);
     }
@@ -422,6 +424,43 @@ where
 
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data, progress).await;
+
+    let sub_progress = progress.subtask("running process");
+
+    Box::pin(async {
+        execve_process(
+            binary,
+            binary_args,
+            env_vars,
+            _did_sip_patch,
+            sub_progress,
+            analytics,
+        )
+        .await
+    })
+    .await
+}
+
+fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn execve_process<P>(
+    binary: String,
+    binary_args: Vec<String>,
+    env_vars: HashMap<String, String>,
+    _did_sip_patch: bool,
+    mut progress: P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = process_which(&binary)?;
+
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
 
     let args = binary_args
         .clone()
@@ -456,6 +495,74 @@ where
     }
 
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+#[cfg(target_os = "windows")]
+async fn execve_process<P>(
+    binary: String,
+    binary_args: Vec<String>,
+    env_vars: HashMap<String, String>,
+    _did_sip_patch: bool,
+    mut progress: P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+    // Add .exe extension if necessary on Windows
+    // From CreateProcessW documentation:
+    // lpApplicationName - This parameter must include the file name extension; no default extension
+    // is assumed.
+    let binary_name = if binary.ends_with(".exe") {
+        binary.clone()
+    } else {
+        format!("{}.exe", binary)
+    };
+
+    let binary_path = process_which(&binary_name).map_err(|e| {
+        error!("process_which failed: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        e
+    })?;
+
+    let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
+        .and_then(|os_str| os_str.into_string().ok())
+        .ok_or_else(|| {
+            CliError::LayerFilePathMissing(
+                binary.clone(),
+                binary_args.clone(),
+                std::env::vars().collect(),
+            )
+        })?;
+
+    let mut env_vars = env_vars.clone();
+    env_vars
+        .entry("MIRRORD_LAYER_FILE".to_string())
+        .or_insert(layer_path.clone());
+
+    let cmd = WindowsCommand::new(&binary_path)
+        .args(&binary_args)
+        .envs(env_vars)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    // On Windows, we need to manually handle process replacement
+    let mut process = cmd.inject_and_spawn(layer_path).map_err(|e| {
+        error!("Failed to create process: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+    })?;
+
+    progress.success(Some("Ready!"));
+
+    // Wait for process and handle I/O
+    let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
+        error!("Process failed: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        EXIT_FAILURE
+    });
+    std::process::exit(exit_code);
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -622,6 +729,8 @@ fn print_config<P>(
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
+    ensure_not_nested()?;
+
     let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -646,6 +755,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
@@ -662,21 +772,23 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
     result?;
 
-    let execution_result = exec_process(
-        config,
-        config_file_path.as_deref(),
-        args,
-        &mut progress,
-        &mut analytics,
-        user_data,
-    )
-    .await;
+    Box::pin(async move {
+        let res = exec_process(
+            config,
+            config_file_path.as_deref(),
+            args,
+            &mut progress,
+            &mut analytics,
+            user_data,
+        )
+        .await;
 
-    if execution_result.is_err() && !analytics.has_error() {
-        analytics.set_error(AnalyticsError::Unknown);
-    }
-
-    execution_result
+        if res.is_err() && !analytics.has_error() {
+            analytics.set_error(AnalyticsError::Unknown);
+        }
+        res
+    })
+    .await
 }
 
 async fn port_forward(
@@ -832,7 +944,7 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
-    let res: CliResult<(), CliError> = rt.block_on(async move {
+    let res: CliResult<(), CliError> = rt.block_on(Box::pin(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         let mut user_data = UserData::from_default_path()
@@ -889,6 +1001,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
             }
@@ -898,7 +1011,7 @@ fn main() -> miette::Result<()> {
         };
 
         Ok(())
-    });
+    }));
 
     rt.block_on(async move {
         tokio::time::timeout(Duration::from_secs(10), signal.drain())
@@ -910,6 +1023,14 @@ fn main() -> miette::Result<()> {
     });
 
     res.map_err(Into::into)
+}
+
+/// Make sure we're not running nested inside another mirrord exec
+fn ensure_not_nested() -> CliResult<()> {
+    match std::env::var(mirrord_config::LayerConfig::RESOLVED_CONFIG_ENV) {
+        Ok(_) => Err(CliError::NestedExec),
+        Err(_) => Ok(()),
+    }
 }
 
 async fn prompt_outdated_version(progress: &ProgressTracker) {

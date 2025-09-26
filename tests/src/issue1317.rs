@@ -33,6 +33,7 @@ mod issue1317_tests {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     async fn issue1317(
         #[future]
@@ -95,7 +96,7 @@ mod issue1317_tests {
             .join("../target/debug/issue1317")
             .to_string_lossy()
             .to_string();
-        let executable = vec![app_path.as_str()];
+        let executable = vec![app_path];
         let mut process = run_exec_with_target(
             executable,
             &service.pod_container_target(),

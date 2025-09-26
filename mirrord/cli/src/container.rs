@@ -1,6 +1,6 @@
-use std::{
-    net::SocketAddr, ops::Not, os::unix::process::ExitStatusExt, path::PathBuf, process::Stdio,
-};
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::ExitStatusExt;
+use std::{net::SocketAddr, ops::Not, path::PathBuf, process::Stdio};
 
 use clap::ValueEnum;
 pub use command_display::CommandDisplay;
@@ -19,6 +19,7 @@ use tracing::Level;
 use crate::{
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
+    ensure_not_nested,
     error::{CliResult, ContainerError},
     execution::{LINUX_INJECTION_ENV_VAR, MirrordExecution},
     logging::pipe_intproxy_sidecar_logs,
@@ -209,6 +210,8 @@ pub async fn container_command(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<i32> {
+    ensure_not_nested()?;
+
     let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
@@ -252,12 +255,13 @@ pub async fn container_command(
         }
     })?;
 
+    #[cfg(not(target_os = "windows"))]
     if let Some(signal) = status.signal() {
         tracing::warn!("Container command was terminated by signal {signal}");
-        Ok(-1)
-    } else {
-        Ok(status.code().unwrap_or_default())
+        return Ok(-1);
     }
+
+    Ok(status.code().unwrap_or_default())
 }
 
 /// Main entry point for the `mirrord container` command.

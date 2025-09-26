@@ -8,6 +8,140 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.163.0](https://github.com/metalbear-co/mirrord/tree/3.163.0) - 2025-09-19
+
+
+### Added
+
+- Improved UX when spawning the agent pod fails or takes a long time
+  [#3578](https://github.com/metalbear-co/mirrord/issues/3578)
+- Added a configuration option to automatically inject `Mirrord-Agent` header
+  into responses to HTTP requests served by the mirrord-agent.
+  The header indicates whether the request was handled by the local
+  or the remote app. Header can be enabled with `agent.inject_headers`.
+
+
+### Fixed
+
+- Fixed compatibility issues with Go 1.25.
+
+
+### Internal
+
+- Improved mirrord-agent docs.
+- Increased the timeout on the layer test `outgoing::outgoing_tcp_bound_socket`
+  from 15 to 25 seconds to reduce chance of flakes on macOS.
+- Update CI to use newer versions of node and express.
+
+## [3.162.0](https://github.com/metalbear-co/mirrord/tree/3.162.0) - 2025-09-16
+
+
+### Added
+
+- Mirroring incoming TCP traffic now supports using an HTTP filter.
+  [#2538](https://github.com/metalbear-co/mirrord/issues/2538)
+- mirrord now retries failed Kubernetes API requests made during startup. This
+  should improve stability when facing transient errors, like cluster
+  connectivity issues.
+
+  The retry policy can be adjusted in startup_retry mirrord config section.
+
+
+### Changed
+
+- Agent->layer message logs will no longer contain environment variables.
+- Update TELEMETRY.md to include the machine_id metric in the OSS.
+- Updated so if the PingPong will not attempt to request restart if not
+  connected to operator.
+
+
+### Fixed
+
+- Intproxy now no longer runs as a child of the user process so it doesn't get
+  reaped by wait/waitall calls.
+  [#3563](https://github.com/metalbear-co/mirrord/issues/3563)
+
+
+### Internal
+
+- Add tuple struct support for medschool.
+- Add warning message to `AgentConnection`'s reconnect to print out what kind
+  of reconnect is requested.
+- Fixed cancellation of background tasks in the internal proxy.
+- Improved UX of filtered traffic mirroring with old agents.
+
+## [3.161.0](https://github.com/metalbear-co/mirrord/tree/3.161.0) - 2025-09-04
+
+
+### Added
+
+- Added config for specifying mirrord-tls.pem path when using mirrord container
+  command. [#3508](https://github.com/metalbear-co/mirrord/issues/3508)
+
+
+### Changed
+
+- Changed MySQL database branch's default TTL to 5 minutes.
+
+
+### Fixed
+
+- Fixed an issue where mirrord was not handling gRPC error responses properly,
+  resulting in errors like "server closed connection with RST_STREAM without
+  sending trailers".
+- Fixed iptables backend detection on kernel 6.12+.
+
+
+### Internal
+
+- Changed backoff intervals between intproxy->operator reconnect attemps.
+  Improved logs.
+
+## [3.160.0](https://github.com/metalbear-co/mirrord/tree/3.160.0) - 2025-09-02
+
+
+### Added
+
+- Added hook for the `rename` function, enabled with the
+  `experimental.hook_rename` setting.
+  [#3456](https://github.com/metalbear-co/mirrord/issues/3456)
+- Introduced `MysqlBranchDatabase` CRD.
+- `workloadRestartTimeout` field for `MirrordWorkloadQueueRegistry`, that
+  controls the timeout for the target workload to restart on the first SQS
+  session start of a target.
+
+
+### Internal
+
+- Hide `operator setup` command from `--help`.
+
+## [3.159.2](https://github.com/metalbear-co/mirrord/tree/3.159.2) - 2025-09-01
+
+
+### Changed
+
+- A mirrord session can now be terminated early if a remote DNS lookup fails
+  with `permission denied` error.
+  This error indicates that the Kubernetes cluster is hardened and the
+  mirrord-agent might not be fully functional.
+  The behavior is controlled with the `experimental.dns_permission_error_fatal`
+  setting, and enabled by default in OSS.
+
+
+### Fixed
+
+- Fixed a compatability issue with openapiv2 for operator CRDs
+  [#3398](https://github.com/metalbear-co/mirrord/issues/3398)
+
+
+### Internal
+
+- Added a suggestion to use mfT when encountering `AgentError::IPTablesDirty` in
+  error messages.
+- Added a github action to build windows builds.
+- Updated all metalbear.co urls to metalbear.com.
+- Upgraded Frida dependency.
+
 ## [3.159.1](https://github.com/metalbear-co/mirrord/tree/3.159.1) - 2025-08-27
 
 ### Changed

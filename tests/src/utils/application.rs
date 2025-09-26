@@ -1,9 +1,35 @@
 #![allow(dead_code)]
+use std::fmt;
+
 use super::TestProcess;
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
 
 pub(crate) mod env;
 pub(crate) mod file_ops;
+
+/// Go versions used with test applications.
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
+pub enum GoVersion {
+    GO_1_23,
+    GO_1_24,
+    GO_1_25,
+}
+
+impl GoVersion {
+    pub const LATEST: Self = Self::GO_1_25;
+}
+
+impl fmt::Display for GoVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::GO_1_23 => "23",
+            Self::GO_1_24 => "24",
+            Self::GO_1_25 => "25",
+        };
+        f.write_str(as_str)
+    }
+}
 
 #[derive(Debug)]
 pub enum Application {
@@ -19,23 +45,7 @@ pub enum Application {
     /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
     ///
     /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
-    Go21HTTP,
-    /// Can run as both HTTP and HTTPS server, listens on port 80.
-    ///
-    /// Env:
-    /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
-    /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
-    ///
-    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
-    Go22HTTP,
-    /// Can run as both HTTP and HTTPS server, listens on port 80.
-    ///
-    /// Env:
-    /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
-    /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
-    ///
-    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
-    Go23HTTP,
+    GoHTTP(GoVersion),
     CurlToKubeApi,
     CurlToKubeApiOverIpv6,
     PythonCloseSocket,
@@ -47,60 +57,70 @@ pub enum Application {
     ///
     /// - `node-e2e/fspolicy/test_operator_fs_policy.mjs`
     NodeFsPolicy,
+    /// Waits for any child process to finish, and verifies that the `wait` call fails with
+    /// `ECHILD`.
+    IntproxyChild,
 }
 
 impl Application {
-    pub fn get_cmd(&self) -> Vec<&str> {
+    pub fn get_cmd(&self) -> Vec<String> {
         match self {
-            Application::PythonFlaskHTTP => {
-                vec!["python3", "-u", "python-e2e/app_flask.py"]
-            }
-            Application::PythonFastApiHTTP => {
-                vec![
-                    "uvicorn",
-                    "--port=80",
-                    "--host=0.0.0.0",
-                    "--app-dir=./python-e2e/",
-                    "app_fastapi:app",
-                ]
-            }
-            Application::PythonFastApiHTTPIPv6 => {
-                vec![
-                    "uvicorn",
-                    "--port=80",
-                    "--host=::",
-                    "--app-dir=./python-e2e/",
-                    "app_fastapi:app",
-                ]
-            }
-            Application::PythonCloseSocket => {
-                vec!["python3", "-u", "python-e2e/close_socket.py"]
-            }
-            Application::PythonCloseSocketKeepConnection => {
-                vec![
-                    "python3",
-                    "-u",
-                    "python-e2e/close_socket_keep_connection.py",
-                ]
-            }
-            Application::NodeHTTP => vec!["node", "node-e2e/app.mjs"],
-            Application::NodeHTTP2 => {
-                vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
-            }
-            Application::NodeFsPolicy => {
-                vec!["node", "node-e2e/fspolicy/test_operator_fs_policy.mjs"]
-            }
-            Application::Go21HTTP => vec!["go-e2e/21.go_test_app"],
-            Application::Go22HTTP => vec!["go-e2e/22.go_test_app"],
-            Application::Go23HTTP => vec!["go-e2e/23.go_test_app"],
-            Application::CurlToKubeApi => {
-                vec!["curl", "https://kubernetes/api", "--insecure"]
-            }
+            Application::PythonFlaskHTTP => ["python3", "-u", "python-e2e/app_flask.py"]
+                .map(String::from)
+                .to_vec(),
+            Application::PythonFastApiHTTP => [
+                "uvicorn",
+                "--port=80",
+                "--host=0.0.0.0",
+                "--app-dir=./python-e2e/",
+                "app_fastapi:app",
+            ]
+            .map(String::from)
+            .to_vec(),
+            Application::PythonFastApiHTTPIPv6 => [
+                "uvicorn",
+                "--port=80",
+                "--host=::",
+                "--app-dir=./python-e2e/",
+                "app_fastapi:app",
+            ]
+            .map(String::from)
+            .to_vec(),
+            Application::PythonCloseSocket => ["python3", "-u", "python-e2e/close_socket.py"]
+                .map(String::from)
+                .to_vec(),
+            Application::PythonCloseSocketKeepConnection => [
+                "python3",
+                "-u",
+                "python-e2e/close_socket_keep_connection.py",
+            ]
+            .map(String::from)
+            .to_vec(),
+            Application::NodeHTTP => ["node", "node-e2e/app.mjs"].map(String::from).to_vec(),
+            Application::NodeHTTP2 => ["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
+                .map(String::from)
+                .to_vec(),
+            Application::NodeFsPolicy => ["node", "node-e2e/fspolicy/test_operator_fs_policy.mjs"]
+                .map(String::from)
+                .to_vec(),
+            Application::GoHTTP(go_version) => vec![format!("go-e2e/{go_version}.go_test_app")],
+            Application::CurlToKubeApi => ["curl", "https://kubernetes/api", "--insecure"]
+                .map(String::from)
+                .to_vec(),
             Application::CurlToKubeApiOverIpv6 => {
-                vec!["curl", "-6", "https://kubernetes/api", "--insecure"]
+                ["curl", "-6", "https://kubernetes/api", "--insecure"]
+                    .map(String::from)
+                    .to_vec()
             }
-            Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
-            Application::RustSqs => vec!["../target/debug/rust-sqs-printer"],
+            Application::RustWebsockets => ["../target/debug/rust-websockets"]
+                .map(String::from)
+                .to_vec(),
+            Application::RustSqs => ["../target/debug/rust-sqs-printer"]
+                .map(String::from)
+                .to_vec(),
+            Application::IntproxyChild => {
+                ["intproxy_child/out.c_test_app"].map(String::from).to_vec()
+            }
         }
     }
 
