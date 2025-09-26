@@ -16,10 +16,10 @@ jobs:
       BUCKET_URI: gs://mirrord-windows-builds
 
     steps:
-      - name: Checkout windows-support
+      - name: Checkout windows branch
         uses: actions/checkout@v4
         with:
-          ref: windows-support-gh
+          ref: windows-builds-gh
           fetch-depth: 0
           submodules: recursive
 
