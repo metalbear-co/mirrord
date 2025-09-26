@@ -1,5 +1,4 @@
 #[cfg(target_os = "windows")]
-use std::path::Path;
 use std::process::exit;
 
 fn recheck_and_setup_layer_file() {
@@ -9,30 +8,15 @@ fn recheck_and_setup_layer_file() {
     println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
 
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
-        #[cfg(target_os = "windows")]
-        {
-            let out_dir_env =
-                std::env::var("OUT_DIR").expect("Failed getting OUT_DIR from environment");
-            let out_dir = Path::new(&out_dir_env);
-            let build_dir = out_dir
-                .ancestors()
-                .nth(3)
-                .expect("Failed extracting build directory from OUT_DIR");
-            let layer = build_dir.join("mirrord_layer_win.dll");
-
-            println!(
-                "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-                layer.to_str().unwrap()
-            );
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            println!(
-                "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
-                std::env::var("CARGO_CDYLIB_FILE_MIRRORD_LAYER").unwrap()
-            );
-        }
+        const VAR_LAYER_FILE: &str = if cfg!(target_os = "windows") {
+            "CARGO_CDYLIB_FILE_MIRRORD_LAYER_WIN"
+        } else {
+            "CARGO_CDYLIB_FILE_MIRRORD_LAYER"
+        };
+        println!(
+            "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
+            std::env::var(VAR_LAYER_FILE).unwrap()
+        );
     };
 }
 
