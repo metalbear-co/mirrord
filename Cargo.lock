@@ -4749,6 +4749,7 @@ dependencies = [
  "tempfile",
  "test-cdylib",
  "tests",
+ "thiserror 2.0.16",
  "tokio",
  "tracing",
  "tracing-subscriber",
