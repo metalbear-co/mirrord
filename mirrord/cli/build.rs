@@ -1,4 +1,3 @@
-#[cfg(target_os = "windows")]
 use std::process::exit;
 
 fn main() {
