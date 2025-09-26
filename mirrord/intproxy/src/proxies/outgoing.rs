@@ -245,6 +245,7 @@ impl OutgoingProxy {
     async fn handle_connection_refresh(&mut self, message_bus: &mut MessageBus<Self>) {
         tracing::debug!("Closing all local connections");
         self.txs.clear();
+        self.background_tasks.clear();
 
         tracing::debug!(
             responses = self.datagrams_reqs.len(),
@@ -344,6 +345,93 @@ impl BackgroundTask for OutgoingProxy {
                     }
                 },
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::net::SocketAddr;
+
+    use mirrord_intproxy_protocol::{
+        LayerId, NetProtocol, OutgoingConnectRequest, ProxyToLayerMessage,
+    };
+    use mirrord_protocol::{
+        ClientMessage,
+        outgoing::{
+            DaemonConnect, LayerConnect, SocketAddress,
+            tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        },
+    };
+
+    use crate::{
+        background_tasks::{BackgroundTasks, TaskUpdate},
+        main_tasks::{ProxyMessage, ToLayer},
+        proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
+    };
+
+    /// Verifies that the outgoing proxy can handle operator reconnect
+    /// when there is an open connection.
+    #[tokio::test]
+    async fn clear_on_reconnect() {
+        let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
+
+        let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
+            BackgroundTasks::default();
+        let outgoing = background_tasks.register(OutgoingProxy::default(), (), 8);
+
+        for i in 0..=1 {
+            // Layer wants to make an outgoing connection.
+            outgoing
+                .send(OutgoingProxyMessage::LayerConnect(
+                    OutgoingConnectRequest {
+                        remote_address: SocketAddress::Ip(peer_addr),
+                        protocol: NetProtocol::Stream,
+                    },
+                    i,
+                    LayerId(0),
+                ))
+                .await;
+            let message = background_tasks.next().await.unwrap().1.unwrap_message();
+            assert_eq!(
+                message,
+                ProxyMessage::ToAgent(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
+                    LayerConnect {
+                        remote_address: SocketAddress::Ip(peer_addr),
+                    }
+                ))),
+            );
+
+            // Operator confirms with connection id 0.
+            outgoing
+                .send(OutgoingProxyMessage::AgentStream(
+                    DaemonTcpOutgoing::Connect(Ok(DaemonConnect {
+                        connection_id: 0,
+                        remote_address: SocketAddress::Ip(peer_addr),
+                        local_address: SocketAddress::Ip("127.0.0.1:1337".parse().unwrap()),
+                    })),
+                ))
+                .await;
+            let message = background_tasks.next().await.unwrap().1.unwrap_message();
+            match message {
+                ProxyMessage::ToLayer(ToLayer {
+                    message_id,
+                    layer_id: LayerId(0),
+                    message: ProxyToLayerMessage::OutgoingConnect(Ok(..)),
+                }) => {
+                    assert_eq!(message_id, i);
+                }
+                other => panic!("unexpected message from outgoing proxy: {other:?}"),
+            }
+
+            // Connection with the operator was reset.
+            outgoing.send(OutgoingProxyMessage::ConnectionRefresh).await;
+        }
+
+        std::mem::drop(outgoing);
+        match background_tasks.next().await.unwrap() {
+            ((), TaskUpdate::Finished(Ok(()))) => {}
+            other => panic!("unexpected update from the outgoing proxy: {other:?}"),
         }
     }
 }
