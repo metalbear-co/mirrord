@@ -16,13 +16,6 @@ jobs:
       BUCKET_URI: gs://mirrord-windows-builds
 
     steps:
-      - name: Checkout windows-support
-        uses: actions/checkout@v4
-        with:
-          ref: windows-support
-          fetch-depth: 0
-          submodules: recursive
-
 
       - name: Identity & DigiCert healthcheck
         run: |
