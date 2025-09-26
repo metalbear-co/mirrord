@@ -51,7 +51,7 @@ jobs:
           "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
 
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord-layer-win.dll'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
           "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build mirrord
