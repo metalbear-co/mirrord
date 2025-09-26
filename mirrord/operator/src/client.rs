@@ -424,6 +424,7 @@ where
             .spec
             .supported_features()
             .contains(&NewOperatorFeature::CertificateSigning)
+            .not()
         {
             return Err(OperatorApiError::UnsupportedFeature {
                 feature: NewOperatorFeature::CertificateSigning,

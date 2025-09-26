@@ -1,3 +1,4 @@
+use kube::api::ObjectMeta;
 use mirrord_auth::{
     certificate::Certificate,
     credentials::client::{SigningRequest, SigningResponse},
@@ -14,7 +15,10 @@ impl SigningRequest for crd::MirrordClusterOperatorUserCredential {
             kind: crd::UserCredentialKind::Regular,
         };
         Self {
-            metadata: Default::default(),
+            metadata: ObjectMeta {
+                generate_name: Some("mirrord-operator-regular-cred-".to_string()),
+                ..Default::default()
+            },
             spec,
             status: None,
         }
@@ -26,7 +30,10 @@ impl SigningRequest for crd::MirrordClusterOperatorUserCredential {
             kind: crd::UserCredentialKind::Ci,
         };
         Self {
-            metadata: Default::default(),
+            metadata: ObjectMeta {
+                generate_name: Some("mirrord-operator-ci-cred-".to_string()),
+                ..Default::default()
+            },
             spec,
             status: None,
         }

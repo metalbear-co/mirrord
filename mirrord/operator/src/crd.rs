@@ -734,7 +734,7 @@ pub struct MirrordSqsSessionSpec {
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
-    version = "v1alpha",
+    version = "v1",
     kind = "MirrordClusterOperatorUserCredential",
     status = "MirrordClusterOperatorUserCredentialStatus"
 )]
