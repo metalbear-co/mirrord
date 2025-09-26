@@ -18,6 +18,7 @@ pub enum OperatorOperation {
     SessionManagement,
     ListingTargets,
     MysqlBranching,
+    CertificateSigning,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -31,6 +32,7 @@ impl fmt::Display for OperatorOperation {
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
             Self::MysqlBranching => "mysql branching",
+            Self::CertificateSigning => "certificate signing",
         };
 
         f.write_str(as_str)

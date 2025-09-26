@@ -266,30 +266,18 @@ pub mod client {
     use super::*;
     use crate::error::CredentialStoreError;
 
-    #[derive(Serialize, Debug, Clone)]
-    #[serde(rename_all = "camelCase")]
-    struct CertificateSigningRequest {
-        csr: String,
-        usage: CertificateUsage,
+    pub trait SigningRequest: Resource {
+        fn regular(csr: String) -> Self;
+
+        fn ci(csr: String) -> Self;
     }
 
-    #[derive(Deserialize, Debug, Clone)]
-    #[serde(rename_all = "camelCase")]
-    struct CertificateSigningResponse {
-        certificate: Certificate,
-    }
-
-    #[derive(Serialize, Debug, Clone)]
-    #[serde(rename_all = "camelCase")]
-    enum CertificateUsage {
-        #[allow(unused)]
-        Regular,
-        Ci,
+    pub trait SigningResponse: Resource {
+        fn try_into_certificate(self) -> Result<Certificate, CredentialStoreError>;
     }
 
     impl Credentials {
-        /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
-        /// If the `key_pair` is not given, the request is signed with a randomly generated one.
+        /// In deprecation, use [`Credentials::init_regular`] if the operator supports the feature.
         pub async fn init<R>(
             client: Client,
             common_name: &str,
@@ -311,7 +299,6 @@ pub mod client {
 
             let api: Api<R> = Api::all(client);
 
-            // TODO: Use `/certificates` endpoint once all operator instances are >= 3.127.0
             let certificate: Certificate = api
                 .create_subresource(
                     "certificate",
@@ -327,6 +314,40 @@ pub mod client {
             })
         }
 
+        /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
+        /// If the `key_pair` is not given, the request is signed with a randomly generated one.
+        pub async fn init_regular<R>(
+            client: Client,
+            common_name: &str,
+            key_pair: Option<KeyPair>,
+        ) -> Result<Self, CredentialStoreError>
+        where
+            R: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+            R: for<'de> Deserialize<'de>,
+            R::DynamicType: Default,
+        {
+            let key_pair = match key_pair {
+                Some(key_pair) => key_pair,
+                None => KeyPair::new_random()?,
+            };
+
+            let csr = Self::certificate_request(common_name, &key_pair)?
+                .encode_pem()
+                .map_err(X509CertificateError::from)?;
+            let resource = R::regular(csr);
+
+            let api: Api<R> = Api::all(client);
+
+            let response = api.create(&PostParams::default(), &resource).await?;
+
+            let credentials = Credentials {
+                certificate: R::try_into_certificate(response)?,
+                key_pair,
+            };
+
+            Ok(credentials)
+        }
+
         /// Generate a new key pair, create a [`rfc2986::CertificationRequest`] for CI usage
         /// and send it to the operator.
         pub async fn init_ci<R>(
@@ -334,7 +355,7 @@ pub mod client {
             common_name: &str,
         ) -> Result<Self, CredentialStoreError>
         where
-            R: Resource + Clone + Debug,
+            R: Clone + Debug + SigningRequest + SigningResponse + Serialize,
             R: for<'de> Deserialize<'de>,
             R::DynamicType: Default,
         {
@@ -343,27 +364,18 @@ pub mod client {
             let csr = Self::certificate_request(common_name, &key_pair)?
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
-            let certificate_request = CertificateSigningRequest {
-                csr,
-                usage: CertificateUsage::Ci,
-            };
+            let resource = R::ci(csr);
 
             let api: Api<R> = Api::all(client);
 
-            let response: CertificateSigningResponse = api
-                .create_subresource(
-                    "certificates",
-                    "operator",
-                    &PostParams::default(),
-                    serde_json::to_vec(&certificate_request)
-                        .expect("to bytes serialization shouldn't fail"),
-                )
-                .await?;
+            let response = api.create(&PostParams::default(), &resource).await?;
 
-            Ok(Credentials {
-                certificate: response.certificate,
+            let credentials = Credentials {
+                certificate: R::try_into_certificate(response)?,
                 key_pair,
-            })
+            };
+
+            Ok(credentials)
         }
 
         /// Create [`rfc2986::CertificationRequest`] and send it to the operator.

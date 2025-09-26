@@ -381,6 +381,7 @@ pub enum NewOperatorFeature {
     KafkaQueueSplittingDirect,
     SqsQueueSplittingDirect,
     MySqlBranching,
+    CertificateSigning,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -405,6 +406,7 @@ impl Display for NewOperatorFeature {
                 "SQS queue splitting without copy target"
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
+            NewOperatorFeature::CertificateSigning => "client certificate signing",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -727,4 +729,31 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+}
+
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordClusterOperatorUserCredential",
+    status = "MirrordClusterOperatorUserCredentialStatus"
+)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterOperatorUserCredentialSpec {
+    pub csr: String,
+    pub kind: UserCredentialKind,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterOperatorUserCredentialStatus {
+    pub certificate: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum UserCredentialKind {
+    #[default]
+    Regular,
+    Ci,
 }

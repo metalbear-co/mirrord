@@ -22,6 +22,9 @@ pub enum CredentialStoreError {
 
     #[error("certification request failed: {0}")]
     Kube(#[from] kube::Error),
+
+    #[error("No signed certificate found in the operator response")]
+    SigningResponse,
 }
 
 /// Errors from API key encoding and decoding operations.

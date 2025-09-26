@@ -37,7 +37,8 @@ use crate::{
         DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
     },
     crd::{
-        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
+        OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
     },
@@ -49,6 +50,7 @@ use crate::{
 
 mod conn_wrapper;
 mod connect_params;
+mod credentials;
 mod database_branches;
 mod discovery;
 pub mod error;
@@ -417,7 +419,19 @@ where
     }
 
     pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
-        let api_key: CiApiKey = Credentials::init_ci::<MirrordOperatorCrd>(
+        if self
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::CertificateSigning)
+        {
+            return Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::CertificateSigning,
+                operator_version: self.operator().spec.operator_version.to_string(),
+            });
+        }
+
+        let api_key: CiApiKey = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
             self.client.clone(),
             &format!(
                 "mirrord-ci@{}",
@@ -548,10 +562,14 @@ where
         })?;
 
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(
+            .get_client_certificate::<MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
                 &self.client,
                 fingerprint,
                 subscription_id,
+                self.operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::CertificateSigning),
             )
             .await
             .map_err(|error| {
