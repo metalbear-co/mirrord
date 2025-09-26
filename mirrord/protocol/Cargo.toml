@@ -41,5 +41,5 @@ strum_macros.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs"] }
 
-[features]
+[features]	
 windows_build = []

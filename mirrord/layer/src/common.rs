@@ -1,50 +1,52 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, ops::Not, path::PathBuf};
+use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
 
 use libc::c_char;
-// Re-export proxy request functions from layer-lib (Unix only)
-pub use mirrord_layer_lib::proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
-};
+use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;
 use tracing::warn;
 
 use crate::{
+    PROXY_CONNECTION,
     detour::{Bypass, Detour},
-    error::HookError,
+    error::{HookError, HookResult},
     exec_hooks::Argv,
     file::OpenOptionsInternalExt,
     socket::SHARED_SOCKETS_ENV_VAR,
 };
 
-/// Convert NulError to Detour for `?` operator support
-impl<T> From<std::ffi::NulError> for Detour<T> {
-    fn from(error: std::ffi::NulError) -> Self {
-        Detour::Error(HookError::Null(error))
-    }
-}
-
-/// Convert TryFromIntError to Detour for `?` operator support
-impl<T> From<std::num::TryFromIntError> for Detour<T> {
-    fn from(error: std::num::TryFromIntError) -> Self {
-        Detour::Error(HookError::TryFromInt(error))
-    }
-}
-
-/// Handle nested Result<Result<T, ResponseError>, HookError> structures
-/// This is the pattern returned by make_proxy_request_with_response where the inner response can be
-/// an error
-impl<T, E> From<Result<Result<T, E>, HookError>> for Detour<T>
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the proxy responds.
+pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
 where
-    HookError: From<E>,
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
 {
-    fn from(result: Result<Result<T, E>, HookError>) -> Self {
-        match result {
-            Ok(Ok(value)) => Detour::Success(value),
-            Ok(Err(inner_error)) => Detour::Error(HookError::from(inner_error)),
-            Err(outer_error) => Detour::Error(outer_error),
-        }
+    // SAFETY: mutation happens only on initialization.
+    #[allow(static_mut_refs)]
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_with_response(request)
+            .map_err(Into::into)
+    }
+}
+
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the request is sent.
+pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
+    request: T,
+) -> HookResult<MessageId> {
+    // SAFETY: mutation happens only on initialization.
+    #[allow(static_mut_refs)]
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_no_response(request)
+            .map_err(Into::into)
     }
 }
 

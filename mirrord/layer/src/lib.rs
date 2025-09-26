@@ -1,4 +1,3 @@
-#![cfg(not(target_os = "windows"))]
 #![feature(c_variadic)]
 #![feature(io_error_uncategorized)]
 #![feature(try_trait_v2)]
@@ -67,21 +66,20 @@
 extern crate alloc;
 extern crate core;
 
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::process::parent_id;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::File,
     io::Read,
     net::SocketAddr,
+    os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
 };
 
 use ctor::ctor;
-use error::{LayerError, LayerResult as Result};
+use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
@@ -93,10 +91,10 @@ use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
-use mirrord_layer_lib::proxy_connection::ProxyConnection;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
+use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -134,6 +132,7 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod proxy_connection;
 mod setup;
 mod socket;
 #[cfg(target_os = "macos")]
@@ -187,7 +186,7 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
-fn layer_pre_initialization() -> Result<()> {
+fn layer_pre_initialization() -> Result<(), LayerError> {
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {

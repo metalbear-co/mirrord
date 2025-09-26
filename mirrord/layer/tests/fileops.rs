@@ -11,12 +11,10 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(target_os = "windows"))]
 use libc::{O_RDWR, pid_t};
 use mirrord_protocol::{file::*, *};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_PATH_BUF, SipPatchOptions, sip_patch};
-#[cfg(not(target_os = "windows"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -596,36 +594,6 @@ async fn go_dir_bypass(
     test_process.assert_no_error_in_stderr().await;
 }
 
-#[cfg(target_os = "windows")]
-use tokio::process::Child;
-#[cfg(target_os = "windows")]
-use windows::Win32::{
-    Foundation::CloseHandle,
-    System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
-};
-
-#[cfg(target_os = "windows")]
-fn terminate_tokio_child(child: &Child) -> std::io::Result<()> {
-    let pid = child
-        .id()
-        .ok_or_else(|| std::io::Error::other("Failed to get child process ID"))?;
-
-    unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, false, pid)?;
-        if handle.is_invalid() {
-            return Err(std::io::Error::last_os_error());
-        }
-
-        let result = TerminateProcess(handle, 1);
-        CloseHandle(handle).unwrap();
-
-        match result {
-            Ok(()) => Ok(()),
-            Err(_) => Err(std::io::Error::last_os_error()),
-        }
-    }
-}
-
 /// Test go file read and close.
 /// This test also verifies the close hook, since go's `os.ReadFile` calls `Close`.
 /// We don't call close in other tests because Go does not wait for the operation to complete before
@@ -663,9 +631,6 @@ async fn read_go(
     // Notify Go test app that the close detour completed and it can exit.
     // (The go app waits for this, since Go does not wait for the close detour to complete before
     // returning from `Close`).
-    #[cfg(target_os = "windows")]
-    terminate_tokio_child(&test_process.child).unwrap();
-    #[cfg(not(target_os = "windows"))]
     signal::kill(
         Pid::from_raw(test_process.child.id().unwrap() as pid_t),
         Signal::SIGTERM,
@@ -749,13 +714,8 @@ async fn faccessat_go(
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
-    #[cfg(not(target_os = "windows"))]
-    let access_mode = O_RDWR as u8;
-    #[cfg(target_os = "windows")]
-    let access_mode = 0x3; // GENERIC_READ | GENERIC_WRITE equivalent
-
     intproxy
-        .expect_file_access(PathBuf::from("/app/test.txt"), access_mode)
+        .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)
         .await;
 
     // Assert all clear

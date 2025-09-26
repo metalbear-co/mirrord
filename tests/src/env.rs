@@ -12,7 +12,6 @@ mod env_tests {
         services::basic_service,
     };
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -24,7 +23,6 @@ mod env_tests {
         remote_env_vars_works(basic_service, application).await;
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

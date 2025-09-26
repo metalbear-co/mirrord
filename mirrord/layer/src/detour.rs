@@ -9,9 +9,9 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::prelude::*;
-use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf, sync::OnceLock};
+use std::{
+    cell::RefCell, ffi::CString, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock,
+};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;

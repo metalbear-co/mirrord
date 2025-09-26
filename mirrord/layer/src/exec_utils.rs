@@ -114,7 +114,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 executed locally if its execution without mirrord indeed succeeds.",
                 path, sip_error
             );
-            Error(HookError::FailedSipPatch(sip_error.into()))
+            Error(HookError::FailedSipPatch(sip_error))
         }
     }
 }

@@ -9,6 +9,10 @@
 //! - [`hook_symbol!`]
 //!
 //! Used to hook go symbols.
+//!
+//! - [`graceful_exit!`](`macro@crate::graceful_exit`)
+//!
+//! Exits the process with a nice message.
 
 /// Replaces the `$func` [`libc`] function, with the equivalent hook `$detour_function`, by calling
 /// `HookManager::hook_export_or_any`.
@@ -42,13 +46,10 @@ macro_rules! replace {
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
-         -> anyhow::Result<$detour_type> {
+         -> $crate::error::Result<$detour_type> {
             let replaced =
-                hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void);
-            if replaced.is_err() {
-                return replaced.unwrap_err();
-            }
-            let original_fn: $detour_type = std::mem::transmute(replaced.unwrap());
+                hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void)?;
+            let original_fn: $detour_type = std::mem::transmute(replaced);
 
             tracing::trace!("hooked {symbol_name:?}");
             Ok(original_fn)
@@ -103,13 +104,10 @@ macro_rules! replace_with_fallback {
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
-         -> anyhow::Result<$detour_type> {
+         -> $crate::error::Result<$detour_type> {
             let replaced =
-                hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void);
-            if replaced.is_err() {
-                return replaced.unwrap_err();
-            }
-            let original_fn: $detour_type = std::mem::transmute(replaced.unwrap());
+                hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void)?;
+            let original_fn: $detour_type = std::mem::transmute(replaced);
 
             tracing::trace!("hooked {symbol_name:?}");
             Ok(original_fn)
@@ -161,6 +159,36 @@ macro_rules! hook_symbol {
             }
         }
     };
+}
+
+/// Kills the process and prints a helpful error message to the user.
+///
+/// ## Parameters
+///
+/// - `$arg`: messages to print, supports [`println!`] style arguments.
+///
+/// ## Examples
+///
+/// - Exiting on IO failure:
+///
+/// ```rust, no_run
+/// if let Err(fail) = File::open("nothing.txt") {
+///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
+/// }
+/// ```
+#[macro_export]
+macro_rules! graceful_exit {
+    ($($arg:tt)+) => {{
+        eprintln!($($arg)+);
+        graceful_exit!()
+    }};
+    () => {{
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(std::process::id() as i32),
+            nix::sys::signal::Signal::SIGKILL,
+        )
+        .expect("unable to graceful exit")
+    }};
 }
 
 #[cfg(all(

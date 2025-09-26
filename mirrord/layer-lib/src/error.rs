@@ -6,8 +6,6 @@
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-#[cfg(target_os = "macos")]
-use std::boxed::Box;
 #[cfg(unix)]
 use std::ptr;
 use std::{
@@ -219,7 +217,7 @@ pub enum HookError {
 
     #[cfg(target_os = "macos")]
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
-    FailedSipPatch(#[from] Box<SipError>),
+    FailedSipPatch(#[from] SipError),
 
     #[error("mirrord-layer: IPv6 can't be used with mirrord")]
     SocketUnsuportedIpv6,

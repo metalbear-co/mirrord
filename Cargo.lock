@@ -3764,7 +3764,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.161.0"
+version = "3.163.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -4716,7 +4716,6 @@ name = "mirrord-layer"
 version = "3.163.0"
 dependencies = [
  "actix-codec",
- "anyhow",
  "apple-codesign",
  "base64 0.22.1",
  "bincode",
@@ -4731,7 +4730,6 @@ dependencies = [
  "mirrord-console",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
- "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-protocol",
  "mirrord-sip",
@@ -4753,7 +4751,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "windows",
 ]
 
 [[package]]

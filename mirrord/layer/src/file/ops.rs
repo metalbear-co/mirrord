@@ -3,18 +3,16 @@
 //! When operating on the paths provided from the user application, remember to verify/remap them.
 //! Canonical order of operations can be found in [`common_path_check`].
 
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 use std::{
     env,
     ffi::CString,
     io::SeekFrom,
+    os::unix::io::RawFd,
     path::{Path, PathBuf},
 };
 
-#[cfg(not(target_os = "windows"))]
 use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
@@ -27,7 +25,6 @@ use mirrord_protocol::{
         WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
     },
 };
-#[cfg(not(target_os = "windows"))]
 use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]

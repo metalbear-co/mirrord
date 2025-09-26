@@ -1,7 +1,6 @@
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::io::RawFd;
 use std::{
     collections::HashMap,
+    os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
 

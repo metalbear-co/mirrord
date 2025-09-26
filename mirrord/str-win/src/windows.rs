@@ -3,32 +3,6 @@ use std::{
     os::windows::ffi::{OsStrExt, OsStringExt},
 };
 
-pub unsafe fn u8_ptr_to_slice<'a>(ptr: *const u8) -> Option<&'a [u8]> {
-    unsafe {
-        if ptr.is_null() {
-            return None;
-        }
-
-        let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
-        let slice = std::slice::from_raw_parts(ptr, len);
-
-        Some(slice)
-    }
-}
-
-pub unsafe fn u16_ptr_to_slice<'a>(ptr: *const u16) -> Option<&'a [u16]> {
-    unsafe {
-        if ptr.is_null() {
-            return None;
-        }
-
-        let len = (0..).take_while(|&i| *ptr.offset(i) != 0).count();
-        let slice = std::slice::from_raw_parts(ptr, len);
-
-        Some(slice)
-    }
-}
-
 pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 

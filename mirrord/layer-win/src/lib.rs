@@ -44,8 +44,6 @@ fn initialize_detour_guard() -> anyhow::Result<()> {
 }
 
 fn release_detour_guard() -> anyhow::Result<()> {
-    let test: anyhow::Result<()> = Err(LayerError::UnsupportedSocketType("waah"));
-    let test = test?;
     unsafe {
         // This will release the hooking engine, removing all hooks.
         if let Some(guard) = DETOUR_GUARD.as_mut() {
@@ -109,14 +107,14 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     let timeout = std::time::Duration::from_secs(30);
     let new_connection = ProxyConnection::new(address, session, timeout)?;
     PROXY_CONNECTION.set(new_connection).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized".into())
+        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
     })?;
 
     // Read and initialize configuration
     let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-    CONFIG.set(config.clone()).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Layer config already initialized".into())
-    })?;
+    CONFIG
+        .set(config.clone())
+        .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer config already initialized"))?;
 
     // Initialize layer setup with the configuration
     init_setup(config, address)?;

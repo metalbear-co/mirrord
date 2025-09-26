@@ -1,5 +1,7 @@
-# Workspace build is unix-only currently
-# For windows, build specific packages
+# Cross compilable mirrord workspace
+# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
+# On Unix: Default cargo build will build the Unix-compatible crates
+# All platforms: mirrord/* in members ensures all crates are available for explicit builds
 # This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
 [workspace]
 
@@ -216,19 +218,22 @@ anyhow = "1.0"
 minhook-detours-rs = "0.2.0"
 windows-strings = "0.4"
 
-winapi = { version = "0.3.9", features = [
-    "winbase", "minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", 
-    "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", 
-    "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv",
-    "timezoneapi", "memoryapi", "winioctl"
-] }
-
 # Used by `cli`, `intproxy`
 windows = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
+
+# Used by `layer-win`
+winapi = { version = "0.3.9", features = [
+    "winbase", "minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", 
+    "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", 
+    "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv",
+    "winioctl", "memoryapi", "timezoneapi"
+] }
+
+
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
