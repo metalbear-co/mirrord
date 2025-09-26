@@ -1,4 +1,4 @@
-#![cfg(feature = "operator")]
+#![cfg(all(feature = "operator", unix))]
 
 use std::{
     collections::{BTreeMap, HashMap},

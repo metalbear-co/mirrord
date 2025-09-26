@@ -1,5 +1,7 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+#[cfg(target_os = "windows")]
+use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
@@ -95,6 +97,7 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OpenLogFile(String, std::io::Error),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -115,6 +118,7 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
@@ -239,6 +243,11 @@ pub(crate) enum CliError {
     "#
     ))]
     RosettaMissing(String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Failed to execute binary `{0}` with args {1:?}, env {2:?}")]
+    #[diagnostic(help("MIRRORD_LAYER_FILE env var is missing"))]
+    LayerFilePathMissing(String, Vec<String>, Vec<(String, String)>),
 
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
@@ -421,6 +430,7 @@ pub(crate) enum CliError {
     #[error(transparent)]
     ProfileError(#[from] ProfileError),
 
+    #[cfg(not(target_os = "windows"))]
     #[error(
         "Failed to execute the binary: execve failed with {}",
         nix::errno::Errno::E2BIG
@@ -462,6 +472,22 @@ pub(crate) enum CliError {
     ))]
     NestedExec,
 }
+
+#[derive(Debug, Error, Diagnostic)]
+#[allow(dead_code)]
+pub(crate) enum ProcessExecError {
+    #[error("Executed process pid was not found: {0}")]
+    ProcessNotFound(u32, String),
+
+    #[error("Failed to inject DLL \"{0}\" into pid {1}: {2}")]
+    InjectionFailed(String, u32, String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Pipe Error: {0}")]
+    PipeError(#[from] windows_core::Error),
+}
+#[allow(dead_code)]
+pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
 
 impl CliError {
     /// Here we give more meaning to some errors, instead of just letting them pass as
