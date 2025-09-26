@@ -4792,6 +4792,7 @@ version = "3.163.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "libc",
  "minhook-detours-rs",
  "mirrord-config",
  "mirrord-console",
@@ -4799,6 +4800,8 @@ dependencies = [
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-protocol",
+ "once_cell",
+ "phnt",
  "socket2 0.5.10",
  "str-win",
  "thiserror 2.0.16",
@@ -5051,6 +5054,16 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "nt-string"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64f73b19d9405e886b53b9dee286e7fbb622a5276a7fd143c2d8e4dac3a0c6c"
+dependencies = [
+ "displaydoc",
+ "widestring",
 ]
 
 [[package]]
@@ -5577,6 +5590,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
 dependencies = [
  "siphasher",
+]
+
+[[package]]
+name = "phnt"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a88b858d3d129dd19de9bd1e4318b20753f2c92bea944fc0fb2728e444bf5f44"
+dependencies = [
+ "nt-string",
+ "quote",
+ "syn 2.0.106",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

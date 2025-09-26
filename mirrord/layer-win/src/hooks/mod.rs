@@ -1,9 +1,9 @@
 //! Module responsible for providing [`initialize_hooks`].
 
-mod files;
-mod macros;
-mod process;
-mod socket;
+pub(crate) mod files;
+pub(crate) mod macros;
+pub(crate) mod process;
+pub(crate) mod socket;
 
 use minhook_detours_rs::guard::DetourGuard;
 

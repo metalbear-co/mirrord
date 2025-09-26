@@ -3,6 +3,10 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
+#![feature(slice_pattern)]
+
+#[cfg(test)]
+mod tests;
 
 mod console;
 mod hooks;
@@ -103,14 +107,14 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     let timeout = std::time::Duration::from_secs(30);
     let new_connection = ProxyConnection::new(address, session, timeout)?;
     PROXY_CONNECTION.set(new_connection).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized".into())
+        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
     })?;
 
     // Read and initialize configuration
     let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-    CONFIG.set(config.clone()).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Layer config already initialized".into())
-    })?;
+    CONFIG
+        .set(config.clone())
+        .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer config already initialized"))?;
 
     // Initialize layer setup with the configuration
     init_setup(config, address)?;
@@ -128,14 +132,13 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
-        println!("Checking for debugger...");
         wait_for_debug!();
     }
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
         mirrord_start().expect("Failed call to mirrord_start");
-        println!("mirrord-layer-win fully initialized!");
+        tracing::info!("mirrord-layer-win fully initialized!");
     });
 
     TRUE
@@ -150,7 +153,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Release detour guard
     if let Err(e) = release_detour_guard() {
-        eprintln!(
+        tracing::error!(
             "Warning: Failed releasing detour guard during DLL detach: {}",
             e
         );
@@ -182,20 +185,18 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 fn mirrord_start() -> anyhow::Result<()> {
     // Create Windows console, and redirects std handles.
     if let Err(e) = console::create() {
-        println!("WARNING: couldn't initialize console: {:?}", e);
+        tracing::warn!("WARNING: couldn't initialize console: {:?}", e);
     }
 
-    println!("Console initialized");
-
     initialize_windows_proxy_connection()?;
-    println!("ProxyConnection initialized");
+    tracing::info!("ProxyConnection initialized");
 
     initialize_detour_guard()?;
-    println!("DetourGuard initialized");
+    tracing::info!("DetourGuard initialized");
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;
-    println!("Hooks initialized");
+    tracing::info!("Hooks initialized");
 
     Ok(())
 }

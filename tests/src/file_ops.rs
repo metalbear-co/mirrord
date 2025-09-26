@@ -57,7 +57,6 @@ mod file_ops_tests {
         ops.assert(process).await;
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]

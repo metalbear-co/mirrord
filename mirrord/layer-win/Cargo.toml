@@ -32,10 +32,15 @@ socket2.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+libc = "0.2.175"
+[target.'cfg(windows)'.dependencies]
+phnt = "0.1.2"
+
 # Additional dependencies for proxy connection
 tokio.workspace = true
 bincode.workspace = true
 tokio-util.workspace = true
+once_cell = "1.21.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi.workspace = true
