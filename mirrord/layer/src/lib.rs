@@ -81,7 +81,7 @@ use std::{
 };
 
 use ctor::ctor;
-use error::{HookResult as Result, LayerError};
+use error::{LayerError, LayerResult as Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
@@ -187,7 +187,7 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
-fn layer_pre_initialization() -> Result<(), LayerError> {
+fn layer_pre_initialization() -> Result<()> {
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {

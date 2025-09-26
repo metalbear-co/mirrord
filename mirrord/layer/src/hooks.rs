@@ -3,7 +3,7 @@ use std::{ptr::null_mut, sync::LazyLock};
 use frida_gum::{Gum, Module, NativePointer, Process, interceptor::Interceptor};
 use tracing::trace;
 
-use crate::{LayerError, LayerError as Result};
+use crate::error::{LayerError, LayerResult as Result};
 
 static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 

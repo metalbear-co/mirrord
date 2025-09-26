@@ -32,9 +32,7 @@ use nix::{
     sys::socket::{SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage, sockopt},
 };
 use socket2::SockAddr;
-#[cfg(debug_assertions)]
-use tracing::Level;
-use tracing::{error, trace};
+use tracing::{Level, error, trace};
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
