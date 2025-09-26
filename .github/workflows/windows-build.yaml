@@ -16,10 +16,10 @@ jobs:
       BUCKET_URI: gs://mirrord-windows-builds
 
     steps:
-      - name: Checkout PR 3536 (merge ref)
+      - name: Checkout windows-support
         uses: actions/checkout@v4
         with:
-          ref: refs/pull/3536/merge
+          ref: windows-support
           fetch-depth: 0
           submodules: recursive
 
