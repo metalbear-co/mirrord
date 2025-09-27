@@ -163,7 +163,11 @@ impl CredentialStore {
 
                 if !credentials.is_valid() {
                     credentials
-                        .refresh::<Old>(client.clone(), &Self::certificate_common_name())
+                        .refresh::<Old, New>(
+                            client.clone(),
+                            &Self::certificate_common_name(),
+                            support_new,
+                        )
                         .await?;
                 }
 

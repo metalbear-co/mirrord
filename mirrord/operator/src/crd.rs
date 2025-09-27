@@ -740,7 +740,10 @@ pub struct MirrordSqsSessionSpec {
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterOperatorUserCredentialSpec {
+    /// Certificate signing request created using the client's key pair.
     pub csr: String,
+
+    /// The intented usage of this credential.
     pub kind: UserCredentialKind,
 }
 

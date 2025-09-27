@@ -266,12 +266,14 @@ pub mod client {
     use super::*;
     use crate::error::CredentialStoreError;
 
+    /// Implemented by custom resource that serves as a request for signing a certificate.
     pub trait SigningRequest: Resource {
         fn regular(csr: String) -> Self;
 
         fn ci(csr: String) -> Self;
     }
 
+    /// Implemented by custom resource that converts to a signed certificate.
     pub trait SigningResponse: Resource {
         fn try_into_certificate(self) -> Result<Certificate, CredentialStoreError>;
     }
@@ -380,31 +382,39 @@ pub mod client {
 
         /// Create [`rfc2986::CertificationRequest`] and send it to the operator.
         /// Returned certificate replaces the [`Certificate`] stored in this struct.
-        pub async fn refresh<R>(
+        pub async fn refresh<Old, New>(
             &mut self,
             client: Client,
             common_name: &str,
+            support_new: bool,
         ) -> Result<(), CredentialStoreError>
         where
-            R: Resource + Clone + Debug,
-            R: for<'de> Deserialize<'de>,
-            R::DynamicType: Default,
+            Old: Resource + Clone + Debug,
+            Old: for<'de> Deserialize<'de>,
+            Old::DynamicType: Default,
+            New: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+            New: for<'de> Deserialize<'de>,
+            New::DynamicType: Default,
         {
             let certificate_request = Self::certificate_request(common_name, &self.key_pair)?
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: Api<R> = Api::all(client);
-
-            let certificate: Certificate = api
-                .create_subresource(
+            let certificate: Certificate = if support_new {
+                let api: Api<New> = Api::all(client);
+                let resource = New::ci(certificate_request);
+                let response = api.create(&PostParams::default(), &resource).await?;
+                New::try_into_certificate(response)?
+            } else {
+                let api: Api<Old> = Api::all(client);
+                api.create_subresource(
                     "certificate",
                     "operator",
                     &PostParams::default(),
                     certificate_request.into(),
                 )
-                .await?;
-
+                .await?
+            };
             self.certificate = certificate;
 
             Ok(())

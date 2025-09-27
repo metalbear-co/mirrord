@@ -418,6 +418,8 @@ where
         &self.client
     }
 
+    /// Create a new CI api key by generating a random key pair, creating a certificate
+    /// signing request and sending it to the operator.
     pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
         if self
             .operator()

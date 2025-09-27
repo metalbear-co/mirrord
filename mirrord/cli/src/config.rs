@@ -155,6 +155,7 @@ pub(super) enum Commands {
     Newsletter,
 
     /// Execute a command related to mirrord CI.
+    #[command(hide = true)]
     Ci(Box<CiArgs>),
 }
 

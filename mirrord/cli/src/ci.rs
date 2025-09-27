@@ -15,7 +15,7 @@ pub(crate) async fn ci_command(args: CiArgs) -> CliResult<()> {
 }
 
 /// Generate a new API key for CI usage by calling the operator API:
-/// `POST /mirrordoperators/:name/certificates`
+/// `POST /mirrordclusteroperatorusercredentials`
 #[tracing::instrument(level = "trace", ret)]
 async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord ci api-key");
