@@ -4,13 +4,17 @@ use std::{
 };
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use bincode::{
+    de, enc,
+    error::{DecodeError, EncodeError},
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 #[cfg(feature = "client")]
 use x509_certificate::{
-    InMemorySigningKeyPair, X509CertificateBuilder, X509CertificateError, rfc2986,
+    InMemorySigningKeyPair, X509Certificate, X509CertificateBuilder, X509CertificateError, rfc2986,
 };
 use x509_certificate::{asn1time::Time, rfc5280};
 
@@ -62,6 +66,43 @@ impl Credentials {
 impl AsRef<Certificate> for Credentials {
     fn as_ref(&self) -> &Certificate {
         &self.certificate
+    }
+}
+
+impl bincode::Encode for Credentials {
+    fn encode<E: enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        let Credentials {
+            certificate,
+            key_pair,
+        } = self;
+
+        certificate
+            .encode_der()
+            .map_err(|error| EncodeError::Io {
+                inner: error,
+                index: 0, // we don't know how many bytes were written
+            })?
+            .encode(encoder)?;
+        key_pair
+            .to_pkcs8_one_asymmetric_key_der()
+            .as_slice()
+            .encode(encoder)?;
+
+        Ok(())
+    }
+}
+
+impl bincode::Decode<()> for Credentials {
+    fn decode<D: de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let certificate = X509Certificate::from_der(Vec::<u8>::decode(decoder)?)
+            .map_err(|error| DecodeError::OtherString(error.to_string()))?;
+        let key_pair = InMemorySigningKeyPair::from_pkcs8_der(Vec::<u8>::decode(decoder)?)
+            .map_err(|error| DecodeError::OtherString(error.to_string()))?;
+
+        Ok(Self {
+            certificate: certificate.into(),
+            key_pair: key_pair.into(),
+        })
     }
 }
 
@@ -128,8 +169,7 @@ impl CiApiKey {
     pub fn encode(&self) -> Result<String, ApiKeyError> {
         match self {
             CiApiKey::V1(credentials) => {
-                let bytes =
-                    bincode::serde::encode_to_vec(credentials, bincode::config::standard())?;
+                let bytes = bincode::encode_to_vec(credentials, bincode::config::standard())?;
 
                 let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
                 compression_encoder.write_all(&bytes)?;
@@ -155,8 +195,7 @@ impl CiApiKey {
             let mut bytes = Vec::new();
             compression_decoder.read_to_end(&mut bytes)?;
 
-            let (credentials, _) =
-                bincode::serde::decode_from_slice(&bytes, bincode::config::standard())?;
+            let (credentials, _) = bincode::decode_from_slice(&bytes, bincode::config::standard())?;
 
             return Ok(CiApiKey::V1(credentials));
         }
@@ -478,7 +517,7 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
     #[test]
     fn v1_ci_api_key_encode_decode() {
         // This credential is generated using a test root issuer
-        const V1_API_KEY: &str = "mci-v1:eNptk8uSqzYURQeZucr_cOddqWug_RpkgEBg2Ui-mKc0M2DzsKDxA8vwAfma_GEmEZ2bqk4lVDE5krb22kfnz99_-XX8ALQR-WbAg48sZOg-_KxOJxghgw6GoRf7XBcI6Ln8fX0DcnxjsW7pJiDYWwnHpWbouqZpMBDAS-6p4RxZYTedHGM3D-1wyGwwIBh2mR326WbbpmqQ-zavWDQfmA-PGOS2rgTQyMXBDcEWwQc_eSCcTpKaz5B14Knmik2RElwFYu_DOa7ggE2sRZ-19N-1Sm-wFwgkqDmdfDoDr8cx3vaJtr04EWldaLmeBxwWX_IwmreZAQIWkxk2hADy1E4NO-DqJnLBUircLkW9otYyq8u-uxKuXf2o3T-TxNHZ221V3doz9y4fj8VeppeLPIczmR3QdRo7qsKnk8y27rQOi7Rc348R4UlDuKPyjtUroJ9XMD9ZS9Qc5qkdlPtyK9clcQP6Y0w4KkUpc4is91gjnMaHAVUfL2zqd9QQhTakSmsuMps_E75umYEWqKIqjaiy99OZ4-sardBjOiEmFHtPKYlKKsenGo6wim30jmuo0BLdUb3umWp1x7gtvqolTXhPjNFDJjtHI1Hua1YkG0lgbFUWb4djtO6kpxL37y9c0Q4boxrvUu1QJDXhzPqbWlJI7pEibRhPS7RgtXWXb2EkGcnO8oaCqo82qbNzEq0vzJM0FyJPy7cDR4W0ObSs5pXczVEzE05Oz2PGXxKuEpvLBN0nVcM-M9YirddC-pydXNeZTk79VklVqxm1sVT42W8x9tt19VPlaE0X3wo96L3OfXNesVWYm0iL1-ytdpZwOsn9-vKyiWPtdruVusFqejW-X3dK9dHPmuhHso_i1Sa5Knfqzc5miRJP7KaTz6GCxPyfQfvjyxj-OKBQrnzbQfrPGFrQ0F0oDf40aiCICAjQq69n_Sp87wZrEcAhUbNr8Vhuh_j0XLl8lefAshM3loY9qJ-U4xyxpw1OGvu4364VyxYX5erfVLUX9vn6HS0W8Txod0762xez_7XzFwspVos";
+        const V1_API_KEY: &str = "mci-v1:eNqFUk1oE0EYzSZprG1FtMVKLXadWj2Y7c7mPxHEED1oola0-EMlzm4mYehms52ZiDFGaKz_HtSLiFhaehMPKt48CL1IERTspbdS7MGDUvCi2EOdNBIKPfTwMXzMe2_em-9bzjlh1WmIap9wOSWnU5LgJo_rALabHPCEpkLF4xp0u9r2xQeOyUlckgctwuWzmPHLTD5qcUxtShiWU8TAFsNaF9xZI7S0bVtHgLs7t_iCMKpFfZof-sMXRRte08L9Wh_srT_XnSeUFmhGMcjh9ULeukWryeHa43iffNN1MNY8nNqaSL5s5afOzf7ePqY_uPH3e8_QPPwzNFWVIrAqBUQ5PJ1qHnNk6hhR1axbVomVLUjSint0oQx4ycYgBnAjGPCCPLqaZhhxBmIahF7AijozKLE5KVhpkhHwUAhlg9FwQIFh3acENBhV9LBhKKGwZoSgHvGhoC6ECjSHLHINNYhW0TS9gFOCTBDLIpNhL7iCKRP3QtXfr_lC_VAQicU4sgycSf_3LPxQAWyQavbSnCJjmFi5dL6QqYVImETkSGDKSZYYiGNQgf2enjU_YKwiVENAVJsWbHGW3K1lUGQoJxR8lcYquOKOt68mR1pmr89bc6kX7TPn857KdMf40-MTHb8-5_f-WHo-8G7s3p1O--fyx5ZDXy5s3vF1aeVRZKr37m3l20J8eqb5DDxdW66mVUU3cMvBT0f6dn0ITcYXWbd-q3xfHXl980nl5OPxOXmxcunZw9GNZ_sPjxrpow";
 
         let api_key = CiApiKey::decode(V1_API_KEY).expect("decode api key");
         let CiApiKey::V1(credentials) = &api_key;
