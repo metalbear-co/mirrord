@@ -64,15 +64,7 @@ impl KeyPair {
     /// The new [`KeyPair`] initially has valid format.
     pub fn new_random() -> Result<Self, X509CertificateError> {
         let key_pair = InMemorySigningKeyPair::generate_random(KeyAlgorithm::Ed25519)?;
-        let der = key_pair.to_pkcs8_one_asymmetric_key_der();
-        let pem_key = pem::Pem::new("PRIVATE KEY", der.to_vec());
-        let pem_document = pem::encode(&pem_key);
-
-        Ok(Self {
-            pem: pem_document,
-            key_pair: key_pair.into(),
-            der_bugged: false,
-        })
+        Ok(key_pair.into())
     }
 
     /// Exposes this key pair as a PEM-encoded document.
@@ -119,6 +111,20 @@ impl KeyPair {
 
         self.pem = pem_document;
         self.der_bugged = false;
+    }
+}
+
+impl From<InMemorySigningKeyPair> for KeyPair {
+    fn from(key_pair: InMemorySigningKeyPair) -> Self {
+        let der = key_pair.to_pkcs8_one_asymmetric_key_der();
+        let pem_key = pem::Pem::new("PRIVATE KEY", der.to_vec());
+        let pem_document = pem::encode(&pem_key);
+
+        Self {
+            pem: pem_document,
+            key_pair: key_pair.into(),
+            der_bugged: false,
+        }
     }
 }
 

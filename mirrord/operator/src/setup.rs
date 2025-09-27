@@ -28,7 +28,8 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    MirrordOperatorCrd, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
+    MirrordWorkloadQueueRegistry, TargetCrd,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
     patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
@@ -703,6 +704,16 @@ impl OperatorClusterRole {
                     "deletecollection".to_owned(),
                     "list".to_owned(),
                 ],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![
+                    MirrordClusterOperatorUserCredential::group(&()).into_owned(),
+                ]),
+                resources: Some(vec![
+                    MirrordClusterOperatorUserCredential::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
         ];

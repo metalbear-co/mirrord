@@ -284,6 +284,7 @@ use tracing::{error, info, trace, warn};
 use which::which;
 
 mod browser;
+mod ci;
 mod config;
 mod connection;
 mod container;
@@ -901,6 +902,7 @@ fn main() -> miette::Result<()> {
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
             Commands::Newsletter => newsletter::newsletter_command().await,
+            Commands::Ci(args) => ci::ci_command(*args).await?,
         };
 
         Ok(())
