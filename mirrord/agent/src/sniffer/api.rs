@@ -18,10 +18,7 @@ use super::{
     AgentResult,
     messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
 };
-use crate::{
-    error::AgentError,
-    util::{ClientId, remote_runtime::BgTaskStatus},
-};
+use crate::{error::AgentError, task::status::BgTaskStatus, util::ClientId};
 
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate

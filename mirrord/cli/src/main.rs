@@ -411,7 +411,7 @@ where
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
         &sub_progress_config,
-        &binary_args,
+        Some(&binary_args),
         &config,
         config_file_path,
         execution_info.uses_operator,
@@ -459,16 +459,18 @@ where
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
-fn print_config<P>(
+pub(crate) fn print_config<P>(
     progress: &P,
-    command: &[String],
+    command: Option<&[String]>,
     config: &LayerConfig,
     config_file_path: Option<&str>,
     operator_used: bool,
 ) where
     P: Progress,
 {
-    progress.info(&format!("Running command: {}", command.join(" ")));
+    if let Some(cmd) = command {
+        progress.info(&format!("Running command: {}", cmd.join(" ")));
+    }
 
     let target_and_config_path_info = format!(
         "{}, {}",
@@ -622,6 +624,8 @@ fn print_config<P>(
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
+    ensure_not_nested()?;
+
     let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -912,6 +916,14 @@ fn main() -> miette::Result<()> {
     });
 
     res.map_err(Into::into)
+}
+
+/// Make sure we're not running nested inside another mirrord exec
+fn ensure_not_nested() -> CliResult<()> {
+    match std::env::var(mirrord_config::LayerConfig::RESOLVED_CONFIG_ENV) {
+        Ok(_) => Err(CliError::NestedExec),
+        Err(_) => Ok(()),
+    }
 }
 
 async fn prompt_outdated_version(progress: &ProgressTracker) {

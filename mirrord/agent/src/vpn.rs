@@ -19,7 +19,10 @@ use tokio::{
 
 use crate::{
     error::AgentResult,
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
+    },
 };
 
 /// An interface for a background task handling [`ClientVpn`] messages.
@@ -42,13 +45,16 @@ impl VpnApi {
     ///
     /// * `runtime` - tokio runtime to spawn the task on.
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+        // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+        // Do not remove this.
+        let _rt = runtime.handle().enter();
+
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
         let pid = runtime.target_pid();
 
-        let task_status = runtime
-            .spawn(VpnTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("VpnTask");
+        let task_status =
+            tokio::spawn(VpnTask::new(pid, layer_rx, daemon_tx).run()).into_status("VpnTask");
 
         Self {
             task_status,

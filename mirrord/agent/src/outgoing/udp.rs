@@ -26,7 +26,10 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::UDP_OUTGOING_CONNECTION,
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    task::{
+        BgTaskRuntime,
+        status::{BgTaskStatus, IntoStatus},
+    },
 };
 
 /// Task that handles [`LayerUdpOutgoing`] and [`DaemonUdpOutgoing`] messages.
@@ -304,12 +307,16 @@ async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseErr
 
 impl UdpOutgoingApi {
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+        // IMPORTANT: this makes tokio tasks spawn on `runtime`.
+        // Do not remove this.
+        let _rt = runtime.handle().enter();
+
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task_status = runtime
-            .spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
-            .into_status("UdpOutgoingTask");
+        let task_status =
+            tokio::spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
+                .into_status("UdpOutgoingTask");
 
         Self {
             task_status,
