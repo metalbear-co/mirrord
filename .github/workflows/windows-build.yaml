@@ -1,258 +1,75 @@
-name: Windows build + tests
+name: Windows tests (reuse signed build from GCS)
 
 on:
   workflow_dispatch:
-    inputs:
-      use_cached_build:
-        description: "Reuse an existing build from GCS instead of rebuilding?"
-        type: boolean
-        default: false
-        required: true
-      gcs_artifact_dir:
-        description: "If reusing, path under bucket, e.g. windows/mirrord-3.163.0-run70-0932953"
-        type: string
-        default: ""
-        required: false
 
 permissions:
   contents: read
 
 env:
+  # Fixed GCS location you provided (bucket + subpath split for clarity)
   BUCKET_URI: gs://mirrord-windows-builds
+  ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
+
+  # Rust/bindgen/env defaults
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
 
 jobs:
-  build_and_or_fetch:
+  windows_tests:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: pwsh
-    outputs:
-      exe_path: ${{ steps.set-outputs.outputs.exe_path }}
-      dll_path: ${{ steps.set-outputs.outputs.dll_path }}
-      version:  ${{ steps.set-outputs.outputs.version }}
 
     steps:
-      - name: Checkout windows branch
+      - name: Checkout repo (tests & sources)
         uses: actions/checkout@v4
         with:
           ref: windows-builds-gh
           fetch-depth: 0
           submodules: recursive
 
-      - name: Verify runner prerequisites (signtool, gcloud, LLVM)
-        run: |
-          $ErrorActionPreference='Stop'
-          Get-Command signtool.exe | Out-Null
-          gcloud --version | Out-Null
-          if (!(Test-Path "C:\Program Files\LLVM\bin\libclang.dll")) {
-            throw "LLVM (libclang) missing on runner."
-          }
-
-      - name: Add Rust MSVC target
-        if: ${{ inputs.use_cached_build != true }}
-        run: rustup target add x86_64-pc-windows-msvc
-
-      # ---------- BUILD (only when not reusing) ----------
-      - name: Build mirrord-layer-win (DLL)
-        if: ${{ inputs.use_cached_build != true }}
-        run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
-
-      - name: Locate package for bin "mirrord" + set envs (pkg/version/layer path)
-        if: ${{ inputs.use_cached_build != true }}
-        run: |
-          $ErrorActionPreference='Stop'
-          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $pkg = $meta.packages | Where-Object { $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') } } | Select-Object -First 1
-          if (-not $pkg) {
-            $names = ($meta.packages | ForEach-Object name) -join ', '
-            throw "No bin target named 'mirrord' found. Workspace packages: $names"
-          }
-          "MIRRORD_PKG=$($pkg.name)"        | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-          $dbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
-          $rel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll'
-          if     (Test-Path $dbg) { $dll = $dbg }
-          elseif (Test-Path $rel) { $dll = $rel }
-          else { throw "Layer DLL not found at:`n  $dbg`n  $rel" }
-          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Embedding layer DLL from: $dll"
-          Get-Item $dll | Format-List FullName,Length,LastWriteTime
-
-      - name: Build mirrord (bin)
-        if: ${{ inputs.use_cached_build != true }}
-        run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
-
-      - name: Code sign mirrord.exe + layer DLL (and verify)
-        if: ${{ inputs.use_cached_build != true }}
-        run: |
-          $ErrorActionPreference='Stop'
-          $dDbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-          $dRel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
-          $exe = if (Test-Path (Join-Path $dDbg 'mirrord.exe')) { Join-Path $dDbg 'mirrord.exe' } elseif (Test-Path (Join-Path $dRel 'mirrord.exe')) { Join-Path $dRel 'mirrord.exe' } else { "" }
-          if (-not $exe) { throw "mirrord.exe not found in Debug/Release." }
-
-          $dllCandidates = @($env:MIRRORD_LAYER_FILE, (Join-Path $dDbg 'mirrord_layer_win.dll'), (Join-Path $dRel 'mirrord_layer_win.dll')) | Where-Object { $_ }
-          $dll = $dllCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $dll) { throw "Layer DLL not found in Debug/Release or env." }
-
-          foreach ($f in @($exe, $dll)) {
-            Write-Host "Signing $f"
-            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$f"
-            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
-            & signtool.exe verify /pa "$f"
-            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
-          }
-
-      - name: Upload signed artifacts to GCS
-        if: ${{ inputs.use_cached_build != true }}
-        run: |
-          $ErrorActionPreference='Stop'
-          $dDbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-          $dRel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
-          $exe = if (Test-Path (Join-Path $dDbg 'mirrord.exe')) { Join-Path $dDbg 'mirrord.exe' } else { Join-Path $dRel 'mirrord.exe' }
-          $dll = if ($env:MIRRORD_LAYER_FILE -and (Test-Path $env:MIRRORD_LAYER_FILE)) { $env:MIRRORD_LAYER_FILE } elseif (Test-Path (Join-Path $dDbg 'mirrord_layer_win.dll')) { Join-Path $dDbg 'mirrord_layer_win.dll' } else { Join-Path $dRel 'mirrord_layer_win.dll' }
-
-          $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
-          New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item $exe -Destination $staging -Force
-          Copy-Item $dll -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
-
-          Write-Host "Staged files:"; Get-ChildItem $staging | Format-Table Name,Length
-
-          # checksums (note wildcard so -Include works)
-          Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll | ForEach-Object {
-            $h = Get-FileHash -Algorithm SHA256 $_.FullName
-            "$($h.Hash)  $($_.Name)" | Out-File (Join-Path $staging "$($_.Name).sha256") -Encoding ascii
-          }
-
-          $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
-          $sha7 = $env:GITHUB_SHA.Substring(0,7)
-          $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
-          $dest = "$($env:BUCKET_URI)/$artifactDir/"
-          Write-Host "Uploading to $dest"
-
-          $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
-          if (-not $files) { throw "No artifacts found in $staging" }
-          foreach ($f in $files) {
-            gcloud --quiet storage cp $($f.FullName) $dest
-            if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($f.Name) (exit $LASTEXITCODE)" }
-          }
-          gcloud --quiet storage ls $dest
-
-      # ---------- FETCH (when reusing) ----------
-      - name: Fetch existing build from GCS
-        if: ${{ inputs.use_cached_build == true }}
+      - name: Fetch signed mirrord.exe + layer DLL from GCS
         run: |
           $ErrorActionPreference='Stop'
 
-          $raw = "${{ inputs.gcs_artifact_dir }}".Trim()
-          if ([string]::IsNullOrWhiteSpace($raw)) {
-            throw "Provide inputs.gcs_artifact_dir like: windows/mirrord-<ver>-run<run>-<sha7>"
-          }
+          # Sanity: show what’s in the bucket path
+          Write-Host "Listing: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/"
+          gcloud --quiet storage ls "$env:BUCKET_URI/$env:ARTIFACT_SUBPATH/"
 
-          # Sanitize input: strip gs://bucket/ and duplicate bucket prefix
-          $bucket = ($env:BUCKET_URI -replace '^gs://','')
-          $artifact = $raw -replace "^gs://[^/]+/",""
-          if ($artifact.StartsWith("$bucket/")) { $artifact = $artifact.Substring($bucket.Length + 1) }
-
-          Write-Host "BUCKET_URI      : $env:BUCKET_URI"
-          Write-Host "Artifact subpath: $artifact"
-          gcloud --quiet storage ls "$env:BUCKET_URI/windows/*"
-
+          # Download to a known folder
           $dest = Join-Path $env:RUNNER_TEMP 'picked'
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
-          gcloud --quiet storage cp "$env:BUCKET_URI/$artifact/*" "$dest/"
+          gcloud --quiet storage cp "$env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*" "$dest/"
           if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
 
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
+          # Resolve exe/dll (fallback to any *layer*.dll just in case)
           $exe = (Get-ChildItem $dest -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
           $dll = (Get-ChildItem $dest -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
-          if (-not $exe -or -not $dll) { throw "mirrord.exe or mirrord_layer_win.dll missing in $dest" }
+          if (-not $dll) { $dll = (Get-ChildItem $dest -Filter '*layer*.dll' -File | Select-Object -First 1).FullName }
 
-          "MIRRORD_VERSION=unknown"            | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_DOWNLOADED_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Set step outputs (exe/dll/version)
-        id: set-outputs
-        run: |
-          $ErrorActionPreference='Stop'
-          $dll = if ($env:MIRRORD_LAYER_FILE) { $env:MIRRORD_LAYER_FILE } else { $env:MIRRORD_TEST_USE_EXISTING_LIB }
-          $exe = if ($env:MIRRORD_DOWNLOADED_EXE) { $env:MIRRORD_DOWNLOADED_EXE } else {
-            $dbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord.exe'
-            $rel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release\mirrord.exe'
-            if (Test-Path $dbg) { $dbg } elseif (Test-Path $rel) { $rel } else { "" }
+          if (-not $exe -or -not $dll) {
+            throw "Did not find mirrord.exe or layer DLL in $dest"
           }
-          if (-not $dll) { throw "dll_path empty" }
-          if (-not $exe) { throw "exe_path empty" }
-          echo "exe_path=$exe"        >> $env:GITHUB_OUTPUT
-          echo "dll_path=$dll"        >> $env:GITHUB_OUTPUT
-          echo "version=${env:MIRRORD_VERSION}" >> $env:GITHUB_OUTPUT
 
-      # Publish the chosen binaries for the tests job
-      - name: Stage binaries for artifact
-        run: |
-          $ErrorActionPreference='Stop'
-          $dest = Join-Path $env:RUNNER_TEMP 'picked'
-          New-Item -ItemType Directory -Path $dest -Force | Out-Null
-          Copy-Item "${{ steps.set-outputs.outputs.exe_path }}" -Destination $dest -Force
-          Copy-Item "${{ steps.set-outputs.outputs.dll_path }}" -Destination $dest -Force
-          Write-Host "Staged files:"; Get-ChildItem $dest | Format-Table Name,Length
-
-      - name: Upload binaries artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-picked
-          path: ${{ runner.temp }}/picked/*
-          if-no-files-found: error
-
-  windows_tests:
-    needs: build_and_or_fetch
-    runs-on: [self-hosted, Windows]
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      RUST_BACKTRACE: "1"
-      LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: windows-builds-gh
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Download picked binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-picked
-        # downloads to ${{github.workspace}}/windows-picked by default
-
-      - name: Locate downloaded EXE/DLL and export env
-        run: |
-          $base = Join-Path $env:GITHUB_WORKSPACE 'windows-picked'
-          Write-Host "Downloaded files:"; Get-ChildItem $base | Format-Table Name,Length
-          $exe = (Get-ChildItem $base -Filter 'mirrord.exe' -File | Select -First 1).FullName
-          $dll = (Get-ChildItem $base -Filter 'mirrord_layer_win.dll' -File | Select -First 1).FullName
-          if (-not $exe -or -not $dll) { throw "mirrord.exe or mirrord_layer_win.dll not found in $base" }
+          # Export for the tests
           "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_LAYER_FILE=$dll"           | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_DOWNLOADED_EXE=$exe"       | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "exe: $exe"
-          Write-Host "dll: $dll"
 
-      - name: Toolchain (MSVC) present?
+          Get-Item $exe,$dll | Format-Table FullName,Length,LastWriteTime
+
+      - name: Toolchain sanity (MSVC + LLVM)
         run: |
           rustup target add x86_64-pc-windows-msvc
-          if (!(Test-Path "C:\Program Files\LLVM\bin\libclang.dll")) { throw "LLVM not installed on runner." }
+          if (!(Test-Path "$env:LIBCLANG_PATH\libclang.dll")) {
+            throw "LLVM (libclang.dll) missing at $env:LIBCLANG_PATH"
+          }
 
       # ---------- Windows-friendly tests ----------
       - name: Unit tests – mirrord-layer (skip bash_script)
@@ -266,14 +83,13 @@ jobs:
               Write-Host "=== cargo test -p $p ==="
               cargo test -p $p -- --nocapture
             } catch {
-              Write-Warning "Skipping $p on Windows (not supported or linux-only)."
+              Write-Warning "Skipping $p on Windows (not supported / linux-only)."
             }
           }
 
       - name: CLI smoke test
         run: |
           & "$env:MIRRORD_DOWNLOADED_EXE" --help | Out-Host
-
 
 
 
