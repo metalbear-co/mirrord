@@ -256,6 +256,11 @@ pub fn connect_through_proxy_with_layer_lib<F>(
 where
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
+    tracing::debug!(
+        "connect_through_proxy_with_layer_lib -> attempting proxy connection for socket {} to address {:#?}",
+        socket,
+        remote_addr
+    );
     let raw_remote_addr = SockAddr::from(remote_addr);
     let optional_ip_address = raw_remote_addr.as_socket();
     if let Some(ip_address) = optional_ip_address

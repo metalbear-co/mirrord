@@ -750,6 +750,30 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
     pub fn as_ptr(&self) -> *mut T {
         self.ptr
     }
+
+    /// Propagate the requested service port into each sockaddr entry
+    pub fn apply_port(&mut self, port: u16) {
+        unsafe {
+            let mut current = self.ptr;
+            while !current.is_null() {
+                let addr = (*current).ai_addr();
+                if !addr.is_null() {
+                    match (*current).ai_family() as i32 {
+                        AF_INET => {
+                            let sockaddr_in_ptr = addr as *mut SOCKADDR_IN;
+                            (*sockaddr_in_ptr).sin_port = port.to_be();
+                        }
+                        AF_INET6 => {
+                            let sockaddr_in6_ptr = addr as *mut SOCKADDR_IN6;
+                            (*sockaddr_in6_ptr).sin6_port = port.to_be();
+                        }
+                        _ => {}
+                    }
+                }
+                current = (*current).ai_next();
+            }
+        }
+    }
 }
 
 impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
@@ -782,7 +806,7 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
 
                     unsafe {
                         (*sockaddr_in_ptr).sin_family = AF_INET as u16;
-                        // Port not available in LookupRecord
+                        // Port applied later via ManagedAddrInfo::apply_port
                         (*sockaddr_in_ptr).sin_port = 0;
                         *(*sockaddr_in_ptr).sin_addr.S_un.S_addr_mut() = u32::from(ipv4).to_be();
                         ptr::write_bytes((*sockaddr_in_ptr).sin_zero.as_mut_ptr(), 0, 8);
@@ -800,7 +824,7 @@ impl<T: WindowsAddrInfo> TryFrom<GetAddrInfoResponse> for ManagedAddrInfo<T> {
 
                     unsafe {
                         (*sockaddr_in6_ptr).sin6_family = AF_INET6 as u16;
-                        // Port not available in LookupRecord
+                        // Port applied later via ManagedAddrInfo::apply_port
                         (*sockaddr_in6_ptr).sin6_port = 0;
                         (*sockaddr_in6_ptr).sin6_flowinfo = 0;
                         *(*sockaddr_in6_ptr).sin6_addr.u.Byte_mut() = ipv6.octets();

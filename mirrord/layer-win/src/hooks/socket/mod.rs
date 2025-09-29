@@ -470,8 +470,8 @@ unsafe extern "system" fn connect_detour(s: SOCKET, name: *const SOCKADDR, namel
             );
             return SOCKET_ERROR;
         }
-        Err(_) => {
-            tracing::debug!("connect_detour -> socket {} not managed, using original", s);
+        Err(e) => {
+            tracing::debug!("connect_detour -> socket {} not managed, using original. err: {}", s, e);
         }
         Ok(connect_result) => {
             return connect_result.result();
@@ -1525,8 +1525,10 @@ unsafe extern "system" fn getaddrinfo_detour(
                 let mut managed = match MANAGED_ADDRINFO.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => {
-                        tracing::error!("MANAGED_ADDRINFO lock failed: {}", poisoned);
-                        return WSAEFAULT;
+                        tracing::warn!(
+                            "getaddrinfo: MANAGED_ADDRINFO was poisoned, attempting recovery"
+                        );
+                        poisoned.into_inner()
                     }
                 };
                 managed.insert(addr_ptr as usize, ManagedAddrInfoAny::A(managed_addr_info));
@@ -1585,8 +1587,10 @@ unsafe extern "system" fn getaddrinfow_detour(
             let mut managed = match MANAGED_ADDRINFO.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => {
-                    tracing::error!("MANAGED_ADDRINFO lock failed: {}", poisoned);
-                    return WSAEFAULT;
+                        tracing::warn!(
+                            "GetAddrInfoW: MANAGED_ADDRINFO was poisoned, attempting recovery"
+                        );
+                        poisoned.into_inner()
                 }
             };
             managed.insert(result_ptr as usize, ManagedAddrInfoAny::W(managed_result));
