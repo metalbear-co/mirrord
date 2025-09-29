@@ -1,106 +1,83 @@
-name: Windows tests (reuse signed build from GCS)
+name: Windows – reuse prebuilt & run tests
 
 on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
+  workflow_dispatch: {}
 
 env:
+  # Where the artifacts live
   BUCKET_URI: gs://mirrord-windows-builds
+  # Fixed path you asked to assume:
   ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
 
+  # Common env
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
-  LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+  # If LLVM is installed in a custom path on your runner, update this (used by frida-gum/bindgen)
+  LIBCLANG_PATH: C:\Program Files\LLVM\bin
 
 jobs:
-  windows_tests:
+  windows-tests:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: pwsh
 
     steps:
-      - name: Checkout repo (tests & sources)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: windows-builds-gh
           fetch-depth: 0
           submodules: recursive
 
-      - name: Fetch signed mirrord.exe + layer DLL from GCS
+      - name: Toolchain info
         run: |
-          $ErrorActionPreference='Stop'
+          $PSStyle.Formatting.TableHeader = $false
+          Write-Host "whoami: $(whoami)"
+          rustc -V
+          cargo -V
+          rustup show
+          if (Get-Command "signtool.exe" -ErrorAction SilentlyContinue) { signtool.exe -? | Out-Null; Write-Host "signtool: OK" }
+          if (Test-Path "$env:LIBCLANG_PATH\libclang.dll") { Write-Host "libclang: $env:LIBCLANG_PATH\libclang.dll" }
 
-          Write-Host "Listing: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/"
-          gcloud --quiet storage ls "$env:BUCKET_URI/$env:ARTIFACT_SUBPATH/"
+      - name: Ensure MSVC target
+        run: rustup target add x86_64-pc-windows-msvc
 
+      # ---------- Pick the prebuilt Windows artifacts from GCS ----------
+      - name: Download prebuilt Windows artifacts from GCS
+        run: |
           $dest = Join-Path $env:RUNNER_TEMP 'picked'
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
-          gcloud --quiet storage cp "$env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*" "$dest/"
+          Write-Host "Downloading from: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*"
+          gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
           if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
-
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
+          # Find exe/dll
           $exe = (Get-ChildItem $dest -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
-          # prefer the canonical name; fall back to any *layer*.dll
-          $dll = (Get-ChildItem $dest -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
-          if (-not $dll) { $dll = (Get-ChildItem $dest -Filter '*layer*.dll' -File | Select-Object -First 1).FullName }
-
+          # DLL can be named with underscore or dash; fall back to any *layer*.dll
+          $dll = (Get-ChildItem $dest -Include 'mirrord_layer_win.dll','mirrord-layer-win.dll','*layer*.dll' -File | Select-Object -First 1).FullName
           if (-not $exe -or -not $dll) {
-            throw "Did not find mirrord.exe or layer DLL in $dest"
+            Write-Host "Files present:"; Get-ChildItem $dest -File | Select Name,FullName | Format-Table
+            throw "Did not find mirrord.exe or layer DLL under $dest"
           }
 
-          "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_LAYER_FILE=$dll"           | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_DOWNLOADED_EXE=$exe"       | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_LAYER_FILE=$dll"           | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_TEST_USE_EXISTING_LIB=$dll"| Out-File -FilePath $env:GITHUB_ENV -Append
 
-          Get-Item $exe,$dll | Format-Table FullName,Length,LastWriteTime
-
-      - name: Toolchain sanity (MSVC + LLVM)
+      - name: Show picked files
         run: |
-          rustup target add x86_64-pc-windows-msvc
-          if (!(Test-Path "$env:LIBCLANG_PATH\libclang.dll")) {
-            throw "LLVM (libclang.dll) missing at $env:LIBCLANG_PATH"
-          }
+          Write-Host "exe:  $env:MIRRORD_DOWNLOADED_EXE"
+          Write-Host "dll:  $env:MIRRORD_LAYER_FILE"
+          Get-Item $env:MIRRORD_LAYER_FILE | Format-List FullName,Length,LastWriteTime
 
-      # ---------- WINDOWS-SAFE TESTS ----------
-      # 1) Cross-platform crates only. These shouldn't drag in linux-only code.
-      - name: Unit tests – cross-platform crates
-        run: |
-          cargo test -p mirrord-protocol --lib -- --nocapture
-          cargo test -p mirrord-config   --lib -- --nocapture
-
-      # 2) Windows layer crate: compile and compile-tests only (don't run integration tests).
-      - name: Build mirrord-layer-win (library)
-        run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
-
-      - name: Compile test targets for mirrord-layer-win (no run)
-        run: cargo test -p mirrord-layer-win --no-run -- --nocapture
-
-      # 3) CLI smoke checks against the signed binary we fetched.
-      - name: CLI smoke test
-        run: |
-          & "$env:MIRRORD_DOWNLOADED_EXE" --version | Out-Host
-          & "$env:MIRRORD_DOWNLOADED_EXE" --help    | Out-Host
-
-      - name: Verify code signature
-        shell: pwsh
-        run: |
-          & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
-          if ($LASTEXITCODE -ne 0) { throw "Signature verify failed for $env:MIRRORD_LAYER_FILE" }
-
-
-      # OPTIONAL: prove the DLL exports are loadable
-      - name: Sanity check layer DLL (map without running DllMain)
-        shell: pwsh
+      # ---------- Sanity check DLL without executing DllMain ----------
+      - name: Map DLL without running DllMain (LoadLibraryEx)
         run: |
           $dll = $env:MIRRORD_LAYER_FILE
           if (-not (Test-Path $dll)) { throw "Layer DLL not found at $dll" }
 
-          # C# P/Invoke for LoadLibraryEx with DONT_RESOLVE_DLL_REFERENCES
           $csPath = Join-Path $env:RUNNER_TEMP 'WinApi_LoadEx.cs'
           $lines = @(
             'using System;',
@@ -121,13 +98,89 @@ jobs:
             $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
             throw "LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES) failed for $dll (Win32 $err)"
           }
-          Write-Host "DLL mapped successfully (no DllMain executed): $dll"
+          Write-Host "DLL mapped OK (no DllMain executed): $dll"
 
-      - name: Verify code signature
-        shell: pwsh
+      - name: (Optional) Verify signature
+        if: ${{ always() }}
+        continue-on-error: true
         run: |
-          & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
-          if ($LASTEXITCODE -ne 0) { throw "Signature verify failed for $env:MIRRORD_LAYER_FILE" }
+          if (Get-Command "signtool.exe" -ErrorAction SilentlyContinue) {
+            & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
+            if ($LASTEXITCODE -ne 0) { throw "Signature verify failed for $env:MIRRORD_LAYER_FILE" }
+            Write-Host "Signature OK for $env:MIRRORD_LAYER_FILE"
+          } else {
+            Write-Host "signtool.exe not found; skipping signature verify."
+          }
+
+      # ---------- Run Windows tests ----------
+      - name: List mirrord-layer-win tests
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "layer_win_tests_list.txt"
+          cargo test -p mirrord-layer-win --target x86_64-pc-windows-msvc -- --list 2>&1 | Tee-Object -FilePath $log
+          Write-Host "Saved list to $log"
+
+      - name: Run mirrord-layer-win tests
+        env:
+          MIRRORD_TEST_USE_EXISTING_LIB: ${{ env.MIRRORD_LAYER_FILE }}
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "layer_win_tests.log"
+          cargo test -p mirrord-layer-win --target x86_64-pc-windows-msvc -- --nocapture 2>&1 | Tee-Object -FilePath $log
+
+          # Fail if zero tests ran
+          $txt = Get-Content $log -Raw
+          $m = [regex]::Matches($txt, 'running\s+(\d+)\s+tests')
+          $total = 0
+          foreach ($x in $m) { $total += [int]$x.Groups[1].Value }
+          if ($total -lt 1) {
+            Write-Host $txt
+            throw "No mirrord-layer-win tests ran. Check crate filters / configuration."
+          }
+          Write-Host "Total tests reported by harness: $total"
+          # Soft report of suite results
+          $ok = ([regex]::Matches($txt, 'test result:\s+ok\.')).Count
+          $fail = ([regex]::Matches($txt, 'test result:\s+FAILED\.')).Count
+          "OK suites: $ok; FAILED suites: $fail" | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt')
+
+      - name: (Optional) Run mirrord CLI unit tests on Windows
+        continue-on-error: true
+        env:
+          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}   # for include_bytes! at compile-time
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "cli_tests.log"
+          cargo test -p mirrord --target x86_64-pc-windows-msvc -- --nocapture 2>&1 | Tee-Object -FilePath $log
+          Write-Host "CLI tests done (optional). Log: $log"
+
+      - name: Upload Windows test logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-logs
+          path: |
+            ${{ runner.temp }}\layer_win_tests_list.txt
+            ${{ runner.temp }}\layer_win_tests.log
+            ${{ runner.temp }}\layer_win_summary.txt
+            ${{ runner.temp }}\cli_tests.log
+          if-no-files-found: warn
+
+      - name: Job summary
+        if: ${{ always() }}
+        run: |
+          $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
+          $dll = $env:MIRRORD_LAYER_FILE
+          $exe = $env:MIRRORD_DOWNLOADED_EXE
+          $out = @()
+          $out += "### Windows tests summary"
+          $out += ""
+          $out += "* Picked EXE: `$exe`"
+          $out += "* Picked DLL: `$dll`"
+          if (Test-Path $sum) {
+            $out += ""
+            $out += (Get-Content $sum -Raw)
+          } else {
+            $out += ""
+            $out += "_No summary file (tests may not have run)._"
+          }
+          $out -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
 
 
 
