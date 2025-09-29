@@ -179,7 +179,7 @@ jobs:
         run: cargo test --target x86_64-pc-windows-msvc -p mirrord
 
       # ---------- Summary to Job Summary tab ----------
-      - name: Publish Windows test results (summary table)
+      - name: Publish Windows test results (summary table, sandboxed)
         if: always()
         shell: pwsh
         run: |
@@ -194,10 +194,10 @@ jobs:
           function Get-ExpectedSha256([string]$shaFile) {
             if (-not (Test-Path $shaFile)) { return $null }
             $raw = Get-Content $shaFile -Raw
-            return $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
+            $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
           }
 
-          # SHA256s (and expected from .sha256 files)
+          # === SHA256 (and expected from .sha256) ===
           $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
           $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
           if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
@@ -209,75 +209,86 @@ jobs:
           $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
           $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
 
-          # Code signing (if signtool exists)
+          # === Code signing (if signtool exists) ===
           $sigExe = $null; $sigDll = $null
           if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
             & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
           }
 
-          # DLL load/unload check
+          # === DLL load/unload check in a CHILD process (so crashes don't kill this step) ===
           $dllLoadOk = $false
+          $dllCrash = $false
+          $loader = @"
           try {
-            $csPath = Join-Path $env:RUNNER_TEMP 'WinApi_Load.cs'
-            @'
+            Add-Type -TypeDefinition @'
           using System;
           using System.Runtime.InteropServices;
-          namespace Util {
-            public static class WinApi {
-              [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-              public static extern IntPtr LoadLibrary(string lpFileName);
-              [DllImport("kernel32.dll", SetLastError=true)]
-              public static extern bool FreeLibrary(IntPtr hModule);
-            }
+          public static class L {
+            [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+            public static extern IntPtr LoadLibrary(string lpFileName);
+            [DllImport("kernel32.dll", SetLastError=true)]
+            public static extern bool FreeLibrary(IntPtr hModule);
           }
-          '@ | Set-Content -Path $csPath -Encoding UTF8
-                Add-Type -Path $csPath
-                $ptr = [Util.WinApi]::LoadLibrary($dll)
-                if ($ptr -ne [IntPtr]::Zero) { [void][Util.WinApi]::FreeLibrary($ptr); $dllLoadOk = $true }
-              } catch { $dllLoadOk = $false }
+          '@;
+            var ptr = L.LoadLibrary(@"{($dll -replace '"','""')}");
+            if (ptr == IntPtr.Zero) Environment.Exit(2);
+            L.FreeLibrary(ptr);
+            Environment.Exit(0);
+          } catch { Environment.Exit(3); }
+          "@
 
-              # CLI checks
+              $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
+              Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
+
+              $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
+              $childExit = $p.ExitCode
+              if ($childExit -eq 0) { $dllLoadOk = $true }
+              # Access violation typically returns 3221225477 (0xC0000005) or -1073741819 depending on signedness
+              if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
+
+              # === CLI checks ===
               $verRc = $null; $verText = ""
               try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
               $helpRc = $null; $helpText = ""
               try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
 
-              # Sizes
+              # === Sizes ===
               $exeSize = (Get-Item $exe).Length
               $dllSize = (Get-Item $dll).Length
 
-              # Build rows
+              # === Build rows ===
               $rows = @()
               $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
               $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
-              $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= "signtool verify /pa" }
-              $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= "signtool verify /pa" }
-              $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}else{'❌ Failed'})); Notes= (Split-Path $dll -Leaf) }
+              $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+              $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+              $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
               $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
               $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
               $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
 
-              # Emit Markdown table to the job summary
+              # === Emit Markdown summary ===
               $md = @()
-              $md += "### Windows test results"
-              $md += ""
-              $md += "**Artifact dir:** `${env:ARTIFACT_SUBPATH}`  "
-              $md += "**EXE:** ``$exe``  "
-              $md += "**DLL:** ``$dll``"
-              $md += ""
-              $md += "| Check | Result | Notes |"
-              $md += "|------:|:------:|-------|"
+              $md += '### Windows test results'
+              $md += ''
+              $md += ('**Artifact dir:** `{0}`  ' -f $env:ARTIFACT_SUBPATH)
+              $md += ('**EXE:** `{0}`  ' -f $exe)
+              $md += ('**DLL:** `{0}`' -f $dll)
+              $md += ''
+              $md += '| Check | Result | Notes |'
+              $md += '|------:|:------:|-------|'
               foreach ($r in $rows) {
                 $c = ($r.Check  -replace '\|','\|')
                 $res = ($r.Result -replace '\|','\|')
                 $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
                 $md += "| $c | $res | $n |"
               }
-              $md += ""
-              $md += "<sub>See step logs for full command output.</sub>"
+              $md += ''
+              $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
 
               $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+
 
 
 
