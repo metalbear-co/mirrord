@@ -44,30 +44,46 @@ jobs:
       # - name: Use pinned nightly like Linux CI
       #   run: rustup default nightly-2025-08-01
 
-      - name: Pick Windows artifacts from GCS
+      - name: Pick Windows artifacts from GCS (robust)
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+
           $dest = Join-Path $env:RUNNER_TEMP 'picked'
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
           Write-Host "Downloading from: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*"
           gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
           if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
 
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
-          # Find exe/dll (accept underscore/dash; fallback to any *layer*.dll)
-          $exe = (Get-ChildItem $dest -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
-          $dll = (Get-ChildItem $dest -Include 'mirrord_layer_win.dll','mirrord-layer-win.dll','*layer*.dll' -File | Select-Object -First 1).FullName
+          # Use wildcarded path so -Filter actually matches; avoid -Include.
+          $wild = Join-Path $dest '*'
+
+          # exe
+          $exe = (Get-ChildItem -Path $wild -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
+
+          # dll (handle both underscore/dash names; then a generic fallback)
+          $dll = (Get-ChildItem -Path $wild -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
+          if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter 'mirrord-layer-win.dll' -File | Select-Object -First 1).FullName }
+          if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter '*layer*.dll'        -File | Select-Object -First 1).FullName }
+
+          Write-Host "Found exe: $exe"
+          Write-Host "Found dll: $dll"
 
           if (-not $exe -or -not $dll) {
-            Write-Host "Files present:"; Get-ChildItem $dest -File | Select Name,FullName | Format-Table
+            Write-Host "Files present:"; Get-ChildItem -Path $wild -File | Select Name,FullName | Format-Table
             throw "Did not find mirrord.exe or layer DLL under $dest"
           }
 
-          # Export env for subsequent steps
           "MIRRORD_DOWNLOADED_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Write-Host "Exported env:"
+          Get-Content $env:GITHUB_ENV
+
 
       - name: Quick smoke (hash + signature + --version/--help)
         run: |
