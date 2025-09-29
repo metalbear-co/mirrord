@@ -86,40 +86,48 @@ jobs:
           & "$env:MIRRORD_DOWNLOADED_EXE" --version | Out-Host
           & "$env:MIRRORD_DOWNLOADED_EXE" --help    | Out-Host
 
+      - name: Verify code signature
+        shell: pwsh
+        run: |
+          & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
+          if ($LASTEXITCODE -ne 0) { throw "Signature verify failed for $env:MIRRORD_LAYER_FILE" }
+
+
       # OPTIONAL: prove the DLL exports are loadable
-      - name: Check layer DLL loads
+      - name: Sanity check layer DLL (map without running DllMain)
         shell: pwsh
         run: |
           $dll = $env:MIRRORD_LAYER_FILE
           if (-not (Test-Path $dll)) { throw "Layer DLL not found at $dll" }
 
-          # Generate minimal C# to P/Invoke LoadLibrary/FreeLibrary
-          $csPath = Join-Path $env:RUNNER_TEMP 'WinApi_Load.cs'
+          # C# P/Invoke for LoadLibraryEx with DONT_RESOLVE_DLL_REFERENCES
+          $csPath = Join-Path $env:RUNNER_TEMP 'WinApi_LoadEx.cs'
           $lines = @(
-            'using System;'
-            'using System.Runtime.InteropServices;'
-            'namespace Util {'
-            '  public static class WinApi {'
-            '    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]'
-            '    public static extern IntPtr LoadLibrary(string lpFileName);'
-            '    [DllImport("kernel32.dll", SetLastError=true)]'
-            '    public static extern bool FreeLibrary(IntPtr hModule);'
-            '  }'
+            'using System;',
+            'using System.Runtime.InteropServices;',
+            'namespace Util {',
+            '  public static class WinApi {',
+            '    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]',
+            '    public static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);',
+            '  }',
             '}'
           )
           Set-Content -Path $csPath -Value $lines -Encoding UTF8
-
-          # Compile and load
           Add-Type -Path $csPath
 
-          # Try to load/unload the DLL
-          $ptr = [Util.WinApi]::LoadLibrary($dll)
-          if ($ptr -eq [IntPtr]::Zero) {
-            throw "LoadLibrary failed for $dll (check architecture/signature/deps)"
+          $DONT_RESOLVE_DLL_REFERENCES = 0x00000001
+          $h = [Util.WinApi]::LoadLibraryEx($dll, [IntPtr]::Zero, $DONT_RESOLVE_DLL_REFERENCES)
+          if ($h -eq [IntPtr]::Zero) {
+            $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw "LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES) failed for $dll (Win32 $err)"
           }
-          [void][Util.WinApi]::FreeLibrary($ptr)
-          Write-Host "DLL loaded/unloaded OK: $dll"
+          Write-Host "DLL mapped successfully (no DllMain executed): $dll"
 
+      - name: Verify code signature
+        shell: pwsh
+        run: |
+          & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
+          if ($LASTEXITCODE -ne 0) { throw "Signature verify failed for $env:MIRRORD_LAYER_FILE" }
 
 
 
