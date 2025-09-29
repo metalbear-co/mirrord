@@ -52,27 +52,48 @@ jobs:
         run: rustup target add x86_64-pc-windows-msvc
 
       # ---------- Pick the prebuilt Windows artifacts from GCS ----------
-      - name: Download prebuilt Windows artifacts from GCS
+      - name: Download chosen Windows build
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+
           $dest = Join-Path $env:RUNNER_TEMP 'picked'
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
           Write-Host "Downloading from: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*"
           gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
           if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
-          Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
-          # Find exe/dll
-          $exe = (Get-ChildItem $dest -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
-          # DLL can be named with underscore or dash; fall back to any *layer*.dll
-          $dll = (Get-ChildItem $dest -Include 'mirrord_layer_win.dll','mirrord-layer-win.dll','*layer*.dll' -File | Select-Object -First 1).FullName
+          Write-Host "Downloaded files:"
+          Get-ChildItem $dest | Format-Table Name,Length -HideTableHeaders
+
+          # Resolve files (don't use -Include without wildcard/recurse)
+          $exe = Get-Item -Path (Join-Path $dest 'mirrord.exe') -ErrorAction SilentlyContinue
+          $dll = $null
+          foreach ($candidate in @('mirrord_layer_win.dll','mirrord-layer-win.dll')) {
+            $p = Join-Path $dest $candidate
+            if (Test-Path $p) { $dll = Get-Item $p; break }
+          }
+          if (-not $dll) {
+            # Fallback: any file with "layer" in name
+            $dll = Get-ChildItem -Path $dest -File | Where-Object { $_.Name -like '*layer*.dll' } | Select-Object -First 1
+          }
+
           if (-not $exe -or -not $dll) {
-            Write-Host "Files present:"; Get-ChildItem $dest -File | Select Name,FullName | Format-Table
+            Write-Host "Files present:"; Get-ChildItem $dest -File | Select Name,FullName | Format-Table -HideTableHeaders
             throw "Did not find mirrord.exe or layer DLL under $dest"
           }
 
-          "MIRRORD_DOWNLOADED_EXE=$exe"       | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_LAYER_FILE=$dll"           | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_TEST_USE_EXISTING_LIB=$dll"| Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_DOWNLOADED_EXE=$($exe.FullName)"        | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_LAYER_FILE=$($dll.FullName)"            | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_TEST_USE_EXISTING_LIB=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Write-Host "exe: $($exe.FullName)"
+          Write-Host "dll: $($dll.FullName)"
+        env:
+          BUCKET_URI: gs://mirrord-windows-builds
+          ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
+
 
       - name: Show picked files
         run: |
