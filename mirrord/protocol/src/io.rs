@@ -44,7 +44,7 @@ impl ProtocolEndpoint for Client {
     type Codec = ClientCodec;
 
     async fn negotiate<IO: AsyncIO>(io: &mut Framed<IO, Self::Codec>) -> Result<Mode, ProtocolError> {
-        io.send(ClientMessage::SwitchProtocolVersion(VERSION.clone()))
+io.send(ClientMessage::SwitchProtocolVersion(VERSION.clone()))
             .await?;
 
         let version = match io.next().await {

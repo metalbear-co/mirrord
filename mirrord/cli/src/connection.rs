@@ -4,7 +4,7 @@ use mirrord_analytics::Reporter;
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
+    api::{container::ContainerConfig, kubernetes::KubernetesAPI},
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
@@ -13,7 +13,7 @@ use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::{io::{Client, Connection}, ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 use tracing::Level;
 
@@ -24,7 +24,8 @@ pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 // REVIEW: It would be really nice to replace this struct with
 // mirrord_protocol::io::Connection as they're basically isomorphic.
 // The problem here is the channels could be for an operator task too,
-// and that talks websocket instead of raw tcp.
+// and that talks websocket instead of raw tcp. We'd need to come up
+// with a way for mirrord_protocol::io to handle websockets too.
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
@@ -170,18 +171,21 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
-    let (sender, receiver) = wrap_raw_connection(
+    let conn = Connection::<Client>::new(
         k8s_api
             .create_connection_portforward(agent_connect_info.clone())
             .await
             .map_err(|error| {
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
-    );
+    ).await?;
 
     Ok((
         AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        AgentConnection { sender, receiver },
+        AgentConnection {
+            sender: conn.tx,
+            receiver: conn.rx,
+        },
     ))
 }
 

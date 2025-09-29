@@ -8,9 +8,9 @@ use std::{
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError};
-use mirrord_operator::client::{OperatorSession, error::OperatorApiError};
+use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
 use mirrord_protocol::{
-    ClientMessage,
+    ClientMessage, DaemonMessage,
     io::{Client, Connection, ProtocolError},
 };
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,10 @@ use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 pub use tls::ConnectionTlsError;
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::{
+    net::{TcpSocket, TcpStream},
+    sync::mpsc::{Receiver, Sender},
+};
 use tokio_retry::{Retry, strategy::ExponentialBackoff};
 use tracing::Level;
 
@@ -135,39 +138,39 @@ impl From<ClientMessage> for AgentConnectionMessage {
 /// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
 /// [`BackgroundTask`] trait.
 pub struct AgentConnection {
-    pub conn: Connection<Client>,
+    pub agent_tx: Sender<ClientMessage>,
+    pub agent_rx: Receiver<DaemonMessage>,
     pub reconnect: ReconnectFlow,
 }
 
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
-    #[tracing::instrument(level = Level::INFO, skip(config, _analytics), ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip(config, analytics), ret, err)]
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: AgentConnectInfo,
-        _analytics: &mut R,
+        analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
 
-        let (conn, reconnect) = match connect_info {
-            AgentConnectInfo::Operator(_session) => {
-                todo!("Operator stuff not implemented")
-                // let connection =
-                //     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
-                //         .await?;
-                // (
-                //     connection.tx,
-                //     connection.rx,
-                //     if session.allow_reconnect {
-                //         ReconnectFlow::ConnectInfo {
-                //             config: config.clone(),
-                //             connect_info: AgentConnectInfo::Operator(session),
-                //         }
-                //     } else {
-                //         ReconnectFlow::Break(kind)
-                //     },
-                // )
+        let (agent_tx, agent_rx, reconnect) = match connect_info {
+            AgentConnectInfo::Operator(session) => {
+                let connection =
+                    OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
+                        .await?;
+                (
+                    connection.tx,
+                    connection.rx,
+                    if session.allow_reconnect {
+                        ReconnectFlow::ConnectInfo {
+                            config: config.clone(),
+                            connect_info: AgentConnectInfo::Operator(session),
+                        }
+                    } else {
+                        ReconnectFlow::Break(kind)
+                    },
+                )
             }
 
             AgentConnectInfo::ExternalProxy {
@@ -185,31 +188,36 @@ impl AgentConnection {
                     None => Connection::new(stream).await?,
                 };
 
-                (conn, ReconnectFlow::Break(kind))
+                (conn.tx, conn.rx, ReconnectFlow::Break(kind))
             }
 
             AgentConnectInfo::DirectKubernetes(connect_info) => {
                 let conn = portforward::create_connection(config, connect_info.clone()).await?;
-                (conn, ReconnectFlow::Break(kind))
+                (conn.tx, conn.rx, ReconnectFlow::Break(kind))
             }
         };
 
-        Ok(Self { conn, reconnect })
+        Ok(Self {
+            agent_tx,
+            agent_rx,
+            reconnect,
+        })
     }
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
-        let conn = Connection::new(stream).await?;
+        let conn = Connection::<Client>::new(stream).await?;
 
         Ok(Self {
-            conn,
+            agent_tx: conn.tx,
+            agent_rx: conn.rx,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         })
     }
 
     #[tracing::instrument(level = Level::TRACE, name = "send_message_to_agent", skip(self), ret, err(level = Level::TRACE))]
     async fn send(&mut self, msg: ClientMessage) -> Result<(), AgentConnectionTaskError> {
-        self.conn
+        self.agent_tx
             .send(msg)
             .await
             .map_err(|_| AgentConnectionTaskError::ChannelError(self.reconnect.kind()))
@@ -267,7 +275,7 @@ impl BackgroundTask for AgentConnection {
                     }
                 },
 
-                msg = self.conn.recv() => match msg {
+                msg = self.agent_rx.recv() => match msg {
                     None => {
                         tracing::error!("failed to receive message from the {}, inner task down", self.reconnect.kind());
                         break Err(AgentConnectionTaskError::ChannelError(self.reconnect.kind()));
