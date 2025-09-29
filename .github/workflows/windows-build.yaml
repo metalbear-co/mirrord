@@ -7,11 +7,9 @@ permissions:
   contents: read
 
 env:
-  # Fixed GCS location you provided (bucket + subpath split for clarity)
   BUCKET_URI: gs://mirrord-windows-builds
   ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
 
-  # Rust/bindgen/env defaults
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
@@ -36,11 +34,9 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
 
-          # Sanity: show what’s in the bucket path
           Write-Host "Listing: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/"
           gcloud --quiet storage ls "$env:BUCKET_URI/$env:ARTIFACT_SUBPATH/"
 
-          # Download to a known folder
           $dest = Join-Path $env:RUNNER_TEMP 'picked'
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
           gcloud --quiet storage cp "$env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*" "$dest/"
@@ -48,7 +44,6 @@ jobs:
 
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
-          # Resolve exe/dll (fallback to any *layer*.dll just in case)
           $exe = (Get-ChildItem $dest -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
           $dll = (Get-ChildItem $dest -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
           if (-not $dll) { $dll = (Get-ChildItem $dest -Filter '*layer*.dll' -File | Select-Object -First 1).FullName }
@@ -57,7 +52,6 @@ jobs:
             throw "Did not find mirrord.exe or layer DLL in $dest"
           }
 
-          # Export for the tests
           "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_LAYER_FILE=$dll"           | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_DOWNLOADED_EXE=$exe"       | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -72,24 +66,31 @@ jobs:
           }
 
       # ---------- Windows-friendly tests ----------
-      - name: Unit tests – mirrord-layer (skip bash_script)
-        run: cargo test -p mirrord-layer -- --nocapture --skip bash_script
+      # IMPORTANT: only run library (unit) tests so Cargo doesn't compile linux-only integration tests.
+      - name: Unit tests – mirrord-layer (lib only)
+        run: |
+          cargo test -p mirrord-layer --lib -- --nocapture
+          # (optional) doc tests, also safe on Windows:
+          cargo test -p mirrord-layer --doc -- --nocapture
 
-      - name: Unit tests – other crates (best-effort on Windows)
+      - name: Unit tests – other crates (lib only; best-effort on Windows)
         run: |
           $ErrorActionPreference='Continue'
           foreach ($p in @('mirrord-protocol','mirrord-config','mirrord-kube','mirrord-auth','mirrord-intproxy','mirrord')) {
             try {
-              Write-Host "=== cargo test -p $p ==="
-              cargo test -p $p -- --nocapture
+              Write-Host "=== cargo test (lib) -p $p ==="
+              cargo test -p $p --lib -- --nocapture
+              Write-Host "=== cargo test (doc) -p $p ==="
+              cargo test -p $p --doc -- --nocapture
             } catch {
-              Write-Warning "Skipping $p on Windows (not supported / linux-only)."
+              Write-Warning "Skipping some tests in $p on Windows (not supported / linux-only)."
             }
           }
 
       - name: CLI smoke test
         run: |
           & "$env:MIRRORD_DOWNLOADED_EXE" --help | Out-Host
+
 
 
 
