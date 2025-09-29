@@ -45,6 +45,7 @@ jobs:
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
           $exe = (Get-ChildItem $dest -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
+          # prefer the canonical name; fall back to any *layer*.dll
           $dll = (Get-ChildItem $dest -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
           if (-not $dll) { $dll = (Get-ChildItem $dest -Filter '*layer*.dll' -File | Select-Object -First 1).FullName }
 
@@ -65,31 +66,48 @@ jobs:
             throw "LLVM (libclang.dll) missing at $env:LIBCLANG_PATH"
           }
 
-      # ---------- Windows-friendly tests ----------
-      # IMPORTANT: only run library (unit) tests so Cargo doesn't compile linux-only integration tests.
-      - name: Unit tests – mirrord-layer (lib only)
+      # ---------- WINDOWS-SAFE TESTS ----------
+      # 1) Cross-platform crates only. These shouldn't drag in linux-only code.
+      - name: Unit tests – cross-platform crates
         run: |
-          cargo test -p mirrord-layer --lib -- --nocapture
-          # (optional) doc tests, also safe on Windows:
-          cargo test -p mirrord-layer --doc -- --nocapture
+          cargo test -p mirrord-protocol --lib -- --nocapture
+          cargo test -p mirrord-config   --lib -- --nocapture
 
-      - name: Unit tests – other crates (lib only; best-effort on Windows)
-        run: |
-          $ErrorActionPreference='Continue'
-          foreach ($p in @('mirrord-protocol','mirrord-config','mirrord-kube','mirrord-auth','mirrord-intproxy','mirrord')) {
-            try {
-              Write-Host "=== cargo test (lib) -p $p ==="
-              cargo test -p $p --lib -- --nocapture
-              Write-Host "=== cargo test (doc) -p $p ==="
-              cargo test -p $p --doc -- --nocapture
-            } catch {
-              Write-Warning "Skipping some tests in $p on Windows (not supported / linux-only)."
-            }
-          }
+      # 2) Windows layer crate: compile and compile-tests only (don't run integration tests).
+      - name: Build mirrord-layer-win (library)
+        run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
 
+      - name: Compile test targets for mirrord-layer-win (no run)
+        run: cargo test -p mirrord-layer-win --no-run -- --nocapture
+
+      # 3) CLI smoke checks against the signed binary we fetched.
       - name: CLI smoke test
         run: |
-          & "$env:MIRRORD_DOWNLOADED_EXE" --help | Out-Host
+          & "$env:MIRRORD_DOWNLOADED_EXE" --version | Out-Host
+          & "$env:MIRRORD_DOWNLOADED_EXE" --help    | Out-Host
+
+      # OPTIONAL: prove the DLL exports are loadable
+      - name: Check layer DLL loads
+        run: |
+          $dll = $env:MIRRORD_LAYER_FILE
+          if (-not (Test-Path $dll)) { throw "Layer DLL not found at $dll" }
+          # Try to load/unload via PowerShell Add-Type (will fail fast if broken)
+          try {
+            $h = Add-Type -Name WinApi -Namespace Util -MemberDefinition @"
+            [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)]
+            public static extern System.IntPtr LoadLibrary(string lpFileName);
+            [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)]
+            public static extern bool FreeLibrary(System.IntPtr hModule);
+            "@ -PassThru
+            $ptr = [Util.WinApi]::LoadLibrary($dll)
+            if ($ptr -eq [IntPtr]::Zero) { throw "LoadLibrary failed for $dll (check architecture/signature/deps)" }
+            [void][Util.WinApi]::FreeLibrary($ptr)
+            Write-Host "DLL loaded/unloaded OK: $dll"
+          } catch {
+            Write-Error $_
+            throw
+          }
+
 
 
 
