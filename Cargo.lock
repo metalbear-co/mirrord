@@ -4472,8 +4472,11 @@ dependencies = [
 name = "mirrord-auth"
 version = "3.163.0"
 dependencies = [
+ "base64 0.22.1",
  "bcder",
+ "bincode",
  "chrono",
+ "flate2",
  "fs4 0.13.1",
  "home",
  "k8s-openapi",

@@ -1,15 +1,23 @@
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    io::{Read, Write},
+};
 
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use bincode::{
+    de, enc,
+    error::{DecodeError, EncodeError},
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 #[cfg(feature = "client")]
 use x509_certificate::{
-    InMemorySigningKeyPair, X509CertificateBuilder, X509CertificateError, rfc2986,
+    InMemorySigningKeyPair, X509Certificate, X509CertificateBuilder, X509CertificateError, rfc2986,
 };
 use x509_certificate::{asn1time::Time, rfc5280};
 
-use crate::{certificate::Certificate, key_pair::KeyPair};
+use crate::{certificate::Certificate, error::ApiKeyError, key_pair::KeyPair};
 
 /// Client credentials container for authentication with the operator.
 /// Contains a local [`KeyPair`] and an optional [`Certificate`].
@@ -60,6 +68,43 @@ impl AsRef<Certificate> for Credentials {
     }
 }
 
+impl bincode::Encode for Credentials {
+    fn encode<E: enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        let Credentials {
+            certificate,
+            key_pair,
+        } = self;
+
+        certificate
+            .encode_der()
+            .map_err(|error| EncodeError::Io {
+                inner: error,
+                index: 0, // we don't know how many bytes were written
+            })?
+            .encode(encoder)?;
+        key_pair
+            .to_pkcs8_one_asymmetric_key_der()
+            .as_slice()
+            .encode(encoder)?;
+
+        Ok(())
+    }
+}
+
+impl bincode::Decode<()> for Credentials {
+    fn decode<D: de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let certificate = X509Certificate::from_der(Vec::<u8>::decode(decoder)?)
+            .map_err(|error| DecodeError::OtherString(error.to_string()))?;
+        let key_pair = InMemorySigningKeyPair::from_pkcs8_der(Vec::<u8>::decode(decoder)?)
+            .map_err(|error| DecodeError::OtherString(error.to_string()))?;
+
+        Ok(Self {
+            certificate: certificate.into(),
+            key_pair: key_pair.into(),
+        })
+    }
+}
+
 /// Extends a date type ([`DateTime<Utc>`]) to help us when checking for a license's
 /// certificate validity.
 ///
@@ -102,6 +147,19 @@ impl LicenseValidity for NaiveDate {
             .num_days()
             .try_into()
             .ok()
+    }
+}
+
+/// Continuous Integration API Key versioned container.
+#[derive(Debug)]
+pub enum CiApiKey {
+    /// V1 API key carries exactly the same data as [`Credentials`].
+    V1(Credentials),
+}
+
+impl From<Credentials> for CiApiKey {
+    fn from(credentials: Credentials) -> Self {
+        CiApiKey::V1(credentials)
     }
 }
 
@@ -194,14 +252,27 @@ impl DateValidityExt for rfc5280::Validity {
 /// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
+    use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
     use kube::{Api, Client, Resource, api::PostParams};
+    use serde::Serialize;
 
     use super::*;
     use crate::error::CredentialStoreError;
 
+    /// Implemented by custom resource that serves as a request for signing a certificate.
+    pub trait SigningRequest: Resource {
+        fn regular(csr: String) -> Self;
+
+        fn ci(csr: String) -> Self;
+    }
+
+    /// Implemented by custom resource that converts to a signed certificate.
+    pub trait SigningResponse: Resource {
+        fn try_into_certificate(self) -> Result<Certificate, CredentialStoreError>;
+    }
+
     impl Credentials {
-        /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
-        /// If the `key_pair` is not given, the request is signed with a randomly generated one.
+        /// In deprecation, use [`Credentials::init_regular`] if the operator supports the feature.
         pub async fn init<R>(
             client: Client,
             common_name: &str,
@@ -238,36 +309,155 @@ pub mod client {
             })
         }
 
+        /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
+        /// If the `key_pair` is not given, the request is signed with a randomly generated one.
+        pub async fn init_regular<R>(
+            client: Client,
+            common_name: &str,
+            key_pair: Option<KeyPair>,
+        ) -> Result<Self, CredentialStoreError>
+        where
+            R: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+            R: for<'de> Deserialize<'de>,
+            R::DynamicType: Default,
+        {
+            let key_pair = match key_pair {
+                Some(key_pair) => key_pair,
+                None => KeyPair::new_random()?,
+            };
+
+            let csr = Self::certificate_request(common_name, &key_pair)?
+                .encode_pem()
+                .map_err(X509CertificateError::from)?;
+            let resource = R::regular(csr);
+
+            let api: Api<R> = Api::all(client);
+
+            let response = api.create(&PostParams::default(), &resource).await?;
+
+            let credentials = Credentials {
+                certificate: R::try_into_certificate(response)?,
+                key_pair,
+            };
+
+            Ok(credentials)
+        }
+
+        /// Generate a new key pair, create a [`rfc2986::CertificationRequest`] for CI usage
+        /// and send it to the operator.
+        pub async fn init_ci<R>(
+            client: Client,
+            common_name: &str,
+        ) -> Result<Self, CredentialStoreError>
+        where
+            R: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+            R: for<'de> Deserialize<'de>,
+            R::DynamicType: Default,
+        {
+            let key_pair = KeyPair::new_random()?;
+
+            let csr = Self::certificate_request(common_name, &key_pair)?
+                .encode_pem()
+                .map_err(X509CertificateError::from)?;
+            let resource = R::ci(csr);
+
+            let api: Api<R> = Api::all(client);
+
+            let response = api.create(&PostParams::default(), &resource).await?;
+
+            let credentials = Credentials {
+                certificate: R::try_into_certificate(response)?,
+                key_pair,
+            };
+
+            Ok(credentials)
+        }
+
         /// Create [`rfc2986::CertificationRequest`] and send it to the operator.
         /// Returned certificate replaces the [`Certificate`] stored in this struct.
-        pub async fn refresh<R>(
+        pub async fn refresh<Old, New>(
             &mut self,
             client: Client,
             common_name: &str,
+            support_new: bool,
         ) -> Result<(), CredentialStoreError>
         where
-            R: Resource + Clone + Debug,
-            R: for<'de> Deserialize<'de>,
-            R::DynamicType: Default,
+            Old: Resource + Clone + Debug,
+            Old: for<'de> Deserialize<'de>,
+            Old::DynamicType: Default,
+            New: Clone + Debug + SigningRequest + SigningResponse + Serialize,
+            New: for<'de> Deserialize<'de>,
+            New::DynamicType: Default,
         {
             let certificate_request = Self::certificate_request(common_name, &self.key_pair)?
                 .encode_pem()
                 .map_err(X509CertificateError::from)?;
 
-            let api: Api<R> = Api::all(client);
-
-            let certificate: Certificate = api
-                .create_subresource(
+            let certificate: Certificate = if support_new {
+                let api: Api<New> = Api::all(client);
+                let resource = New::ci(certificate_request);
+                let response = api.create(&PostParams::default(), &resource).await?;
+                New::try_into_certificate(response)?
+            } else {
+                let api: Api<Old> = Api::all(client);
+                api.create_subresource(
                     "certificate",
                     "operator",
                     &PostParams::default(),
                     certificate_request.into(),
                 )
-                .await?;
-
+                .await?
+            };
             self.certificate = certificate;
 
             Ok(())
+        }
+    }
+
+    impl CiApiKey {
+        const V1_PREFIX: &str = "mci-v1:";
+
+        /// V1 encoding:
+        /// 1. Serialize [`Credentials`] with `bincode` (standard config).
+        /// 2. Compress with `zlib` with highest compression level (9).
+        /// 3. Encode with URL-safe base64 without padding.
+        /// 4. Prefix with `mci-v1:`, mirrord CI version 1.
+        pub fn encode(&self) -> Result<String, ApiKeyError> {
+            match self {
+                CiApiKey::V1(credentials) => {
+                    let bytes = bincode::encode_to_vec(credentials, bincode::config::standard())?;
+
+                    let mut compression_encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+                    compression_encoder.write_all(&bytes)?;
+                    let compressed = compression_encoder.finish()?;
+
+                    let encoded = format!(
+                        "{}{}",
+                        Self::V1_PREFIX,
+                        BASE64_URL_SAFE_NO_PAD.encode(compressed),
+                    );
+                    Ok(encoded)
+                }
+            }
+        }
+
+        /// Decoding a CI API key by first checking the prefix to determine the version.
+        /// Then follow the encoding process in reverse for each version.
+        pub fn decode(encoded: &str) -> Result<Self, ApiKeyError> {
+            if let Some(rest) = encoded.strip_prefix(Self::V1_PREFIX) {
+                let compressed_bytes = BASE64_URL_SAFE_NO_PAD.decode(rest)?;
+
+                let mut compression_decoder = ZlibDecoder::new(&compressed_bytes[..]);
+                let mut bytes = Vec::new();
+                compression_decoder.read_to_end(&mut bytes)?;
+
+                let (credentials, _) =
+                    bincode::decode_from_slice(&bytes, bincode::config::standard())?;
+
+                return Ok(CiApiKey::V1(credentials));
+            }
+
+            Err(ApiKeyError::InvalidFormat)
         }
     }
 }
@@ -279,6 +469,8 @@ mod test {
         decode::{BytesSource, Constructed},
     };
     use x509_certificate::rfc2986::CertificationRequest;
+
+    use crate::credentials::CiApiKey;
 
     /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
     #[test]
@@ -321,5 +513,25 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
                 .octet_bytes(),
             PUBLIC_KEY
         );
+    }
+
+    #[test]
+    fn v1_ci_api_key_encode_decode() {
+        // This credential is generated using a test root issuer
+        const V1_API_KEY: &str = "mci-v1:eNqFUk1oE0EYzSZprG1FtMVKLXadWj2Y7c7mPxHEED1oola0-EMlzm4mYehms52ZiDFGaKz_HtSLiFhaehMPKt48CL1IERTspbdS7MGDUvCi2EOdNBIKPfTwMXzMe2_em-9bzjlh1WmIap9wOSWnU5LgJo_rALabHPCEpkLF4xp0u9r2xQeOyUlckgctwuWzmPHLTD5qcUxtShiWU8TAFsNaF9xZI7S0bVtHgLs7t_iCMKpFfZof-sMXRRte08L9Wh_srT_XnSeUFmhGMcjh9ULeukWryeHa43iffNN1MNY8nNqaSL5s5afOzf7ePqY_uPH3e8_QPPwzNFWVIrAqBUQ5PJ1qHnNk6hhR1axbVomVLUjSint0oQx4ycYgBnAjGPCCPLqaZhhxBmIahF7AijozKLE5KVhpkhHwUAhlg9FwQIFh3acENBhV9LBhKKGwZoSgHvGhoC6ECjSHLHINNYhW0TS9gFOCTBDLIpNhL7iCKRP3QtXfr_lC_VAQicU4sgycSf_3LPxQAWyQavbSnCJjmFi5dL6QqYVImETkSGDKSZYYiGNQgf2enjU_YKwiVENAVJsWbHGW3K1lUGQoJxR8lcYquOKOt68mR1pmr89bc6kX7TPn857KdMf40-MTHb8-5_f-WHo-8G7s3p1O--fyx5ZDXy5s3vF1aeVRZKr37m3l20J8eqb5DDxdW66mVUU3cMvBT0f6dn0ITcYXWbd-q3xfHXl980nl5OPxOXmxcunZw9GNZ_sPjxrpow";
+
+        let api_key = CiApiKey::decode(V1_API_KEY).expect("decode api key");
+        let CiApiKey::V1(credentials) = &api_key;
+        assert_eq!(
+            credentials.as_ref().subject_common_name().unwrap(),
+            "mirrord-ci@API Key Unit Test"
+        );
+        assert_eq!(
+            credentials.as_ref().issuer_common_name().unwrap(),
+            "API Key Unit Test`s Enterprise License"
+        );
+
+        let encoded = api_key.encode().expect("encode api key");
+        assert_eq!(encoded, V1_API_KEY);
     }
 }

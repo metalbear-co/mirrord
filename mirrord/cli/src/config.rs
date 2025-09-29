@@ -153,6 +153,10 @@ pub(super) enum Commands {
 
     /// Subscribe to the mirrord newsletter
     Newsletter,
+
+    /// Execute a command related to mirrord CI.
+    #[command(hide = true)]
+    Ci(Box<CiArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1044,6 +1048,22 @@ pub(super) struct VpnArgs {
     /// Path to resolver (macOS)
     #[arg(long, default_value = "/etc/resolver")]
     pub resolver_path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct CiArgs {
+    /// Command to use with `mirrord ci`.
+    #[command(subcommand)]
+    pub command: CiCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum CiCommand {
+    ApiKey {
+        /// Specify config file to use
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+        config_file: Option<PathBuf>,
+    },
 }
 
 #[cfg(test)]
