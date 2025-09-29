@@ -215,7 +215,7 @@ frida-gum = { version = "0.17", features = ["auto-download", "std"] }
 
 # Used by `layer-win`
 anyhow = "1.0"
-minhook-detours-rs = "0.2.0"
+minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
 windows-strings = "0.4"
 
 # Used by `cli`, `intproxy`
