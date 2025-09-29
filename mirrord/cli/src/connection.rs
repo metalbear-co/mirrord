@@ -21,6 +21,10 @@ use crate::{CliError, CliResult};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
+// REVIEW: It would be really nice to replace this struct with
+// mirrord_protocol::io::Connection as they're basically isomorphic.
+// The problem here is the channels could be for an operator task too,
+// and that talks websocket instead of raw tcp.
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,

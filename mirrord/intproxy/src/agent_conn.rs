@@ -7,21 +7,18 @@ use std::{
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
-use mirrord_kube::{
-    api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
-    error::KubeApiError,
+use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError};
+use mirrord_operator::client::{OperatorSession, error::OperatorApiError};
+use mirrord_protocol::{
+    ClientMessage,
+    io::{Client, Connection, ProtocolError},
 };
-use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
-use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 pub use tls::ConnectionTlsError;
-use tokio::{
-    net::{TcpSocket, TcpStream},
-    sync::mpsc::{Receiver, Sender},
-};
+use tokio::net::{TcpSocket, TcpStream};
 use tokio_retry::{Retry, strategy::ExponentialBackoff};
 use tracing::Level;
 
@@ -48,6 +45,9 @@ pub enum AgentConnectionError {
     /// Making a TLS connection to the mirrord-extproxy failed.
     #[error("failed to prepare TLS communication with mirrord-extproxy: {0}")]
     Tls(#[from] ConnectionTlsError),
+    /// An error happened while communicating with the agent
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] ProtocolError),
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -125,6 +125,7 @@ impl From<ClientMessage> for AgentConnectionMessage {
     }
 }
 
+/// REVIEW update this note
 /// Handles logic of the `proxy <-> agent` connection as a [`BackgroundTask`].
 ///
 /// # Note
@@ -134,39 +135,39 @@ impl From<ClientMessage> for AgentConnectionMessage {
 /// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
 /// [`BackgroundTask`] trait.
 pub struct AgentConnection {
-    pub agent_tx: Sender<ClientMessage>,
-    pub agent_rx: Receiver<DaemonMessage>,
+    pub conn: Connection<Client>,
     pub reconnect: ReconnectFlow,
 }
 
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
-    #[tracing::instrument(level = Level::INFO, skip(config, analytics), ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip(config, _analytics), ret, err)]
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: AgentConnectInfo,
-        analytics: &mut R,
+        _analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
 
-        let (agent_tx, agent_rx, reconnect) = match connect_info {
-            AgentConnectInfo::Operator(session) => {
-                let connection =
-                    OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
-                        .await?;
-                (
-                    connection.tx,
-                    connection.rx,
-                    if session.allow_reconnect {
-                        ReconnectFlow::ConnectInfo {
-                            config: config.clone(),
-                            connect_info: AgentConnectInfo::Operator(session),
-                        }
-                    } else {
-                        ReconnectFlow::Break(kind)
-                    },
-                )
+        let (conn, reconnect) = match connect_info {
+            AgentConnectInfo::Operator(_session) => {
+                todo!("Operator stuff not implemented")
+                // let connection =
+                //     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
+                //         .await?;
+                // (
+                //     connection.tx,
+                //     connection.rx,
+                //     if session.allow_reconnect {
+                //         ReconnectFlow::ConnectInfo {
+                //             config: config.clone(),
+                //             connect_info: AgentConnectInfo::Operator(session),
+                //         }
+                //     } else {
+                //         ReconnectFlow::Break(kind)
+                //     },
+                // )
             }
 
             AgentConnectInfo::ExternalProxy {
@@ -179,41 +180,36 @@ impl AgentConnection {
 
                 let stream = socket.connect(proxy_addr).await?;
 
-                let (tx, rx) = match tls_pem {
+                let conn = match tls_pem {
                     Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
-                    None => wrap_raw_connection(stream),
+                    None => Connection::new(stream).await?,
                 };
 
-                (tx, rx, ReconnectFlow::Break(kind))
+                (conn, ReconnectFlow::Break(kind))
             }
 
             AgentConnectInfo::DirectKubernetes(connect_info) => {
-                let (tx, rx) = portforward::create_connection(config, connect_info.clone()).await?;
-                (tx, rx, ReconnectFlow::Break(kind))
+                let conn = portforward::create_connection(config, connect_info.clone()).await?;
+                (conn, ReconnectFlow::Break(kind))
             }
         };
 
-        Ok(Self {
-            agent_tx,
-            agent_rx,
-            reconnect,
-        })
+        Ok(Self { conn, reconnect })
     }
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
-        let (agent_tx, agent_rx) = wrap_raw_connection(stream);
+        let conn = Connection::new(stream).await?;
 
         Ok(Self {
-            agent_tx,
-            agent_rx,
+            conn,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         })
     }
 
     #[tracing::instrument(level = Level::TRACE, name = "send_message_to_agent", skip(self), ret, err(level = Level::TRACE))]
-    async fn send(&self, msg: ClientMessage) -> Result<(), AgentConnectionTaskError> {
-        self.agent_tx
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), AgentConnectionTaskError> {
+        self.conn
             .send(msg)
             .await
             .map_err(|_| AgentConnectionTaskError::ChannelError(self.reconnect.kind()))
@@ -242,6 +238,10 @@ pub enum AgentConnectionTaskError {
     ChannelError(AgentConnectInfoDiscriminants),
 }
 
+// REVIEW: See if we can get rid of this task Currently messages
+// traverse 2 tasks (this one and and the
+// mirrord_protocol::io::Connection). It would be really nice if we
+// could get rid of one of the extra tasks.
 impl BackgroundTask for AgentConnection {
     type Error = AgentConnectionTaskError;
     type MessageIn = AgentConnectionMessage;
@@ -267,7 +267,7 @@ impl BackgroundTask for AgentConnection {
                     }
                 },
 
-                msg = self.agent_rx.recv() => match msg {
+                msg = self.conn.recv() => match msg {
                     None => {
                         tracing::error!("failed to receive message from the {}, inner task down", self.reconnect.kind());
                         break Err(AgentConnectionTaskError::ChannelError(self.reconnect.kind()));

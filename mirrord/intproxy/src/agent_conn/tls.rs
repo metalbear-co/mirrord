@@ -1,11 +1,11 @@
 use std::{io, path::Path};
 
 use mirrord_config::external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::io::{Client, Connection, ProtocolError};
 use mirrord_tls_util::{SecureChannelError, SecureChannelSetup};
 use rustls::pki_types::ServerName;
 use thiserror::Error;
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::net::TcpStream;
 
 #[derive(Error, Debug)]
 pub enum ConnectionTlsError {
@@ -13,6 +13,8 @@ pub enum ConnectionTlsError {
     SetupError(#[from] SecureChannelError),
     #[error("failed to connect with TLS: {0}")]
     ConnectionError(#[source] io::Error),
+    #[error("protocol error during post-TLS handshake: {0}")]
+    ProtocolError(#[from] ProtocolError),
 }
 
 /// Makes a TLS connection to the external proxy within the given [`TcpStream`].
@@ -30,16 +32,16 @@ pub enum ConnectionTlsError {
 pub async fn wrap_raw_connection(
     stream: TcpStream,
     tls_pem: &Path,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ConnectionTlsError> {
+) -> Result<Connection<Client>, ConnectionTlsError> {
     let connector = SecureChannelSetup::create_connector(tls_pem).await?;
 
     let server_name =
         ServerName::try_from(MIRRORD_EXTPROXY_TLS_SERVER_NAME).expect("valid hostname");
 
-    Ok(mirrord_kube::api::wrap_raw_connection(
-        connector
-            .connect(server_name, stream)
-            .await
-            .map_err(ConnectionTlsError::ConnectionError)?,
-    ))
+    let stream = connector
+        .connect(server_name, stream)
+        .await
+        .map_err(ConnectionTlsError::ConnectionError)?;
+
+    Ok(Connection::new(stream).await?)
 }
