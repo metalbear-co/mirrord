@@ -88,25 +88,38 @@ jobs:
 
       # OPTIONAL: prove the DLL exports are loadable
       - name: Check layer DLL loads
+        shell: pwsh
         run: |
           $dll = $env:MIRRORD_LAYER_FILE
           if (-not (Test-Path $dll)) { throw "Layer DLL not found at $dll" }
-          # Try to load/unload via PowerShell Add-Type (will fail fast if broken)
-          try {
-            $h = Add-Type -Name WinApi -Namespace Util -MemberDefinition @"
-            [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)]
-            public static extern System.IntPtr LoadLibrary(string lpFileName);
-            [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)]
-            public static extern bool FreeLibrary(System.IntPtr hModule);
-            "@ -PassThru
-            $ptr = [Util.WinApi]::LoadLibrary($dll)
-            if ($ptr -eq [IntPtr]::Zero) { throw "LoadLibrary failed for $dll (check architecture/signature/deps)" }
-            [void][Util.WinApi]::FreeLibrary($ptr)
-            Write-Host "DLL loaded/unloaded OK: $dll"
-          } catch {
-            Write-Error $_
-            throw
+
+          # Generate minimal C# to P/Invoke LoadLibrary/FreeLibrary
+          $csPath = Join-Path $env:RUNNER_TEMP 'WinApi_Load.cs'
+          $lines = @(
+            'using System;'
+            'using System.Runtime.InteropServices;'
+            'namespace Util {'
+            '  public static class WinApi {'
+            '    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]'
+            '    public static extern IntPtr LoadLibrary(string lpFileName);'
+            '    [DllImport("kernel32.dll", SetLastError=true)]'
+            '    public static extern bool FreeLibrary(IntPtr hModule);'
+            '  }'
+            '}'
+          )
+          Set-Content -Path $csPath -Value $lines -Encoding UTF8
+
+          # Compile and load
+          Add-Type -Path $csPath
+
+          # Try to load/unload the DLL
+          $ptr = [Util.WinApi]::LoadLibrary($dll)
+          if ($ptr -eq [IntPtr]::Zero) {
+            throw "LoadLibrary failed for $dll (check architecture/signature/deps)"
           }
+          [void][Util.WinApi]::FreeLibrary($ptr)
+          Write-Host "DLL loaded/unloaded OK: $dll"
+
 
 
 
