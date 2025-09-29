@@ -706,16 +706,6 @@ impl OperatorClusterRole {
                 ],
                 ..Default::default()
             },
-            PolicyRule {
-                api_groups: Some(vec![
-                    MirrordClusterOperatorUserCredential::group(&()).into_owned(),
-                ]),
-                resources: Some(vec![
-                    MirrordClusterOperatorUserCredential::plural(&()).into_owned(),
-                ]),
-                verbs: vec!["create".to_owned()],
-                ..Default::default()
-            },
         ];
 
         if options.kafka_splitting || options.sqs_splitting {
@@ -1116,6 +1106,16 @@ impl OperatorClusterUserRole {
                 api_groups: Some(vec![MirrordClusterProfile::group(&()).into_owned()]),
                 resources: Some(vec![MirrordClusterProfile::plural(&()).into_owned()]),
                 verbs: vec!["list", "get"].into_iter().map(String::from).collect(),
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![
+                    MirrordClusterOperatorUserCredential::group(&()).into_owned(),
+                ]),
+                resources: Some(vec![
+                    MirrordClusterOperatorUserCredential::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
         ];

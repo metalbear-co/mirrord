@@ -425,11 +425,11 @@ where
             .operator()
             .spec
             .supported_features()
-            .contains(&NewOperatorFeature::CertificateSigning)
+            .contains(&NewOperatorFeature::ExtendableUserCredentials)
             .not()
         {
             return Err(OperatorApiError::UnsupportedFeature {
-                feature: NewOperatorFeature::CertificateSigning,
+                feature: NewOperatorFeature::ExtendableUserCredentials,
                 operator_version: self.operator().spec.operator_version.to_string(),
             });
         }
@@ -572,7 +572,7 @@ where
                 self.operator()
                     .spec
                     .supported_features()
-                    .contains(&NewOperatorFeature::CertificateSigning),
+                    .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
             .map_err(|error| {
