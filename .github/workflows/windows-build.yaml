@@ -68,6 +68,7 @@ jobs:
           Write-Host "dll: $($dll.FullName)"
 
       - name: Run Windows smoke tests (no build)
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
@@ -78,81 +79,74 @@ jobs:
           $base = Split-Path $exe -Parent
 
           $lines = @()
-          $lines += "## Windows smoke tests"
-          $lines += ""
-          $lines += "**Picked EXE**: `$exe`"
-          $lines += "**Picked DLL**: `$dll`"
-          $lines += ""
+          $lines += '## Windows smoke tests'
+          $lines += ''
+          $lines += '**Picked EXE**: `$exe`'
+          $lines += '**Picked DLL**: `$dll`'
+          $lines += ''
 
-          # 1) SHA256 verification against the .sha256 files
           function Get-ExpectedSha256([string]$shaFile) {
             if (-not (Test-Path $shaFile)) { return $null }
             $raw = Get-Content $shaFile -Raw
-            # .sha256 file usually: "<hash>  filename"
-            return $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
+            $raw.Split(' ',[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
           }
 
           $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
           $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
           if (-not (Test-Path $dllShaFile)) {
-            # Try the older name
             $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256'
           }
 
-          $exeHash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-          $dllHash = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
+          $exeHash  = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          $dllHash  = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
           $exeExpect = Get-ExpectedSha256 $exeShaFile
           $dllExpect = Get-ExpectedSha256 $dllShaFile
 
-          $lines += "### SHA256"
+          $lines += '### SHA256'
           if ($exeExpect) {
-            $lines += "- mirrord.exe:  `$exeHash` (expected `$exeExpect`) -> " + ($(if ($exeHash -eq $exeExpect) { "OK" } else { "**MISMATCH**" }))
+            $lines += ('- mirrord.exe:  `'+$exeHash+'` (expected `'+$exeExpect+'`) -> ' + ($(if ($exeHash -eq $exeExpect) { 'OK' } else { '**MISMATCH**' })))
           } else {
-            $lines += "- mirrord.exe:  `$exeHash` (no .sha256 file present)"
+            $lines += ('- mirrord.exe:  `'+$exeHash+'` (no .sha256 file present)')
           }
           if ($dllExpect) {
-            $lines += "- layer dll:    `$dllHash` (expected `$dllExpect`) -> " + ($(if ($dllHash -eq $dllExpect) { "OK" } else { "**MISMATCH**" }))
+            $lines += ('- layer dll:    `'+$dllHash+'` (expected `'+$dllExpect+'`) -> ' + ($(if ($dllHash -eq $dllExpect) { 'OK' } else { '**MISMATCH**' })))
           } else {
-            $lines += "- layer dll:    `$dllHash` (no .sha256 file present)"
+            $lines += ('- layer dll:    `'+$dllHash+'` (no .sha256 file present)')
           }
-          $lines += ""
+          $lines += ''
 
-          # 2) Code signing verification (if signtool is available)
-          $lines += "### Code signing"
+          $lines += '### Code signing'
           if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
-            & signtool.exe verify /pa $exe | Out-Null
-            $rcExe = $LASTEXITCODE
-            & signtool.exe verify /pa $dll | Out-Null
-            $rcDll = $LASTEXITCODE
-            $lines += "- signtool mirrord.exe: " + ($(if ($rcExe -eq 0) {'OK'} else {"FAIL ($rcExe)"}))
-            $lines += "- signtool layer dll:   " + ($(if ($rcDll -eq 0) {'OK'} else {"FAIL ($rcDll)"}))
+            & signtool.exe verify /pa $exe | Out-Null;  $rcExe = $LASTEXITCODE
+            & signtool.exe verify /pa $dll | Out-Null;  $rcDll = $LASTEXITCODE
+            $lines += ('- signtool mirrord.exe: ' + ($(if ($rcExe -eq 0) { 'OK' } else { 'FAIL ('+$rcExe+')' })))
+            $lines += ('- signtool layer dll:   ' + ($(if ($rcDll -eq 0) { 'OK' } else { 'FAIL ('+$rcDll+')' })))
           } else {
-            $lines += "- signtool.exe not found on PATH (skipping)"
+            $lines += '- signtool.exe not found on PATH (skipping)'
           }
-          $lines += ""
+          $lines += ''
 
-          # 3) CLI --version/--help
-          $lines += "### CLI"
+          $lines += '### CLI'
           $versionOut = & $exe --version 2>&1
           $verRc = $LASTEXITCODE
-          $lines += "- \`mirrord.exe --version\` exit code: $verRc"
-          $lines += ""
-          $lines += "```"
+          $lines += ('- `mirrord.exe --version` exit code: ' + $verRc)
+          $lines += ''
+          $lines += '```'
           $lines += $versionOut
-          $lines += "```"
-          $lines += ""
+          $lines += '```'
+          $lines += ''
 
           $helpOut = & $exe --help 2>&1
           $helpRc = $LASTEXITCODE
-          $lines += "- \`mirrord.exe --help\` exit code: $helpRc"
-          $lines += ""
-          $lines += "```"
+          $lines += ('- `mirrord.exe --help` exit code: ' + $helpRc)
+          $lines += ''
+          $lines += '```'
           $lines += $helpOut
-          $lines += "```"
-          $lines += ""
+          $lines += '```'
+          $lines += ''
 
-          # Write summary file for the next step to pick up
           $lines -join "`n" | Out-File -FilePath $sum -Encoding utf8
+
 
       - name: Append summary
         run: |
