@@ -142,21 +142,24 @@ jobs:
           Copy-Item $exe.FullName -Destination $staging -Force
           Copy-Item $dll        -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
 
-          # Checksums
-          Get-ChildItem -Path $staging -Include *.exe,*.dll -File | ForEach-Object {
+          # Show what we staged (helps debugging)
+          Write-Host "Staged files:"; Get-ChildItem $staging | Format-Table Name,Length
+
+          # Make checksums
+          Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll | ForEach-Object {
             $h = Get-FileHash -Algorithm SHA256 $_.FullName
             "$($h.Hash)  $($_.Name)" | Out-File (Join-Path $staging "$($_.Name).sha256") -Encoding ascii
           }
 
-          # Folder name: windows/mirrord-<version>-run<run#>-<sha7>/
+          # Collect files (NOTE the wildcard so -Include works)
+          $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
+          if (-not $files) { throw "No artifacts found in $staging" }
+
           $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
           $sha7 = $env:GITHUB_SHA.Substring(0,7)
           $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
           $dest = "$($env:BUCKET_URI)/$artifactDir/"
           Write-Host "Uploading to $dest"
-
-          $files = Get-ChildItem -Path $staging -Include *.exe,*.dll,*.sha256 -File
-          if (-not $files) { throw "No artifacts found in $staging" }
 
           foreach ($f in $files) {
             gcloud --quiet storage cp $($f.FullName) $dest
