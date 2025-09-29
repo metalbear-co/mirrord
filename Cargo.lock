@@ -4333,9 +4333,8 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minhook-detours-rs"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b174894cff4c07ed6a74334f5371c0551413a98670f27a4d25b3d1ac21bfd569"
+version = "0.2.1"
+source = "git+https://github.com/metalbear-co/minhook-detours-rs.git?rev=4bfbf5717c6829f91b527180a038ec591b8265ca#4bfbf5717c6829f91b527180a038ec591b8265ca"
 dependencies = [
  "minhook-detours-sys",
  "thiserror 2.0.16",
@@ -4345,8 +4344,7 @@ dependencies = [
 [[package]]
 name = "minhook-detours-sys"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dce4fe0bfc6380cd27891bdbcec9a4416130cf430023875aa21eb68115938ec"
+source = "git+https://github.com/metalbear-co/minhook-detours-sys.git?rev=3ad2f470c2f1ecb44bddcd065c0e8919ac734b74#3ad2f470c2f1ecb44bddcd065c0e8919ac734b74"
 dependencies = [
  "bindgen 0.72.1",
  "cc",
