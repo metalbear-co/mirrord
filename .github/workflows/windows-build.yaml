@@ -31,14 +31,22 @@ jobs:
           submodules: recursive
 
       - name: Toolchain info
+        shell: pwsh
         run: |
-          $PSStyle.Formatting.TableHeader = $false
           Write-Host "whoami: $(whoami)"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
           rustc -V
           cargo -V
           rustup show
-          if (Get-Command "signtool.exe" -ErrorAction SilentlyContinue) { signtool.exe -? | Out-Null; Write-Host "signtool: OK" }
-          if (Test-Path "$env:LIBCLANG_PATH\libclang.dll") { Write-Host "libclang: $env:LIBCLANG_PATH\libclang.dll" }
+          if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
+            Write-Host "signtool: OK"
+          } else {
+            Write-Host "signtool: not found"
+          }
+          if (Test-Path "$env:LIBCLANG_PATH\libclang.dll") {
+            Write-Host "libclang: $env:LIBCLANG_PATH\libclang.dll"
+          }
+
 
       - name: Ensure MSVC target
         run: rustup target add x86_64-pc-windows-msvc
