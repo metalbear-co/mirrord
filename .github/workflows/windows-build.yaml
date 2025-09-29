@@ -23,7 +23,6 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-
       - name: Identity & DigiCert healthcheck
         run: |
           $ErrorActionPreference = 'Stop'
@@ -32,12 +31,19 @@ jobs:
           Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
           smctl --version
           smctl healthcheck
-      - name: Add Rust MSVC target
+
+      - name: Ensure Rust MSVC target
         run: rustup target add x86_64-pc-windows-msvc
+
+      # --- Build the layer FIRST so include_bytes! can find it ---
+      - name: Build mirrord-layer-win (DLL)
+        run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
 
       - name: Locate package for bin "mirrord" + set envs (package, version, layer path)
         run: |
           $ErrorActionPreference = 'Stop'
+
+          # Which package contains bin "mirrord"?
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg = $meta.packages | Where-Object {
             $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
@@ -46,38 +52,55 @@ jobs:
             $names = ($meta.packages | ForEach-Object name) -join ', '
             throw "No bin target named 'mirrord' found. Workspace packages: $names"
           }
-          "MIRRORD_PKG=$($pkg.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          "MIRRORD_PKG=$($pkg.name)"           | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_VERSION=$($pkg.version)"    | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          # IMPORTANT: underscores in the produced DLL name
+          $dllDbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
+          $dllRel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll'
+          if     (Test-Path $dllDbg) { $dll = $dllDbg }
+          elseif (Test-Path $dllRel) { $dll = $dllRel }
+          else   { throw "Layer DLL not found. Expected at:`n  $dllDbg`n  $dllRel" }
+
+          "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Will embed layer DLL from: $dll"
           Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
-          $dll = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord-layer-win.dll'
-          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Build mirrord
+
+          # Print size for sanity
+          Get-Item $dll | Format-List FullName,Length,LastWriteTime
+
+      # --- Build the CLI AFTER the layer exists & env var is set ---
+      - name: Build mirrord (bin)
         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
-      
-      - name: Build mirrord-layer-win (DLL)
-        run: |
-          cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-          $exe = Join-Path $buildDir 'mirrord.exe'
+
+          $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+          $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
+
+          # Resolve exe (prefer Debug, fallback Release)
+          $exe = Join-Path $dbgDir 'mirrord.exe'
           if (!(Test-Path $exe)) {
-            throw "Expected binary not found at $exe"
+            $exeRel = Join-Path $relDir 'mirrord.exe'
+            if (Test-Path $exeRel) { $exe = $exeRel } else { throw "Expected mirrord.exe not found at $exe or $exeRel" }
           }
-          # Prefer explicit env, then common names
+
+          # Resolve dll (prefer env, else common locations)
           $dllCandidates = @()
           if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
           $dllCandidates += @(
-            (Join-Path $buildDir 'mirrord_layer_win.d')
+            (Join-Path $dbgDir 'mirrord_layer_win.dll'),
+            (Join-Path $relDir 'mirrord_layer_win.dll')
           )
           $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
           if (-not $dll) {
             $list = ($dllCandidates | ForEach-Object { $_ }) -join [Environment]::NewLine
             throw ("Layer DLL not found. Looked for:{0}{1}" -f [Environment]::NewLine, $list)
           }
+
           foreach ($f in @($exe, $dll)) {
             Write-Host "Signing $f"
             & signtool.exe sign `
@@ -87,43 +110,57 @@ jobs:
               /fd SHA256 `
               "$f"
             if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
+
             Write-Host "Verifying $f"
             & signtool.exe verify /pa "$f"
             if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
           }
+
       - name: Stage and upload signed artifacts to GCS
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
-          $buildDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-          $exe = Join-Path $buildDir 'mirrord.exe'
+
+          $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+          $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
+
+          # Resolve exe and dll like above
+          $exe = (Get-Item -EA SilentlyContinue (Join-Path $dbgDir 'mirrord.exe'))
+          if (-not $exe) { $exe = Get-Item -EA Stop (Join-Path $relDir 'mirrord.exe') }
+
           $dll = $env:MIRRORD_LAYER_FILE
-          if (!(Test-Path $exe)) { throw "mirrord.exe missing at $exe" }
           if (-not $dll -or !(Test-Path $dll)) {
-            $dll = (Get-ChildItem -Path $buildDir -Filter '*layer*.dll' | Select-Object -First 1).FullName
-            if (-not $dll) { throw "Layer DLL not found under $buildDir" }
+            $dll = (Get-ChildItem -Path $dbgDir -Filter 'mirrord_layer_win.dll' -EA SilentlyContinue | Select-Object -First 1).FullName
+            if (-not $dll) {
+              $dll = (Get-ChildItem -Path $relDir -Filter 'mirrord_layer_win.dll' -EA SilentlyContinue | Select-Object -First 1).FullName
+            }
+            if (-not $dll) { throw "Layer DLL not found in debug or release directories." }
           }
+
           $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item $exe -Destination $staging -Force
-          Copy-Item $dll -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
-          # Make checksums
-          Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll | ForEach-Object {
+          Copy-Item $exe.FullName -Destination $staging -Force
+          Copy-Item $dll        -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
+
+          # Checksums
+          Get-ChildItem -Path $staging -Include *.exe,*.dll -File | ForEach-Object {
             $h = Get-FileHash -Algorithm SHA256 $_.FullName
             "$($h.Hash)  $($_.Name)" | Out-File (Join-Path $staging "$($_.Name).sha256") -Encoding ascii
           }
-          # Build folder name
+
+          # Folder name: windows/mirrord-<version>-run<run#>-<sha7>/
           $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
           $sha7 = $env:GITHUB_SHA.Substring(0,7)
           $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
           $dest = "$($env:BUCKET_URI)/$artifactDir/"
           Write-Host "Uploading to $dest"
-          # Use wildcard path so -Include works; ensure we actually found files
-          $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
+
+          $files = Get-ChildItem -Path $staging -Include *.exe,*.dll,*.sha256 -File
           if (-not $files) { throw "No artifacts found in $staging" }
+
           foreach ($f in $files) {
             gcloud --quiet storage cp $($f.FullName) $dest
             if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($f.Name) (exit $LASTEXITCODE)" }
           }
+
           gcloud --quiet storage ls $dest
