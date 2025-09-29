@@ -148,24 +148,30 @@ jobs:
           $lines -join "`n" | Out-File -FilePath $sum -Encoding utf8
 
 
-      - name: Append summary
+      - name: Publish Windows tests summary
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
-          $dll = $env:MIRRORD_LAYER_FILE
           $exe = $env:MIRRORD_DOWNLOADED_EXE
+          $dll = $env:MIRRORD_LAYER_FILE
+
           $out = @()
-          $out += "### Windows tests summary"
-          $out += ""
-          $out += "* Picked EXE: `$exe`"
-          $out += "* Picked DLL: `$dll`"
+          $out += '### Windows tests summary'
+          $out += ''
+          $out += ('* Picked EXE: `{0}`' -f $exe)
+          $out += ('* Picked DLL: `{0}`' -f $dll)
+
           if (Test-Path $sum) {
-            $out += ""
+            $out += ''
             $out += (Get-Content $sum -Raw)
           } else {
-            $out += ""
-            $out += "_No summary file (tests may not have run)._"
+            $out += ''
+            $out += '_No summary file (tests may not have run)._'
           }
+
           $out -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
 
 
 
