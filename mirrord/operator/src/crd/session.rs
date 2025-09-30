@@ -67,8 +67,10 @@ pub struct SessionJiraMetrics {
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
     /// Last time when the session was observed to have an open user connection.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub connected_timestamp: Option<MicroTime>,
     /// If the session has been closed, describes the reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<SessionClosed>,
 }
 
@@ -79,5 +81,6 @@ pub struct SessionClosed {
     /// Short reason in PascalCase.
     pub reason: String,
     /// Optional human friendly message.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
