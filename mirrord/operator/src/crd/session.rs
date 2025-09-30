@@ -76,8 +76,6 @@ pub struct MirrordClusterSessionStatus {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionClosed {
-    /// Time when the session was closed.
-    pub timestamp: MicroTime,
     /// Short reason in PascalCase.
     pub reason: String,
     /// Optional human friendly message.
