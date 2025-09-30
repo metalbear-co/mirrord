@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::collections::BTreeMap;
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
@@ -98,60 +98,9 @@ pub struct SessionMySqlBranching {
     pub branches: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connected_timestamp: Option<MicroTime>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copy_target: Option<SessionFeatureStatus<SessionCopiedPodReady>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sqs_splitting_status: Option<SessionFeatureStatus<SessionEnvOverrides>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kafka_splitting_status: Option<SessionFeatureStatus<SessionEnvOverrides>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mysql_branching_status: Option<SessionFeatureStatus<SessionEnvOverrides>>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub agents: Vec<SessionAgent>,
-}
-
-/// Generic status of preparing a session feature.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum SessionFeatureStatus<T> {
-    Ready(T),
-    Error(FatalError),
-}
-
-/// Describes an output of preparing the copy target session feature - copied pod to use as a
-/// target.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionCopiedPodReady {
-    pub pod: String,
-    pub container: String,
-}
-
-/// Describes an output of preparing a session feature - a list of environment overrides.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionEnvOverrides {
-    pub env_overrides: BTreeMap<String, String>,
-}
-
-/// Describes a fatal error that has occurred when preparing a session feature.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FatalError {
-    pub code: u16,
-    pub reason: String,
-    pub message: String,
-}
-
-/// Describes a mirrord agent spawned for a session.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionAgent {
-    /// Address on which the agent accepts mirrord-protocol connections.
-    pub address: SocketAddr,
 }
