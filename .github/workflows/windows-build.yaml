@@ -1,8 +1,20 @@
 name: Windows tests (reuse prebuilt)
 
 on:
-  # trigger it like the Linux CI (and manual)
+  # manual + same triggers as Linux CI
   workflow_dispatch:
+    inputs:
+      source:
+        description: 'Where to get artifacts: "gcs" (pull prebuilt) or "build" (build & sign locally)'
+        type: choice
+        options: [gcs, build]
+        default: gcs
+      bucket_uri:
+        description: 'GCS bucket override (e.g., gs://mirrord-windows-builds)'
+        required: false
+      artifact_subpath:
+        description: 'GCS subpath override (e.g., windows/mirrord-3.163.0-run70-0932953)'
+        required: false
   push:
   pull_request:
     branches: [main, "*staging*"]
@@ -12,6 +24,7 @@ permissions:
   contents: read
 
 env:
+  # Defaults used when not overridden by workflow_dispatch inputs
   BUCKET_URI: gs://mirrord-windows-builds
   ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
   RUST_BACKTRACE: "1"
@@ -25,6 +38,9 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      # default to GCS unless workflow_dispatch overrides it
+      WINDOWS_SOURCE: gcs
 
     steps:
       - name: Checkout repo (tests need sources)
@@ -32,6 +48,19 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Apply inputs overrides
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if ("${{ github.event.inputs.source }}" -ne "") {
+            "WINDOWS_SOURCE=${{ github.event.inputs.source }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+          if ("${{ github.event.inputs.bucket_uri }}" -ne "") {
+            "BUCKET_URI=${{ github.event.inputs.bucket_uri }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+          if ("${{ github.event.inputs.artifact_subpath }}" -ne "") {
+            "ARTIFACT_SUBPATH=${{ github.event.inputs.artifact_subpath }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
       - name: Toolchain info
         run: |
@@ -43,35 +72,147 @@ jobs:
       # - name: Use pinned nightly like Linux CI
       #   run: rustup default nightly-2025-08-01
 
+      # =========================
+      # === PULL PREBUILT (GCS)
+      # =========================
       - name: Pick Windows artifacts from GCS (robust)
-        shell: pwsh
+        if: ${{ env.WINDOWS_SOURCE == 'gcs' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $dest = Join-Path $env:RUNNER_TEMP 'picked'
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
           Write-Host "Downloading from: $env:BUCKET_URI/$env:ARTIFACT_SUBPATH/*"
           gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
           if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
+
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
+
           # Use wildcarded path so -Filter actually matches; avoid -Include.
           $wild = Join-Path $dest '*'
+
           # exe
           $exe = (Get-ChildItem -Path $wild -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
+
           # dll (handle both underscore/dash names; then a generic fallback)
           $dll = (Get-ChildItem -Path $wild -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
           if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter 'mirrord-layer-win.dll' -File | Select-Object -First 1).FullName }
           if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter '*layer*.dll'        -File | Select-Object -First 1).FullName }
+
           Write-Host "Found exe: $exe"
           Write-Host "Found dll: $dll"
+
           if (-not $exe -or -not $dll) {
             Write-Host "Files present:"; Get-ChildItem -Path $wild -File | Select Name,FullName | Format-Table
             throw "Did not find mirrord.exe or layer DLL under $dest"
           }
+
           "MIRRORD_DOWNLOADED_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Exported env:"
-          Get-Content $env:GITHUB_ENV
+
+      # =========================
+      # === BUILD & SIGN (LOCALLY)
+      # =========================
+      - name: Identity & DigiCert healthcheck
+        if: ${{ env.WINDOWS_SOURCE == 'build' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          whoami
+          Write-Host "SM_HOST=$env:SM_HOST"
+          Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
+          smctl --version
+          smctl healthcheck
+
+      - name: Ensure Rust MSVC target
+        if: ${{ env.WINDOWS_SOURCE == 'build' }}
+        run: rustup target add x86_64-pc-windows-msvc
+
+      # Build the layer FIRST so include_bytes!/env! consumers can find it.
+      - name: Build mirrord-layer-win (DLL)
+        if: ${{ env.WINDOWS_SOURCE == 'build' }}
+        run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
+
+      - name: Locate package for bin "mirrord" + set envs (package, version, layer path)
+        if: ${{ env.WINDOWS_SOURCE == 'build' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object {
+            $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
+          } | Select-Object -First 1
+          if (-not $pkg) {
+            $names = ($meta.packages | ForEach-Object name) -join ', '
+            throw "No bin target named 'mirrord' found. Workspace packages: $names"
+          }
+
+          "MIRRORD_PKG=$($pkg.name)"        | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          $dllDbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
+          $dllRel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll'
+          if     (Test-Path $dllDbg) { $dll = $dllDbg }
+          elseif (Test-Path $dllRel) { $dll = $dllRel }
+          else   { throw "Layer DLL not found. Expected at:`n  $dllDbg`n  $dllRel" }
+
+          "MIRRORD_LAYER_FILE=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Get-Item $dll | Format-List FullName,Length,LastWriteTime
+
+      # Build the CLI AFTER the layer exists & env var is set.
+      - name: Build mirrord (bin)
+        if: ${{ env.WINDOWS_SOURCE == 'build' }}
+        run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
+
+      - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
+        if: ${{ env.WINDOWS_SOURCE == 'build' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+          $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
+
+          $exe = Join-Path $dbgDir 'mirrord.exe'
+          if (!(Test-Path $exe)) {
+            $exeRel = Join-Path $relDir 'mirrord.exe'
+            if (Test-Path $exeRel) { $exe = $exeRel } else { throw "Expected mirrord.exe not found at $exe or $exeRel" }
+          }
+
+          $dllCandidates = @()
+          if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
+          $dllCandidates += @(
+            (Join-Path $dbgDir 'mirrord_layer_win.dll'),
+            (Join-Path $relDir 'mirrord_layer_win.dll')
+          )
+          $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $dll) {
+            $list = ($dllCandidates | ForEach-Object { $_ }) -join [Environment]::NewLine
+            throw ("Layer DLL not found. Looked for:{0}{1}" -f [Environment]::NewLine, $list)
+          }
+
+          foreach ($f in @($exe, $dll)) {
+            Write-Host "Signing $f"
+            & signtool.exe sign `
+              /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
+              /tr http://timestamp.digicert.com `
+              /td SHA256 `
+              /fd SHA256 `
+              "$f"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
+
+            Write-Host "Verifying $f"
+            & signtool.exe verify /pa "$f"
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
+          }
+
+          # Export paths so later steps are identical to the GCS path
+          "MIRRORD_DOWNLOADED_EXE=$exe"        | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # =========================
+      # Common smoke summary (works for GCS or build)
+      # =========================
       - name: Quick smoke (hash + signature + --version/--help)
         run: |
           $ErrorActionPreference = 'Stop'
@@ -80,18 +221,22 @@ jobs:
           $base = Split-Path $exe -Parent
           $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
           Remove-Item $sum -ErrorAction SilentlyContinue
+
           function Get-ExpectedSha256([string]$shaFile) {
             if (-not (Test-Path $shaFile)) { return $null }
             $raw = Get-Content $shaFile -Raw
             return $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
           }
+
           $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
           $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
           if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
+
           $exeHash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
           $dllHash = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
           $exeExpect = Get-ExpectedSha256 $exeShaFile
           $dllExpect = Get-ExpectedSha256 $dllShaFile
+
           $lines = @()
           $lines += '## Windows smoke tests'
           $lines += ''
@@ -128,8 +273,8 @@ jobs:
           $lines += '```'
           $lines += ''
           $lines -join "`n" | Out-File -FilePath $sum -Encoding utf8
-      # ---------- Rust unit tests on Windows ----------
 
+      # ---------- Rust unit tests on Windows ----------
       - name: mirrord-layer-win UT
         run: cargo test --target x86_64-pc-windows-msvc -p mirrord-layer-win
 
@@ -151,45 +296,49 @@ jobs:
       - name: mirrord operator UT
         run: cargo test --target x86_64-pc-windows-msvc -p mirrord-operator --features "crd, client"
 
-      # Build+test CLI with the downloaded DLL embedded via env! at compile time.
+      # Build+test CLI with the picked/built DLL embedded via env! at compile time.
       - name: mirrord CLI UT (embed the picked DLL)
         env:
-          # These are also in $GITHUB_ENV already; keeping explicit for clarity:
           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
         run: cargo test --target x86_64-pc-windows-msvc -p mirrord
 
       # ---------- Summary to Job Summary tab ----------
       - name: Publish Windows test results (summary table, sandboxed)
         if: always()
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+
           $exe = $env:MIRRORD_DOWNLOADED_EXE
           $dll = $env:MIRRORD_LAYER_FILE
           if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
           if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
           $base = Split-Path $exe -Parent
+
           function Get-ExpectedSha256([string]$shaFile) {
             if (-not (Test-Path $shaFile)) { return $null }
             $raw = Get-Content $shaFile -Raw
             $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
           }
+
           # === SHA256 (and expected from .sha256) ===
           $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
           $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
           if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
+
           $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
           $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
           $exeExpect = Get-ExpectedSha256 $exeShaFile
           $dllExpect = Get-ExpectedSha256 $dllShaFile
           $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
           $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
+
           # === Code signing (if signtool exists) ===
           $sigExe = $null; $sigDll = $null
           if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
             & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
           }
+
           # === DLL load/unload check in a CHILD process (so crashes don't kill this step) ===
           $dllLoadOk = $false
           $dllCrash = $false
@@ -211,220 +360,55 @@ jobs:
             Environment.Exit(0);
           } catch { Environment.Exit(3); }
           "@
-              $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
-              Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
-              $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
-              $childExit = $p.ExitCode
-              if ($childExit -eq 0) { $dllLoadOk = $true }
-              # Access violation typically returns 3221225477 (0xC0000005) or -1073741819 depending on signedness
-              if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
-              # === CLI checks ===
-              $verRc = $null; $verText = ""
-              try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
-              $helpRc = $null; $helpText = ""
-              try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
-              # === Sizes ===
-              $exeSize = (Get-Item $exe).Length
-              $dllSize = (Get-Item $dll).Length
-              # === Build rows ===
-              $rows = @()
-              $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
-              $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
-              $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-              $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-              $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
-              $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
-              $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
-              $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
-              # === Emit Markdown summary ===
-              $md = @()
-              $md += '### Windows test results'
-              $md += ''
-              $md += ('**Artifact dir:** `{0}`  ' -f $env:ARTIFACT_SUBPATH)
-              $md += ('**EXE:** `{0}`  ' -f $exe)
-              $md += ('**DLL:** `{0}`' -f $dll)
-              $md += ''
-              $md += '| Check | Result | Notes |'
-              $md += '|------:|:------:|-------|'
-              foreach ($r in $rows) {
-                $c = ($r.Check  -replace '\|','\|')
-                $res = ($r.Result -replace '\|','\|')
-                $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
-                $md += "| $c | $res | $n |"
-              }
-              $md += ''
-              $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
-              $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
 
+          $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
+          Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
 
+          $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
+          $childExit = $p.ExitCode
+          if ($childExit -eq 0) { $dllLoadOk = $true }
+          # Access violation typically returns 3221225477 (0xC0000005) or -1073741819 depending on signedness
+          if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
 
-### THIS PART WORKS ###
-# name: Windows mirrord build and cert signing
+          # === CLI checks ===
+          $verRc = $null; $verText = ""
+          try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
+          $helpRc = $null; $helpText = ""
+          try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
 
-# on:
-#   workflow_dispatch:
+          # === Sizes ===
+          $exeSize = (Get-Item $exe).Length
+          $dllSize = (Get-Item $dll).Length
 
-# permissions:
-#   contents: read
+          # === Build rows ===
+          $rows = @()
+          $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
+          $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
+          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
+          $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
 
-# jobs:
-#   build:
-#     runs-on: [self-hosted, Windows]
-#     defaults:
-#       run:
-#         shell: pwsh
-#     env:
-#       BUCKET_URI: gs://mirrord-windows-builds
+          # === Emit Markdown summary ===
+          $md = @()
+          $md += '### Windows test results'
+          $md += ''
+          $md += ('**Mode:** `{0}`  ' -f $env:WINDOWS_SOURCE)
+          $md += ('**Artifact dir (when GCS):** `{0}`  ' -f $env:ARTIFACT_SUBPATH)
+          $md += ('**EXE:** `{0}`  ' -f $exe)
+          $md += ('**DLL:** `{0}`' -f $dll)
+          $md += ''
+          $md += '| Check | Result | Notes |'
+          $md += '|------:|:------:|-------|'
+          foreach ($r in $rows) {
+            $c = ($r.Check  -replace '\|','\|')
+            $res = ($r.Result -replace '\|','\|')
+            $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
+            $md += "| $c | $res | $n |"
+          }
+          $md += ''
+          $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
 
-#     steps:
-#       - name: Checkout windows branch
-#         uses: actions/checkout@v4
-#         with:
-#           ref: windows-builds-gh
-#           fetch-depth: 0
-#           submodules: recursive
-
-#       - name: Identity & DigiCert healthcheck
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           whoami
-#           Write-Host "SM_HOST=$env:SM_HOST"
-#           Write-Host "SM_CLIENT_CERT_FILE=$env:SM_CLIENT_CERT_FILE"
-#           smctl --version
-#           smctl healthcheck
-
-#       - name: Ensure Rust MSVC target
-#         run: rustup target add x86_64-pc-windows-msvc
-
-#       # --- Build the layer FIRST so include_bytes! can find it ---
-#       - name: Build mirrord-layer-win (DLL)
-#         run: cargo build -p mirrord-layer-win --target x86_64-pc-windows-msvc
-
-#       - name: Locate package for bin "mirrord" + set envs (package, version, layer path)
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-
-#           # Which package contains bin "mirrord"?
-#           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-#           $pkg = $meta.packages | Where-Object {
-#             $_.targets | Where-Object { ($_."kind" -contains 'bin') -and ($_.name -eq 'mirrord') }
-#           } | Select-Object -First 1
-#           if (-not $pkg) {
-#             $names = ($meta.packages | ForEach-Object name) -join ', '
-#             throw "No bin target named 'mirrord' found. Workspace packages: $names"
-#           }
-
-#           "MIRRORD_PKG=$($pkg.name)"           | Out-File -FilePath $env:GITHUB_ENV -Append
-#           "MIRRORD_VERSION=$($pkg.version)"    | Out-File -FilePath $env:GITHUB_ENV -Append
-
-#           # IMPORTANT: underscores in the produced DLL name
-#           $dllDbg = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug\mirrord_layer_win.dll'
-#           $dllRel = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll'
-#           if     (Test-Path $dllDbg) { $dll = $dllDbg }
-#           elseif (Test-Path $dllRel) { $dll = $dllRel }
-#           else   { throw "Layer DLL not found. Expected at:`n  $dllDbg`n  $dllRel" }
-
-#           "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
-#           Write-Host "Will embed layer DLL from: $dll"
-#           Write-Host "Will build bin 'mirrord' from package: $($pkg.name) v$($pkg.version)"
-
-#           # Print size for sanity
-#           Get-Item $dll | Format-List FullName,Length,LastWriteTime
-
-#       # --- Build the CLI AFTER the layer exists & env var is set ---
-#       - name: Build mirrord (bin)
-#         run: cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
-
-#       - name: Code sign mirrord.exe + layer DLL (thumbprint) + verify
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-
-#           $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-#           $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
-
-#           # Resolve exe (prefer Debug, fallback Release)
-#           $exe = Join-Path $dbgDir 'mirrord.exe'
-#           if (!(Test-Path $exe)) {
-#             $exeRel = Join-Path $relDir 'mirrord.exe'
-#             if (Test-Path $exeRel) { $exe = $exeRel } else { throw "Expected mirrord.exe not found at $exe or $exeRel" }
-#           }
-
-#           # Resolve dll (prefer env, else common locations)
-#           $dllCandidates = @()
-#           if ($env:MIRRORD_LAYER_FILE) { $dllCandidates += $env:MIRRORD_LAYER_FILE }
-#           $dllCandidates += @(
-#             (Join-Path $dbgDir 'mirrord_layer_win.dll'),
-#             (Join-Path $relDir 'mirrord_layer_win.dll')
-#           )
-#           $dll = $dllCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-#           if (-not $dll) {
-#             $list = ($dllCandidates | ForEach-Object { $_ }) -join [Environment]::NewLine
-#             throw ("Layer DLL not found. Looked for:{0}{1}" -f [Environment]::NewLine, $list)
-#           }
-
-#           foreach ($f in @($exe, $dll)) {
-#             Write-Host "Signing $f"
-#             & signtool.exe sign `
-#               /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
-#               /tr http://timestamp.digicert.com `
-#               /td SHA256 `
-#               /fd SHA256 `
-#               "$f"
-#             if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
-
-#             Write-Host "Verifying $f"
-#             & signtool.exe verify /pa "$f"
-#             if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
-#           }
-
-#       - name: Stage and upload signed artifacts to GCS
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
-
-#           $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
-#           $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
-
-#           # Resolve exe and dll like above
-#           $exe = (Get-Item -EA SilentlyContinue (Join-Path $dbgDir 'mirrord.exe'))
-#           if (-not $exe) { $exe = Get-Item -EA Stop (Join-Path $relDir 'mirrord.exe') }
-
-#           $dll = $env:MIRRORD_LAYER_FILE
-#           if (-not $dll -or !(Test-Path $dll)) {
-#             $dll = (Get-ChildItem -Path $dbgDir -Filter 'mirrord_layer_win.dll' -EA SilentlyContinue | Select-Object -First 1).FullName
-#             if (-not $dll) {
-#               $dll = (Get-ChildItem -Path $relDir -Filter 'mirrord_layer_win.dll' -EA SilentlyContinue | Select-Object -First 1).FullName
-#             }
-#             if (-not $dll) { throw "Layer DLL not found in debug or release directories." }
-#           }
-
-#           $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
-#           New-Item -ItemType Directory -Path $staging -Force | Out-Null
-#           Copy-Item $exe.FullName -Destination $staging -Force
-#           Copy-Item $dll        -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
-
-#           # Show what we staged (helps debugging)
-#           Write-Host "Staged files:"; Get-ChildItem $staging | Format-Table Name,Length
-
-#           # Make checksums
-#           Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll | ForEach-Object {
-#             $h = Get-FileHash -Algorithm SHA256 $_.FullName
-#             "$($h.Hash)  $($_.Name)" | Out-File (Join-Path $staging "$($_.Name).sha256") -Encoding ascii
-#           }
-
-#           # Collect files (NOTE the wildcard so -Include works)
-#           $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
-#           if (-not $files) { throw "No artifacts found in $staging" }
-
-#           $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
-#           $sha7 = $env:GITHUB_SHA.Substring(0,7)
-#           $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
-#           $dest = "$($env:BUCKET_URI)/$artifactDir/"
-#           Write-Host "Uploading to $dest"
-
-#           foreach ($f in $files) {
-#             gcloud --quiet storage cp $($f.FullName) $dest
-#             if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($f.Name) (exit $LASTEXITCODE)" }
-#           }
-
-#           gcloud --quiet storage ls $dest
+          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
