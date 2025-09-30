@@ -137,17 +137,24 @@ jobs:
           $lines += ''
           $lines -join "`n" | Out-File -FilePath $sum -Encoding utf8
 
-      - name: Install cargo-nextest (no third-party actions)
+      # === Install cargo-nextest to a controlled location and add to PATH ===
+      - name: Install cargo-nextest (no disallowed actions)
         run: |
           $ErrorActionPreference = 'Stop'
-          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
-          $exePath  = Join-Path $cargoBin 'cargo-nextest.exe'
-          if (Test-Path $exePath) {
-            & $exePath --version
+          $root = Join-Path $env:RUNNER_TEMP 'cargo-tools'
+          $bin  = Join-Path $root 'bin'
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+
+          # Persist PATH for subsequent steps
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append
+
+          $nextest = Join-Path $bin 'cargo-nextest.exe'
+          if (Test-Path $nextest) {
+            & $nextest --version
           } else {
-            cargo install cargo-nextest --locked
+            cargo install cargo-nextest --locked --root "$root"
             if ($LASTEXITCODE -ne 0) { throw "cargo install cargo-nextest failed" }
-            & $exePath --version
+            & $nextest --version
           }
 
       # ---------- Build tests once (no-run) ----------
@@ -197,7 +204,7 @@ jobs:
 
           $procs = @()
           foreach ($c in $crates) {
-            $safe = ($c.name -replace '[^A-Za-z0-9_.-]','_')
+            $safe  = ($c.name -replace '[^A-Za-z0-9_.-]','_')
             $junit = Join-Path $logDir "$safe.junit.xml"
             $log   = Join-Path $logDir "$safe.nextest.log"
             $cmd   = "cargo $toolchain nextest run --target $target $($c.args) --no-fail-fast --status-level pass --retries 0 --report-time --no-build --junit-xml `"$junit`""
@@ -334,9 +341,6 @@ jobs:
         with:
           name: windows-nextest-logs
           path: ${{ env.NEXT_LOG_DIR }}
-
-
-
 
 
 
