@@ -1,4 +1,4 @@
-name: Windows tests (reuse prebuilt)
+name: Windows tests (reuse prebuilt, parallel)
 
 on:
   workflow_dispatch:
@@ -39,8 +39,13 @@ jobs:
           cargo -V
           rustup show
 
-      - name: Install nightly for JSON test format
+      - name: Install nightly (keep aligned with Linux CI)
         run: rustup toolchain install nightly-2025-08-01 --profile minimal
+
+      - name: Install cargo-nextest (parallel test runner)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
 
       - name: Pick Windows artifacts from GCS (robust)
         run: |
@@ -55,16 +60,11 @@ jobs:
 
           Write-Host "Downloaded files:"; Get-ChildItem $dest | Format-Table Name,Length
 
-          # Use wildcarded path so -Filter actually matches; avoid -Include.
           $wild = Join-Path $dest '*'
-
-          # exe
           $exe = (Get-ChildItem -Path $wild -Filter 'mirrord.exe' -File | Select-Object -First 1).FullName
-
-          # dll (handle both underscore/dash names; then a generic fallback)
           $dll = (Get-ChildItem -Path $wild -Filter 'mirrord_layer_win.dll' -File | Select-Object -First 1).FullName
           if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter 'mirrord-layer-win.dll' -File | Select-Object -First 1).FullName }
-          if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter '*layer*.dll'        -File | Select-Object -First 1).FullName }
+          if (-not $dll) { $dll = (Get-ChildItem -Path $wild -Filter '*layer*.dll' -File | Select-Object -First 1).FullName }
 
           Write-Host "Found exe: $exe"
           Write-Host "Found dll: $dll"
@@ -78,12 +78,9 @@ jobs:
           "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
           "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-          Write-Host "Exported env:"
-          Get-Content $env:GITHUB_ENV
+      # ---------- Smoke (hash/signing/DLL load/CLI) ----------
 
-      # ---------- Quick smoke on the downloaded binaries ----------
-
-      - name: Publish Windows smoke results (hash/signing/DLL load/CLI)
+      - name: Publish Windows smoke results
         if: always()
         run: |
           $ErrorActionPreference = 'Stop'
@@ -100,7 +97,6 @@ jobs:
             $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
           }
 
-          # === SHA256 (and expected from .sha256) ===
           $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
           $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
           if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
@@ -112,14 +108,12 @@ jobs:
           $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
           $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
 
-          # === Code signing (if signtool exists) ===
           $sigExe = $null; $sigDll = $null
           if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
             & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
           }
 
-          # === DLL load/unload check in a CHILD process (so crashes don't kill this job) ===
           $dllLoadOk = $false
           $dllCrash = $false
           $loader = @"
@@ -147,20 +141,16 @@ jobs:
           $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
           $childExit = $p.ExitCode
           if ($childExit -eq 0) { $dllLoadOk = $true }
-          # Access violation typically 0xC0000005 => 3221225477
           if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
 
-          # === CLI checks ===
           $verRc = $null; $verText = ""
           try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
           $helpRc = $null; $helpText = ""
           try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
 
-          # === Sizes ===
           $exeSize = (Get-Item $exe).Length
           $dllSize = (Get-Item $dll).Length
 
-          # === Build rows ===
           $rows = @()
           $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
           $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
@@ -171,7 +161,6 @@ jobs:
           $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
           $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
 
-          # === Emit Markdown summary ===
           $md = @()
           $md += '### Windows smoke results'
           $md += ''
@@ -192,140 +181,162 @@ jobs:
 
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
 
-      # ---------- Run ALL Rust tests and publish a clean pass/fail table ----------
+      # ---------- Parallel Rust tests with nextest ----------
 
-      - name: Run Rust tests (all crates) & publish full report
+      - name: Build tests (no-run) for all crates
         run: |
           $ErrorActionPreference = 'Stop'
+          $toolchain = '+nightly-2025-08-01'
+          $target    = 'x86_64-pc-windows-msvc'
 
-          $toolchain   = '+nightly-2025-08-01'
-          $target      = 'x86_64-pc-windows-msvc'
-          $logDir      = Join-Path $env:RUNNER_TEMP 'cargo-test-logs'
-          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-
-          # Define all test invocations you had as separate steps
-          $crates = @(
-            @{ name = 'mirrord-layer-win' ; args = '-p mirrord-layer-win' }
-            @{ name = 'mirrord-protocol'  ; args = '-p mirrord-protocol' }
-            @{ name = 'mirrord-config'    ; args = '-p mirrord-config' }
-            @{ name = 'mirrord-kube'      ; args = '-p mirrord-kube --all-features' }
-            @{ name = 'mirrord-intproxy'  ; args = '-p mirrord-intproxy' }
-            @{ name = 'mirrord-auth'      ; args = '-p mirrord-auth' }
-            @{ name = 'mirrord-operator'  ; args = '-p mirrord-operator --features "crd, client"' }
-            @{ name = 'mirrord (CLI)'     ; args = '-p mirrord' } # uses MIRRORD_LAYER_FILE from env
+          $todo = @(
+            'cargo {0} test --target {1} -p mirrord-layer-win --no-run'      -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord-protocol --no-run'       -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord-config --no-run'         -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord-kube --all-features --no-run' -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord-intproxy --no-run'       -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord-auth --no-run'           -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord-operator --features "crd, client" --no-run' -f $toolchain,$target
+            'cargo {0} test --target {1} -p mirrord --no-run'                -f $toolchain,$target
           )
 
-          $report = @()
-          $overallPassed = 0
-          $overallFailed = 0
-          $overallIgnored = 0
-          $overallTime = 0.0
+          foreach ($cmd in $todo) {
+            Write-Host ">>> $cmd"
+            cmd /c $cmd
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $cmd" }
+          }
+
+      - name: Run crates in parallel (nextest) + publish table
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $toolchain = '+nightly-2025-08-01'
+          $target    = 'x86_64-pc-windows-msvc'
+          $logDir    = Join-Path $env:RUNNER_TEMP 'nextest-logs'
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+          $crates = @(
+            @{ name='mirrord-layer-win' ; args='-p mirrord-layer-win' }
+            @{ name='mirrord-protocol'  ; args='-p mirrord-protocol' }
+            @{ name='mirrord-config'    ; args='-p mirrord-config' }
+            @{ name='mirrord-kube'      ; args='-p mirrord-kube --all-features' }
+            @{ name='mirrord-intproxy'  ; args='-p mirrord-intproxy' }
+            @{ name='mirrord-auth'      ; args='-p mirrord-auth' }
+            @{ name='mirrord-operator'  ; args='-p mirrord-operator --features "crd, client"' }
+            @{ name='mirrord (CLI)'     ; args='-p mirrord' }
+          )
+
+          $procs = @()
 
           foreach ($c in $crates) {
-            $name = $c.name
-            $args = $c.args
-            $log  = Join-Path $logDir ("{0}.log" -f ($name -replace '[^\w\.-]','_'))
+            $safe = ($c.name -replace '[^A-Za-z0-9_.-]','_')
+            $junit = Join-Path $logDir "$safe.junit.xml"
+            $log   = Join-Path $logDir "$safe.nextest.log"
+            $cmd   = "cargo $toolchain nextest run --target $target $($c.args) --no-fail-fast --status-level pass --retries 0 --report-time --no-build --junit-xml `"$junit`""
+            Write-Host ">>> $cmd"
 
-            Write-Host "=== Running tests for $name ==="
-            $cmd = "cargo $toolchain test --target $target $args -- -Z unstable-options --format json"
-            Write-Host $cmd
-            cmd /c "$cmd" 2>&1 | Tee-Object -FilePath $log | Out-Null
-            $exit = $LASTEXITCODE
+            $args = @(
+              '-NoProfile','-NonInteractive','-Command',
+              "$cmd 2>&1 | Tee-Object -FilePath `"$log`" ; exit `$LASTEXITCODE`"
+            )
+            $p = Start-Process pwsh -ArgumentList $args -PassThru
+            $procs += [pscustomobject]@{ Name=$c.name; Safe=$safe; Junit=$junit; Log=$log; Proc=$p }
+          }
 
-            # Parse JSON lines from the log
-            $passed = 0; $failed = 0; $ignored = 0; $filtered = 0; $measured = 0; $time = 0.0
-            $failedTests = New-Object System.Collections.Generic.List[string]
+          # Wait for all processes to finish
+          Wait-Process -Id ($procs | ForEach-Object { $_.Proc.Id })
 
-            Get-Content $log | ForEach-Object {
-              $line = $_
-              if (-not $line.TrimStart().StartsWith('{')) { return }
-              try {
-                $o = $line | ConvertFrom-Json
-              } catch { return }
+          # Helper: parse JUnit into a summary object
+          function Parse-JUnit([string]$path) {
+            if (-not (Test-Path $path)) { return @{tests=0;fail=1;skip=0;time=0.0;failed=@('NO-REPORT')} }
+            [xml]$xml = Get-Content $path
+            $tests=0; $fail=0; $skip=0; $time=0.0; $failed = New-Object System.Collections.Generic.List[string]
 
-              if ($o.type -eq 'test' -and $o.event -eq 'failed') {
-                $failedTests.Add([string]$o.name)
+            if ($xml.testsuites) {
+              foreach ($ts in $xml.testsuites.testsuite) {
+                $tests += [int]$ts.tests
+                $fail  += ([int]$ts.failures + [int]$ts.errors)
+                $skip  += [int]($ts.skipped ?? 0)
+                $time  += [double]$ts.time
+                foreach ($tc in $ts.testcase) {
+                  if ($tc.failure -or $tc.error) { $failed.Add([string]$tc.name) }
+                }
               }
-              if ($o.type -eq 'suite' -and ($o.event -eq 'ok' -or $o.event -eq 'failed')) {
-                $passed     += [int]$o.passed
-                $failed     += [int]$o.failed
-                $ignored    += [int]$o.ignored
-                $filtered   += [int]$o.filtered_out
-                $measured   += [int]$o.measured
-                $time       += [double]$o.exec_time
+            } elseif ($xml.testsuite) {
+              $ts = $xml.testsuite
+              $tests = [int]$ts.tests
+              $fail  = ([int]$ts.failures + [int]$ts.errors)
+              $skip  = [int]($ts.skipped ?? 0)
+              $time  = [double]$ts.time
+              foreach ($tc in $ts.testcase) {
+                if ($tc.failure -or $tc.error) { $failed.Add([string]$tc.name) }
               }
             }
+            return @{tests=$tests; fail=$fail; skip=$skip; time=$time; failed=$failed}
+          }
 
-            if ($exit -ne 0 -and ($passed + $failed + $ignored) -eq 0) {
-              # Nonzero exit but no parsed suite summary => mark as 1 failure so it's visible
-              $failed = 1
-            }
+          $rows = @()
+          $totPassed=0; $totFailed=0; $totSkipped=0; $totTime=0.0
+          $anyFail = $false
 
-            $overallPassed += $passed
-            $overallFailed += $failed
-            $overallIgnored += $ignored
-            $overallTime += $time
-
-            $status = if ($failed -gt 0 -or $exit -ne 0) { '❌' } else { '✅' }
-
-            $report += [pscustomobject]@{
-              Crate    = $name
-              Passed   = $passed
-              Failed   = $failed
-              Ignored  = $ignored
-              Time     = ('{0:F2}s' -f $time)
-              Status   = $status
-              FailList = ($failedTests -join ', ')
+          foreach ($x in $procs) {
+            $exit = $x.Proc.ExitCode
+            $r = Parse-JUnit $x.Junit
+            $passed = [int]($r.tests - $r.fail - $r.skip)
+            $totPassed += $passed
+            $totFailed += [int]$r.fail
+            $totSkipped += [int]$r.skip
+            $totTime += [double]$r.time
+            $status = if ($r.fail -gt 0 -or $exit -ne 0) { $anyFail = $true; '❌' } else { '✅' }
+            $rows += [pscustomobject]@{
+              Crate   = $x.Name
+              Passed  = $passed
+              Failed  = [int]$r.fail
+              Skipped = [int]$r.skip
+              Time    = ('{0:F2}s' -f $r.time)
+              Status  = $status
+              FailedList = ($r.failed -join ', ')
               ExitCode = $exit
-              LogPath  = $log
+              LogPath  = $x.Log
             }
           }
 
-          # Build Markdown table
+          # Markdown table
           $md = @()
-          $md += '## Windows Rust test results'
+          $md += '## Windows Rust tests (parallel via nextest)'
           $md += ''
-          $md += '| Crate | Passed | Failed | Ignored | Time | Status |'
-          $md += '|:------|------:|------:|--------:|-----:|:------:|'
-          foreach ($r in $report) {
-            $md += ('| {0} | {1} | {2} | {3} | {4} | {5} |' -f $r.Crate, $r.Passed, $r.Failed, $r.Ignored, $r.Time, $r.Status)
+          $md += '| Crate | Passed | Failed | Skipped | Time | Status |'
+          $md += '|:------|------:|------:|-------:|-----:|:------:|'
+          foreach ($r in $rows) {
+            $md += ('| {0} | {1} | {2} | {3} | {4} | {5} |' -f $r.Crate, $r.Passed, $r.Failed, $r.Skipped, $r.Time, $r.Status)
           }
-          $md += ('| **Total** | **{0}** | **{1}** | **{2}** | **{3:F2}s** |  |' -f $overallPassed, $overallFailed, $overallIgnored, $overallTime)
+          $md += ('| **Total** | **{0}** | **{1}** | **{2}** | **{3:F2}s** |  |' -f $totPassed, $totFailed, $totSkipped, $totTime)
           $md += ''
 
-          foreach ($r in $report | Where-Object { $_.Failed -gt 0 -and $_.FailList }) {
+          foreach ($r in $rows | Where-Object { $_.Failed -gt 0 -and $_.FailedList }) {
             $md += "<details><summary>Failed tests: <strong>$($r.Crate)</strong></summary>"
             $md += ''
             $md += '```'
-            ($r.FailList -split ', ') | ForEach-Object { if ($_ -ne '') { $md += $_ } }
+            ($r.FailedList -split ', ') | ForEach-Object { if ($_ -ne '') { $md += $_ } }
             $md += '```'
             $md += ''
             $md += '</details>'
             $md += ''
           }
 
-          $md += '<sub>Per-crate logs are attached as a workflow artifact.</sub>'
+          $md += '<sub>Each crate ran with <code>cargo nextest</code> using multiple processes/threads. Per-crate logs are attached as an artifact.</sub>'
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
 
-          # Export a machine-readable JSON summary too
-          $summaryPath = Join-Path $logDir 'summary.json'
-          $report | ConvertTo-Json -Depth 4 | Out-File -FilePath $summaryPath -Encoding UTF8
+          # Save a machine-readable summary
+          $rows | ConvertTo-Json -Depth 4 | Out-File -FilePath (Join-Path $logDir 'summary.json') -Encoding UTF8
 
-          # Fail the job if any test failed
-          if ($overallFailed -gt 0) {
-            Write-Host "Some tests failed."
-            exit 1
-          } else {
-            Write-Host "All tests passed."
-          }
+          if ($anyFail) { exit 1 }
 
       - name: Upload test logs (artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-cargo-test-logs
-          path: ${{ runner.temp }}/cargo-test-logs
-
+          name: windows-nextest-logs
+          path: ${{ runner.temp }}/nextest-logs
 
 
 
