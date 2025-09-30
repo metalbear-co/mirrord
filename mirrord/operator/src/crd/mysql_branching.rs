@@ -6,7 +6,7 @@ use mirrord_config::target::Target;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::crd::session::MirrordClusterSessionOwner;
+use crate::crd::session::SessionOwner;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -83,5 +83,5 @@ pub struct SessionInfo {
     /// Session id.
     pub id: String,
     /// Owner info of the session.
-    pub owner: MirrordClusterSessionOwner,
+    pub owner: SessionOwner,
 }
