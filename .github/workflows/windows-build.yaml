@@ -1,4 +1,4 @@
-name: Windows tests (reuse/build & sign)
+name: Windows Build
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       mode:
         description: "Pick artifacts from GCS (reuse) or build & sign now"
         type: choice
-        options: [reuse, build_sign]
+        options: [build_sign, reuse]
         default: reuse
   push:
   pull_request:
