@@ -1,18 +1,18 @@
 use std::{
-    collections::{HashMap, VecDeque},
-    io,
-    mem::Discriminant,
+    collections::HashMap,
+    io::{self},
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
-use bincode::{error::DecodeError, Decode, Encode};
-use bytes::Bytes;
-use futures::{FutureExt, SinkExt, StreamExt};
+use bincode::{Decode, Encode, error::DecodeError};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures::{SinkExt, StreamExt};
 use semver::Version;
 use tokio::{select, sync::mpsc};
+use tracing::instrument;
 
 use crate::{
-    ClientCodec, ClientMessage, DaemonCodec, DaemonMessage, Payload, ProtocolCodec, VERSION,
+    ClientCodec, ClientMessage, DaemonCodec, DaemonMessage, Payload, ToPayload, VERSION,
     file::CHUNKED_PROTOCOL_VERSION,
 };
 
@@ -169,6 +169,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     }
 }
 
+#[instrument(skip_all)]
 async fn io_task_legacy<IO: AsyncIO, Type: ProtocolEndpoint>(
     mut framed: Framed<IO, Type::Codec>,
     mut rx: mpsc::Receiver<Type::OutMsg>,
@@ -176,40 +177,68 @@ async fn io_task_legacy<IO: AsyncIO, Type: ProtocolEndpoint>(
 ) {
     loop {
         select! {
-            // REVIEW: handle errors gracefully
-            to_send = rx.recv().fuse() => {
-                let to_send = to_send.expect("io task channel closed");
-                framed.send(to_send).await.expect("failed to send");
+            to_send = rx.recv() => {
+                let Some(to_send) = to_send else {
+                    tracing::info!("io task rx channel closed");
+                    break;
+                };
+                if let Err(err) = framed.send(to_send).await {
+                    tracing::error!(?err, "failed to send message");
+                    break;
+                }
             }
-            // REVIEW: Cancel safety?
-            received = framed.next().fuse() => {
+            received = framed.next() => {
                 match received {
-                    None => panic!("failed to receive"),
-                    Some(Ok(e)) => tx.send(e).await.expect("io task channel closed"),
-                    Some(Err(err)) => panic!("invalid message received: {err:?}")
+                    None => {
+                        tracing::info!("no more messages, exiting task");
+                        break;
+                    }
+                    Some(Err(err)) => {
+                        tracing::error!(?err, "failed to receive message");
+                        break;
+                    }
+                    Some(Ok(e)) => {
+						if let Err(e) = tx.send(e).await {
+							tracing::info!(?e, "io task channel closed");
+							break;
+						}
+					},
                 }
             }
         }
     }
+
+    let _ = framed.close().await;
 }
+
+type MessageId = u16;
+type PayloadLen = u32;
 
 #[derive(Debug, Encode, Decode)]
 struct Chunk {
-    id: u32,
+    id: MessageId,
     payload: Payload,
+}
+
+impl Chunk {
+    const ID_SIZE: usize = size_of::<MessageId>();
+    const PAYLOAD_LEN_SIZE: usize = size_of::<PayloadLen>();
+
+    const HEADER_SIZE: usize = Self::ID_SIZE + Self::PAYLOAD_LEN_SIZE;
 }
 
 struct OutMessage {
     encoded: Bytes,
     next_chunk_offset: u32,
-    id: u32,
+    id: MessageId,
 }
 
 impl OutMessage {
-    fn encode<T: bincode::Encode>(message: T, id: u32) -> Self {
-        let encoded = bincode::encode_to_vec(message, bincode::config::standard())
+    fn encode<T: bincode::Encode>(message: T, id: MessageId) -> Self {
+        let encoded: Bytes = bincode::encode_to_vec(message, bincode::config::standard())
             .expect("failed to encode message")
             .into();
+
         Self {
             encoded,
             next_chunk_offset: 0,
@@ -218,7 +247,8 @@ impl OutMessage {
     }
 }
 
-const CHUNK_SIZE: u32 = 1024 * 8;
+/// REVIEW make this configurable
+const CHUNK_SIZE: u32 = 1024 * 64;
 
 impl Iterator for OutMessage {
     type Item = Chunk;
@@ -226,20 +256,19 @@ impl Iterator for OutMessage {
     fn next(&mut self) -> Option<Self::Item> {
         let size = Ord::min(
             CHUNK_SIZE,
-            self.encoded.len() as u32 - self.next_chunk_offset,
+            self.encoded.len() as PayloadLen - self.next_chunk_offset,
         );
 
         if size == 0 {
             return None;
         }
 
-
         let payload = self
             .encoded
             .slice(self.next_chunk_offset as usize..(self.next_chunk_offset + size) as usize)
             .into();
 
-		self.next_chunk_offset += size;
+        self.next_chunk_offset += size;
 
         Some(Chunk {
             id: self.id,
@@ -248,69 +277,140 @@ impl Iterator for OutMessage {
     }
 }
 
-struct OutQueue {
-    messages: VecDeque<OutMessage>,
-}
-
-#[derive(Default)]
-struct OutQueues<T> {
-    queues: HashMap<Discriminant<T>, OutQueue>,
-}
-
 #[derive(Default)]
 struct InBuffers {
-    partially_received: HashMap<u32, Vec<u8>>,
+    partially_received: HashMap<MessageId, Vec<u8>>,
 }
 
+struct SimpleChunkCodec;
+
+impl Encoder<Chunk> for SimpleChunkCodec {
+    type Error = io::Error;
+
+    fn encode(&mut self, chunk: Chunk, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.put_u16(chunk.id);
+        dst.put_u32(chunk.payload.len() as PayloadLen);
+        dst.put(chunk.payload.0);
+        Ok(())
+    }
+}
+
+impl Decoder for SimpleChunkCodec {
+    type Item = Chunk;
+
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if src.len() < Chunk::ID_SIZE + Chunk::PAYLOAD_LEN_SIZE + 1 {
+            return Ok(None);
+        }
+
+        let expected_len = PayloadLen::from_be_bytes(
+            src[Chunk::ID_SIZE..Chunk::ID_SIZE + Chunk::PAYLOAD_LEN_SIZE]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+
+        let actual_payload_size = src.len() - Chunk::HEADER_SIZE;
+
+        if expected_len > actual_payload_size {
+            src.reserve(expected_len - actual_payload_size);
+            return Ok(None);
+        }
+
+        let id = MessageId::from_be_bytes(src[0..Chunk::ID_SIZE].try_into().unwrap());
+        let payload = (&src[Chunk::HEADER_SIZE..Chunk::HEADER_SIZE + expected_len]).to_payload();
+
+        src.advance(expected_len + Chunk::HEADER_SIZE);
+
+        Ok(Some(Chunk { id, payload }))
+    }
+}
+
+// struct OutQueue {
+//     messages: VecDeque<OutMessage>,
+// }
+
+// #[derive(Default)]
+// struct OutQueues<T> {
+//     queues: HashMap<Discriminant<T>, OutQueue>,
+// }
+
+#[instrument(skip_all)]
 async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
     io: IO,
     mut rx: mpsc::Receiver<Type::OutMsg>,
     tx: mpsc::Sender<Type::InMsg>,
 ) {
-    // REVIEW: handle errors gracefully
     // let out_queues = OutQueues::default();
     let mut in_buffers = InBuffers::default();
 
-    let mut chunk_codec = Framed::new(io, ProtocolCodec::<Chunk, Chunk>::default());
+    // It would be nice if we could reuse these
+    let mut tx_id: MessageId = 0;
 
-    let mut tx_id: u32 = 0;
+    let mut framed = Framed::new(io, SimpleChunkCodec);
 
     loop {
         select! {
-            to_send = rx.recv().fuse() => {
-                let to_send = to_send.expect("io task channel closed");
+            to_send = rx.recv() => {
+                let Some(to_send) = to_send else {
+                    tracing::info!("no more messages, closing task");
+                    break;
+                };
+
                 // Dumb
-                for chunk in OutMessage::encode(to_send, tx_id) {
-                    chunk_codec.send(chunk).await.expect("failed 2 send");
+                for chunk in OutMessage::encode(&to_send, tx_id) {
+                    if let Err(err) = framed.send(chunk).await {
+                        tracing::error!(?err, "failed to send encoded chunk");
+                        break;
+                    }
                 }
 
-                tx_id += 1;
+                // By the time we overflow, the first messages will
+                // most certainly have been received.
+                tx_id = tx_id.overflowing_add(1).0;
 
             }
-            // REVIEW: Cancel safety?
-            received = chunk_codec.next().fuse() => {
+            received = framed.next() => {
                 let Chunk { id, payload } = match received {
-                    None => panic!("failed to receive"),
-                    Some(Err(err)) => panic!("invalid message received: {err:?}"),
                     Some(Ok(c)) => c,
+                    Some(Err(err)) => {
+                        tracing::error!(?err, "failed to receive chunk");
+                        break;
+                    },
+                    None => {
+                        tracing::info!("stream closed, exiting task");
+                        break;
+                    },
                 };
 
                 let buffer = in_buffers
                     .partially_received
                     .entry(id)
-                .or_default();
+                    .or_default();
                 buffer.extend_from_slice(&payload);
 
-                match bincode::decode_from_slice(&buffer, bincode::config::standard()){
+
+                let decode_result = bincode::decode_from_slice(&buffer, bincode::config::standard());
+
+                match decode_result {
                     Ok((message, size)) => {
                         let buffer = in_buffers.partially_received.remove(&id).unwrap();
                         assert_eq!(size, buffer.len());
-                        tx.send(message).await.expect("io task channel closed");
+                        if let Err(err) = tx.send(message).await {
+                            tracing::info!(?err, "io task channel closed");
+                            break;
+                        }
                     },
                     Err(DecodeError::UnexpectedEnd { .. } ) => (),
-					Err(e) => panic!("chunk decoding error: {e}"),
+                    Err(e) => {
+                        tracing::error!("chunk decoding error: {e}");
+                        break;
+                    },
                 }
             }
         }
     }
+
+    let _ = framed.close().await;
 }
