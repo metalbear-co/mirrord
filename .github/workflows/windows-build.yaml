@@ -1,4 +1,4 @@
-name: Windows tests (reuse/build & sign) + GCS upload on failure
+name: Windows tests (reuse/build & sign)
 
 on:
   workflow_dispatch:
@@ -8,14 +8,6 @@ on:
         type: choice
         options: [reuse, build_sign]
         default: reuse
-      upload_on_fail:
-        description: "Upload bundle to GCS when tests fail?"
-        type: boolean
-        default: false
-      upload_gcs_prefix:
-        description: "Subpath under BUCKET_URI to store failure bundles"
-        type: string
-        default: windows/builds-on-fail
   push:
   pull_request:
     branches: [main, "*staging*"]
@@ -25,9 +17,8 @@ permissions:
   contents: read
 
 env:
-  # GCS where we read (and optionally write) artifacts
+  # GCS where we read artifacts (used in "reuse" mode)
   BUCKET_URI: gs://mirrord-windows-builds
-  # Used in "reuse" mode to download a known set of artifacts
   ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
 
   RUST_BACKTRACE: "1"
@@ -42,10 +33,7 @@ jobs:
       run:
         shell: pwsh
     env:
-      # Map dispatch inputs into env for easy access (with safe defaults for non-dispatch triggers)
       MODE: ${{ github.event.inputs.mode || 'reuse' }}
-      UPLOAD_ON_FAIL: ${{ github.event.inputs.upload_on_fail || 'false' }}
-      UPLOAD_GCS_PREFIX: ${{ github.event.inputs.upload_gcs_prefix || 'windows/builds-on-fail' }}
 
     steps:
       - name: Checkout repo (tests need sources)
@@ -93,10 +81,9 @@ jobs:
             throw "Did not find mirrord.exe or layer DLL under $dest"
           }
 
-          # Unify the names we use everywhere from here
-          "MIRRORD_EXE=$exe"                     | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_LAYER_FILE=$dll"              | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MIRRORD_TEST_USE_EXISTING_LIB=$dll"   | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_EXE=$exe"                   | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_LAYER_FILE=$dll"            | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MIRRORD_TEST_USE_EXISTING_LIB=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
           Write-Host "Picked EXE: $exe"
           Write-Host "Picked DLL: $dll"
@@ -177,6 +164,62 @@ jobs:
             & signtool.exe verify /pa "$f"
             if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
           }
+
+      # >>> NEW STEP: uploads to gs://mirrord-windows-builds/windows/... <<<
+      - name: Build & Sign | Stage and upload signed artifacts to GCS
+        if: ${{ env.MODE == 'build_sign' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:BUCKET_URI) { throw "BUCKET_URI env is empty. Set gs://<bucket> at job.env." }
+          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+            throw "gcloud not found on PATH. Ensure the runner is authenticated."
+          }
+
+          $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
+          $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
+
+          # Resolve exe and dll
+          $exe = (Get-Item -EA SilentlyContinue (Join-Path $dbgDir 'mirrord.exe'))
+          if (-not $exe) { $exe = Get-Item -EA Stop (Join-Path $relDir 'mirrord.exe') }
+
+          $dll = $env:MIRRORD_LAYER_FILE
+          if (-not $dll -or !(Test-Path $dll)) {
+            $dll = (Get-ChildItem -Path $dbgDir -Filter 'mirrord_layer_win.dll' -EA SilentlyContinue | Select-Object -First 1).FullName
+            if (-not $dll) {
+              $dll = (Get-ChildItem -Path $relDir -Filter 'mirrord_layer_win.dll' -EA SilentlyContinue | Select-Object -First 1).FullName
+            }
+            if (-not $dll) { throw "Layer DLL not found in debug or release directories." }
+          }
+
+          # Stage
+          $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe.FullName -Destination $staging -Force
+          Copy-Item $dll        -Destination (Join-Path $staging (Split-Path $dll -Leaf)) -Force
+
+          Write-Host "Staged files:"; Get-ChildItem $staging | Format-Table Name,Length
+
+          # Checksums
+          Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll | ForEach-Object {
+            $h = Get-FileHash -Algorithm SHA256 $_.FullName
+            "$($h.Hash)  $($_.Name)" | Out-File (Join-Path $staging "$($_.Name).sha256") -Encoding ascii
+          }
+
+          $files = Get-ChildItem -Path (Join-Path $staging '*') -Include *.exe,*.dll,*.sha256 -File
+          if (-not $files) { throw "No artifacts found in $staging" }
+
+          $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
+          $sha7 = $env:GITHUB_SHA.Substring(0,7)
+          $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
+          $dest = "$($env:BUCKET_URI)/$artifactDir/"
+
+          Write-Host "Uploading to $dest"
+          foreach ($f in $files) {
+            gcloud --quiet storage cp $($f.FullName) $dest
+            if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($f.Name) (exit $LASTEXITCODE)" }
+          }
+
+          gcloud --quiet storage ls $dest
 
       # ===========================
       # === Quick smoke checks ====
@@ -369,78 +412,3 @@ jobs:
           $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
 
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
-
-      # ==================================================
-      # === Package outputs so we can upload to GCS on fail
-      # ==================================================
-      - name: Package build/downloaded outputs (for potential GCS upload)
-        if: always()
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $exe = $env:MIRRORD_EXE
-          $dll = $env:MIRRORD_LAYER_FILE
-          if (-not (Test-Path $exe)) { Write-Host "No EXE to package."; $exe = $null }
-          if (-not (Test-Path $dll)) { Write-Host "No DLL to package."; $dll = $null }
-
-          $bundle = Join-Path $env:RUNNER_TEMP 'upload_bundle'
-          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
-
-          if ($exe) {
-            Copy-Item $exe $bundle -Force
-            (Get-FileHash -Algorithm SHA256 $exe).Hash | Set-Content (Join-Path $bundle 'mirrord.exe.sha256.txt')
-          }
-          if ($dll) {
-            Copy-Item $dll $bundle -Force
-            (Get-FileHash -Algorithm SHA256 $dll).Hash | Set-Content (Join-Path $bundle 'mirrord_layer_win.dll.sha256.txt')
-          }
-
-          $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
-          if (Test-Path $sum) { Copy-Item $sum $bundle -Force }
-
-          # Compute a clean destination prefix inside the bucket
-          $ref = ${env:GITHUB_REF_NAME}
-          if (-not $ref) { $ref = 'no-ref' }
-          $safeRef = ($ref -replace '[^A-Za-z0-9._-]','_')
-          $sha7 = ${env:GITHUB_SHA}.Substring(0,7)
-          $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
-
-          $prefix = $env:UPLOAD_GCS_PREFIX
-          if (-not $prefix) { $prefix = 'windows/builds-on-fail' }
-
-          $dst = ("{0}/{1}/run-{2}-{3}/{4}/{5}" -f ($env:BUCKET_URI.TrimEnd('/')), $prefix.Trim('/'), $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT, $safeRef, $sha7)
-
-          "BUNDLE_DIR=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "GCS_UPLOAD_DST=$dst/$ts" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-          Write-Host "Prepared bundle: $bundle"
-          Write-Host "Planned GCS destination: $($env:GCS_UPLOAD_DST)"
-
-      # ==========================================
-      # === Upload to Google Cloud Storage on fail
-      # ==========================================
-      - name: Upload bundle to GCS (only on failure & enabled)
-        if: ${{ failure() && (env.UPLOAD_ON_FAIL == 'true') }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-            throw "gcloud not found on PATH. Please ensure the runner is authenticated and has gcloud installed."
-          }
-
-          if (-not $env:BUNDLE_DIR -or -not (Test-Path $env:BUNDLE_DIR)) {
-            Write-Warning "Bundle dir not found: $env:BUNDLE_DIR"
-            exit 0
-          }
-          if (-not $env:GCS_UPLOAD_DST) {
-            throw "GCS_UPLOAD_DST not set."
-          }
-
-          Write-Host "Uploading $env:BUNDLE_DIR to $env:GCS_UPLOAD_DST ..."
-          gcloud --quiet storage cp -r "$env:BUNDLE_DIR" "$env:GCS_UPLOAD_DST"
-          if ($LASTEXITCODE -ne 0) {
-            throw "gcloud storage cp failed with exit code $LASTEXITCODE"
-          }
-
-          Write-Host "Upload complete. Listing destination:"
-          gcloud --quiet storage ls "$env:GCS_UPLOAD_DST"
