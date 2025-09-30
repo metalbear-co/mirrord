@@ -1,7 +1,6 @@
 name: Windows tests (reuse prebuilt)
 
 on:
-  # trigger it like the Linux CI (and manual)
   workflow_dispatch:
   push:
   pull_request:
@@ -40,12 +39,10 @@ jobs:
           cargo -V
           rustup show
 
-      # If you want to pin the same nightly as Linux CI, uncomment:
-      # - name: Use pinned nightly like Linux CI
-      #   run: rustup default nightly-2025-08-01
+      - name: Install nightly for JSON test format
+        run: rustup toolchain install nightly-2025-08-01 --profile minimal
 
       - name: Pick Windows artifacts from GCS (robust)
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -84,104 +81,10 @@ jobs:
           Write-Host "Exported env:"
           Get-Content $env:GITHUB_ENV
 
+      # ---------- Quick smoke on the downloaded binaries ----------
 
-      - name: Quick smoke (hash + signature + --version/--help)
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = $env:MIRRORD_DOWNLOADED_EXE
-          $dll = $env:MIRRORD_LAYER_FILE
-          $base = Split-Path $exe -Parent
-          $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
-          Remove-Item $sum -ErrorAction SilentlyContinue
-
-          function Get-ExpectedSha256([string]$shaFile) {
-            if (-not (Test-Path $shaFile)) { return $null }
-            $raw = Get-Content $shaFile -Raw
-            return $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
-          }
-
-          $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
-          $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
-          if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
-
-          $exeHash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-          $dllHash = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
-          $exeExpect = Get-ExpectedSha256 $exeShaFile
-          $dllExpect = Get-ExpectedSha256 $dllShaFile
-
-          $lines = @()
-          $lines += '## Windows smoke tests'
-          $lines += ''
-          $lines += ('**Picked EXE**: `{0}`' -f $exe)
-          $lines += ('**Picked DLL**: `{0}`' -f $dll)
-          $lines += ''
-          $lines += '### SHA256'
-          if ($exeExpect) { $lines += ('- mirrord.exe:  `{0}` (expected `{1}`) -> {2}' -f $exeHash, $exeExpect, ($(if ($exeHash -eq $exeExpect) {'OK'} else {'**MISMATCH**'}))) } else { $lines += ('- mirrord.exe:  `{0}` (no .sha256 file present)' -f $exeHash) }
-          if ($dllExpect) { $lines += ('- layer dll:    `{0}` (expected `{1}`) -> {2}' -f $dllHash, $dllExpect, ($(if ($dllHash -eq $dllExpect) {'OK'} else {'**MISMATCH**'}))) } else { $lines += ('- layer dll:    `{0}` (no .sha256 file present)' -f $dllHash) }
-          $lines += ''
-
-          $lines += '### Code signing'
-          if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
-            & signtool.exe verify /pa $exe | Out-Null; $rcExe = $LASTEXITCODE
-            & signtool.exe verify /pa $dll | Out-Null; $rcDll = $LASTEXITCODE
-            $lines += ('- signtool mirrord.exe: {0}' -f ($(if ($rcExe -eq 0) {'OK'} else {"FAIL ($rcExe)"})))
-            $lines += ('- signtool layer dll:   {0}' -f ($(if ($rcDll -eq 0) {'OK'} else {"FAIL ($rcDll)"})))
-          } else {
-            $lines += '- signtool.exe not found on PATH (skipping)'
-          }
-          $lines += ''
-
-          $lines += '### CLI'
-          $versionOut = & $exe --version 2>&1; $verRc = $LASTEXITCODE
-          $helpOut = & $exe --help 2>&1;     $helpRc = $LASTEXITCODE
-          $lines += ('- `mirrord.exe --version` exit code: {0}' -f $verRc)
-          $lines += ''
-          $lines += '```'
-          $lines += $versionOut
-          $lines += '```'
-          $lines += ''
-          $lines += ('- `mirrord.exe --help` exit code: {0}' -f $helpRc)
-          $lines += ''
-          $lines += '```'
-          $lines += $helpOut
-          $lines += '```'
-          $lines += ''
-          $lines -join "`n" | Out-File -FilePath $sum -Encoding utf8
-
-      # ---------- Rust unit tests on Windows ----------
-
-      - name: mirrord-layer-win UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-layer-win
-
-      - name: mirrord protocol UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-protocol
-
-      - name: mirrord config UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-config
-
-      - name: mirrord kube UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-kube --all-features
-
-      - name: mirrord intproxy UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-intproxy
-
-      - name: mirrord auth UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-auth
-
-      - name: mirrord operator UT
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord-operator --features "crd, client"
-
-      # Build+test CLI with the downloaded DLL embedded via env! at compile time.
-      - name: mirrord CLI UT (embed the picked DLL)
-        env:
-          # These are also in $GITHUB_ENV already; keeping explicit for clarity:
-          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
-        run: cargo test --target x86_64-pc-windows-msvc -p mirrord
-
-      # ---------- Summary to Job Summary tab ----------
-      - name: Publish Windows test results (summary table, sandboxed)
+      - name: Publish Windows smoke results (hash/signing/DLL load/CLI)
         if: always()
-        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -216,7 +119,7 @@ jobs:
             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
           }
 
-          # === DLL load/unload check in a CHILD process (so crashes don't kill this step) ===
+          # === DLL load/unload check in a CHILD process (so crashes don't kill this job) ===
           $dllLoadOk = $false
           $dllCrash = $false
           $loader = @"
@@ -238,58 +141,190 @@ jobs:
           } catch { Environment.Exit(3); }
           "@
 
-              $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
-              Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
+          $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
+          Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
 
-              $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
-              $childExit = $p.ExitCode
-              if ($childExit -eq 0) { $dllLoadOk = $true }
-              # Access violation typically returns 3221225477 (0xC0000005) or -1073741819 depending on signedness
-              if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
+          $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
+          $childExit = $p.ExitCode
+          if ($childExit -eq 0) { $dllLoadOk = $true }
+          # Access violation typically 0xC0000005 => 3221225477
+          if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
 
-              # === CLI checks ===
-              $verRc = $null; $verText = ""
-              try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
-              $helpRc = $null; $helpText = ""
-              try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
+          # === CLI checks ===
+          $verRc = $null; $verText = ""
+          try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
+          $helpRc = $null; $helpText = ""
+          try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
 
-              # === Sizes ===
-              $exeSize = (Get-Item $exe).Length
-              $dllSize = (Get-Item $dll).Length
+          # === Sizes ===
+          $exeSize = (Get-Item $exe).Length
+          $dllSize = (Get-Item $dll).Length
 
-              # === Build rows ===
-              $rows = @()
-              $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
-              $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
-              $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-              $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-              $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
-              $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
-              $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
-              $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
+          # === Build rows ===
+          $rows = @()
+          $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
+          $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
+          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
+          $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
 
-              # === Emit Markdown summary ===
-              $md = @()
-              $md += '### Windows test results'
-              $md += ''
-              $md += ('**Artifact dir:** `{0}`  ' -f $env:ARTIFACT_SUBPATH)
-              $md += ('**EXE:** `{0}`  ' -f $exe)
-              $md += ('**DLL:** `{0}`' -f $dll)
-              $md += ''
-              $md += '| Check | Result | Notes |'
-              $md += '|------:|:------:|-------|'
-              foreach ($r in $rows) {
-                $c = ($r.Check  -replace '\|','\|')
-                $res = ($r.Result -replace '\|','\|')
-                $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
-                $md += "| $c | $res | $n |"
+          # === Emit Markdown summary ===
+          $md = @()
+          $md += '### Windows smoke results'
+          $md += ''
+          $md += ('**Artifact dir:** `{0}`  ' -f $env:ARTIFACT_SUBPATH)
+          $md += ('**EXE:** `{0}`  ' -f $exe)
+          $md += ('**DLL:** `{0}`' -f $dll)
+          $md += ''
+          $md += '| Check | Result | Notes |'
+          $md += '|------:|:------:|-------|'
+          foreach ($r in $rows) {
+            $c = ($r.Check  -replace '\|','\|')
+            $res = ($r.Result -replace '\|','\|')
+            $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
+            $md += "| $c | $res | $n |"
+          }
+          $md += ''
+          $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
+
+          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+
+      # ---------- Run ALL Rust tests and publish a clean pass/fail table ----------
+
+      - name: Run Rust tests (all crates) & publish full report
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $toolchain   = '+nightly-2025-08-01'
+          $target      = 'x86_64-pc-windows-msvc'
+          $logDir      = Join-Path $env:RUNNER_TEMP 'cargo-test-logs'
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+          # Define all test invocations you had as separate steps
+          $crates = @(
+            @{ name = 'mirrord-layer-win' ; args = '-p mirrord-layer-win' }
+            @{ name = 'mirrord-protocol'  ; args = '-p mirrord-protocol' }
+            @{ name = 'mirrord-config'    ; args = '-p mirrord-config' }
+            @{ name = 'mirrord-kube'      ; args = '-p mirrord-kube --all-features' }
+            @{ name = 'mirrord-intproxy'  ; args = '-p mirrord-intproxy' }
+            @{ name = 'mirrord-auth'      ; args = '-p mirrord-auth' }
+            @{ name = 'mirrord-operator'  ; args = '-p mirrord-operator --features "crd, client"' }
+            @{ name = 'mirrord (CLI)'     ; args = '-p mirrord' } # uses MIRRORD_LAYER_FILE from env
+          )
+
+          $report = @()
+          $overallPassed = 0
+          $overallFailed = 0
+          $overallIgnored = 0
+          $overallTime = 0.0
+
+          foreach ($c in $crates) {
+            $name = $c.name
+            $args = $c.args
+            $log  = Join-Path $logDir ("{0}.log" -f ($name -replace '[^\w\.-]','_'))
+
+            Write-Host "=== Running tests for $name ==="
+            $cmd = "cargo $toolchain test --target $target $args -- -Z unstable-options --format json"
+            Write-Host $cmd
+            cmd /c "$cmd" 2>&1 | Tee-Object -FilePath $log | Out-Null
+            $exit = $LASTEXITCODE
+
+            # Parse JSON lines from the log
+            $passed = 0; $failed = 0; $ignored = 0; $filtered = 0; $measured = 0; $time = 0.0
+            $failedTests = New-Object System.Collections.Generic.List[string]
+
+            Get-Content $log | ForEach-Object {
+              $line = $_
+              if (-not $line.TrimStart().StartsWith('{')) { return }
+              try {
+                $o = $line | ConvertFrom-Json
+              } catch { return }
+
+              if ($o.type -eq 'test' -and $o.event -eq 'failed') {
+                $failedTests.Add([string]$o.name)
               }
-              $md += ''
-              $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
+              if ($o.type -eq 'suite' -and ($o.event -eq 'ok' -or $o.event -eq 'failed')) {
+                $passed     += [int]$o.passed
+                $failed     += [int]$o.failed
+                $ignored    += [int]$o.ignored
+                $filtered   += [int]$o.filtered_out
+                $measured   += [int]$o.measured
+                $time       += [double]$o.exec_time
+              }
+            }
 
-              $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+            if ($exit -ne 0 -and ($passed + $failed + $ignored) -eq 0) {
+              # Nonzero exit but no parsed suite summary => mark as 1 failure so it's visible
+              $failed = 1
+            }
 
+            $overallPassed += $passed
+            $overallFailed += $failed
+            $overallIgnored += $ignored
+            $overallTime += $time
 
+            $status = if ($failed -gt 0 -or $exit -ne 0) { '❌' } else { '✅' }
+
+            $report += [pscustomobject]@{
+              Crate    = $name
+              Passed   = $passed
+              Failed   = $failed
+              Ignored  = $ignored
+              Time     = ('{0:F2}s' -f $time)
+              Status   = $status
+              FailList = ($failedTests -join ', ')
+              ExitCode = $exit
+              LogPath  = $log
+            }
+          }
+
+          # Build Markdown table
+          $md = @()
+          $md += '## Windows Rust test results'
+          $md += ''
+          $md += '| Crate | Passed | Failed | Ignored | Time | Status |'
+          $md += '|:------|------:|------:|--------:|-----:|:------:|'
+          foreach ($r in $report) {
+            $md += ('| {0} | {1} | {2} | {3} | {4} | {5} |' -f $r.Crate, $r.Passed, $r.Failed, $r.Ignored, $r.Time, $r.Status)
+          }
+          $md += ('| **Total** | **{0}** | **{1}** | **{2}** | **{3:F2}s** |  |' -f $overallPassed, $overallFailed, $overallIgnored, $overallTime)
+          $md += ''
+
+          foreach ($r in $report | Where-Object { $_.Failed -gt 0 -and $_.FailList }) {
+            $md += "<details><summary>Failed tests: <strong>$($r.Crate)</strong></summary>"
+            $md += ''
+            $md += '```'
+            ($r.FailList -split ', ') | ForEach-Object { if ($_ -ne '') { $md += $_ } }
+            $md += '```'
+            $md += ''
+            $md += '</details>'
+            $md += ''
+          }
+
+          $md += '<sub>Per-crate logs are attached as a workflow artifact.</sub>'
+          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+
+          # Export a machine-readable JSON summary too
+          $summaryPath = Join-Path $logDir 'summary.json'
+          $report | ConvertTo-Json -Depth 4 | Out-File -FilePath $summaryPath -Encoding UTF8
+
+          # Fail the job if any test failed
+          if ($overallFailed -gt 0) {
+            Write-Host "Some tests failed."
+            exit 1
+          } else {
+            Write-Host "All tests passed."
+          }
+
+      - name: Upload test logs (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cargo-test-logs
+          path: ${{ runner.temp }}/cargo-test-logs
 
 
 
