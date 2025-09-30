@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub struct MirrordClusterSessionSpec {
     /// Resources needed to report session metrics to the mirrord Jira app.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub jira_metrics_resources: Option<JiraMetricsResources>,
+    pub jira_metrics: Option<SessionJiraMetrics>,
 
     /// Owner of this session
     pub owner: SessionOwner,
@@ -60,7 +60,7 @@ pub struct SessionTarget {
 /// Resources needed to report session metrics to the mirrord Jira app.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct JiraMetricsResources {
+pub struct SessionJiraMetrics {
     /// The user's current git branch.
     pub branch_name: String,
 }
