@@ -9,6 +9,10 @@ on:
         type: choice
         options: [gcs, build]
         default: gcs
+      upload_on_fail:
+        description: 'If the job fails, upload the built/downloaded EXE/DLL as a GitHub artifact'
+        type: boolean
+        default: false
       bucket_uri:
         description: 'GCS bucket override (e.g., gs://mirrord-windows-builds)'
         required: false
@@ -39,8 +43,9 @@ jobs:
       run:
         shell: pwsh
     env:
-      # default to GCS unless workflow_dispatch overrides it
+      # toggles with sane defaults
       WINDOWS_SOURCE: gcs
+      UPLOAD_ON_FAIL: "false"
 
     steps:
       - name: Checkout repo (tests need sources)
@@ -54,6 +59,9 @@ jobs:
         run: |
           if ("${{ github.event.inputs.source }}" -ne "") {
             "WINDOWS_SOURCE=${{ github.event.inputs.source }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+          if ("${{ github.event.inputs.upload_on_fail }}" -ne "") {
+            "UPLOAD_ON_FAIL=${{ github.event.inputs.upload_on_fail }}" | Out-File -FilePath $env:GITHUB_ENV -Append
           }
           if ("${{ github.event.inputs.bucket_uri }}" -ne "") {
             "BUCKET_URI=${{ github.event.inputs.bucket_uri }}" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -412,3 +420,47 @@ jobs:
           $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
 
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+
+      # ---------- Upload builds only if the job failed AND toggle is on ----------
+      - name: Package build/downloaded outputs (only on failure & enabled)
+        if: ${{ failure() && env.UPLOAD_ON_FAIL == 'true' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:RUNNER_TEMP 'upload_bundle'
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+
+          $exe = $env:MIRRORD_DOWNLOADED_EXE
+          $dll = $env:MIRRORD_LAYER_FILE
+          $sum = Join-Path $env:RUNNER_TEMP 'layer_win_summary.txt'
+
+          # Copy main binaries
+          if (Test-Path $exe) { Copy-Item $exe -Destination (Join-Path $bundle (Split-Path $exe -Leaf)) -Force }
+          if (Test-Path $dll) { Copy-Item $dll -Destination (Join-Path $bundle (Split-Path $dll -Leaf)) -Force }
+
+          # Copy any nearby .pdb and .sha256 files (if present)
+          $exeDir = Split-Path $exe -Parent
+          $dllDir = Split-Path $dll -Parent
+          Get-ChildItem $exeDir -File -Include '*.pdb','*.sha256' -ErrorAction SilentlyContinue | Copy-Item -Destination $bundle -Force
+          if ($dllDir -ne $exeDir) {
+            Get-ChildItem $dllDir -File -Include '*.pdb','*.sha256' -ErrorAction SilentlyContinue | Copy-Item -Destination $bundle -Force
+          }
+
+          # Add quick hashes
+          $hashFile = Join-Path $bundle 'hashes.txt'
+          if (Test-Path $exe) { "mirrord.exe  = $((Get-FileHash -Algorithm SHA256 $exe).Hash)" | Out-File -FilePath $hashFile -Append -Encoding UTF8 }
+          if (Test-Path $dll) { "$(Split-Path $dll -Leaf) = $((Get-FileHash -Algorithm SHA256 $dll).Hash)" | Out-File -FilePath $hashFile -Append -Encoding UTF8 }
+
+          # Add the smoke summary if present
+          if (Test-Path $sum) { Copy-Item $sum -Destination (Join-Path $bundle 'smoke_summary.md') -Force }
+
+          Write-Host "Bundle contents:"
+          Get-ChildItem $bundle -File | Format-Table Name,Length
+
+      - name: Upload builds (only on failure & enabled)
+        if: ${{ failure() && env.UPLOAD_ON_FAIL == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds-on-fail-${{ github.run_id }}
+          path: ${{ runner.temp }}\upload_bundle
+          if-no-files-found: warn
+          retention-days: 7
