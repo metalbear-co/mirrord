@@ -220,6 +220,28 @@ jobs:
           }
 
           gcloud --quiet storage ls $dest
+          
+      - name: Ensure .sha256 files exist next to artifacts (for smoke)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = $env:MIRRORD_EXE
+          $dll = $env:MIRRORD_LAYER_FILE
+
+          foreach ($f in @($exe, $dll)) {
+            if (-not $f -or -not (Test-Path $f)) { continue }
+
+            $dir  = Split-Path $f -Parent
+            $leaf = Split-Path $f -Leaf
+            $shaPath = Join-Path $dir ($leaf + '.sha256')
+
+            if (-not (Test-Path $shaPath) -or ((Get-Item $shaPath).Length -eq 0)) {
+              $hash = (Get-FileHash -Algorithm SHA256 $f).Hash
+              "$hash  $leaf" | Out-File -FilePath $shaPath -Encoding ascii
+              Write-Host "Wrote $shaPath"
+            } else {
+              Write-Host "Found existing $shaPath"
+            }
+          }
 
       # ===========================
       # === Quick smoke checks ====
