@@ -15,13 +15,10 @@ pub struct MirrordClusterSessionSpec {
     /// Resources needed to report session metrics to the mirrord Jira app.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jira_metrics: Option<SessionJiraMetrics>,
-
     /// Owner of this session
     pub owner: SessionOwner,
-
     /// Kubernetes namespace of the session.
     pub namespace: String,
-
     /// Target of the session.
     ///
     /// None for targetless sessions.
@@ -71,4 +68,18 @@ pub struct SessionJiraMetrics {
 pub struct MirrordClusterSessionStatus {
     /// Last time when the session was observed to have an open user connection.
     pub connected_timestamp: Option<MicroTime>,
+    /// If the session has been closed, describes the reason.
+    pub closed: Option<SessionClosed>,
+}
+
+/// Describes the reason for with a mirrord session was closed.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClosed {
+    /// Time when the session was closed.
+    pub timestamp: MicroTime,
+    /// Short reason in PascalCase.
+    pub reason: String,
+    /// Optional human friendly message.
+    pub message: Option<String>,
 }
