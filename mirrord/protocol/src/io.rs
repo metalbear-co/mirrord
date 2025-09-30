@@ -92,6 +92,8 @@ impl ProtocolEndpoint for Agent {
     async fn negotiate<IO: AsyncIO>(
         io: &mut Framed<IO, Self::Codec>,
     ) -> Result<(Mode, Version), ProtocolError> {
+		// REVIEW: Handle non-switchprotocolversion first messages
+		// REVIEW: Fix multiple switchprotocolversions taking place
         let client_version = match io.next().await {
             None => {
                 return Err(io::Error::new(
