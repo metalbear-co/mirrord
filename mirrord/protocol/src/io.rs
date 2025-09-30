@@ -250,7 +250,7 @@ impl OutMessage {
 }
 
 /// REVIEW make this configurable
-const CHUNK_SIZE: u32 = 1024 * 64;
+const CHUNK_SIZE: u32 = 1024 * 256;
 
 impl Iterator for OutMessage {
     type Item = Chunk;
@@ -360,8 +360,10 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
                     break;
                 };
 
+				let encoded = OutMessage::encode(to_send, tx_id);
+
                 // Dumb
-                for chunk in OutMessage::encode(&to_send, tx_id) {
+                for chunk in encoded {
                     if let Err(err) = framed.send(chunk).await {
                         tracing::error!(?err, "failed to send encoded chunk");
                         break;
@@ -392,6 +394,7 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
                     .or_default();
                 buffer.extend_from_slice(&payload);
 
+				drop(payload);
 
                 let decode_result = bincode::decode_from_slice(&buffer, bincode::config::standard());
 
@@ -399,6 +402,8 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
                     Ok((message, size)) => {
                         let buffer = in_buffers.partially_received.remove(&id).unwrap();
                         assert_eq!(size, buffer.len());
+						drop(buffer);
+
                         if let Err(err) = tx.send(message).await {
                             tracing::info!(?err, "io task channel closed");
                             break;
