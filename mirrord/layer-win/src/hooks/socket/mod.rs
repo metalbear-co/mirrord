@@ -36,11 +36,9 @@ use winapi::{
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
-    um::{
-        winsock2::{
-            HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT,
-            WSAGetLastError, WSASetLastError, fd_set, timeval,
-        },
+    um::winsock2::{
+        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT, WSAGetLastError,
+        WSASetLastError, fd_set, timeval,
     },
     // ws2tcpip::{GetNameInfoW, socklen_t},
 };
@@ -56,10 +54,7 @@ use self::{
         MANAGED_ADDRINFO, free_managed_addrinfo, handle_hostname_ansi, handle_hostname_unicode,
         is_remote_hostname, windows_getaddrinfo,
     },
-    ops::{
-        WSABufferData, get_connectex_original, hook_connectex_extension,
-        log_connection_result,
-    },
+    ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
     state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
     utils::{ManagedAddrInfoAny, SocketAddrExtWin, create_thread_local_hostent},
 };

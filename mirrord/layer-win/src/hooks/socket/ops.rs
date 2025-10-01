@@ -75,11 +75,7 @@ pub fn get_connectex_original() -> Option<ConnectExFn> {
     CONNECTEX_ORIGINAL.get().copied()
 }
 
-unsafe fn write_connectex_pointer(
-    buffer: *mut c_void,
-    len: u32,
-    detour: LPFN_CONNECTEX,
-) -> bool {
+unsafe fn write_connectex_pointer(buffer: *mut c_void, len: u32, detour: LPFN_CONNECTEX) -> bool {
     if buffer.is_null() || (len as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
         return false;
     }
@@ -125,16 +121,10 @@ pub unsafe fn hook_connectex_extension(
         });
         tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
 
-        if unsafe {
-            write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement)
-        } {
-            tracing::trace!(
-                "wsa_ioctl_detour -> substituted ConnectEx pointer with detour"
-            );
+        if unsafe { write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement) } {
+            tracing::trace!("wsa_ioctl_detour -> substituted ConnectEx pointer with detour");
         } else {
-            tracing::warn!(
-                "wsa_ioctl_detour -> failed to write ConnectEx detour pointer"
-            );
+            tracing::warn!("wsa_ioctl_detour -> failed to write ConnectEx detour pointer");
         }
     }
 }
