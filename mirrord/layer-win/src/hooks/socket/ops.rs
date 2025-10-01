@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr, ToSocketAddrs},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
@@ -18,15 +18,132 @@ use mirrord_layer_lib::{
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use winapi::{
+    ctypes::c_void,
     shared::{
-        minwindef::INT,
+        guiddef::GUID,
+        minwindef::{BOOL, INT},
         ws2def::{SOCKADDR, WSABUF},
     },
-    um::winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
+    um::{
+        minwinbase::OVERLAPPED,
+        mswsock::{LPFN_CONNECTEX, WSAID_CONNECTEX},
+        winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
+    },
 };
 use windows_strings::PCWSTR;
 
 use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
+
+#[derive(Clone, Copy)]
+pub struct GuidWrapper(pub GUID);
+
+impl GuidWrapper {
+    pub fn from_buffer(buffer: *mut c_void, len: u32) -> Option<Self> {
+        if buffer.is_null() || len as usize != std::mem::size_of::<GUID>() {
+            return None;
+        }
+
+        Some(Self(unsafe { *(buffer as *const GUID) }))
+    }
+
+    pub fn equals(&self, other: &GUID) -> bool {
+        unsafe {
+            std::slice::from_raw_parts(
+                &self.0 as *const GUID as *const u8,
+                std::mem::size_of::<GUID>(),
+            ) == std::slice::from_raw_parts(
+                other as *const GUID as *const u8,
+                std::mem::size_of::<GUID>(),
+            )
+        }
+    }
+}
+
+pub unsafe fn read_connectex_pointer(buffer: *mut c_void, len: u32) -> Option<LPFN_CONNECTEX> {
+    if buffer.is_null() || (len as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
+        None
+    } else {
+        Some(unsafe { *(buffer as *mut LPFN_CONNECTEX) })
+    }
+}
+
+type ConnectExFn = unsafe extern "system" fn(
+    SOCKET,
+    *const SOCKADDR,
+    INT,
+    *mut c_void,
+    u32,
+    *mut u32,
+    *mut OVERLAPPED,
+) -> BOOL;
+
+static CONNECTEX_ORIGINAL: OnceLock<ConnectExFn> = OnceLock::new();
+
+pub fn store_connectex_original(ptr: LPFN_CONNECTEX) -> bool {
+    if let Some(func) = ptr {
+        CONNECTEX_ORIGINAL.set(func).is_ok()
+    } else {
+        false
+    }
+}
+
+pub fn get_connectex_original() -> Option<ConnectExFn> {
+    CONNECTEX_ORIGINAL.get().copied()
+}
+
+pub unsafe fn handle_connectex_extension_pointer(
+    lpv_in_buffer: *mut c_void,
+    cb_in_buffer: u32,
+    lpv_out_buffer: *mut c_void,
+    cb_out_buffer: u32,
+    replacement: LPFN_CONNECTEX,
+) {
+    if let Some(requested_guid) = GuidWrapper::from_buffer(lpv_in_buffer, cb_in_buffer) {
+        if requested_guid.equals(&WSAID_CONNECTEX) {
+            match unsafe { read_connectex_pointer(lpv_out_buffer, cb_out_buffer) } {
+                Some(original_ptr) => {
+                    if store_connectex_original(original_ptr) {
+                        tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
+                    }
+
+                    if unsafe {
+                        write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement)
+                    } {
+                        tracing::trace!(
+                            "wsa_ioctl_detour -> substituted ConnectEx pointer with detour"
+                        );
+                    } else {
+                        tracing::warn!(
+                            "wsa_ioctl_detour -> failed to write ConnectEx detour pointer"
+                        );
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        "wsa_ioctl_detour -> insufficient output buffer for ConnectEx pointer (size: {})",
+                        cb_out_buffer
+                    );
+                }
+            }
+        }
+    }
+}
+
+pub unsafe fn write_connectex_pointer(
+    buffer: *mut c_void,
+    len: u32,
+    detour: LPFN_CONNECTEX,
+) -> bool {
+    if buffer.is_null() || (len as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
+        return false;
+    }
+
+    unsafe {
+        let target_ptr = buffer as *mut LPFN_CONNECTEX;
+        *target_ptr = detour;
+    }
+    true
+}
 
 /// Wrapper around Windows WSABUF array for safe buffer handling
 #[derive(Debug)]
