@@ -1851,11 +1851,9 @@ unsafe extern "system" fn getsockopt_detour(
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
-    println!("HOOK INIT DEBUG: Initializing socket hooks");
     let enabled_remote_dns = layer_setup().remote_dns_enabled();
 
     // Register core socket operations
-    println!("HOOK INIT DEBUG: Installing socket hook");
     apply_hook!(
         guard,
         "ws2_32",
