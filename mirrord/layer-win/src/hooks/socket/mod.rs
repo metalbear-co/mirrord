@@ -37,7 +37,6 @@ use winapi::{
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
     um::{
-        synchapi::SetEvent,
         winsock2::{
             HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT,
             WSAGetLastError, WSASetLastError, fd_set, timeval,
@@ -58,7 +57,7 @@ use self::{
         is_remote_hostname, windows_getaddrinfo,
     },
     ops::{
-        WSABufferData, get_connectex_original, handle_connectex_extension_pointer,
+        WSABufferData, get_connectex_original, hook_connectex_extension,
         log_connection_result,
     },
     state::{proxy_bind, register_accepted_socket, register_windows_socket, setup_listening},
@@ -787,7 +786,7 @@ unsafe extern "system" fn wsa_ioctl_detour(
 
     if result == ERROR_SUCCESS_I32 && dwIoControlCode == SIO_GET_EXTENSION_FUNCTION_POINTER {
         unsafe {
-            handle_connectex_extension_pointer(
+            hook_connectex_extension(
                 lpvInBuffer,
                 cbInBuffer,
                 lpvOutBuffer,
@@ -946,7 +945,7 @@ unsafe extern "system" fn connectex_detour(
             original_connectex(
                 s,
                 addr.as_ptr() as *const SOCKADDR,
-                addr.len() as i32,
+                addr.len(),
                 lpSendBuffer,
                 dwSendDataLength,
                 lpdwBytesSent,
@@ -970,7 +969,7 @@ unsafe extern "system" fn connectex_detour(
             ConnectResult::new(SOCKET_ERROR, Some(last_error))
         }
     };
-    
+
     if !is_managed {
         tracing::debug!(
             "connectex_detour -> socket {} not managed, using original with unified connect_fn",

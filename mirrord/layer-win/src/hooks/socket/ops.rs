@@ -59,14 +59,6 @@ impl GuidWrapper {
     }
 }
 
-pub unsafe fn read_connectex_pointer(buffer: *mut c_void, len: u32) -> Option<LPFN_CONNECTEX> {
-    if buffer.is_null() || (len as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
-        None
-    } else {
-        Some(unsafe { *(buffer as *mut LPFN_CONNECTEX) })
-    }
-}
-
 type ConnectExFn = unsafe extern "system" fn(
     SOCKET,
     *const SOCKADDR,
@@ -79,57 +71,11 @@ type ConnectExFn = unsafe extern "system" fn(
 
 static CONNECTEX_ORIGINAL: OnceLock<ConnectExFn> = OnceLock::new();
 
-pub fn store_connectex_original(ptr: LPFN_CONNECTEX) -> bool {
-    if let Some(func) = ptr {
-        CONNECTEX_ORIGINAL.set(func).is_ok()
-    } else {
-        false
-    }
-}
-
 pub fn get_connectex_original() -> Option<ConnectExFn> {
     CONNECTEX_ORIGINAL.get().copied()
 }
 
-pub unsafe fn handle_connectex_extension_pointer(
-    lpv_in_buffer: *mut c_void,
-    cb_in_buffer: u32,
-    lpv_out_buffer: *mut c_void,
-    cb_out_buffer: u32,
-    replacement: LPFN_CONNECTEX,
-) {
-    if let Some(requested_guid) = GuidWrapper::from_buffer(lpv_in_buffer, cb_in_buffer) {
-        if requested_guid.equals(&WSAID_CONNECTEX) {
-            match unsafe { read_connectex_pointer(lpv_out_buffer, cb_out_buffer) } {
-                Some(original_ptr) => {
-                    if store_connectex_original(original_ptr) {
-                        tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
-                    }
-
-                    if unsafe {
-                        write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement)
-                    } {
-                        tracing::trace!(
-                            "wsa_ioctl_detour -> substituted ConnectEx pointer with detour"
-                        );
-                    } else {
-                        tracing::warn!(
-                            "wsa_ioctl_detour -> failed to write ConnectEx detour pointer"
-                        );
-                    }
-                }
-                None => {
-                    tracing::warn!(
-                        "wsa_ioctl_detour -> insufficient output buffer for ConnectEx pointer (size: {})",
-                        cb_out_buffer
-                    );
-                }
-            }
-        }
-    }
-}
-
-pub unsafe fn write_connectex_pointer(
+unsafe fn write_connectex_pointer(
     buffer: *mut c_void,
     len: u32,
     detour: LPFN_CONNECTEX,
@@ -143,6 +89,54 @@ pub unsafe fn write_connectex_pointer(
         *target_ptr = detour;
     }
     true
+}
+
+pub unsafe fn hook_connectex_extension(
+    lpv_in_buffer: *mut c_void,
+    cb_in_buffer: u32,
+    lpv_out_buffer: *mut c_void,
+    cb_out_buffer: u32,
+    replacement: LPFN_CONNECTEX,
+) {
+    if let Some(requested_guid) = GuidWrapper::from_buffer(lpv_in_buffer, cb_in_buffer) {
+        if !requested_guid.equals(&WSAID_CONNECTEX) {
+            return;
+        }
+
+        if (cb_out_buffer as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
+            tracing::warn!(
+                "wsa_ioctl_detour -> insufficient output buffer for ConnectEx pointer (size: {})",
+                cb_out_buffer
+            );
+            return;
+        }
+
+        let original_ptr = unsafe { *(lpv_out_buffer as *mut LPFN_CONNECTEX) };
+        if original_ptr.is_none() {
+            tracing::error!("wsa_ioctl_detour -> ConnectEx original pointer is null");
+            return;
+        }
+
+        CONNECTEX_ORIGINAL.set(original_ptr.unwrap()).unwrap_or_else(|curr_val| {
+            tracing::warn!(
+                "wsa_ioctl_detour -> ConnectEx original pointer was already set (addr: {:p}), overwriting it.",
+                curr_val as *const ()
+            );
+        });
+        tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
+
+        if unsafe {
+            write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement)
+        } {
+            tracing::trace!(
+                "wsa_ioctl_detour -> substituted ConnectEx pointer with detour"
+            );
+        } else {
+            tracing::warn!(
+                "wsa_ioctl_detour -> failed to write ConnectEx detour pointer"
+            );
+        }
+    }
 }
 
 /// Wrapper around Windows WSABUF array for safe buffer handling
