@@ -54,8 +54,9 @@ pub static MANAGED_HANDLES: Lazy<RwLock<HashMap<MirrordHandle, Arc<RwLock<Handle
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Keeps track of latest handle.
-static HANDLE_COUNTER: AtomicUsize =
-    AtomicUsize::new(unsafe { std::mem::transmute(MIRRORD_FIRST_MANAGED_HANDLE.0) });
+static HANDLE_COUNTER: AtomicUsize = AtomicUsize::new(unsafe {
+    std::mem::transmute::<*mut winapi::ctypes::c_void, usize>(MIRRORD_FIRST_MANAGED_HANDLE.0)
+});
 
 /// The data behind a [`MirrordHandle`].
 pub struct HandleContext {
@@ -68,10 +69,13 @@ pub struct HandleContext {
     /// Windows file attributes
     pub file_attributes: ULONG,
     /// Windows share access
+    #[allow(dead_code)]
     pub share_access: ULONG,
     /// Windows create disposition
+    #[allow(dead_code)]
     pub create_disposition: ULONG,
     /// Windows create options
+    #[allow(dead_code)]
     pub create_options: ULONG,
     /// Creation time as [`FILETIME`]
     pub creation_time: FILETIME,

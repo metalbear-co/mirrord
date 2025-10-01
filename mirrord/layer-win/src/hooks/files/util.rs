@@ -104,6 +104,7 @@ impl WindowsTime {
     }
 
     /// Get current Windows time as [`SYSTEMTIME`].
+    #[allow(dead_code)]
     pub fn as_system_time(&self) -> SYSTEMTIME {
         self.time
     }

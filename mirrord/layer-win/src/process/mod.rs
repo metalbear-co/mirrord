@@ -26,6 +26,7 @@ pub fn get_module_base<T: AsRef<str>>(module: T) -> *mut c_void {
 ///
 /// * `module` - Name of the module to look for exports in.
 /// * `export` - Name of export to look for (function/variable/...).
+///
 /// Retrieve an export from module. `NULL` is returned if not found.
 ///
 /// # Arguments
