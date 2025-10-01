@@ -965,107 +965,90 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    if !is_managed {
-        tracing::debug!(
-            "connectex_detour -> socket {} not managed, using original with unified connect_fn",
-            s
-        );
-        // For unmanaged sockets, call connect_fn directly with the original target address
-        let connect_result = connect_fn(s, raw_addr);
-        let error_opt = connect_result.error();
-        let result_code: i32 = connect_result.into();
-
-        if result_code == ERROR_SUCCESS_I32 {
-            return TRUE;
-        } else {
-            // Set last error if provided and return FALSE
-            if let Some(error) = error_opt {
-                unsafe {
-                    WSASetLastError(error);
-                }
-            }
-            return FALSE;
-        }
-    }
+    if !is_managed {}
 
     // For managed sockets, use attempt_proxy_connection which will call connect_fn with proxy
     // address
-    match ops::attempt_proxy_connection(s, name, namelen, "connectex_detour", connect_fn) {
-        Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
-            tracing::error!(
-                "connectex_detour -> socket {} connect target {:?} is unreachable: {}",
-                s,
-                raw_addr,
-                e
-            );
-            unsafe { WSASetLastError(WSAEFAULT) };
-            return FALSE;
-        }
-        Err(_) => {
-            tracing::debug!(
-                "connectex_detour -> socket {} proxy connection setup failed, using original with unified connect_fn",
-                s
-            );
-            // Fall back to direct connection using the same connect_fn
-            let connect_result = connect_fn(s, raw_addr);
-            let error_opt = connect_result.error();
-            let result_code: i32 = connect_result.into();
-
-            if result_code == ERROR_SUCCESS_I32 {
-                return TRUE;
-            } else {
-                if let Some(error) = error_opt {
-                    unsafe {
-                        WSASetLastError(error);
-                    }
-                }
-                return FALSE;
-            }
-        }
-        Ok(connect_result) => {
-            tracing::debug!(
-                "connectex_detour -> proxy connection result: {:?}",
-                connect_result
-            );
-
-            // Handle the proxy connection result
-            let error_opt = connect_result.error();
-            let result_code: i32 = connect_result.into();
-            tracing::debug!(
-                "connectex_detour -> proxy connection result: {}",
-                result_code
-            );
-
-            if result_code == ERROR_SUCCESS_I32 {
-                return TRUE;
-            } else if error_opt == Some(WSA_IO_PENDING) {
-                // CRITICAL: For local proxy connections, WSA_IO_PENDING usually completes very
-                // quickly Try to wait a short time for completion rather than
-                // returning async
-                tracing::info!(
-                    "connectex_detour -> socket {} ConnectEx to proxy returned WSA_IO_PENDING, attempting immediate completion check",
-                    s
+    if is_managed {
+        match ops::attempt_proxy_connection(s, name, namelen, "connectex_detour", connect_fn) {
+            Ok(connect_result) => {
+                tracing::debug!(
+                    "connectex_detour -> proxy connection result: {:?}",
+                    connect_result
                 );
 
-                // For now, return as async but with special handling
-                unsafe {
-                    WSASetLastError(WSA_IO_PENDING);
-                }
-                return FALSE;
-            } else {
-                // For async operations, set the last error and return FALSE
-                if let Some(error) = error_opt {
-                    unsafe {
-                        WSASetLastError(error);
-                    }
-                    tracing::debug!(
-                        "connectex_detour -> set last error to {} for async operation",
-                        error
+                // Handle the proxy connection result
+                let error_opt = connect_result.error();
+                let result_code: i32 = connect_result.into();
+                tracing::debug!(
+                    "connectex_detour -> proxy connection result: {}",
+                    result_code
+                );
+
+                if result_code == ERROR_SUCCESS_I32 {
+                    return TRUE;
+                } else if error_opt == Some(WSA_IO_PENDING) {
+                    tracing::info!(
+                        "connectex_detour -> socket {} ConnectEx to proxy returned WSA_IO_PENDING, attempting immediate completion check",
+                        s
                     );
+                    unsafe {
+                        WSASetLastError(WSA_IO_PENDING);
+                    }
+                    return FALSE;
+                } else {
+                    // For async operations, set the last error and return FALSE
+                    if let Some(error) = error_opt {
+                        unsafe {
+                            WSASetLastError(error);
+                        }
+                        tracing::debug!(
+                            "connectex_detour -> set last error to {} for async operation",
+                            error
+                        );
+                    }
+                    return FALSE;
                 }
+            }
+            Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
+                tracing::error!(
+                    "connectex_detour -> socket {} connect target {:?} is unreachable: {}",
+                    s,
+                    raw_addr,
+                    e
+                );
+                unsafe { WSASetLastError(WSAEFAULT) };
                 return FALSE;
             }
+            Err(e) => {
+                tracing::debug!(
+                    "connectex_detour -> socket {} proxy connection setup failed, err: {}",
+                    s,
+                    e
+                );
+                // Fall back to direct connection using the same connect_fn
+            }
         }
+    } else {
+        tracing::debug!("connectex_detour -> socket {} not managed", s);
+        // For unmanaged sockets, call connect_fn directly with the original target address
+    }
+
+    tracing::debug!("connectex_detour -> using original for socket {}", s);
+    let connect_result = connect_fn(s, raw_addr);
+    let error_opt = connect_result.error();
+    let result_code: i32 = connect_result.into();
+
+    if result_code == ERROR_SUCCESS_I32 {
+        TRUE
+    } else {
+        // Set last error if provided and return FALSE
+        if let Some(error) = error_opt {
+            unsafe {
+                WSASetLastError(error);
+            }
+        }
+        FALSE
     }
 }
 
