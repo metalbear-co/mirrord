@@ -965,8 +965,6 @@ unsafe extern "system" fn connectex_detour(
         }
     };
 
-    if !is_managed {}
-
     // For managed sockets, use attempt_proxy_connection which will call connect_fn with proxy
     // address
     if is_managed {
