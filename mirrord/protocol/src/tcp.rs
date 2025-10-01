@@ -100,6 +100,13 @@ pub enum DaemonTcp {
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
     HttpRequestChunked(ChunkedRequest),
     NewConnectionV2(NewTcpConnectionV2),
+
+    /// HTTP requests that have been bypassed when using an [`HttpFilter`] (the request does **not**
+    /// match any of the filters).
+    ///
+    /// Used by the operator's `mirrord_bypassed_requests_count`, largely ignored by mirrord itself
+    /// (currently we just log it).
+    HttpRequestBypassed(#[bincode(with_serde)] HttpRequestBypassed),
 }
 
 /// Contents of a chunked message from server.
@@ -499,6 +506,10 @@ pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
 pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that sends the [`DaemonTcp::HttpRequestBypassed`] message.
+pub static MIRRORD_HTTP_REQUEST_BYPASSED_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
+
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -537,6 +548,30 @@ impl<B> HttpRequest<B> {
             },
         }
     }
+}
+
+/// HTTP requests that have been bypassed when using an [`HttpFilter`] (the request does **not**
+/// match any of the filters).
+///
+/// Contains some request information that can be useful to compare with the setup of a user's
+/// [`HttpFilter`], e.g. seeing the amount of requests that's being ignored because they don't match
+/// a user's [`HttpFilter::Method`] filter.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct HttpRequestBypassed {
+    /// [`HttpFilter::Method`] supports filtering on HTTP method.
+    #[serde(with = "http_serde::method")]
+    pub method: Method,
+
+    /// [`HttpFilter::Path`] supports filtering on HTTP path.
+    #[serde(with = "http_serde::uri")]
+    pub uri: Uri,
+
+    /// [`HttpFilter::Header`] supports filtering on HTTP headers.
+    #[serde(with = "http_serde::header_map")]
+    pub headers: HeaderMap,
+
+    /// The original target of this request.
+    pub original_destination: SocketAddr,
 }
 
 /// (De-)Serializable HTTP response.
