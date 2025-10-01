@@ -924,53 +924,24 @@ unsafe extern "system" fn connectex_detour(
     };
     let raw_addr = SockAddr::from(socket_addr);
 
-    // Check if this socket is managed by mirrord - if not, use original ConnectEx
+    // Check if this socket is managed
     let is_managed = is_socket_managed(s);
-    if !is_managed {
-        tracing::debug!(
-            "connectex_detour -> socket {} not managed, using original",
-            s
-        );
-        let success = unsafe {
-            original_connectex(
-                s,
-                raw_addr.as_ptr() as *const _,
-                raw_addr.len(),
-                lpSendBuffer,
-                dwSendDataLength,
-                lpdwBytesSent,
-                lpOverlapped,
-            )
-        };
 
-        let last_error = unsafe { WSAGetLastError() };
-        tracing::debug!(
-            "connectex_detour -> original result: success={}, last_error={}",
-            success != FALSE,
-            last_error
-        );
-
-        return success;
-    }
-
-    // For managed sockets, connect to the local proxy endpoint using original ConnectEx
+    // Unified connect function for both managed and unmanaged sockets
     let connect_fn = |socket_descriptor: SocketDescriptor, addr: SockAddr| {
-        tracing::debug!(
-            "connectex_detour connect_fn -> establishing connection for socket {} to proxy at {:?}",
-            socket_descriptor,
-            addr
-        );
-
-        // Get the original ConnectEx function to connect to the proxy
-        let original_connectex = match ops::get_connectex_original() {
-            Some(func) => func,
-            None => {
-                tracing::error!("connectex_detour connect_fn -> original ConnectEx not available");
-                return ConnectResult::new(SOCKET_ERROR, Some(WSAEFAULT));
-            }
+        let addr_description = if is_managed {
+            format!("proxy at {:?}", addr)
+        } else {
+            format!("target at {:?}", addr)
         };
 
-        // Connect to the proxy address using original ConnectEx
+        tracing::debug!(
+            "connectex_detour connect_fn -> establishing connection for socket {} to {}",
+            socket_descriptor,
+            addr_description
+        );
+
+        // Connect using original ConnectEx
         let result = unsafe {
             original_connectex(
                 s,
@@ -986,7 +957,8 @@ unsafe extern "system" fn connectex_detour(
         let last_error = unsafe { WSAGetLastError() };
 
         tracing::debug!(
-            "connectex_detour connect_fn -> original ConnectEx to proxy result: {}, last_error: {}",
+            "connectex_detour connect_fn -> original ConnectEx to {} result: {}, last_error: {}",
+            addr_description,
             result,
             last_error
         );
@@ -998,7 +970,32 @@ unsafe extern "system" fn connectex_detour(
             ConnectResult::new(SOCKET_ERROR, Some(last_error))
         }
     };
+    
+    if !is_managed {
+        tracing::debug!(
+            "connectex_detour -> socket {} not managed, using original with unified connect_fn",
+            s
+        );
+        // For unmanaged sockets, call connect_fn directly with the original target address
+        let connect_result = connect_fn(s, raw_addr);
+        let error_opt = connect_result.error();
+        let result_code: i32 = connect_result.into();
 
+        if result_code == ERROR_SUCCESS_I32 {
+            return TRUE;
+        } else {
+            // Set last error if provided and return FALSE
+            if let Some(error) = error_opt {
+                unsafe {
+                    WSASetLastError(error);
+                }
+            }
+            return FALSE;
+        }
+    }
+
+    // For managed sockets, use attempt_proxy_connection which will call connect_fn with proxy
+    // address
     match ops::attempt_proxy_connection(s, name, namelen, "connectex_detour", connect_fn) {
         Err(HookError::ConnectError(ConnectError::AddressUnreachable(e))) => {
             tracing::error!(
@@ -1012,22 +1009,24 @@ unsafe extern "system" fn connectex_detour(
         }
         Err(_) => {
             tracing::debug!(
-                "connectex_detour -> socket {} not managed, using original",
+                "connectex_detour -> socket {} proxy connection setup failed, using original with unified connect_fn",
                 s
             );
-            // Fall back to original ConnectEx
-            let success = unsafe {
-                original_connectex(
-                    s,
-                    raw_addr.as_ptr() as *const _,
-                    raw_addr.len(),
-                    lpSendBuffer,
-                    dwSendDataLength,
-                    lpdwBytesSent,
-                    lpOverlapped,
-                )
-            };
-            return success;
+            // Fall back to direct connection using the same connect_fn
+            let connect_result = connect_fn(s, raw_addr);
+            let error_opt = connect_result.error();
+            let result_code: i32 = connect_result.into();
+
+            if result_code == ERROR_SUCCESS_I32 {
+                return TRUE;
+            } else {
+                if let Some(error) = error_opt {
+                    unsafe {
+                        WSASetLastError(error);
+                    }
+                }
+                return FALSE;
+            }
         }
         Ok(connect_result) => {
             tracing::debug!(
