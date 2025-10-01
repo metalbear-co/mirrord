@@ -37,11 +37,11 @@ use winapi::{
         ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
     },
     um::{
-        winsock2::{
-            HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAEFAULT, WSA_IO_PENDING, WSAGetLastError, WSASetLastError,
-            fd_set, timeval,
-        },
         synchapi::SetEvent,
+        winsock2::{
+            HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT,
+            WSAGetLastError, WSASetLastError, fd_set, timeval,
+        },
     },
     // ws2tcpip::{GetNameInfoW, socklen_t},
 };
@@ -927,7 +927,10 @@ unsafe extern "system" fn connectex_detour(
     // Check if this socket is managed by mirrord - if not, use original ConnectEx
     let is_managed = is_socket_managed(s);
     if !is_managed {
-        tracing::debug!("connectex_detour -> socket {} not managed, using original", s);
+        tracing::debug!(
+            "connectex_detour -> socket {} not managed, using original",
+            s
+        );
         let success = unsafe {
             original_connectex(
                 s,
@@ -939,14 +942,14 @@ unsafe extern "system" fn connectex_detour(
                 lpOverlapped,
             )
         };
-        
+
         let last_error = unsafe { WSAGetLastError() };
         tracing::debug!(
             "connectex_detour -> original result: success={}, last_error={}",
             success != FALSE,
             last_error
         );
-        
+
         return success;
     }
 
@@ -957,7 +960,7 @@ unsafe extern "system" fn connectex_detour(
             socket_descriptor,
             addr
         );
-        
+
         // Get the original ConnectEx function to connect to the proxy
         let original_connectex = match ops::get_connectex_original() {
             Some(func) => func,
@@ -966,7 +969,7 @@ unsafe extern "system" fn connectex_detour(
                 return ConnectResult::new(SOCKET_ERROR, Some(WSAEFAULT));
             }
         };
-        
+
         // Connect to the proxy address using original ConnectEx
         let result = unsafe {
             original_connectex(
@@ -979,15 +982,15 @@ unsafe extern "system" fn connectex_detour(
                 lpOverlapped,
             )
         };
-        
+
         let last_error = unsafe { WSAGetLastError() };
-        
+
         tracing::debug!(
             "connectex_detour connect_fn -> original ConnectEx to proxy result: {}, last_error: {}",
             result,
             last_error
         );
-        
+
         // Return the result from ConnectEx - layer-lib will handle the conversion
         if result != 0 {
             ConnectResult::new(ERROR_SUCCESS_I32, None)
@@ -1031,7 +1034,7 @@ unsafe extern "system" fn connectex_detour(
                 "connectex_detour -> proxy connection result: {:?}",
                 connect_result
             );
-            
+
             // Handle the proxy connection result
             let error_opt = connect_result.error();
             let result_code: i32 = connect_result.into();
@@ -1039,17 +1042,18 @@ unsafe extern "system" fn connectex_detour(
                 "connectex_detour -> proxy connection result: {}",
                 result_code
             );
-            
+
             if result_code == ERROR_SUCCESS_I32 {
                 return TRUE;
             } else if error_opt == Some(WSA_IO_PENDING) {
-                // CRITICAL: For local proxy connections, WSA_IO_PENDING usually completes very quickly
-                // Try to wait a short time for completion rather than returning async
+                // CRITICAL: For local proxy connections, WSA_IO_PENDING usually completes very
+                // quickly Try to wait a short time for completion rather than
+                // returning async
                 tracing::info!(
                     "connectex_detour -> socket {} ConnectEx to proxy returned WSA_IO_PENDING, attempting immediate completion check",
                     s
                 );
-                
+
                 // For now, return as async but with special handling
                 unsafe {
                     WSASetLastError(WSA_IO_PENDING);
@@ -2074,10 +2078,16 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let res = unsafe { original(s) };
     // Only clean up mirrord state if the close was successful
     if res == ERROR_SUCCESS_I32 {
-        tracing::debug!("closesocket_detour -> successfully closed socket {}, removing from mirrord tracking", s);
+        tracing::debug!(
+            "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
+            s
+        );
         remove_socket(s);
     } else {
-        tracing::warn!("closesocket_detour -> failed to close socket {}, not removing from mirrord tracking", s);
+        tracing::warn!(
+            "closesocket_detour -> failed to close socket {}, not removing from mirrord tracking",
+            s
+        );
     }
     res
 }
