@@ -314,7 +314,9 @@ pub fn windows_getaddrinfo<T: WindowsAddrInfo>(
 
     let response = make_proxy_request_with_response(request)?;
     // Convert response back to Windows ADDRINFO structures using trait method
-    ManagedAddrInfo::<T>::try_from(response)
+    let mut managed = ManagedAddrInfo::<T>::try_from(response)?;
+    managed.apply_port(port);
+    Ok(managed)
 }
 
 /// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
