@@ -15,7 +15,7 @@ use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
-    credentials::LicenseValidity,
+    credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
@@ -37,7 +37,8 @@ use crate::{
         DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
     },
     crd::{
-        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
+        OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
     },
@@ -49,6 +50,7 @@ use crate::{
 
 mod conn_wrapper;
 mod connect_params;
+mod credentials;
 mod database_branches;
 mod discovery;
 pub mod error;
@@ -416,6 +418,44 @@ where
         &self.client
     }
 
+    /// Create a new CI api key by generating a random key pair, creating a certificate
+    /// signing request and sending it to the operator.
+    pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
+        if self
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ExtendableUserCredentials)
+            .not()
+        {
+            return Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::ExtendableUserCredentials,
+                operator_version: self.operator().spec.operator_version.to_string(),
+            });
+        }
+
+        let api_key: CiApiKey = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
+            self.client.clone(),
+            &format!(
+                "mirrord-ci@{}",
+                self.operator.spec.license.organization.as_str()
+            ),
+        )
+        .await
+        .map_err(|error| {
+            OperatorApiError::ClientCertError(format!(
+                "failed to create credentials for CI: {error}"
+            ))
+        })?
+        .into();
+
+        let encoded = api_key.encode().map_err(|error| {
+            OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
+        })?;
+
+        Ok(encoded)
+    }
+
     /// Creates a base [`Config`] for creating kube [`Client`]s.
     /// Adds extra headers that we send to the operator with each request:
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
@@ -525,10 +565,14 @@ where
         })?;
 
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(
+            .get_client_certificate::<MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
                 &self.client,
                 fingerprint,
                 subscription_id,
+                self.operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
             .map_err(|error| {

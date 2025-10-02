@@ -28,7 +28,8 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    MirrordOperatorCrd, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
+    MirrordWorkloadQueueRegistry, TargetCrd,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
     patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
@@ -1105,6 +1106,16 @@ impl OperatorClusterUserRole {
                 api_groups: Some(vec![MirrordClusterProfile::group(&()).into_owned()]),
                 resources: Some(vec![MirrordClusterProfile::plural(&()).into_owned()]),
                 verbs: vec!["list", "get"].into_iter().map(String::from).collect(),
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![
+                    MirrordClusterOperatorUserCredential::group(&()).into_owned(),
+                ]),
+                resources: Some(vec![
+                    MirrordClusterOperatorUserCredential::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
         ];
