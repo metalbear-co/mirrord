@@ -20,7 +20,7 @@ use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
     shared::{
-        guiddef::GUID,
+        guiddef::{GUID, IsEqualGUID},
         minwindef::{BOOL, INT},
         ws2def::{SOCKADDR, WSABUF},
     },
@@ -35,27 +35,23 @@ use windows_strings::PCWSTR;
 use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
 
 #[derive(Clone, Copy)]
-pub struct GuidWrapper(pub GUID);
+struct GuidBuffer(GUID);
 
-impl GuidWrapper {
-    pub fn from_buffer(buffer: *mut c_void, len: u32) -> Option<Self> {
+impl TryFrom<(*mut c_void, u32)> for GuidBuffer {
+    type Error = &'static str;
+
+    fn try_from((buffer, len): (*mut c_void, u32)) -> Result<Self, Self::Error> {
         if buffer.is_null() || len as usize != std::mem::size_of::<GUID>() {
-            return None;
+            return Err("Invalid buffer or length for GUID");
         }
 
-        Some(Self(unsafe { *(buffer as *const GUID) }))
+        Ok(GuidBuffer(unsafe { *(buffer as *const GUID) }))
     }
+}
 
-    pub fn equals(&self, other: &GUID) -> bool {
-        unsafe {
-            std::slice::from_raw_parts(
-                &self.0 as *const GUID as *const u8,
-                std::mem::size_of::<GUID>(),
-            ) == std::slice::from_raw_parts(
-                other as *const GUID as *const u8,
-                std::mem::size_of::<GUID>(),
-            )
-        }
+impl From<GuidBuffer> for GUID {
+    fn from(val: GuidBuffer) -> Self {
+        val.0
     }
 }
 
@@ -94,8 +90,8 @@ pub unsafe fn hook_connectex_extension(
     cb_out_buffer: u32,
     replacement: LPFN_CONNECTEX,
 ) {
-    if let Some(requested_guid) = GuidWrapper::from_buffer(lpv_in_buffer, cb_in_buffer) {
-        if !requested_guid.equals(&WSAID_CONNECTEX) {
+    if let Ok(requested_guid) = GuidBuffer::try_from((lpv_in_buffer, cb_in_buffer)) {
+        if !IsEqualGUID(&requested_guid.into(), &WSAID_CONNECTEX) {
             return;
         }
 

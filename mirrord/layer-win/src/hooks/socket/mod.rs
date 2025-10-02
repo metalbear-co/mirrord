@@ -42,7 +42,6 @@ use winapi::{
         HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT, WSAGetLastError,
         WSASetLastError, fd_set, timeval,
     },
-    // ws2tcpip::{GetNameInfoW, socklen_t},
 };
 use windows_strings::{PCSTR, PCWSTR};
 
