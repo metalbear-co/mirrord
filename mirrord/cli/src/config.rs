@@ -31,7 +31,9 @@ macro_rules! windows_unsupported {
     ($args:expr, $command_name:literal, $block:block) => {{
         #[cfg(target_os = "windows")]
         {
-            return Err(crate::error::CliError::UnsupportedOnWindows($command_name.to_string()));
+            return Err(crate::error::CliError::UnsupportedOnWindows(
+                $command_name.to_string(),
+            ));
         }
         #[cfg(not(target_os = "windows"))]
         $block
