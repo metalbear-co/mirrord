@@ -33,8 +33,8 @@ use winapi::{
 use winapi::{
     shared::{
         minwindef::{BOOL, FALSE, INT, TRUE},
-        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
-        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR},
+        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA, ERROR_SUCCESS},
+        ws2def::{ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SIO_GET_EXTENSION_FUNCTION_POINTER},
     },
     um::winsock2::{
         HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT, WSAGetLastError,
@@ -42,12 +42,9 @@ use winapi::{
     },
     // ws2tcpip::{GetNameInfoW, socklen_t},
 };
-use windows::Win32::{
-    Foundation::ERROR_SUCCESS, Networking::WinSock::SIO_GET_EXTENSION_FUNCTION_POINTER,
-};
 use windows_strings::{PCSTR, PCWSTR};
 
-const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS.0 as i32;
+const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS as i32;
 
 use self::{
     hostname::{
