@@ -4808,7 +4808,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "winapi",
- "windows",
  "windows-strings",
 ]
 
