@@ -34,27 +34,6 @@ use windows_strings::PCWSTR;
 
 use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
 
-#[derive(Clone, Copy)]
-struct GuidBuffer(GUID);
-
-impl TryFrom<(*mut c_void, u32)> for GuidBuffer {
-    type Error = &'static str;
-
-    fn try_from((buffer, len): (*mut c_void, u32)) -> Result<Self, Self::Error> {
-        if buffer.is_null() || len as usize != std::mem::size_of::<GUID>() {
-            return Err("Invalid buffer or length for GUID");
-        }
-
-        Ok(GuidBuffer(unsafe { *(buffer as *const GUID) }))
-    }
-}
-
-impl From<GuidBuffer> for GUID {
-    fn from(val: GuidBuffer) -> Self {
-        val.0
-    }
-}
-
 type ConnectExFn = unsafe extern "system" fn(
     SOCKET,
     *const SOCKADDR,
@@ -90,38 +69,47 @@ pub unsafe fn hook_connectex_extension(
     cb_out_buffer: u32,
     replacement: LPFN_CONNECTEX,
 ) {
-    if let Ok(requested_guid) = GuidBuffer::try_from((lpv_in_buffer, cb_in_buffer)) {
-        if !IsEqualGUID(&requested_guid.into(), &WSAID_CONNECTEX) {
-            return;
-        }
+    if lpv_in_buffer.is_null() || cb_in_buffer as usize != std::mem::size_of::<GUID>() {
+        tracing::error!(
+            "wsa_ioctl_detour -> invalid input buffer for ConnectEx GUID (is_null: {}, size: {})",
+            lpv_in_buffer.is_null(),
+            cb_in_buffer
+        );
+        return;
+    }
+    
+    let requested_guid = unsafe { *(lpv_in_buffer as *const GUID) };
+    if !IsEqualGUID(&requested_guid, &WSAID_CONNECTEX) {
+        tracing::trace!("wsa_ioctl_detour -> Skipping non-ConnectEx GUID");
+        return;
+    }
 
-        if (cb_out_buffer as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
-            tracing::warn!(
-                "wsa_ioctl_detour -> insufficient output buffer for ConnectEx pointer (size: {})",
-                cb_out_buffer
-            );
-            return;
-        }
+    if (cb_out_buffer as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
+        tracing::warn!(
+            "wsa_ioctl_detour -> insufficient output buffer for ConnectEx pointer (size: {})",
+            cb_out_buffer
+        );
+        return;
+    }
 
-        let original_ptr = unsafe { *(lpv_out_buffer as *mut LPFN_CONNECTEX) };
-        if original_ptr.is_none() {
-            tracing::error!("wsa_ioctl_detour -> ConnectEx original pointer is null");
-            return;
-        }
+    let original_ptr = unsafe { *(lpv_out_buffer as *mut LPFN_CONNECTEX) };
+    if original_ptr.is_none() {
+        tracing::error!("wsa_ioctl_detour -> ConnectEx original pointer is null");
+        return;
+    }
 
-        CONNECTEX_ORIGINAL.set(original_ptr.unwrap()).unwrap_or_else(|curr_val| {
+    CONNECTEX_ORIGINAL.set(original_ptr.unwrap()).unwrap_or_else(|curr_val| {
             tracing::warn!(
                 "wsa_ioctl_detour -> ConnectEx original pointer was already set (addr: {:p}), overwriting it.",
                 curr_val as *const ()
             );
         });
-        tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
+    tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
 
-        if unsafe { write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement) } {
-            tracing::trace!("wsa_ioctl_detour -> substituted ConnectEx pointer with detour");
-        } else {
-            tracing::warn!("wsa_ioctl_detour -> failed to write ConnectEx detour pointer");
-        }
+    if unsafe { write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement) } {
+        tracing::trace!("wsa_ioctl_detour -> substituted ConnectEx pointer with detour");
+    } else {
+        tracing::warn!("wsa_ioctl_detour -> failed to write ConnectEx detour pointer");
     }
 }
 
