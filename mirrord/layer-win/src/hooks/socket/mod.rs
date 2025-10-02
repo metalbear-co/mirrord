@@ -25,12 +25,6 @@ use mirrord_layer_lib::{
 use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
-    um::{
-        minwinbase::OVERLAPPED,
-        winsock2::{LPWSAOVERLAPPED_COMPLETION_ROUTINE, WSAOVERLAPPED},
-    },
-};
-use winapi::{
     shared::{
         minwindef::{BOOL, FALSE, INT, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA, ERROR_SUCCESS},
@@ -38,9 +32,13 @@ use winapi::{
             ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
         },
     },
-    um::winsock2::{
-        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSA_IO_PENDING, WSAEFAULT, WSAGetLastError,
-        WSASetLastError, fd_set, timeval,
+    um::{
+        minwinbase::OVERLAPPED,
+        winsock2::{
+            HOSTENT, INVALID_SOCKET, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET, SOCKET_ERROR,
+            WSA_IO_PENDING, WSAEFAULT, WSAGetLastError, WSAOVERLAPPED, WSASetLastError, fd_set,
+            timeval,
+        },
     },
 };
 use windows_strings::{PCSTR, PCWSTR};
