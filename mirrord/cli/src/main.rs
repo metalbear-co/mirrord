@@ -975,9 +975,9 @@ fn main() -> miette::Result<()> {
 
                 list::print_targets(*args, rich_output).await?
             }
-            Commands::Operator(args) => windows_unsupported!(args, "operator", {
-                operator_command(*args).await?
-            }),
+            Commands::Operator(args) => {
+                windows_unsupported!(args, "operator", { operator_command(*args).await? })
+            }
             Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
                 extension_exec(*args, watch, &user_data).await?;
             }),
@@ -991,9 +991,9 @@ fn main() -> miette::Result<()> {
                 let mut cmd: clap::Command = Cli::command();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
-            Commands::Teams => windows_unsupported!((), "teams", {
-                teams::navigate_to_intro().await
-            }),
+            Commands::Teams => {
+                windows_unsupported!((), "teams", { teams::navigate_to_intro().await })
+            }
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
                 let (runtime_args, exec_params) = args.into_parts();
