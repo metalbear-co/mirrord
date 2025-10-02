@@ -134,8 +134,8 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     pub async fn new<IO: AsyncIO + 'static>(inner: IO) -> Result<Self, ProtocolError> {
         let mut framed = Framed::new(inner, Type::Codec::default());
         let (mode, version) = Type::negotiate(&mut framed).await?;
-        let (inbound_tx, inbound_rx) = mpsc::channel(1024);
-        let (outbound_tx, outbound_rx) = mpsc::channel(1024);
+        let (inbound_tx, inbound_rx) = mpsc::channel(32);
+        let (outbound_tx, outbound_rx) = mpsc::channel(32);
 
         match mode {
             Mode::Legacy => {
