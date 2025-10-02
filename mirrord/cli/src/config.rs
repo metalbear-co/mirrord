@@ -24,6 +24,20 @@ use mirrord_config::{
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
 
+/// Macro to automatically handle Windows unsupported commands.
+/// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
+#[macro_export]
+macro_rules! windows_unsupported {
+    ($args:expr, $command_name:literal, $block:block) => {{
+        #[cfg(target_os = "windows")]
+        {
+            return Err(crate::error::CliError::UnsupportedOnWindows($command_name.to_string()));
+        }
+        #[cfg(not(target_os = "windows"))]
+        $block
+    }};
+}
+
 #[derive(Debug, Parser)]
 #[command(
     author,
@@ -48,6 +62,7 @@ pub(super) enum Commands {
     Exec(Box<ExecArgs>),
 
     /// Print incoming tcp traffic of specific ports from remote target.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Dump(Box<DumpArgs>),
 
     /// Generate shell completions for the provided shell.
@@ -63,6 +78,7 @@ pub(super) enum Commands {
     Extract { path: String },
 
     /// Execute a command related to the mirrord Operator.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Operator(Box<OperatorArgs>),
 
     /// List available mirrord targets in the cluster.
@@ -143,6 +159,7 @@ pub(super) enum Commands {
     VerifyConfig(VerifyConfigArgs),
 
     /// Try out mirrord for Teams.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Teams,
 
     /// Diagnose mirrord setup.

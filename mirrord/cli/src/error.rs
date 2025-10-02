@@ -471,6 +471,10 @@ pub(crate) enum CliError {
         does not invoke mirrord."
     ))]
     NestedExec,
+
+    #[cfg(target_os = "windows")]
+    #[error("The '{0}' command is not currently supported on Windows")]
+    UnsupportedOnWindows(String),
 }
 
 #[derive(Debug, Error, Diagnostic)]

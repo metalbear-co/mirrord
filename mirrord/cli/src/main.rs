@@ -957,7 +957,9 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch, &mut user_data).await?,
-            Commands::Dump(args) => dump_command(&args, watch, &user_data).await?,
+            Commands::Dump(args) => windows_unsupported!(args, "dump", {
+                dump_command(&args, watch, &user_data).await?
+            }),
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),
@@ -973,10 +975,12 @@ fn main() -> miette::Result<()> {
 
                 list::print_targets(*args, rich_output).await?
             }
-            Commands::Operator(args) => operator_command(*args).await?,
-            Commands::ExtensionExec(args) => {
+            Commands::Operator(args) => windows_unsupported!(args, "operator", {
+                operator_command(*args).await?
+            }),
+            Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
                 extension_exec(*args, watch, &user_data).await?;
-            }
+            }),
             Commands::InternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_intproxy_tracing_registry(&config)?;
@@ -987,9 +991,11 @@ fn main() -> miette::Result<()> {
                 let mut cmd: clap::Command = Cli::command();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
-            Commands::Teams => teams::navigate_to_intro().await,
+            Commands::Teams => windows_unsupported!((), "teams", {
+                teams::navigate_to_intro().await
+            }),
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => {
+            Commands::Container(args) => windows_unsupported!(args, "container", {
                 let (runtime_args, exec_params) = args.into_parts();
 
                 let exit_code =
@@ -998,18 +1004,20 @@ fn main() -> miette::Result<()> {
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
-            }
-            Commands::ExtensionContainer(args) => {
+            }),
+            Commands::ExtensionContainer(args) => windows_unsupported!(args, "container-ext", {
                 container_ext_command(args.config_file, args.target, watch, &user_data).await?
-            }
-            Commands::ExternalProxy { port, .. } => {
+            }),
+            Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;
 
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
-            }
+            }),
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
-            Commands::Vpn(args) => vpn::vpn_command(*args).await?,
+            Commands::Vpn(args) => {
+                windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
+            }
             Commands::Newsletter => newsletter::newsletter_command().await,
             Commands::Ci(args) => ci::ci_command(*args).await?,
         };
