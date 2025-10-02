@@ -77,7 +77,7 @@ pub unsafe fn hook_connectex_extension(
         );
         return;
     }
-    
+
     let requested_guid = unsafe { *(lpv_in_buffer as *const GUID) };
     if !IsEqualGUID(&requested_guid, &WSAID_CONNECTEX) {
         tracing::trace!("wsa_ioctl_detour -> Skipping non-ConnectEx GUID");
