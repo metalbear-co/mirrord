@@ -14,7 +14,7 @@ use winapi::shared::ws2def::SOCKADDR as SOCK_ADDR_T;
 #[cfg(windows)]
 use winapi::um::winsock2::SOCKET;
 #[cfg(windows)]
-use winapi::um::winsock2::{WSAEINPROGRESS, WSAEINTR};
+use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR};
 
 use super::sockets::{set_socket_state, socket_descriptor_to_i64};
 #[cfg(windows)]
@@ -81,7 +81,7 @@ impl ConnectResult {
             }
             #[cfg(windows)]
             {
-                error != WSAEINTR && error != WSAEINPROGRESS
+                error != WSAEINTR && error != WSAEINPROGRESS && error != WSA_IO_PENDING
             }
         })
     }

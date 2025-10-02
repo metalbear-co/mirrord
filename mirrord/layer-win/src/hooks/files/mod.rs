@@ -940,14 +940,21 @@ unsafe extern "system" fn nt_query_information_file_hook(
                     }
 
                     fn query_all(handle: HANDLE) -> Option<FILE_ALL_INFORMATION> {
-                        let mut all_info = FILE_ALL_INFORMATION::default();
-
-                        all_info.BasicInformation =
-                            query_single(handle, FILE_INFORMATION_CLASS::FileBasicInformation)?;
-                        all_info.StandardInformation =
-                            query_single(handle, FILE_INFORMATION_CLASS::FileStandardInformation)?;
-                        all_info.PositionInformation =
-                            query_single(handle, FILE_INFORMATION_CLASS::FilePositionInformation)?;
+                        let all_info = FILE_ALL_INFORMATION {
+                            BasicInformation: query_single(
+                                handle,
+                                FILE_INFORMATION_CLASS::FileBasicInformation,
+                            )?,
+                            StandardInformation: query_single(
+                                handle,
+                                FILE_INFORMATION_CLASS::FileStandardInformation,
+                            )?,
+                            PositionInformation: query_single(
+                                handle,
+                                FILE_INFORMATION_CLASS::FilePositionInformation,
+                            )?,
+                            ..Default::default()
+                        };
 
                         Some(all_info)
                     }

@@ -223,12 +223,14 @@ windows = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_Pipes",
     "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
 ] }
 
 # Used by `layer-win`
 winapi = { version = "0.3.9", features = [
     "winbase", "minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", 
-    "winsock2", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", 
+    "winsock2", "mswsock", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", 
     "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv",
     "winioctl", "memoryapi", "timezoneapi"
 ] }

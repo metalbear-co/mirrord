@@ -15,9 +15,9 @@ static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
 pub fn init_setup(config: LayerConfig, proxy_address: SocketAddr) -> LayerResult<()> {
     let state = LayerSetup::new(config, proxy_address);
-    SETUP.set(state).map_err(|_| {
-        LayerError::GlobalAlreadyInitialized("Layer setup already initialized".into())
-    })?;
+    SETUP
+        .set(state)
+        .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer setup already initialized"))?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr, ToSocketAddrs},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
@@ -18,15 +18,100 @@ use mirrord_layer_lib::{
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use winapi::{
+    ctypes::c_void,
     shared::{
-        minwindef::INT,
+        guiddef::{GUID, IsEqualGUID},
+        minwindef::{BOOL, INT},
         ws2def::{SOCKADDR, WSABUF},
     },
-    um::winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
+    um::{
+        minwinbase::OVERLAPPED,
+        mswsock::{LPFN_CONNECTEX, WSAID_CONNECTEX},
+        winsock2::{SOCKET, SOCKET_ERROR, WSAGetLastError},
+    },
 };
 use windows_strings::PCWSTR;
 
 use crate::{hooks::socket::utils::SocketAddrExtWin, layer_setup};
+
+type ConnectExFn = unsafe extern "system" fn(
+    SOCKET,
+    *const SOCKADDR,
+    INT,
+    *mut c_void,
+    u32,
+    *mut u32,
+    *mut OVERLAPPED,
+) -> BOOL;
+
+static CONNECTEX_ORIGINAL: OnceLock<ConnectExFn> = OnceLock::new();
+
+pub fn get_connectex_original() -> Option<ConnectExFn> {
+    CONNECTEX_ORIGINAL.get().copied()
+}
+
+unsafe fn write_connectex_pointer(buffer: *mut c_void, len: u32, detour: LPFN_CONNECTEX) -> bool {
+    if buffer.is_null() || (len as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
+        return false;
+    }
+
+    unsafe {
+        let target_ptr = buffer as *mut LPFN_CONNECTEX;
+        *target_ptr = detour;
+    }
+    true
+}
+
+pub unsafe fn hook_connectex_extension(
+    lpv_in_buffer: *mut c_void,
+    cb_in_buffer: u32,
+    lpv_out_buffer: *mut c_void,
+    cb_out_buffer: u32,
+    replacement: LPFN_CONNECTEX,
+) {
+    if lpv_in_buffer.is_null() || cb_in_buffer as usize != std::mem::size_of::<GUID>() {
+        tracing::error!(
+            "wsa_ioctl_detour -> invalid input buffer for ConnectEx GUID (is_null: {}, size: {})",
+            lpv_in_buffer.is_null(),
+            cb_in_buffer
+        );
+        return;
+    }
+
+    let requested_guid = unsafe { *(lpv_in_buffer as *const GUID) };
+    if !IsEqualGUID(&requested_guid, &WSAID_CONNECTEX) {
+        tracing::trace!("wsa_ioctl_detour -> Skipping non-ConnectEx GUID");
+        return;
+    }
+
+    if (cb_out_buffer as usize) < std::mem::size_of::<LPFN_CONNECTEX>() {
+        tracing::warn!(
+            "wsa_ioctl_detour -> insufficient output buffer for ConnectEx pointer (size: {})",
+            cb_out_buffer
+        );
+        return;
+    }
+
+    let original_ptr = unsafe { *(lpv_out_buffer as *mut LPFN_CONNECTEX) };
+    if original_ptr.is_none() {
+        tracing::error!("wsa_ioctl_detour -> ConnectEx original pointer is null");
+        return;
+    }
+
+    CONNECTEX_ORIGINAL.set(original_ptr.unwrap()).unwrap_or_else(|curr_val| {
+            tracing::warn!(
+                "wsa_ioctl_detour -> ConnectEx original pointer was already set (addr: {:p}), overwriting it.",
+                curr_val as *const ()
+            );
+        });
+    tracing::debug!("wsa_ioctl_detour -> captured original ConnectEx address");
+
+    if unsafe { write_connectex_pointer(lpv_out_buffer, cb_out_buffer, replacement) } {
+        tracing::trace!("wsa_ioctl_detour -> substituted ConnectEx pointer with detour");
+    } else {
+        tracing::warn!("wsa_ioctl_detour -> failed to write ConnectEx detour pointer");
+    }
+}
 
 /// Wrapper around Windows WSABUF array for safe buffer handling
 #[derive(Debug)]
