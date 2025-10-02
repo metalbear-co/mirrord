@@ -220,9 +220,9 @@ where
     }
 
     pub fn clear(&mut self) {
-        for (id, _) in self.handles.drain() {
-            self.streams.remove(&id);
-        }
+        self.handles = Default::default();
+        self.streams = Default::default();
+        self.suspended_streams = Default::default();
     }
 
     /// Returns the next update from one of registered tasks.

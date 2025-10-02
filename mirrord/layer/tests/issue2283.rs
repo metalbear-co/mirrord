@@ -85,6 +85,15 @@ async fn test_issue2283(
             },
         ))))
         .await;
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let stdout = test_process.get_stdout().await;
+        if stdout.contains("received all expected bytes") {
+            break;
+        }
+    }
+
     intproxy
         .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
         .await;

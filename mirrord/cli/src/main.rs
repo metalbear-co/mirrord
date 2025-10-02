@@ -287,6 +287,7 @@ use tracing::{error, info, trace, warn};
 use which::which;
 
 mod browser;
+mod ci;
 mod config;
 mod connection;
 mod container;
@@ -413,7 +414,7 @@ where
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
         &sub_progress_config,
-        &binary_args,
+        Some(&binary_args),
         &config,
         config_file_path,
         execution_info.uses_operator,
@@ -566,16 +567,18 @@ where
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
-fn print_config<P>(
+pub(crate) fn print_config<P>(
     progress: &P,
-    command: &[String],
+    command: Option<&[String]>,
     config: &LayerConfig,
     config_file_path: Option<&str>,
     operator_used: bool,
 ) where
     P: Progress,
 {
-    progress.info(&format!("Running command: {}", command.join(" ")));
+    if let Some(cmd) = command {
+        progress.info(&format!("Running command: {}", cmd.join(" ")));
+    }
 
     let target_and_config_path_info = format!(
         "{}, {}",
@@ -1008,6 +1011,7 @@ fn main() -> miette::Result<()> {
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
             Commands::Newsletter => newsletter::newsletter_command().await,
+            Commands::Ci(args) => ci::ci_command(*args).await?,
         };
 
         Ok(())
