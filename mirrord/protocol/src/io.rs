@@ -153,7 +153,7 @@ pub struct Connection<Type: ProtocolEndpoint> {
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
-    pub async fn new<IO: AsyncIO + 'static>(inner: IO) -> Result<Self, ProtocolError> {
+    pub async fn new<IO: AsyncIO>(inner: IO) -> Result<Self, ProtocolError> {
         let mut framed = Framed::new(inner, Type::Codec::default());
         let (mode, version) = Type::negotiate(&mut framed).await?;
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
