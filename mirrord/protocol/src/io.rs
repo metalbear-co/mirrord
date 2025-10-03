@@ -503,10 +503,16 @@ async fn tx_task<Type: ProtocolEndpoint, IO: AsyncIO>(
 ) -> SplitSink<Framed<IO, SimpleChunkCodec>, Chunk> {
     let mut maybe_have_more = false;
     'outer: loop {
-        select! {
-            _ = state.can_send.notified(), if !maybe_have_more => (),
-            _ = cancel.cancelled() => break,
-        }
+        if !maybe_have_more {
+			select! {
+				_ = state.can_send.notified() => (),
+				_ = cancel.cancelled() => break,
+			}
+		} else {
+			if cancel.is_cancelled() {
+				break;
+			}
+		}
 
         let next_chunk = {
             let mut lock = state.queues.lock().unwrap();
