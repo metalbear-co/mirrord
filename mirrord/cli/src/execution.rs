@@ -35,13 +35,18 @@ use tracing::{Level, debug, error, info, trace, warn};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
+#[cfg(unix)]
+use crate::util::reparent_to_init;
 use crate::{
     CliResult,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     extract::extract_library,
-    util::{get_user_git_branch, remove_proxy_env, reparent_to_init},
+    util::{get_user_git_branch, remove_proxy_env},
 };
+
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -192,6 +197,7 @@ impl MirrordExecution {
     where
         P: Progress,
     {
+        // Extract Layer from exe
         let lib_path = extract_library(None, progress, true)?;
 
         if !config.use_proxy {
@@ -273,13 +279,20 @@ impl MirrordExecution {
         }
 
         let lib_path = lib_path.to_string_lossy().into_owned();
-        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
-        // If already exists, we append.
-        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
-        } else {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
-        };
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
+            // If already exists, we append.
+            if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+            } else {
+                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+            };
+        }
+        #[cfg(target_os = "windows")]
+        {
+            unsafe { std::env::set_var("MIRRORD_LAYER_FILE", lib_path) };
+        }
 
         let encoded_config = config.encode()?;
 
@@ -301,6 +314,7 @@ impl MirrordExecution {
             )
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        #[cfg(unix)]
         unsafe {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
         }
@@ -314,13 +328,17 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        // The pre_exec(reparent_to_init) causes the process to fork
-        // and our immediate child promptly exits (which is what we
-        // wait for here), reparenting our (now former) grandchild to
-        // init.
-        // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html
-        // for reference.
-        proxy_process.wait().await.unwrap();
+        // Windows-Compatibility: this wait hangs after agent EnvVarsResponse
+        //  Skipping it works around the issue.
+        #[cfg(not(target_os = "windows"))]
+        {
+            // The pre_exec(reparent_to_init) causes the process to fork and our immediate child
+            // promptly exits (which is what we wait for here), reparenting our (now former)
+            // grandchild to init.
+            // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html for
+            // reference.
+            proxy_process.wait().await.unwrap();
+        }
 
         let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
