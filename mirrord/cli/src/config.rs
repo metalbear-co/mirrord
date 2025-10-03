@@ -29,13 +29,15 @@ use thiserror::Error;
 #[macro_export]
 macro_rules! windows_unsupported {
     ($args:expr, $command_name:literal, $block:block) => {{
-        #[cfg(target_os = "windows")]
-        {
+        // we use cfg! to prevent rust from optimizing out $block which forces us to
+        // cfg(not(windows))  existing pieces of compilable code, used but unix but
+        // currently not windows,  which'll be used by windows in the future (currently
+        // assumed as untested but compilable)
+        if cfg!(target_os = "windows") {
             return Err($crate::error::CliError::UnsupportedOnWindows(
                 $command_name.to_string(),
             ));
         }
-        #[cfg(not(target_os = "windows"))]
         $block
     }};
 }
