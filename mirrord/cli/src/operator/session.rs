@@ -13,7 +13,7 @@ use mirrord_operator::{
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
-use crate::{CliError, CliResult, SessionCommand};
+use crate::{CliError, CliResult, MirrordCi, SessionCommand};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
 pub(super) struct SessionCommandHandler {
@@ -37,6 +37,7 @@ impl SessionCommandHandler {
     pub(super) async fn new(
         command: SessionCommand,
         config_file: Option<PathBuf>,
+        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
@@ -52,8 +53,13 @@ impl SessionCommandHandler {
                 .await?
             {
                 Some(api) => {
-                    api.prepare_client_cert(&mut NullReporter::default(), &progress, &layer_config)
-                        .await
+                    api.prepare_client_cert(
+                        &mut NullReporter::default(),
+                        &progress,
+                        &layer_config,
+                        mirrord_for_ci.map(|ci| ci.api_key()),
+                    )
+                    .await
                 }
                 None => {
                     subtask.failure(Some("operator not found"));

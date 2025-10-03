@@ -3,7 +3,7 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
-    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
+    CliResult, MirrordCi, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
     user_data::UserData,
 };
 
@@ -14,6 +14,7 @@ async fn mirrord_exec<P>(
     mut progress: P,
     analytics: &mut AnalyticsReporter,
     config_file_path: Option<&str>,
+    mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -26,6 +27,7 @@ where
         None,
         &mut progress,
         analytics,
+        mirrord_for_ci,
     )
     .await?;
 
@@ -114,6 +116,7 @@ pub(crate) async fn extension_exec(
         progress,
         &mut analytics,
         args.config_file.as_ref().and_then(|p| p.to_str()),
+        None,
     )
     .await;
 

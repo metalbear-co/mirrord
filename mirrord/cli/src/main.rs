@@ -315,7 +315,8 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 use crate::{
-    newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
+    ci::MirrordCi, newsletter::suggest_newsletter_signup, user_data::UserData,
+    util::get_user_git_branch,
 };
 
 async fn exec_process<P>(
@@ -325,6 +326,7 @@ async fn exec_process<P>(
     progress: &mut P,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
+    mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -364,6 +366,7 @@ where
         Some(binary_args.as_slice()),
         &mut sub_progress,
         analytics,
+        mirrord_for_ci,
     )
     .await?;
 
@@ -432,13 +435,50 @@ where
 
     // env vars should be formatted as "varname=value" CStrings
     let env = env_vars
+        .clone()
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
     progress.success(Some("Ready!"));
 
+    tracing::info!(
+        ?binary_path,
+        ?binary_args,
+        // ?env_vars,
+        ?path,
+        ?args,
+        // ?env,
+        "What are we trying to run?",
+    );
+    match tokio::process::Command::new(binary_path)
+        .args(binary_args.clone().into_iter().skip(1))
+        .envs(env_vars.clone())
+        .kill_on_drop(false)
+        .spawn()
+    {
+        Ok(child) => tracing::info!("{:?}", child.id()),
+        Err(fail) => panic!("Kaboom {:?}", fail),
+    };
+
+    tracing::info!("Let it live forever");
+
+    /*
+
+    match std::process::Command::new(binary_path)
+        .args(binary_args.clone().into_iter().skip(1))
+        .envs(env_vars.clone())
+        .spawn()
+    {
+        Ok(child) => tracing::info!("{:?}", child.id()),
+        Err(fail) => panic!("Kaboom {:?}", fail),
+    };
+    */
+
+    Ok(())
+
     // The execve hook is not yet active and does not hijack this call.
+    /*
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
         .expect_err("call to execve cannot succeed");
     error!("Couldn't execute {:?}", errno);
@@ -457,6 +497,7 @@ where
     }
 
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
+    */
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -624,7 +665,12 @@ pub(crate) fn print_config<P>(
     ));
 }
 
-async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
+async fn exec(
+    args: &ExecArgs,
+    watch: drain::Watch,
+    user_data: &mut UserData,
+    mirrord_for_ci: Option<MirrordCi>,
+) -> CliResult<()> {
     ensure_not_nested()?;
 
     let mut progress = ProgressTracker::from_env("mirrord exec");
@@ -648,7 +694,9 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
         )
     }
 
-    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.params.as_env_vars())
+        .set_mandatory_operator(mirrord_for_ci.is_some());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
@@ -675,6 +723,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
         &mut progress,
         &mut analytics,
         user_data,
+        mirrord_for_ci,
     )
     .await;
 
@@ -773,8 +822,14 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let (connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
+    let (connection_info, connection) = create_and_connect(
+        &mut config,
+        &mut progress,
+        &mut analytics,
+        branch_name,
+        None,
+    )
+    .await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
@@ -847,7 +902,7 @@ fn main() -> miette::Result<()> {
             .unwrap_or_default();
 
         match cli.commands {
-            Commands::Exec(args) => exec(&args, watch, &mut user_data).await?,
+            Commands::Exec(args) => exec(&args, watch, &mut user_data, None).await?,
             Commands::Dump(args) => dump_command(&args, watch, &user_data).await?,
             Commands::Extract { path } => {
                 extract_library(
@@ -902,7 +957,7 @@ fn main() -> miette::Result<()> {
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
             Commands::Newsletter => newsletter::newsletter_command().await,
-            Commands::Ci(args) => ci::ci_command(*args).await?,
+            Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
         };
 
         Ok(())

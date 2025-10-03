@@ -287,6 +287,7 @@ impl OperatorApi<NoClientCert> {
         reporter: &mut R,
         progress: &P,
         layer_config: &LayerConfig,
+        ci_api_key: Option<&str>,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
@@ -295,7 +296,15 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
 
         let result = try {
-            let certificate = self.get_client_certificate().await?;
+            let certificate = if let Some(CiApiKey::V1(credentials)) = ci_api_key
+                .map(|api_key| CiApiKey::decode(api_key))
+                .transpose()?
+            {
+                tracing::info!(?credentials, "it's the ci stuff");
+                credentials.as_ref().clone()
+            } else {
+                self.get_client_certificate().await?
+            };
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
                 client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
@@ -544,6 +553,23 @@ where
         }
 
         Ok(())
+    }
+
+    async fn make_mirrord_for_ci_work(
+        &self,
+        ci_api_key: CiApiKey,
+    ) -> Result<Certificate, OperatorApiError> {
+        let credentials = match ci_api_key {
+            CiApiKey::V1(credentials) => credentials,
+        };
+
+        let mut credential_store = CredentialStoreSync::open().await.map_err(|error| {
+            OperatorApiError::ClientCertError(format!(
+                "failed to access local credential store: {error}"
+            ))
+        })?;
+
+        todo!()
     }
 
     /// Retrieves client [`Certificate`] from local credential store or requests one from the

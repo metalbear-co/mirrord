@@ -36,7 +36,7 @@ use tracing::{Level, debug, error, info, trace, warn};
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
 use crate::{
-    CliResult,
+    CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     extract::extract_library,
@@ -188,6 +188,7 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")] args: Option<&[OsString]>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
+        mirrord_for_ci: Option<MirrordCi>,
     ) -> CliResult<Self>
     where
         P: Progress,
@@ -201,7 +202,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name)
+            create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
@@ -321,6 +322,8 @@ impl MirrordExecution {
         // This should *never* fail, see https://man7.org/linux/man-pages/man2/wait.2.html
         // for reference.
         proxy_process.wait().await.unwrap();
+
+        println!("proxy pid {:?}", proxy_process.id());
 
         let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
@@ -446,7 +449,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name)
+            create_and_connect(config, progress, analytics, branch_name, None)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 

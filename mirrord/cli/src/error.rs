@@ -145,6 +145,15 @@ pub(crate) enum InternalProxyError {
     #[error("Initial ping pong with the agent failed: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InitialPingPongFailed(String),
+
+    // TODO(alex) [mid]: Should probably be a `MirrordForCi` specific error.
+    #[error("File operation failed: {0}!")]
+    #[diagnostic(help("blah blah blah"))]
+    IO(#[from] std::io::Error),
+
+    #[error("Json error: {0}!")]
+    #[diagnostic(help("blah blah blah"))]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.
@@ -461,6 +470,21 @@ pub(crate) enum CliError {
         does not invoke mirrord."
     ))]
     NestedExec,
+
+    #[error(
+        "The required environment variable {0} was not found or contains an invalid character!"
+    )]
+    #[diagnostic(help(
+        "Some mirrord commands require special environment variables to be set, e.g. `mirrord ci start` \
+         requires `MIRRORD_FOR_CI_API_KEY`, please add the missing env var before trying to run \
+         mirrord again."
+    ))]
+    EnvVar(&'static str, std::env::VarError),
+
+    // TODO(alex) [mid]: Should probably be a `MirrordForCi` specific error.
+    #[error("File operation failed: {0}!")]
+    #[diagnostic(help("blah blah blah"))]
+    IO(#[from] std::io::Error),
 }
 
 impl CliError {
@@ -548,6 +572,9 @@ impl From<OperatorApiError> for CliError {
                 operation: operation.to_string(),
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
+            OperatorApiError::ApiKey(fail) => {
+                Self::OperatorApiForbidden(OperatorOperation::SessionManagement, fail.to_string())
+            }
         }
     }
 }

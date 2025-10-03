@@ -1064,6 +1064,41 @@ pub(super) enum CiCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
+
+    // TODO(alex) [high]: So the way it works is the following:
+    // We're not really going to be doing `mirrord ci start node app.mjs` because we want to
+    // see how `app.mjs` changes behave in the cluster. We want to `mirrord exec node app.mjs`
+    // so the user can then run their tests like `npm tests`, and these tests will hit the
+    // `app.mjs` that's deployed in their cluster, but the stuff actually gets intercepted by
+    // mirrord.
+    //
+    // tl;dr; mirrord is being used here to "spawn" a service in the staging environment, and
+    // it'll intercept the traffic and etc from the service to the local process.
+    //
+    // ```sh
+    // mirrord ci start --target deployment/cool-beans -- node cool-beans.mjs
+    //
+    // npm test "cool_beans_receives_traffic_on_route_/coolerbeans/1"
+    //
+    // mirrord ci stop
+    // ```
+    //
+    // TODO(alex) [high]: We need to set a header for the ci http stealer, otherwise it would
+    // block the remote service for other users. This has to be `mirrord ci start {ID}` specific
+    // so the user can run multiple mirrord for ci at the same time for the same service. A GUID
+    // is probably good enough.
+    Start(Box<ExecArgs>),
+
+    // TODO(alex) [high]: The `mirrord ci stop` has to kill the intproxy we're running, so
+    // we can kill the agent and etc. We need this command because the service we started
+    // will never finish, the tests that the user is running have an end, but not the service.
+    // We can save the `PID` to an env var when `mirrord ci start` and read from it when this is
+    // called. The PID should probably be associated with the GUID of the ci run? So we can finish
+    // the correct `mirrord exec` when this gets called. Btw, the GUID cannot be the PID, because
+    // multiple machines may be involved in running this setup, so we might end up getting
+    // `machine-a: pid-10`, and machine-b: pid-10` as http filters (different machine names, but
+    // they could actually be the same too).
+    Stop,
 }
 
 #[cfg(test)]

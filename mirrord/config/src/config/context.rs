@@ -28,6 +28,8 @@ pub struct ConfigContext {
 
     /// Warnings collected during config verification.
     warnings: Vec<String>,
+
+    mandatory_operator: bool,
 }
 
 impl ConfigContext {
@@ -126,6 +128,15 @@ impl ConfigContext {
     pub fn has_warnings(&self) -> bool {
         self.warnings.is_empty().not()
     }
+
+    pub fn set_mandatory_operator(mut self, mandatory: bool) -> Self {
+        self.mandatory_operator = mandatory;
+        self
+    }
+
+    pub fn is_mandatory_operator(&self) -> bool {
+        self.mandatory_operator
+    }
 }
 
 impl Default for ConfigContext {
@@ -135,6 +146,7 @@ impl Default for ConfigContext {
             env_override: Default::default(),
             strict_env: false,
             warnings: Default::default(),
+            mandatory_operator: false,
         }
     }
 }
