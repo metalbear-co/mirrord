@@ -32,6 +32,8 @@ socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
 derive_more = { workspace = true, features = ["from", "into", "deref"] }
 tokio.workspace = true
+tokio-util.workspace = true
+rand.workspace = true
 
 mirrord-macros = { path = "../macros" }
 
