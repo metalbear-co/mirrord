@@ -361,18 +361,15 @@ where
         })
         .collect::<Vec<_>>();
 
-    let execution_info = async {
-        MirrordExecution::start_internal(
-            &mut config,
-            #[cfg(target_os = "macos")]
-            Some(&args.binary),
-            #[cfg(target_os = "macos")]
-            Some(binary_args.as_slice()),
-            &mut sub_progress,
-            analytics,
-        )
-        .await
-    }
+    let execution_info = MirrordExecution::start_internal(
+        &mut config,
+        #[cfg(target_os = "macos")]
+        Some(&args.binary),
+        #[cfg(target_os = "macos")]
+        Some(binary_args.as_slice()),
+        &mut sub_progress,
+        analytics,
+    )
     .await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
@@ -428,17 +425,14 @@ where
 
     let sub_progress = progress.subtask("running process");
 
-    async {
-        execve_process(
-            binary,
-            binary_args,
-            env_vars,
-            _did_sip_patch,
-            sub_progress,
-            analytics,
-        )
-        .await
-    }
+    execve_process(
+        binary,
+        binary_args,
+        env_vars,
+        _did_sip_patch,
+        sub_progress,
+        analytics,
+    )
     .await
 }
 
@@ -775,23 +769,20 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
     result?;
 
-    async move {
-        let res = exec_process(
-            config,
-            config_file_path.as_deref(),
-            args,
-            &mut progress,
-            &mut analytics,
-            user_data,
-        )
-        .await;
+    let res = exec_process(
+        config,
+        config_file_path.as_deref(),
+        args,
+        &mut progress,
+        &mut analytics,
+        user_data,
+    )
+    .await;
 
-        if res.is_err() && !analytics.has_error() {
-            analytics.set_error(AnalyticsError::Unknown);
-        }
-        res
+    if res.is_err() && !analytics.has_error() {
+        analytics.set_error(AnalyticsError::Unknown);
     }
-    .await
+    res
 }
 
 async fn port_forward(
