@@ -7,7 +7,7 @@ on:
         description: "Pick artifacts from GCS (reuse) or build & sign now"
         type: choice
         options: [build_sign, reuse]
-        default: reuse
+        default: build_sign
   push:
   pull_request:
     branches: [main, "*staging*"]
