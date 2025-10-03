@@ -477,8 +477,8 @@ pub(crate) enum CliError {
     UnsupportedOnWindows(String),
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug, Error, Diagnostic)]
-#[allow(dead_code)]
 pub(crate) enum ProcessExecError {
     #[error("Executed process pid was not found: {0}")]
     ProcessNotFound(u32, String),
@@ -486,11 +486,10 @@ pub(crate) enum ProcessExecError {
     #[error("Failed to inject DLL \"{0}\" into pid {1}: {2}")]
     InjectionFailed(String, u32, String),
 
-    #[cfg(target_os = "windows")]
     #[error("Pipe Error: {0}")]
     PipeError(#[from] windows_core::Error),
 }
-#[allow(dead_code)]
+#[cfg(target_os = "windows")]
 pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
 
 impl CliError {

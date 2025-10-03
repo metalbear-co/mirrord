@@ -10,16 +10,6 @@ pub trait CommandExt {
 impl CommandExt for std::process::Command {
     fn display(&self) -> CommandDisplay {
         let envs = self.get_envs().map(|(name, value)| match value {
-            #[cfg(not(target_os = "windows"))]
-            Some(value) => {
-                let mut buf =
-                    Vec::with_capacity(name.as_bytes().len() + value.as_bytes().len() + 1);
-                buf.extend_from_slice(name.as_bytes());
-                buf.push(b'=');
-                buf.extend_from_slice(value.as_bytes());
-                String::from_utf8_lossy(&buf).into_owned()
-            }
-            #[cfg(target_os = "windows")]
             Some(value) => {
                 // Create the environment string in the standard format
                 format!("{}={}", name.to_string_lossy(), value.to_string_lossy())
