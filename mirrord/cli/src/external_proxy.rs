@@ -19,10 +19,11 @@
 //!                       └────────────────┘
 //! ```
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
-    os::unix::ffi::OsStrExt,
     path::Path,
     sync::{
         Arc,
@@ -42,13 +43,15 @@ use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
 use tracing::Level;
 
+#[cfg(not(target_os = "windows"))]
+use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
     user_data::UserData,
-    util::{create_listen_socket, detach_io},
+    util::create_listen_socket,
 };
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
@@ -76,6 +79,8 @@ pub async fn proxy(
     let agent_connect_info: AgentConnectInfo = std::env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
         .ok_or(ExternalProxyError::MissingConnectInfo)
         .and_then(|var| {
+            #[cfg(target_os = "windows")]
+            let var = var.to_string_lossy();
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 let as_string = String::from_utf8_lossy(var.as_bytes()).into_owned();
                 ExternalProxyError::DeseralizeConnectInfo(as_string, error)
@@ -117,6 +122,7 @@ pub async fn proxy(
         .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
+    #[cfg(not(target_os = "windows"))]
     if let Err(error) = unsafe { detach_io() }.map_err(ExternalProxyError::SetSid) {
         tracing::warn!(%error, "unable to detach io");
     }

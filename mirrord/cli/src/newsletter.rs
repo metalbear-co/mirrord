@@ -83,7 +83,9 @@ fn get_open_command() -> Command {
 /// terminal as a fallback.
 #[cfg(target_os = "windows")]
 fn get_open_command() -> Command {
-    Command::new("cmd.exe").arg("/C").arg("start").arg("")
+    let mut command = Command::new("cmd.exe");
+    command.arg("/C").arg("start").arg("");
+    command
 }
 
 /// Attempts to open the mirrord newsletter sign-up page in the default browser.
