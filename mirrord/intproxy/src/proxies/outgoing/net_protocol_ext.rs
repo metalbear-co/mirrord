@@ -27,13 +27,7 @@ use mirrord_protocol::{
 };
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
-#[cfg(target_os = "windows")]
-mod tokio {
-    pub mod net {
-        pub struct UnixStream {}
-        pub struct UnixListener {}
-    }
-}
+#[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
@@ -138,7 +132,7 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
-    #[allow(dead_code)]
+    #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
 
@@ -169,13 +163,6 @@ impl PreparedSocket {
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
                 SocketAddress::Unix(UnixAddr::Pathname(pathname))
             }
-            #[cfg(target_os = "windows")]
-            Self::UnixListener(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "Unsupported UnixListener",
-                ));
-            }
         };
 
         Ok(address)
@@ -195,13 +182,6 @@ impl PreparedSocket {
                 let (stream, _) = listener.accept().await?;
                 (InnerConnectedSocket::UnixStream(stream), true)
             }
-            #[cfg(target_os = "windows")]
-            Self::UnixListener(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "unsupported UnixListener",
-                ));
-            }
         };
 
         Ok(ConnectedSocket {
@@ -215,7 +195,7 @@ impl PreparedSocket {
 enum InnerConnectedSocket {
     UdpSocket(UdpSocket),
     TcpStream(TcpStream),
-    #[allow(dead_code)]
+    #[cfg(not(target_os = "windows"))]
     UnixStream(UnixStream),
 }
 
@@ -243,11 +223,6 @@ impl ConnectedSocket {
             InnerConnectedSocket::TcpStream(stream) => stream.write_all(bytes).await,
             #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
-            #[cfg(target_os = "windows")]
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "unsupported InnerConnectedSocket",
-            )),
         }
     }
 
@@ -279,11 +254,6 @@ impl ConnectedSocket {
                 self.buffer.clear();
                 Ok(bytes)
             }
-            #[cfg(target_os = "windows")]
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "unsupported InnerConnectedSocket",
-            )),
         }
     }
 
@@ -298,11 +268,6 @@ impl ConnectedSocket {
             #[cfg(not(target_os = "windows"))]
             InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
-            #[cfg(target_os = "windows")]
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "unsupported InnerConnectedSocket",
-            )),
         }
     }
 }

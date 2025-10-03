@@ -102,29 +102,6 @@ impl From<Metadata> for MetadataInternal {
     }
 }
 
-#[cfg(target_os = "windows")]
-impl From<Metadata> for MetadataInternal {
-    fn from(metadata: Metadata) -> Self {
-        Self {
-            device_id: metadata.volume_serial_number().unwrap() as u64,
-            // On Windows, true inode is not exposed directly from std
-            // You could return 0 or use Windows APIs like `GetFileInformationByHandle`
-            inode: metadata.file_index().unwrap(),
-            mode: metadata.file_attributes(),
-            hard_links: metadata.number_of_links().unwrap() as u64,
-            user_id: 0,
-            group_id: 0,
-            rdevice_id: 0,
-            size: metadata.file_size(),
-            access_time: metadata.last_access_time() as i64,
-            modification_time: metadata.change_time().unwrap_or(0) as i64,
-            creation_time: metadata.creation_time() as i64,
-            block_size: 0,
-            blocks: 0,
-        }
-    }
-}
-
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
 pub struct FsMetadataInternal {
     /// f_type
