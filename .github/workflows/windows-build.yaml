@@ -125,10 +125,40 @@ jobs:
           Write-Host "Will build 'mirrord' from package: $($pkg.name) v$($pkg.version)"
           Write-Host "Layer DLL path: $dll"
 
-      - name: Build & Sign | Build mirrord (bin)
+      # NEW: Sign the DLL first, then embed it into mirrord.exe
+      - name: Build & Sign | Code sign LAYER DLL (pre-embed)
         if: ${{ env.MODE == 'build_sign' }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not $env:MIRRORD_LAYER_FILE -or -not (Test-Path $env:MIRRORD_LAYER_FILE)) {
+            throw "MIRRORD_LAYER_FILE not set/found"
+          }
+
+          Write-Host "Signing DLL: $env:MIRRORD_LAYER_FILE"
+          & signtool.exe sign `
+            /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
+            /tr http://timestamp.digicert.com `
+            /td SHA256 `
+            /fd SHA256 `
+            "$env:MIRRORD_LAYER_FILE"
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL (exit $LASTEXITCODE)" }
+
+          Write-Host "Verifying DLL signature"
+          & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
+          if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL (exit $LASTEXITCODE)" }
+
+          # Re-export to ensure subsequent steps read the (now signed) same path
+          "MIRRORD_LAYER_FILE=$($env:MIRRORD_LAYER_FILE)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build & Sign | Build mirrord (bin) embedding SIGNED DLL
+        if: ${{ env.MODE == 'build_sign' }}
+        env:
+          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:MIRRORD_LAYER_FILE -or -not (Test-Path $env:MIRRORD_LAYER_FILE)) {
+            throw "Signed MIRRORD_LAYER_FILE not found: $env:MIRRORD_LAYER_FILE"
+          }
           cargo build -p "$env:MIRRORD_PKG" --bin mirrord --target x86_64-pc-windows-msvc
 
           $dbgDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\debug'
@@ -141,31 +171,33 @@ jobs:
           }
 
           "MIRRORD_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Built EXE: $exe"
+          Write-Host "Built EXE (with embedded signed DLL): $exe"
 
-      - name: Build & Sign | Code sign EXE + DLL (and verify)
+      - name: Build & Sign | Code sign EXE (post-embed) and verify both
         if: ${{ env.MODE == 'build_sign' }}
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:MIRRORD_EXE -or -not (Test-Path $env:MIRRORD_EXE)) { throw "MIRRORD_EXE not set/found" }
           if (-not $env:MIRRORD_LAYER_FILE -or -not (Test-Path $env:MIRRORD_LAYER_FILE)) { throw "MIRRORD_LAYER_FILE not set/found" }
 
-          foreach ($f in @($env:MIRRORD_EXE, $env:MIRRORD_LAYER_FILE)) {
-            Write-Host "Signing $f"
-            & signtool.exe sign `
-              /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
-              /tr http://timestamp.digicert.com `
-              /td SHA256 `
-              /fd SHA256 `
-              "$f"
-            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $f (exit $LASTEXITCODE)" }
+          Write-Host "Signing EXE: $env:MIRRORD_EXE"
+          & signtool.exe sign `
+            /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb `
+            /tr http://timestamp.digicert.com `
+            /td SHA256 `
+            /fd SHA256 `
+            "$env:MIRRORD_EXE"
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE (exit $LASTEXITCODE)" }
 
-            Write-Host "Verifying $f"
-            & signtool.exe verify /pa "$f"
-            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $f (exit $LASTEXITCODE)" }
-          }
+          Write-Host "Verifying EXE"
+          & signtool.exe verify /pa "$env:MIRRORD_EXE"
+          if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE (exit $LASTEXITCODE)" }
 
-      # >>> NEW STEP: uploads to gs://mirrord-windows-builds/windows/... <<<
+          Write-Host "Re-verify DLL (should already be signed)"
+          & signtool.exe verify /pa "$env:MIRRORD_LAYER_FILE"
+          if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL (exit $LASTEXITCODE)" }
+
+      # >>> Uploads to gs://mirrord-windows-builds/windows/... <<<
       - name: Build & Sign | Stage and upload signed artifacts to GCS
         if: ${{ env.MODE == 'build_sign' }}
         run: |
@@ -179,8 +211,11 @@ jobs:
           $relDir = Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release'
 
           # Resolve exe and dll
-          $exe = (Get-Item -EA SilentlyContinue (Join-Path $dbgDir 'mirrord.exe'))
-          if (-not $exe) { $exe = Get-Item -EA Stop (Join-Path $relDir 'mirrord.exe') }
+          $exe = (Get-Item -EA SilentlyContinue $env:MIRRORD_EXE)
+          if (-not $exe) {
+            $exe = (Get-Item -EA SilentlyContinue (Join-Path $dbgDir 'mirrord.exe'))
+            if (-not $exe) { $exe = Get-Item -EA Stop (Join-Path $relDir 'mirrord.exe') }
+          }
 
           $dll = $env:MIRRORD_LAYER_FILE
           if (-not $dll -or !(Test-Path $dll)) {
@@ -220,7 +255,7 @@ jobs:
           }
 
           gcloud --quiet storage ls $dest
-          
+
       - name: Ensure .sha256 files exist next to artifacts (for smoke)
         run: |
           $ErrorActionPreference = 'Stop'
