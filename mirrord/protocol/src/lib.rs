@@ -63,13 +63,13 @@ pub mod codec;
 pub mod dns;
 pub mod error;
 pub mod file;
+pub mod io;
 pub mod outgoing;
 #[deprecated = "pause feature was removed"]
 pub mod pause;
 pub mod payload;
 pub mod tcp;
 pub mod vpn;
-pub mod io;
 
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 

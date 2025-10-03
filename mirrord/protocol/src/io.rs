@@ -1,6 +1,7 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::{self},
+    mem::{Discriminant, discriminant},
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
@@ -12,8 +13,10 @@ use tokio::{select, sync::mpsc};
 use tracing::instrument;
 
 use crate::{
-    ClientCodec, ClientMessage, DaemonCodec, DaemonMessage, Payload, ToPayload, VERSION,
+    ClientCodec, ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, Payload, ToPayload,
+    VERSION,
     file::CHUNKED_PROTOCOL_VERSION,
+    tcp::{ChunkedRequest, DaemonTcp},
 };
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + Unpin {}
@@ -25,8 +28,10 @@ pub enum Mode {
 }
 
 pub trait ProtocolEndpoint: 'static + Sized {
-    type InMsg: bincode::Decode<()> + Send + std::fmt::Debug;
-    type OutMsg: bincode::Encode + Send + std::fmt::Debug;
+    type InMsg: bincode::Decode<()> + Send;
+    type OutMsg: bincode::Encode + Send
+    where
+        for<'a> &'a Self::OutMsg: Into<QueueId<Self::OutMsg>>;
     type Codec: Encoder<Self::OutMsg, Error = io::Error>
         + Decoder<Item = Self::InMsg, Error = io::Error>
         + Default
@@ -92,8 +97,8 @@ impl ProtocolEndpoint for Agent {
     async fn negotiate<IO: AsyncIO>(
         io: &mut Framed<IO, Self::Codec>,
     ) -> Result<(Mode, Version), ProtocolError> {
-		// REVIEW: Handle non-switchprotocolversion first messages
-		// REVIEW: Fix multiple switchprotocolversions taking place
+        // REVIEW: Handle non-switchprotocolversion first messages
+        // REVIEW: Fix multiple switchprotocolversions taking place
         let client_version = match io.next().await {
             None => {
                 return Err(io::Error::new(
@@ -200,11 +205,11 @@ async fn io_task_legacy<IO: AsyncIO, Type: ProtocolEndpoint>(
                         break;
                     }
                     Some(Ok(e)) => {
-						if let Err(e) = tx.send(e).await {
-							tracing::info!(?e, "io task channel closed");
-							break;
-						}
-					},
+                        if let Err(e) = tx.send(e).await {
+                            tracing::info!(?e, "io task channel closed");
+                            break;
+                        }
+                    },
                 }
             }
         }
@@ -329,14 +334,58 @@ impl Decoder for SimpleChunkCodec {
     }
 }
 
-// struct OutQueue {
-//     messages: VecDeque<OutMessage>,
-// }
+#[derive(Hash, Eq, PartialEq)]
+enum QueueId<T> {
+    /// For messages which have all their instances in a single queue
+    Normal(Discriminant<T>),
 
-// #[derive(Default)]
-// struct OutQueues<T> {
-//     queues: HashMap<Discriminant<T>, OutQueue>,
-// }
+    /// For tcp data messages (we want to split bandwidth equally between tcp connections)
+    Tcp(ConnectionId),
+}
+
+impl From<&DaemonMessage> for QueueId<DaemonMessage> {
+    fn from(value: &DaemonMessage) -> Self {
+        use QueueId::{Normal, Tcp};
+        todo!();
+
+        // match value {
+        //     DaemonMessage::TcpSteal(t) | DaemonMessage::Tcp(t) => Self::Tcp(match t {
+        //         DaemonTcp::NewConnectionV1(p) => Tcp(p.connection_id),
+        //         DaemonTcp::Data(p) => Tcp(p.connection_id),
+        //         DaemonTcp::Close(p) => Tcp(p.connection_id),
+        //         DaemonTcp::HttpRequest(p) => Tcp(p.connection_id),
+        //         DaemonTcp::HttpRequestFramed(p) => Tcp(p.connection_id),
+        //         DaemonTcp::HttpRequestChunked(p) => match p {
+        //             ChunkedRequest::StartV1(r) => Tcp(r.connection_id),
+        //             ChunkedRequest::Body(r) => Tcp(r.connection_id),
+        //             ChunkedRequest::ErrorV1(r) => Tcp(r.connection_id),
+        //             ChunkedRequest::StartV2(r) => Tcp(r.connection_id),
+        //             ChunkedRequest::ErrorV2(r) => Tcp(r.connection_id),
+        //         },
+        //         DaemonTcp::NewConnectionV2(p) => p.connection.connection_id,
+        //         _ => Normal(discriminant(value)),
+        //     }),
+
+        //     _ => Normal(discriminant(value)),
+        // }
+    }
+}
+
+impl From<&ClientMessage> for QueueId<ClientMessage> {
+    fn from(value: &ClientMessage) -> Self {
+        unimplemented!();
+    }
+}
+
+#[derive(Default)]
+struct OutQueue {
+    messages: VecDeque<OutMessage>,
+}
+
+#[derive(Default)]
+struct OutQueues<T> {
+    queues: HashMap<Discriminant<T>, OutQueue>,
+}
 
 #[instrument(skip_all)]
 async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
@@ -360,7 +409,8 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
                     break;
                 };
 
-				let encoded = OutMessage::encode(to_send, tx_id);
+                let encoded = OutMessage::encode(to_send, tx_id);
+                tx_id = tx_id.overflowing_add(1).0;
 
                 // Dumb
                 for chunk in encoded {
@@ -372,7 +422,6 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
 
                 // By the time we overflow, the first messages will
                 // most certainly have been received.
-                tx_id = tx_id.overflowing_add(1).0;
 
             }
             received = framed.next() => {
@@ -394,7 +443,7 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
                     .or_default();
                 buffer.extend_from_slice(&payload);
 
-				drop(payload);
+                drop(payload);
 
                 let decode_result = bincode::decode_from_slice(&buffer, bincode::config::standard());
 
@@ -402,7 +451,7 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
                     Ok((message, size)) => {
                         let buffer = in_buffers.partially_received.remove(&id).unwrap();
                         assert_eq!(size, buffer.len());
-						drop(buffer);
+                        drop(buffer);
 
                         if let Err(err) = tx.send(message).await {
                             tracing::info!(?err, "io task channel closed");

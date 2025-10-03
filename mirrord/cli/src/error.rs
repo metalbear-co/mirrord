@@ -555,7 +555,7 @@ impl From<OperatorApiError> for CliError {
 
 impl From<ProtocolError> for CliError {
     fn from(e: ProtocolError) -> Self {
-		Self::InitialAgentCommFailed(e.to_string())
+        Self::InitialAgentCommFailed(e.to_string())
     }
 }
 

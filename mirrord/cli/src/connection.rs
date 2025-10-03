@@ -13,7 +13,10 @@ use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
 };
-use mirrord_protocol::{io::{Client, Connection}, ClientMessage, DaemonMessage};
+use mirrord_protocol::{
+    ClientMessage, DaemonMessage,
+    io::{Client, Connection},
+};
 use tokio::sync::mpsc;
 use tracing::Level;
 
@@ -178,7 +181,8 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
             .map_err(|error| {
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
-    ).await?;
+    )
+    .await?;
 
     Ok((
         AgentConnectInfo::DirectKubernetes(agent_connect_info),
