@@ -1,5 +1,3 @@
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::ffi::OsStrExt;
 use std::{borrow::Cow, ffi::OsStr, fmt};
 
 /// Convenience trait that allows for producing a nice display of an std/tokio command.

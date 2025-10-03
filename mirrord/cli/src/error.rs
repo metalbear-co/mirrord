@@ -472,7 +472,6 @@ pub(crate) enum CliError {
     ))]
     NestedExec,
 
-    #[cfg(target_os = "windows")]
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
 }
