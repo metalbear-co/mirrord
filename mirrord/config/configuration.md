@@ -171,10 +171,12 @@ Allows setting up custom annotations for the agent Job and Pod.
 
 ```json
 {
-  "annotations": {
-    "cats.io/inject": "enabled"
-    "prometheus.io/scrape": "true",
-    "prometheus.io/port": "9000"
+  "agent": {
+    "annotations": {
+      "cats.io/inject": "enabled",
+      "prometheus.io/scrape": "true",
+      "prometheus.io/port": "9000"
+    }
   }
 }
 ```
@@ -252,7 +254,9 @@ Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
 
 ```json
 {
-  "image": "internal.repo/images/mirrord:latest"
+  "agent": {
+    "image": "internal.repo/images/mirrord:latest"
+  }
 }
 ```
 
@@ -260,9 +264,11 @@ Complete setup:
 
 ```json
 {
-  "image": {
-    "registry": "internal.repo/images/mirrord",
-    "tag": "latest"
+  "agent": {
+    "image": {
+      "registry": "internal.repo/images/mirrord",
+      "tag": "latest"
+    }
   }
 }
 ```
@@ -313,7 +319,9 @@ Allows setting up custom labels for the agent Job and Pod.
 
 ```json
 {
-  "labels": { "user": "meow", "state": "asleep" }
+  "agent": {
+    "labels": { "user": "meow", "state": "asleep" }
+  }
 }
 ```
 
@@ -342,7 +350,9 @@ configured to scrape for metrics.
 
 ```json
 {
-  "metrics": "0.0.0.0:9000"
+  "agent": {
+    "metrics": "0.0.0.0:9000"
+  }
 }
 ```
 
@@ -376,7 +386,9 @@ as targeted agent always runs on the same node as its target container.
 
 ```json
 {
-  "node_selector": { "kubernetes.io/hostname": "node1" }
+  "agent": {
+    "node_selector": { "kubernetes.io/hostname": "node1" }
+  }
 }
 ```
 
@@ -399,7 +411,9 @@ This option is only applicable when running in the targetless mode.
 
 ```json
 {
-  "priority_class": "my-priority-class-name"
+  "agent": {
+    "priority_class": "my-priority-class-name"
+  }
 }
 ```
 
@@ -420,19 +434,23 @@ as targetless agent containers are never privileged.
 
 ### agent.resources {#agent-resources}
 
-Set pod resource reqirements. (not with ephemeral agents)
+Set pod resource requirements. (not with ephemeral agents)
 Default is
 ```json
 {
-  "requests":
-  {
-    "cpu": "1m",
-    "memory": "1Mi"
-  },
-  "limits":
-  {
-    "cpu": "100m",
-      "memory": "100Mi"
+  "agent": {
+    "resources": {
+      "requests":
+      {
+        "cpu": "1m",
+        "memory": "1Mi"
+      },
+      "limits":
+      {
+        "cpu": "100m",
+          "memory": "100Mi"
+      }
+    }
   }
 }
 ```
@@ -443,7 +461,9 @@ Allows setting up custom Service Account for the agent Job and Pod.
 
 ```json
 {
-  "service_account": "my-service-account"
+  "agent": {
+    "service_account": "my-service-account"
+  }
 }
 ```
 
@@ -462,11 +482,15 @@ Set pod tolerations. (not with ephemeral agents).
 Defaults to `operator: Exists`.
 
 ```json
-[
-  {
-    "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+{
+  "agent": {
+    "tolerations": [
+      {
+        "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+      }
+    ]
   }
-]
+}
 ```
 
 Set to an empty array to have no tolerations at all
