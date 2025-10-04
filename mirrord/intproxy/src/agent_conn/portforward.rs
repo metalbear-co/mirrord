@@ -1,5 +1,5 @@
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI, UnpinStream};
+use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI};
 use mirrord_progress::NullProgress;
 use mirrord_protocol::io::{Client, Connection};
 
@@ -13,7 +13,7 @@ pub async fn create_connection(
         .await
         .map_err(AgentConnectionError::Kube)?;
 
-    let stream: Box<dyn UnpinStream> = k8s_api
+    let stream = k8s_api
         .create_connection_portforward(connect_info.clone())
         .await
         .map_err(AgentConnectionError::Kube)?;
