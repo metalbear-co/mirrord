@@ -129,7 +129,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "image": "internal.repo/images/mirrord:latest"
+    ///   "agent": {
+    ///     "image": "internal.repo/images/mirrord:latest"
+    ///   }
     /// }
     /// ```
     ///
@@ -137,9 +139,11 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "image": {
-    ///     "registry": "internal.repo/images/mirrord",
-    ///     "tag": "latest"
+    ///   "agent": {
+    ///     "image": {
+    ///       "registry": "internal.repo/images/mirrord",
+    ///       "tag": "latest"
+    ///     }
     ///   }
     /// }
     /// ```
@@ -259,11 +263,15 @@ pub struct AgentConfig {
     /// Defaults to `operator: Exists`.
     ///
     /// ```json
-    /// [
-    ///   {
-    ///     "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+    /// {
+    ///   "agent": {
+    ///     "tolerations": [
+    ///         {
+    ///           "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+    ///         }
+    ///     ]
     ///   }
-    /// ]
+    /// }
     /// ```
     ///
     /// Set to an empty array to have no tolerations at all
@@ -271,19 +279,23 @@ pub struct AgentConfig {
 
     /// ### agent.resources {#agent-resources}
     ///
-    /// Set pod resource reqirements. (not with ephemeral agents)
+    /// Set pod resource requirements. (not with ephemeral agents)
     /// Default is
     /// ```json
     /// {
-    ///   "requests":
-    ///   {
-    ///     "cpu": "1m",
-    ///     "memory": "1Mi"
-    ///   },
-    ///   "limits":
-    ///   {
-    ///     "cpu": "100m",
-    ///       "memory": "100Mi"
+    ///   "agent": {
+    ///     "resources": {
+    ///       "requests":
+    ///       {
+    ///         "cpu": "1m",
+    ///         "memory": "1Mi"
+    ///       },
+    ///       "limits":
+    ///       {
+    ///         "cpu": "100m",
+    ///         "memory": "100Mi"
+    ///       }
+    ///     }
     ///   }
     /// }
     /// ```
@@ -330,7 +342,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "labels": { "user": "meow", "state": "asleep" }
+    ///   "agent": {
+    ///     "labels": { "user": "meow", "state": "asleep" }
+    ///   }
     /// }
     /// ```
     pub labels: Option<HashMap<String, String>>,
@@ -341,10 +355,12 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "annotations": {
-    ///     "cats.io/inject": "enabled"
-    ///     "prometheus.io/scrape": "true",
-    ///     "prometheus.io/port": "9000"
+    ///   "agent": {
+    ///     "annotations": {
+    ///       "cats.io/inject": "enabled"
+    ///       "prometheus.io/scrape": "true",
+    ///       "prometheus.io/port": "9000"
+    ///     }
     ///   }
     /// }
     /// ```
@@ -357,7 +373,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   "agent": {
+    ///     "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   }
     /// }
     /// ```
     pub node_selector: Option<HashMap<String, String>>,
@@ -368,7 +386,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "service_account": "my-service-account"
+    ///   "agent": {
+    ///     "service_account": "my-service-account"
+    ///   }
     /// }
     /// ```
     pub service_account: Option<String>,
@@ -382,7 +402,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "metrics": "0.0.0.0:9000"
+    ///   "agent": {
+    ///     "metrics": "0.0.0.0:9000"
+    ///   }
     /// }
     /// ```
     pub metrics: Option<SocketAddr>,
@@ -402,7 +424,9 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "priority_class": "my-priority-class-name"
+    ///   "agent": {
+    ///     "priority_class": "my-priority-class-name"
+    ///   }
     /// }
     /// ```
     ///

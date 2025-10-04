@@ -300,7 +300,7 @@
       "properties": {
         "annotations": {
           "title": "agent.annotations {#agent-annotations}",
-          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"annotations\": { \"cats.io/inject\": \"enabled\" \"prometheus.io/scrape\": \"true\", \"prometheus.io/port\": \"9000\" } } ```",
+          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"agent\": { \"annotations\": { \"cats.io/inject\": \"enabled\" \"prometheus.io/scrape\": \"true\", \"prometheus.io/port\": \"9000\" } } } ```",
           "type": [
             "object",
             "null"
@@ -375,7 +375,7 @@
         },
         "image": {
           "title": "agent.image {#agent-image}",
-          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"image\": \"internal.repo/images/mirrord:latest\" } ```\n\nComplete setup:\n\n```json { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } ```",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```",
           "anyOf": [
             {
               "$ref": "#/definitions/AgentImageFileConfig"
@@ -422,7 +422,7 @@
         },
         "labels": {
           "title": "agent.labels {#agent-labels}",
-          "description": "Allows setting up custom labels for the agent Job and Pod.\n\n```json { \"labels\": { \"user\": \"meow\", \"state\": \"asleep\" } } ```",
+          "description": "Allows setting up custom labels for the agent Job and Pod.\n\n```json { \"agent\": { \"labels\": { \"user\": \"meow\", \"state\": \"asleep\" } } } ```",
           "type": [
             "object",
             "null"
@@ -441,7 +441,7 @@
         },
         "metrics": {
           "title": "agent.metrics {#agent-metrics}",
-          "description": "Enables prometheus metrics for the agent pod.\n\nYou might need to add annotations to the agent pod depending on how prometheus is configured to scrape for metrics.\n\n```json { \"metrics\": \"0.0.0.0:9000\" } ```",
+          "description": "Enables prometheus metrics for the agent pod.\n\nYou might need to add annotations to the agent pod depending on how prometheus is configured to scrape for metrics.\n\n```json { \"agent\": { \"metrics\": \"0.0.0.0:9000\" } } ```",
           "type": [
             "string",
             "null"
@@ -473,7 +473,7 @@
         },
         "node_selector": {
           "title": "agent.node_selector {#agent-node_selector}",
-          "description": "Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.\n\n```json { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } ```",
+          "description": "Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.\n\n```json { \"agent\": { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } } ```",
           "type": [
             "object",
             "null"
@@ -492,7 +492,7 @@
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",
-          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"priority_class\": \"my-priority-class-name\" } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
           "type": [
             "string",
             "null"
@@ -508,7 +508,7 @@
         },
         "resources": {
           "title": "agent.resources {#agent-resources}",
-          "description": "Set pod resource reqirements. (not with ephemeral agents) Default is ```json { \"requests\": { \"cpu\": \"1m\", \"memory\": \"1Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } ```",
+          "description": "Set pod resource requirements. (not with ephemeral agents) Default is ```json { \"agent\": { \"resources\": { \"requests\": { \"cpu\": \"1m\", \"memory\": \"1Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } } } ```",
           "anyOf": [
             {
               "$ref": "#/definitions/io.k8s.api.core.v1.ResourceRequirements"
@@ -520,7 +520,7 @@
         },
         "service_account": {
           "title": "agent.service_account {#agent-service_account}",
-          "description": "Allows setting up custom Service Account for the agent Job and Pod.\n\n```json { \"service_account\": \"my-service-account\" } ```",
+          "description": "Allows setting up custom Service Account for the agent Job and Pod.\n\n```json { \"agent\": { \"service_account\": \"my-service-account\" } } ```",
           "type": [
             "string",
             "null"
@@ -538,7 +538,7 @@
         },
         "tolerations": {
           "title": "agent.tolerations {#agent-tolerations}",
-          "description": "Set pod tolerations. (not with ephemeral agents).\n\nDefaults to `operator: Exists`.\n\n```json [ { \"key\": \"meow\", \"operator\": \"Exists\", \"effect\": \"NoSchedule\" } ] ```\n\nSet to an empty array to have no tolerations at all",
+          "description": "Set pod tolerations. (not with ephemeral agents).\n\nDefaults to `operator: Exists`.\n\n```json { \"agent\": { \"tolerations\": [ { \"key\": \"meow\", \"operator\": \"Exists\", \"effect\": \"NoSchedule\" } ] } } ```\n\nSet to an empty array to have no tolerations at all",
           "type": [
             "array",
             "null"
