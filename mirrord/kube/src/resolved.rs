@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{Pod, Service},
+    core::v1::{EnvVar, Pod, PodSpec, Service},
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::target::Target;
@@ -532,5 +532,82 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Targetless(namespace))
             }
         }
+    }
+}
+
+impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
+    /// Get the pod spec of the target k8s resource.
+    pub fn get_pod_spec(&self) -> Option<&PodSpec> {
+        match self {
+            ResolvedTarget::Deployment(inner) => {
+                inner.resource.spec.as_ref()?.template.spec.as_ref()
+            }
+            ResolvedTarget::Rollout(inner) => inner
+                .resource
+                .spec
+                .as_ref()?
+                .template
+                .as_ref()?
+                .as_ref()
+                .spec
+                .as_ref(),
+            ResolvedTarget::Job(inner) => inner.resource.spec.as_ref()?.template.spec.as_ref(),
+            ResolvedTarget::CronJob(inner) => inner
+                .resource
+                .spec
+                .as_ref()?
+                .job_template
+                .spec
+                .as_ref()?
+                .template
+                .spec
+                .as_ref(),
+            ResolvedTarget::StatefulSet(inner) => {
+                inner.resource.spec.as_ref()?.template.spec.as_ref()
+            }
+            ResolvedTarget::Service(..) => None,
+            ResolvedTarget::ReplicaSet(inner) => inner
+                .resource
+                .spec
+                .as_ref()?
+                .template
+                .as_ref()?
+                .spec
+                .as_ref(),
+            ResolvedTarget::Pod(inner) => inner.resource.spec.as_ref(),
+            ResolvedTarget::Targetless(..) => None,
+        }
+    }
+
+    /// Get the environment variable with [`name`] from the target's pod spec.
+    pub fn get_env(&self, name: &str) -> Option<&EnvVar> {
+        let pod_spec = self.get_pod_spec()?;
+        let target_container = self.container();
+
+        if let Some(container_name) = target_container {
+            for container in &pod_spec.containers {
+                if container.name == container_name
+                    && let Some(env) = &container.env
+                {
+                    for env_var in env {
+                        if env_var.name == name {
+                            return Some(env_var);
+                        }
+                    }
+                }
+            }
+        } else {
+            for container in &pod_spec.containers {
+                if let Some(env) = &container.env {
+                    for env_var in env {
+                        if env_var.name == name {
+                            return Some(env_var);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
