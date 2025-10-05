@@ -129,6 +129,9 @@ pub struct MirrordClusterSessionSpec {
     #[serde(default)]
     pub on_concurrent_steal: ConcurrentSteal,
 
+    #[serde(default)]
+    pub max_time: Option<Duration>,
+
     /// Session's [`Target`](mirrord_config::target::Target)
     pub target: SessionTarget,
 }
