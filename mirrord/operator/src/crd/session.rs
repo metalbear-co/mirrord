@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Duration};
 
 use kube::CustomResource;
 use mirrord_config::feature::network::incoming::ConcurrentSteal;
