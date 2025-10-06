@@ -114,7 +114,7 @@ impl MirrordCi {
                 .await?;
 
             intproxy_pid_file
-                .write(&std::process::id().to_be_bytes())
+                .write_all(&std::process::id().to_be_bytes())
                 .await?;
 
             Ok(())

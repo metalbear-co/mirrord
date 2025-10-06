@@ -675,7 +675,7 @@ async fn exec(
     ensure_not_nested()?;
 
     if !args.params.disable_version_check {
-        prompt_outdated_version(&progress).await;
+        prompt_outdated_version(progress).await;
     }
     info!(
         "Launching {:?} with arguments {:?}",
