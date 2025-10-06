@@ -46,6 +46,12 @@ pub trait Queueable: Sized {
     fn queue_id(&self) -> QueueId<Self>;
 }
 
+pub struct NegotiationResult<Type: ProtocolEndpoint> {
+    mode: Mode,
+    version: Option<Version>,
+    first_unprocessed_message: Option<Type::InMsg>,
+}
+
 pub trait ProtocolEndpoint: 'static + Sized {
     type InMsg: bincode::Decode<()> + Send;
     type OutMsg: bincode::Encode + Send + Queueable;
@@ -56,7 +62,7 @@ pub trait ProtocolEndpoint: 'static + Sized {
 
     fn negotiate<IO: AsyncIO>(
         io: &mut Framed<IO, Self::Codec>,
-    ) -> impl Future<Output = Result<(Mode, Version), ProtocolError>> + Send;
+    ) -> impl Future<Output = Result<NegotiationResult<Self>, ProtocolError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -77,7 +83,7 @@ impl ProtocolEndpoint for Client {
 
     async fn negotiate<IO: AsyncIO>(
         io: &mut Framed<IO, Self::Codec>,
-    ) -> Result<(Mode, Version), ProtocolError> {
+    ) -> Result<NegotiationResult<Self>, ProtocolError> {
         io.send(ClientMessage::SwitchProtocolVersion(VERSION.clone()))
             .await?;
 
@@ -90,19 +96,22 @@ impl ProtocolEndpoint for Client {
                 .into());
             }
             Some(Err(err)) => return Err(err.into()),
-            Some(Ok(DaemonMessage::SwitchProtocolVersionResponse(version))) => version,
+            Some(Ok(DaemonMessage::SwitchProtocolVersionResponse(version))) => Some(version),
             Some(Ok(_)) => {
                 return Err(ProtocolError::UnexpectedPeerMessage);
             }
         };
 
-        let mode = if CHUNKED_PROTOCOL_VERSION.matches(&version) {
-            Mode::Chunked
-        } else {
-            Mode::Legacy
+        let mode = match &version {
+            Some(v) if CHUNKED_PROTOCOL_VERSION.matches(v) => Mode::Chunked,
+            _ => Mode::Legacy,
         };
 
-        Ok((mode, version))
+        Ok(NegotiationResult {
+            mode,
+            version,
+            first_unprocessed_message: None,
+        })
     }
 }
 
@@ -113,51 +122,63 @@ impl ProtocolEndpoint for Agent {
 
     async fn negotiate<IO: AsyncIO>(
         io: &mut Framed<IO, Self::Codec>,
-    ) -> Result<(Mode, Version), ProtocolError> {
-        // REVIEW: Handle non-switchprotocolversion first messages
+    ) -> Result<NegotiationResult<Self>, ProtocolError> {
         // REVIEW: Fix multiple switchprotocolversions taking place
-        let client_version = match io.next().await {
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "unable to receive client switch protocol requst",
-                )
-                .into());
+        match io.next().await {
+            None => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unable to receive client switch protocol requst",
+            )
+            .into()),
+            Some(Err(err)) => Err(err.into()),
+            Some(Ok(ClientMessage::SwitchProtocolVersion(client_version))) => {
+                let version = Ord::min(&client_version, &VERSION).clone();
+                io.send(DaemonMessage::SwitchProtocolVersionResponse(
+                    version.clone(),
+                ))
+                .await?;
+
+                Ok(NegotiationResult {
+                    mode: if CHUNKED_PROTOCOL_VERSION.matches(&version) {
+                        Mode::Chunked
+                    } else {
+                        Mode::Legacy
+                    },
+                    version: Some(version),
+                    first_unprocessed_message: None,
+                })
             }
-            Some(Err(err)) => return Err(err.into()),
-            Some(Ok(ClientMessage::SwitchProtocolVersion(version))) => version,
-            Some(Ok(_)) => return Err(ProtocolError::UnexpectedPeerMessage),
-        };
-
-        let version = Ord::min(&client_version, &VERSION).clone();
-
-        io.send(DaemonMessage::SwitchProtocolVersionResponse(
-            version.clone(),
-        ))
-        .await?;
-
-        let mode = if CHUNKED_PROTOCOL_VERSION.matches(&version) {
-            Mode::Chunked
-        } else {
-            Mode::Legacy
-        };
-
-        Ok((mode, version))
+            Some(Ok(other)) => Ok(NegotiationResult {
+                mode: Mode::Legacy,
+                version: None,
+                first_unprocessed_message: Some(other),
+            }),
+        }
     }
 }
 
 pub struct Connection<Type: ProtocolEndpoint> {
     pub tx: mpsc::Sender<Type::OutMsg>,
     pub rx: mpsc::Receiver<Type::InMsg>,
-    pub version: Version,
+    pub version: Option<Version>,
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
     pub async fn new<IO: AsyncIO>(inner: IO) -> Result<Self, ProtocolError> {
         let mut framed = Framed::new(inner, Type::Codec::default());
-        let (mode, version) = Type::negotiate(&mut framed).await?;
+
+        let NegotiationResult {
+            mode,
+            version,
+            first_unprocessed_message,
+        } = Type::negotiate(&mut framed).await?;
+
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
         let (outbound_tx, outbound_rx) = mpsc::channel(32);
+
+        if let Some(msg) = first_unprocessed_message {
+            inbound_tx.send(msg).await.unwrap();
+        };
 
         match mode {
             Mode::Legacy => {
@@ -308,6 +329,7 @@ struct InBuffers {
 
 struct SimpleChunkCodec;
 
+// Seems to be a little faster than bincode
 impl Encoder<Chunk> for SimpleChunkCodec {
     type Error = io::Error;
 
@@ -504,15 +526,15 @@ async fn tx_task<Type: ProtocolEndpoint, IO: AsyncIO>(
     let mut maybe_have_more = false;
     'outer: loop {
         if !maybe_have_more {
-			select! {
-				_ = state.can_send.notified() => (),
-				_ = cancel.cancelled() => break,
-			}
-		} else {
-			if cancel.is_cancelled() {
-				break;
-			}
-		}
+            select! {
+                _ = state.can_send.notified() => (),
+                _ = cancel.cancelled() => break,
+            }
+        } else {
+            if cancel.is_cancelled() {
+                break;
+            }
+        }
 
         let next_chunk = {
             let mut lock = state.queues.lock().unwrap();
@@ -537,7 +559,7 @@ async fn tx_task<Type: ProtocolEndpoint, IO: AsyncIO>(
                             queue.messages.pop_front();
                         }
                     }
-                }
+                };
             }
         };
 
@@ -546,7 +568,7 @@ async fn tx_task<Type: ProtocolEndpoint, IO: AsyncIO>(
             cancel.cancel();
             break 'outer;
         }
-		maybe_have_more = true;
+        maybe_have_more = true;
     }
 
     framed
