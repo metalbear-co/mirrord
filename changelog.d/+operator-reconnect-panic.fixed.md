@@ -1,1 +1,0 @@
-Fixed an issue where mirrord sessions would sometimes fail after reconnecting to the operator.
