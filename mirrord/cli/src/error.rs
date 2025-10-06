@@ -16,6 +16,7 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
+    ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
     dump::DumpSessionError,
     port_forward::PortForwardError,
@@ -146,14 +147,17 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     InitialPingPongFailed(String),
 
-    // TODO(alex) [mid]: Should probably be a `MirrordForCi` specific error.
-    #[error("File operation failed: {0}!")]
-    #[diagnostic(help("blah blah blah"))]
-    IO(#[from] std::io::Error),
+    #[error("Reading env var failed: {0}!")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    Var(#[from] std::env::VarError),
 
-    #[error("Json error: {0}!")]
-    #[diagnostic(help("blah blah blah"))]
-    SerdeJson(#[from] serde_json::Error),
+    #[error("Reading env var failed: {0}!")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    ParseInt(#[from] ParseIntError),
+
+    #[error("Expected env var {0} to be not be present, but it was already set!")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    EnvVarAlreadyPresent(String),
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.
@@ -471,20 +475,9 @@ pub(crate) enum CliError {
     ))]
     NestedExec,
 
-    #[error(
-        "The required environment variable {0} was not found or contains an invalid character!"
-    )]
-    #[diagnostic(help(
-        "Some mirrord commands require special environment variables to be set, e.g. `mirrord ci start` \
-         requires `MIRRORD_FOR_CI_API_KEY`, please add the missing env var before trying to run \
-         mirrord again."
-    ))]
-    EnvVar(&'static str, std::env::VarError),
-
-    // TODO(alex) [mid]: Should probably be a `MirrordForCi` specific error.
-    #[error("File operation failed: {0}!")]
-    #[diagnostic(help("blah blah blah"))]
-    IO(#[from] std::io::Error),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    MirrordForCi(#[from] CiError),
 }
 
 impl CliError {

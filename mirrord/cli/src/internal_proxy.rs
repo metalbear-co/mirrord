@@ -11,7 +11,7 @@
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
-    env::{self, temp_dir},
+    env::{self},
     io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
@@ -27,11 +27,10 @@ use mirrord_intproxy::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::{io::AsyncWriteExt, net::TcpListener};
+use tokio::net::TcpListener;
 use tracing::{Level, warn};
 
 use crate::{
-    ci::MirrordCiInfo,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
@@ -62,8 +61,6 @@ pub(crate) async fn proxy(
         version = env!("CARGO_PKG_VERSION"),
         "Starting mirrord-intproxy",
     );
-
-    MirrordCiInfo::prepare_intproxy().await?;
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.

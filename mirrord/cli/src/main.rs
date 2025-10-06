@@ -669,11 +669,11 @@ async fn exec(
     args: &ExecArgs,
     watch: drain::Watch,
     user_data: &mut UserData,
+    progress: &mut ProgressTracker,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     ensure_not_nested()?;
 
-    let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -700,7 +700,7 @@ async fn exec(
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
-    crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
+    crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
@@ -720,7 +720,7 @@ async fn exec(
         config,
         config_file_path.as_deref(),
         args,
-        &mut progress,
+        progress,
         &mut analytics,
         user_data,
         mirrord_for_ci,
@@ -902,7 +902,10 @@ fn main() -> miette::Result<()> {
             .unwrap_or_default();
 
         match cli.commands {
-            Commands::Exec(args) => exec(&args, watch, &mut user_data, None).await?,
+            Commands::Exec(args) => {
+                let mut progress = ProgressTracker::from_env("mirrord exec");
+                exec(&args, watch, &mut user_data, &mut progress, None).await?
+            }
             Commands::Dump(args) => dump_command(&args, watch, &user_data).await?,
             Commands::Extract { path } => {
                 extract_library(
@@ -925,6 +928,8 @@ fn main() -> miette::Result<()> {
             }
             Commands::InternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+                MirrordCi::prepare_intproxy()?;
+
                 logging::init_intproxy_tracing_registry(&config)?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }

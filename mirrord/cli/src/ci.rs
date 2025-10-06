@@ -1,23 +1,23 @@
-use std::{env::temp_dir, path::PathBuf, process::ExitStatus};
+use std::{env, path::PathBuf};
 
 use drain::Watch;
 use mirrord_analytics::NullReporter;
+use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
-use serde::{Deserialize, Serialize};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::Command,
-};
 use tracing::Level;
 
-use crate::{
-    CiArgs, CiCommand, CliError, CliResult, ExecArgs, error::InternalProxyError, exec,
-    user_data::UserData,
-};
+use crate::{CiArgs, CiCommand, CliError, CliResult, ci::error::CiError, user_data::UserData};
+
+pub(crate) mod error;
+pub(super) mod start;
+pub(crate) mod stop;
 
 const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
+const MIRRORD_FOR_CI_INTPROXY_PID: &str = "MIRRORD_FOR_CI_INTPROXY_PID";
+
+type CiResult<T> = Result<T, crate::ci::error::CiError>;
 
 /// Handle commands related to CI `mirrord ci ...`
 pub(crate) async fn ci_command(
@@ -27,21 +27,23 @@ pub(crate) async fn ci_command(
 ) -> CliResult<()> {
     match args.command {
         CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file).await,
-        CiCommand::Start(exec_args) => {
-            CiStartCommandHandler::new(exec_args, watch, user_data)
-                .await?
-                .handle()
-                .await
-        }
-        CiCommand::Stop => CiStopCommandHandler::handle()
+        CiCommand::Start(exec_args) => Ok(start::CiStartCommandHandler::new(
+            exec_args, watch, user_data,
+        )
+        .await?
+        .handle()
+        .await?),
+        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new()
+            .await?
+            .handle()
             .await
-            .map(|status| tracing::info!(?status, "Kill all!")),
+            .map(|status| tracing::info!(?status, "Kill all!"))?),
     }
 }
 
 /// Generate a new API key for CI usage by calling the operator API:
 /// `POST /mirrordclusteroperatorusercredentials`
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret)]
 async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord ci api-key");
 
@@ -80,129 +82,44 @@ MIRRORD_CI_API_KEY environment variable.
     Ok(())
 }
 
-pub(super) struct CiStartCommandHandler<'a> {
-    mirrord_for_ci: MirrordCi,
-    exec_args: Box<ExecArgs>,
-    watch: Watch,
-    user_data: &'a mut UserData,
-}
-
-impl<'a> CiStartCommandHandler<'a> {
-    #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn new(
-        exec_args: Box<ExecArgs>,
-        watch: Watch,
-        user_data: &'a mut UserData,
-    ) -> CliResult<Self> {
-        let ci_api_key = std::env::var(MIRRORD_CI_API_KEY)
-            .map_err(|fail| CliError::EnvVar(MIRRORD_CI_API_KEY, fail))?;
-
-        // TODO(alex) [mid]: User cannot set `operator: false`, we need the operator for this one.
-        let mirrord_for_ci = MirrordCi { ci_api_key };
-
-        unsafe {
-            std::env::set_var("MIRRORD_PROGRESS_MODE", "off");
-        }
-
-        Ok(Self {
-            mirrord_for_ci,
-            exec_args,
-            watch,
-            user_data,
-        })
-    }
-
-    pub(super) async fn handle(self) -> CliResult<()> {
-        let Self {
-            mirrord_for_ci,
-            exec_args,
-            watch,
-            user_data,
-        } = self;
-
-        exec(&exec_args, watch, user_data, Some(mirrord_for_ci)).await
-    }
-}
-
-pub(super) struct CiStopCommandHandler;
-
-impl CiStopCommandHandler {
-    pub(super) async fn handle() -> CliResult<ExitStatus> {
-        let ci_info = MirrordCiInfo::read().await?;
-
-        Ok(Command::new("kill")
-            .arg(ci_info.intproxy_pid.to_string())
-            .spawn()?
-            .wait()
-            .await?)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct MirrordCiInfo {
-    intproxy_pid: u32,
-}
-
-impl MirrordCiInfo {
-    pub(super) async fn prepare_intproxy() -> Result<(), InternalProxyError> {
-        if std::env::var(MIRRORD_CI_API_KEY).is_ok() {
-            let mut tmp_mirrord = temp_dir();
-            tmp_mirrord.push("mirrord/mirrord-for-ci-info.json");
-
-            let mut mirrord_ci_file = tokio::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(tmp_mirrord)
-                .await?;
-
-            let mut contents = String::new();
-            mirrord_ci_file.read_to_string(&mut contents).await?;
-
-            let new_contents: Self = if contents.is_empty() {
-                Self {
-                    intproxy_pid: std::process::id(),
-                }
-            } else {
-                let mut old_contents: Self = serde_json::from_str(&contents)?;
-                old_contents.intproxy_pid = std::process::id();
-
-                old_contents
-            };
-
-            mirrord_ci_file
-                .write(serde_json::to_string_pretty(&new_contents)?.as_bytes())
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    pub(super) async fn read() -> Result<Self, InternalProxyError> {
-        let mut tmp_mirrord = temp_dir();
-        tmp_mirrord.push("mirrord/mirrord-for-ci-info.json");
-
-        let mut mirrord_ci_file = tokio::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(tmp_mirrord)
-            .await?;
-
-        let mut contents = String::new();
-        mirrord_ci_file.read_to_string(&mut contents).await?;
-
-        Ok(serde_json::from_str(&contents)?)
-    }
-}
-
 #[derive(Debug)]
 pub(super) struct MirrordCi {
-    ci_api_key: String,
+    ci_api_key: CiApiKey,
+    intproxy_pid: Option<u32>,
 }
 
 impl MirrordCi {
-    pub(super) fn api_key(&self) -> &str {
+    pub(super) fn api_key(&self) -> &CiApiKey {
         &self.ci_api_key
+    }
+
+    pub(super) fn prepare_intproxy() -> CiResult<()> {
+        let mirrord_for_ci = MirrordCi::get()?;
+
+        match mirrord_for_ci.intproxy_pid {
+            Some(_) => Err(CiError::IntproxyPidAlreadyPresent),
+            None => unsafe {
+                env::set_var(MIRRORD_FOR_CI_INTPROXY_PID, std::process::id().to_string());
+                Ok(())
+            },
+        }
+    }
+
+    pub(super) fn get() -> CiResult<Self> {
+        let intproxy_pid: Option<u32> = match std::env::var(MIRRORD_FOR_CI_INTPROXY_PID) {
+            Ok(pid) => Some(pid.parse()?),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(fail @ env::VarError::NotUnicode(..)) => {
+                Err(CiError::EnvVar(MIRRORD_FOR_CI_INTPROXY_PID, fail))?
+            }
+        };
+
+        let ci_api_key = std::env::var(MIRRORD_CI_API_KEY)
+            .map_err(|fail| CiError::EnvVar(MIRRORD_CI_API_KEY, fail))?;
+
+        Ok(Self {
+            ci_api_key: CiApiKey::decode(&ci_api_key)?,
+            intproxy_pid,
+        })
     }
 }

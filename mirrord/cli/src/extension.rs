@@ -14,7 +14,6 @@ async fn mirrord_exec<P>(
     mut progress: P,
     analytics: &mut AnalyticsReporter,
     config_file_path: Option<&str>,
-    mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -27,7 +26,7 @@ where
         None,
         &mut progress,
         analytics,
-        mirrord_for_ci,
+        None,
     )
     .await?;
 
@@ -116,7 +115,6 @@ pub(crate) async fn extension_exec(
         progress,
         &mut analytics,
         args.config_file.as_ref().and_then(|p| p.to_str()),
-        None,
     )
     .await;
 
