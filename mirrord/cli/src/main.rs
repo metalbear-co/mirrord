@@ -243,7 +243,7 @@
 
 use std::{
     collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
-    time::Duration,
+    process::Stdio, time::Duration,
 };
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
@@ -447,6 +447,9 @@ where
             match tokio::process::Command::new(binary_path)
                 .args(binary_args.clone().into_iter().skip(1))
                 .envs(env_vars.clone())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .kill_on_drop(false)
                 .spawn()
             {
