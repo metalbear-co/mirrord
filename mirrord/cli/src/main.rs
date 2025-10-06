@@ -443,26 +443,10 @@ where
     progress.success(Some("Ready!"));
 
     match mirrord_for_ci {
-        Some(_) => {
-            match tokio::process::Command::new(binary_path)
-                .args(binary_args.clone().into_iter().skip(1))
-                .envs(env_vars.clone())
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .kill_on_drop(false)
-                .spawn()
-            {
-                Ok(child) => {
-                    progress.success(Some(&format!("child pid: {:?}", child.id())));
-                    Ok(())
-                }
-                Err(fail) => {
-                    progress.failure(Some(&fail.to_string()));
-                    Err(CliError::BinaryExecuteFailed(binary, binary_args))
-                }
-            }
-        }
+        Some(mirrord_ci) => mirrord_ci
+            .prepare_command(progress, &binary, &binary_path, &binary_args, &env_vars)
+            .await
+            .map_err(From::from),
         None => {
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())

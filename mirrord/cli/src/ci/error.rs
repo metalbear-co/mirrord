@@ -22,6 +22,9 @@ pub(crate) enum CiError {
     #[error("mirrord-intproxy may be running already!")]
     IntproxyPidAlreadyPresent,
 
+    #[error("mirrord user process may be running already!")]
+    UserPidAlreadyPresent,
+
     #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
     #[diagnostic(help(
         "`mirrord ci stop` reads the file `/tmp/mirrord/mirrord-for-ci-intproxy-pid` to stop \
@@ -29,4 +32,7 @@ pub(crate) enum CiError {
         by searching for the pid with `ps | grep mirrord` and calling `kill [pid]`."
     ))]
     IntproxyPidMissing,
+
+    #[error("Failed to execute binary `{0}` with args {1:?}")]
+    BinaryExecuteFailed(String, Vec<String>),
 }
