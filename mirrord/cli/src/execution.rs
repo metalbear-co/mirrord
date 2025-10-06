@@ -323,8 +323,6 @@ impl MirrordExecution {
         // for reference.
         proxy_process.wait().await.unwrap();
 
-        println!("proxy pid {:?}", proxy_process.id());
-
         let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()

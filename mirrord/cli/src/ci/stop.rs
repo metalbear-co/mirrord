@@ -1,6 +1,7 @@
 use std::process::ExitStatus;
 
 use tokio::process::Command;
+use tracing::Level;
 
 use super::CiResult;
 use crate::{MirrordCi, ci::error::CiError};
@@ -10,12 +11,14 @@ pub(super) struct CiStopCommandHandler {
 }
 
 impl CiStopCommandHandler {
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn new() -> CiResult<Self> {
         let mirrord_ci = MirrordCi::get().await?;
 
         Ok(Self { mirrord_ci })
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<ExitStatus> {
         let Self { mirrord_ci } = self;
 

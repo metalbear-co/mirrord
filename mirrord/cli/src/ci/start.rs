@@ -20,7 +20,11 @@ impl<'a> CiStartCommandHandler<'a> {
         watch: Watch,
         user_data: &'a mut UserData,
     ) -> CiResult<Self> {
-        let mut progress = ProgressTracker::from_env("mirrord ci start");
+        let mut progress = if exec_args.params.debug {
+            ProgressTracker::from_env("mirrord ci start")
+        } else {
+            ProgressTracker::NullProgress(mirrord_progress::NullProgress)
+        };
 
         let mirrord_for_ci = MirrordCi::get().await?;
 
@@ -32,10 +36,6 @@ impl<'a> CiStartCommandHandler<'a> {
             )));
         }
 
-        unsafe {
-            std::env::set_var("MIRRORD_PROGRESS_MODE", "off");
-        }
-
         Ok(Self {
             mirrord_for_ci,
             exec_args,
@@ -45,6 +45,7 @@ impl<'a> CiStartCommandHandler<'a> {
         })
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CliResult<()> {
         let Self {
             mirrord_for_ci,

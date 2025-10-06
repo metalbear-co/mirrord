@@ -99,6 +99,7 @@ impl MirrordCi {
         &self.ci_api_key
     }
 
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn prepare_intproxy() -> CiResult<()> {
         if MirrordCi::get().await?.intproxy_pid.is_some() {
             Err(CiError::IntproxyPidAlreadyPresent)
@@ -121,6 +122,7 @@ impl MirrordCi {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub(super) async fn get() -> CiResult<Self> {
         let mut mirrord_ci_tmp_file = temp_dir();
         mirrord_ci_tmp_file.push(Self::MIRRORD_FOR_CI_TMP_FILE);
@@ -144,6 +146,7 @@ impl MirrordCi {
         })
     }
 
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn clear(self) -> CiResult<()> {
         let mut mirrord_ci_tmp_file = temp_dir();
         mirrord_ci_tmp_file.push(Self::MIRRORD_FOR_CI_TMP_FILE);

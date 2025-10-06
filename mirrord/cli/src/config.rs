@@ -238,8 +238,8 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub no_telemetry: bool,
 
-    #[arg(long)]
     /// Disable version check on startup.
+    #[arg(long)]
     pub disable_version_check: bool,
 
     /// Load config from config file
@@ -258,6 +258,13 @@ pub(super) struct ExecParams {
     /// These variables will override environment fetched from the remote target.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
+
+    /// Additional logging when set to true.
+    ///
+    /// Used to enable/disable progress in `mirrord ci start`.
+    #[arg(long)]
+    #[clap(hide(true))]
+    pub debug: bool,
 }
 
 impl ExecParams {
