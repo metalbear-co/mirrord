@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{env::temp_dir, io::ErrorKind, path::PathBuf};
 
 use drain::Watch;
 use mirrord_analytics::NullReporter;
@@ -6,6 +6,10 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
+use tokio::{
+    fs::OpenOptions,
+    io::{AsyncReadExt, AsyncWriteExt},
+};
 use tracing::Level;
 
 use crate::{CiArgs, CiCommand, CliError, CliResult, ci::error::CiError, user_data::UserData};
@@ -89,30 +93,47 @@ pub(super) struct MirrordCi {
 }
 
 impl MirrordCi {
+    const MIRRORD_FOR_CI_TMP_FILE: &str = "mirrord/mirrord-for-ci-intproxy-pid";
+
     pub(super) fn api_key(&self) -> &CiApiKey {
         &self.ci_api_key
     }
 
-    pub(super) fn prepare_intproxy() -> CiResult<()> {
-        let mirrord_for_ci = MirrordCi::get()?;
+    pub(super) async fn prepare_intproxy() -> CiResult<()> {
+        if MirrordCi::get().await?.intproxy_pid.is_some() {
+            Err(CiError::IntproxyPidAlreadyPresent)
+        } else {
+            let mut mirrord_tmp_dir = temp_dir();
+            mirrord_tmp_dir.push(Self::MIRRORD_FOR_CI_TMP_FILE);
 
-        match mirrord_for_ci.intproxy_pid {
-            Some(_) => Err(CiError::IntproxyPidAlreadyPresent),
-            None => unsafe {
-                env::set_var(MIRRORD_FOR_CI_INTPROXY_PID, std::process::id().to_string());
-                Ok(())
-            },
+            let mut intproxy_pid_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(mirrord_tmp_dir)
+                .await?;
+
+            intproxy_pid_file
+                .write(&std::process::id().to_be_bytes())
+                .await?;
+
+            Ok(())
         }
     }
 
-    pub(super) fn get() -> CiResult<Self> {
-        let intproxy_pid: Option<u32> = match std::env::var(MIRRORD_FOR_CI_INTPROXY_PID) {
-            Ok(pid) => Some(pid.parse()?),
-            Err(std::env::VarError::NotPresent) => None,
-            Err(fail @ env::VarError::NotUnicode(..)) => {
-                Err(CiError::EnvVar(MIRRORD_FOR_CI_INTPROXY_PID, fail))?
-            }
-        };
+    pub(super) async fn get() -> CiResult<Self> {
+        let mut mirrord_ci_tmp_file = temp_dir();
+        mirrord_ci_tmp_file.push(Self::MIRRORD_FOR_CI_TMP_FILE);
+
+        let intproxy_pid = match OpenOptions::new()
+            .read(true)
+            .open(mirrord_ci_tmp_file)
+            .await
+        {
+            Ok(mut pid_file) => Ok(Some(pid_file.read_u32().await?)),
+            Err(fail) if matches!(fail.kind(), ErrorKind::NotFound) => Ok(None),
+            Err(fail) => Err(fail),
+        }?;
 
         let ci_api_key = std::env::var(MIRRORD_CI_API_KEY)
             .map_err(|fail| CiError::EnvVar(MIRRORD_CI_API_KEY, fail))?;
@@ -121,5 +142,14 @@ impl MirrordCi {
             ci_api_key: CiApiKey::decode(&ci_api_key)?,
             intproxy_pid,
         })
+    }
+
+    pub(super) async fn clear(self) -> CiResult<()> {
+        let mut mirrord_ci_tmp_file = temp_dir();
+        mirrord_ci_tmp_file.push(Self::MIRRORD_FOR_CI_TMP_FILE);
+
+        tokio::fs::remove_file(mirrord_ci_tmp_file).await?;
+
+        Ok(())
     }
 }

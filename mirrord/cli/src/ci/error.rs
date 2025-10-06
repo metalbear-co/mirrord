@@ -19,15 +19,12 @@ pub(crate) enum CiError {
     ))]
     EnvVar(&'static str, std::env::VarError),
 
-    #[error("File operation failed: {0}!")]
-    Parse(#[from] std::num::ParseIntError),
-
-    #[error("File operation failed: !")]
+    #[error("mirrord-intproxy may be running already!")]
     IntproxyPidAlreadyPresent,
 
     #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
     #[diagnostic(help(
-        "`mirrord ci stop` relies on the environment variable `MIRRORD_FOR_CI_INTPROXY_PID` to stop \
+        "`mirrord ci stop` reads the file `/tmp/mirrord/mirrord-for-ci-intproxy-pid` to stop \
         the running mirrord session, and we could not retrieve this pid. You can manually stop mirrord \
         by searching for the pid with `ps | grep mirrord` and calling `kill [pid]`."
     ))]

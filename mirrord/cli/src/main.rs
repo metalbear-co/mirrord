@@ -928,7 +928,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::InternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
-                MirrordCi::prepare_intproxy()?;
+                MirrordCi::prepare_intproxy().await?;
 
                 logging::init_intproxy_tracing_registry(&config)?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?

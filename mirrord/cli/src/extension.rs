@@ -3,7 +3,7 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
-    CliResult, MirrordCi, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
+    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
     user_data::UserData,
 };
 

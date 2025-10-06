@@ -22,7 +22,7 @@ impl<'a> CiStartCommandHandler<'a> {
     ) -> CiResult<Self> {
         let mut progress = ProgressTracker::from_env("mirrord ci start");
 
-        let mirrord_for_ci = MirrordCi::get()?;
+        let mirrord_for_ci = MirrordCi::get().await?;
 
         if mirrord_for_ci.intproxy_pid.is_some() {
             progress.failure(Some(&format!(
