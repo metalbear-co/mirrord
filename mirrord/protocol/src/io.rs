@@ -173,8 +173,8 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
             first_unprocessed_message,
         } = Type::negotiate(&mut framed).await?;
 
-        let (inbound_tx, inbound_rx) = mpsc::channel(32);
-        let (outbound_tx, outbound_rx) = mpsc::channel(32);
+        let (inbound_tx, inbound_rx) = mpsc::channel(64);
+        let (outbound_tx, outbound_rx) = mpsc::channel(64);
 
         if let Some(msg) = first_unprocessed_message {
             inbound_tx.send(msg).await.unwrap();
@@ -293,7 +293,7 @@ impl OutMessage {
 }
 
 /// REVIEW make this configurable
-const CHUNK_SIZE: u32 = 1024 * 256;
+const CHUNK_SIZE: u32 = 1024 * 128;
 
 impl Iterator for OutMessage {
     type Item = Chunk;
