@@ -19,7 +19,6 @@ pub(super) mod start;
 pub(crate) mod stop;
 
 const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
-const MIRRORD_FOR_CI_INTPROXY_PID: &str = "MIRRORD_FOR_CI_INTPROXY_PID";
 
 type CiResult<T> = Result<T, crate::ci::error::CiError>;
 
