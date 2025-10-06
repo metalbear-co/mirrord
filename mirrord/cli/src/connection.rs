@@ -36,7 +36,7 @@ async fn try_connect_using_operator<P, R>(
     progress: &P,
     analytics: &mut R,
     branch_name: Option<String>,
-    mirrord_for_ci: Option<MirrordCi>,
+    mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<Option<OperatorSessionConnection>>
 where
     P: Progress,
@@ -124,7 +124,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     progress: &mut P,
     analytics: &mut R,
     branch_name: Option<String>,
-    mirrord_for_ci: Option<MirrordCi>,
+    mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)> {
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?

@@ -246,8 +246,6 @@ impl IntProxy {
         first_timeout: Duration,
         idle_timeout: Duration,
     ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
-        tracing::info!("pid {:?}", std::process::id());
-
         self.task_txs
             .agent
             .send(ClientMessage::SwitchProtocolVersion(

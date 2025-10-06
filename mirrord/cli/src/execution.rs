@@ -188,7 +188,7 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")] args: Option<&[OsString]>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
-        mirrord_for_ci: Option<MirrordCi>,
+        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<Self>
     where
         P: Progress,

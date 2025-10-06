@@ -366,7 +366,7 @@ where
         Some(binary_args.as_slice()),
         &mut sub_progress,
         analytics,
-        mirrord_for_ci,
+        mirrord_for_ci.as_ref(),
     )
     .await?;
 
@@ -442,62 +442,42 @@ where
 
     progress.success(Some("Ready!"));
 
-    tracing::info!(
-        ?binary_path,
-        ?binary_args,
-        // ?env_vars,
-        ?path,
-        ?args,
-        // ?env,
-        "What are we trying to run?",
-    );
-    match tokio::process::Command::new(binary_path)
-        .args(binary_args.clone().into_iter().skip(1))
-        .envs(env_vars.clone())
-        .kill_on_drop(false)
-        .spawn()
-    {
-        Ok(child) => tracing::info!("{:?}", child.id()),
-        Err(fail) => panic!("Kaboom {:?}", fail),
-    };
+    match mirrord_for_ci {
+        Some(_) => {
+            match tokio::process::Command::new(binary_path)
+                .args(binary_args.clone().into_iter().skip(1))
+                .envs(env_vars.clone())
+                .kill_on_drop(false)
+                .spawn()
+            {
+                Ok(child) => tracing::info!("{:?}", child.id()),
+                Err(fail) => panic!("Kaboom {:?}", fail),
+            };
 
-    tracing::info!("Let it live forever");
+            Ok(())
+        }
+        None => {
+            // The execve hook is not yet active and does not hijack this call.
+            let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
+                .expect_err("call to execve cannot succeed");
+            error!("Couldn't execute {:?}", errno);
+            analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
-    /*
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            if errno == Errno::from_raw(86) {
+                // "Bad CPU type in executable"
+                if _did_sip_patch {
+                    return Err(CliError::RosettaMissing(binary));
+                }
+            }
 
-    match std::process::Command::new(binary_path)
-        .args(binary_args.clone().into_iter().skip(1))
-        .envs(env_vars.clone())
-        .spawn()
-    {
-        Ok(child) => tracing::info!("{:?}", child.id()),
-        Err(fail) => panic!("Kaboom {:?}", fail),
-    };
-    */
+            if errno == nix::errno::Errno::E2BIG {
+                return Err(CliError::ExecveE2Big);
+            }
 
-    Ok(())
-
-    // The execve hook is not yet active and does not hijack this call.
-    /*
-    let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
-        .expect_err("call to execve cannot succeed");
-    error!("Couldn't execute {:?}", errno);
-    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if errno == Errno::from_raw(86) {
-        // "Bad CPU type in executable"
-        if _did_sip_patch {
-            return Err(CliError::RosettaMissing(binary));
+            Err(CliError::BinaryExecuteFailed(binary, binary_args))
         }
     }
-
-    if errno == nix::errno::Errno::E2BIG {
-        return Err(CliError::ExecveE2Big);
-    }
-
-    Err(CliError::BinaryExecuteFailed(binary, binary_args))
-    */
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
