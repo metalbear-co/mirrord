@@ -228,8 +228,6 @@ impl CredentialStoreSync {
         New::DynamicType: Default,
         C: FnOnce(&mut Credentials) -> V,
     {
-        // TODO(alex) [high] [1]: Here we need to do whatever we have to do with the `credentials`
-        // that we have in `make_mirrord_for_ci_work`.
         let mut store = CredentialStore::load(&mut self.store_file)
             .await
             .inspect_err(|error| tracing::warn!(%error, "CredentialStore load failed"))
