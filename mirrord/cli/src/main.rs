@@ -450,11 +450,15 @@ where
                 .kill_on_drop(false)
                 .spawn()
             {
-                Ok(child) => tracing::info!("{:?}", child.id()),
-                Err(fail) => panic!("Kaboom {:?}", fail),
-            };
-
-            Ok(())
+                Ok(child) => {
+                    progress.success(Some(&format!("child pid: {:?}", child.id())));
+                    Ok(())
+                }
+                Err(fail) => {
+                    progress.failure(Some(&fail.to_string()));
+                    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+                }
+            }
         }
         None => {
             // The execve hook is not yet active and does not hijack this call.
