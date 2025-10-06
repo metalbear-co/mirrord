@@ -128,11 +128,10 @@ impl From<ClientMessage> for AgentConnectionMessage {
     }
 }
 
-/// REVIEW update this note
 /// Handles logic of the `proxy <-> agent` connection as a [`BackgroundTask`].
 ///
 /// # Note
-/// The raw IO is managed in a separate [`tokio::task`] created in a different mirrord crate.
+/// The raw IO is managed in a separate [`tokio::task`] created in mirrord_protocol.
 /// This differs from the [`LayerConnection`](crate::layer_conn::LayerConnection) implementation,
 /// but this logic was already implemented elsewhere. This struct simply wraps the
 /// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
