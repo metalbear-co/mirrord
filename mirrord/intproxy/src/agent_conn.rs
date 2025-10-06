@@ -245,10 +245,6 @@ pub enum AgentConnectionTaskError {
     ChannelError(AgentConnectInfoDiscriminants),
 }
 
-// REVIEW: See if we can get rid of this task Currently messages
-// traverse 2 tasks (this one and and the
-// mirrord_protocol::io::Connection). It would be really nice if we
-// could get rid of one of the extra tasks.
 impl BackgroundTask for AgentConnection {
     type Error = AgentConnectionTaskError;
     type MessageIn = AgentConnectionMessage;
