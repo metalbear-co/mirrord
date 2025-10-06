@@ -198,17 +198,17 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
+	#[inline]
     pub async fn send(
         &self,
         msg: Type::OutMsg,
-        /* REVIEW return type */
     ) -> Result<(), mpsc::error::SendError<Type::OutMsg>> {
         self.tx.send(msg).await
     }
 
+	#[inline]
     pub async fn recv(
         &mut self,
-        /* REVIEW return type */
     ) -> Option<Type::InMsg> {
         self.rx.recv().await
     }
