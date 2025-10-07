@@ -7,6 +7,9 @@ use crate::{CliResult, ExecArgs, ci::error::CiError, exec, user_data::UserData};
 
 /// Handles the `mirrord ci start` command.
 ///
+/// Behaves in a similar way to `mirrord exec`, except that we `spawn` the user's binary with
+/// mirrord, letting them live after the mirrord cli has died.
+///
 /// The fields in here are passed to [`exec`], since we re-use that to start mirrord in ci.
 pub(super) struct CiStartCommandHandler<'a> {
     /// Used to tell [`exec`] that we're running in ci.
@@ -56,7 +59,7 @@ impl<'a> CiStartCommandHandler<'a> {
         }
     }
 
-    /// Calls [`exec`] with `mirrord_for_ci`.
+    /// Calls [`exec`] with [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CliResult<()> {
         let Self {
