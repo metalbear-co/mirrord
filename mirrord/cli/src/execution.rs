@@ -286,8 +286,13 @@ impl MirrordExecution {
 
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+        proxy_command.arg("intproxy");
+
+        if mirrord_for_ci.is_some() {
+            proxy_command.arg("--mirrord-for-ci");
+        }
+
         proxy_command
-            .arg("intproxy")
             // Start of debug args. Don't add real args after this point,
             // `_debug_args` Clap field will swallow them.
             .arg("--log-destination")
