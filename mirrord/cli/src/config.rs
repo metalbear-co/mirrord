@@ -120,6 +120,10 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+
+        #[arg(long, default_value_t = false)]
+        mirrord_for_ci: bool,
+
         /// Debug arguments.
         ///
         /// These are passed only for visibility in `ps` output,
