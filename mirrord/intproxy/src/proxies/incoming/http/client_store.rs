@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use futures::FutureExt;
 use hyper::{Uri, Version};
 use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::{MaybeTls, UriExt};
@@ -122,43 +123,30 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls = match transport {
-            IncomingTrafficTransportType::Tcp => false,
-            IncomingTrafficTransportType::Tls { .. } => true,
-        };
+        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
+            && self.tls_setup.is_some();
 
-        loop {
-            let client = {
-                let Ok(mut guard) = self.clients.lock() else {
-                    tracing::error!("ClientStore mutex is poisoned, this is a bug");
-                    return Err(LocalHttpError::StoreIsPoisoned);
-                };
+        if let Some(ready) = self
+            .wait_for_ready(server_addr, version, uses_tls)
+            .now_or_never()
+        {
+            tracing::debug!(?ready, "Reused an idle client");
+            return Ok(ready);
+        }
 
-                guard
-                    .iter()
-                    .position(|idle_client| {
-                        idle_client.client.local_server_address() == server_addr
-                            && idle_client.client.handles_version(version)
-                            && idle_client.client.uses_tls() == uses_tls
-                    })
-                    .map(|index| guard.swap_remove(index))
-                    .map(|idle_client| idle_client.client)
-            };
+        tokio::select! {
+            biased;
 
-            if let Some(client) = client {
-                // Simply return the client - we remove connection testing for simplicity
-                return Ok(client);
-            }
+            ready = self.wait_for_ready(server_addr, version, uses_tls) => {
+                tracing::debug!(?ready, "Reused an idle client");
+                Ok(ready)
+            },
 
-            match tokio::time::timeout(
-                Duration::from_secs(10),
-                self.wait_for_ready(server_addr, version, uses_tls),
-            )
-            .await
-            {
-                Ok(client) => return Ok(client),
-                Err(_) => return self.make_client(server_addr, version, transport, request_uri).await,
-            }
+            result = self.make_client(server_addr, version, transport, request_uri) => {
+                let client = result?;
+                tracing::debug!(?client, "Made a new client");
+                Ok(client)
+            },
         }
     }
 
