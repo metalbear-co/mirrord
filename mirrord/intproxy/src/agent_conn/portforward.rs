@@ -18,7 +18,7 @@ pub async fn create_connection(
         .await
         .map_err(AgentConnectionError::Kube)?;
 
-    Ok(Connection::new(convert(stream)).await?)
+    Ok(Connection::from_stream(convert(stream)).await?)
 }
 
 // If I don't do this stuff rustc complains about some cursed lifetime

@@ -184,7 +184,7 @@ impl AgentConnection {
 
                 let conn = match tls_pem {
                     Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
-                    None => Connection::new(stream).await?,
+                    None => Connection::from_stream(stream).await?,
                 };
 
                 (conn.tx, conn.rx, ReconnectFlow::Break(kind))
@@ -205,7 +205,7 @@ impl AgentConnection {
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
-        let conn = Connection::<Client>::new(stream).await?;
+        let conn = Connection::<Client>::from_stream(stream).await?;
 
         Ok(Self {
             agent_tx: conn.tx,

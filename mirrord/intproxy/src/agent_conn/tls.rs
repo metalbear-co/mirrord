@@ -43,5 +43,5 @@ pub async fn wrap_raw_connection(
         .await
         .map_err(ConnectionTlsError::ConnectionError)?;
 
-    Ok(Connection::new(stream).await?)
+    Ok(Connection::from_stream(stream).await?)
 }

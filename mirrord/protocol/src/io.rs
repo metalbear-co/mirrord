@@ -9,7 +9,7 @@ use std::{
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
 use bincode::{Decode, Encode, error::DecodeError};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::{SinkExt, StreamExt, stream::SplitSink};
+use futures::{Sink, SinkExt, Stream, StreamExt, stream::SplitSink};
 use rand::seq::IteratorRandom;
 use semver::Version;
 use tokio::{
@@ -20,12 +20,22 @@ use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 use crate::{
-    ClientCodec, ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, Payload, ToPayload,
-    VERSION, file::CHUNKED_PROTOCOL_VERSION,
+    ClientMessage, ConnectionId, DaemonMessage, Payload, ProtocolCodec, ToPayload, VERSION,
+    file::CHUNKED_PROTOCOL_VERSION,
 };
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + Unpin + 'static {}
 impl<T: AsyncWrite + AsyncRead + Send + Unpin + 'static> AsyncIO for T {}
+
+pub trait IoChannel<I, O>:
+    Sink<O, Error = io::Error> + Stream<Item = Result<I, io::Error>> + Send + Unpin + 'static
+{
+}
+
+impl<T, I, O> IoChannel<I, O> for T where
+    T: Sink<O, Error = io::Error> + Stream<Item = Result<I, io::Error>> + Send + Unpin + 'static
+{
+}
 
 pub enum Mode {
     Legacy,
@@ -55,13 +65,9 @@ pub struct NegotiationResult<Type: ProtocolEndpoint> {
 pub trait ProtocolEndpoint: 'static + Sized {
     type InMsg: bincode::Decode<()> + Send;
     type OutMsg: bincode::Encode + Send + Queueable;
-    type Codec: Encoder<Self::OutMsg, Error = io::Error>
-        + Decoder<Item = Self::InMsg, Error = io::Error>
-        + Default
-        + Send;
 
-    fn negotiate<IO: AsyncIO>(
-        io: &mut Framed<IO, Self::Codec>,
+    fn negotiate<Channel: IoChannel<Self::InMsg, Self::OutMsg>>(
+        io: &mut Channel,
     ) -> impl Future<Output = Result<NegotiationResult<Self>, ProtocolError>> + Send;
 }
 
@@ -79,10 +85,9 @@ pub struct Agent;
 impl ProtocolEndpoint for Client {
     type InMsg = DaemonMessage;
     type OutMsg = ClientMessage;
-    type Codec = ClientCodec;
 
-    async fn negotiate<IO: AsyncIO>(
-        io: &mut Framed<IO, Self::Codec>,
+    async fn negotiate<Channel: IoChannel<Self::InMsg, Self::OutMsg>>(
+        io: &mut Channel,
     ) -> Result<NegotiationResult<Self>, ProtocolError> {
         io.send(ClientMessage::SwitchProtocolVersion(VERSION.clone()))
             .await?;
@@ -118,10 +123,9 @@ impl ProtocolEndpoint for Client {
 impl ProtocolEndpoint for Agent {
     type InMsg = ClientMessage;
     type OutMsg = DaemonMessage;
-    type Codec = DaemonCodec;
 
-    async fn negotiate<IO: AsyncIO>(
-        io: &mut Framed<IO, Self::Codec>,
+    async fn negotiate<Channel: IoChannel<Self::InMsg, Self::OutMsg>>(
+        io: &mut Channel,
     ) -> Result<NegotiationResult<Self>, ProtocolError> {
         // REVIEW: Fix multiple switchprotocolversions taking place
         match io.next().await {
@@ -164,8 +168,8 @@ pub struct Connection<Type: ProtocolEndpoint> {
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
-    pub async fn new<IO: AsyncIO>(inner: IO) -> Result<Self, ProtocolError> {
-        let mut framed = Framed::new(inner, Type::Codec::default());
+    pub async fn from_stream<IO: AsyncIO>(inner: IO) -> Result<Self, ProtocolError> {
+        let mut framed = Framed::new(inner, ProtocolCodec::<Type::InMsg, Type::OutMsg>::default());
 
         let NegotiationResult {
             mode,
@@ -182,13 +186,17 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
         match mode {
             Mode::Legacy => {
-                tokio::spawn(io_task_legacy::<IO, Type>(framed, outbound_rx, inbound_tx))
+                tokio::spawn(io_task_legacy::<_, Type>(framed, outbound_rx, inbound_tx))
             }
-            Mode::Chunked => tokio::spawn(io_task_chunked::<IO, Type>(
-                framed.into_parts().io,
-                outbound_rx,
-                inbound_tx,
-            )),
+            Mode::Chunked => {
+                let raw_io = framed.into_parts().io;
+                let chunk_codec = Framed::new(raw_io, SimpleChunkCodec);
+                tokio::spawn(io_task_chunked::<_, Type>(
+                    chunk_codec,
+                    outbound_rx,
+                    inbound_tx,
+                ))
+            }
         };
 
         Ok(Self {
@@ -198,7 +206,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
-	#[inline]
+    #[inline]
     pub async fn send(
         &self,
         msg: Type::OutMsg,
@@ -206,20 +214,21 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         self.tx.send(msg).await
     }
 
-	#[inline]
-    pub async fn recv(
-        &mut self,
-    ) -> Option<Type::InMsg> {
+    #[inline]
+    pub async fn recv(&mut self) -> Option<Type::InMsg> {
         self.rx.recv().await
     }
 }
 
 #[instrument(skip_all)]
-async fn io_task_legacy<IO: AsyncIO, Type: ProtocolEndpoint>(
-    mut framed: Framed<IO, Type::Codec>,
+async fn io_task_legacy<Channel, Type>(
+    mut framed: Channel,
     mut rx: mpsc::Receiver<Type::OutMsg>,
     tx: mpsc::Sender<Type::InMsg>,
-) {
+) where
+    Type: ProtocolEndpoint,
+    Channel: IoChannel<Type::InMsg, Type::OutMsg>,
+{
     loop {
         select! {
             to_send = rx.recv() => {
@@ -422,11 +431,13 @@ struct OutQueues<T> {
 }
 
 #[instrument(skip_all)]
-async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
-    io: IO,
+async fn io_task_chunked<Channel, Type: ProtocolEndpoint>(
+    stream: Channel,
     mut rx: mpsc::Receiver<Type::OutMsg>,
     tx: mpsc::Sender<Type::InMsg>,
-) {
+) where
+    Channel: IoChannel<Chunk, Chunk>,
+{
     let out_queues = Arc::new(OutQueues {
         queues: Mutex::new(HashMap::new()),
         can_send: Notify::new(),
@@ -436,11 +447,11 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
 
     let mut tx_id: MessageId = 0;
 
-    let (framed_out, mut framed_in) = Framed::new(io, SimpleChunkCodec).split();
+    let (framed_out, mut framed_in) = stream.split();
 
     let cancel = CancellationToken::new();
 
-    let tx_task_handle = tokio::spawn(tx_task::<Type, IO>(
+    let tx_task_handle = tokio::spawn(tx_task::<_, Type>(
         out_queues.clone(),
         framed_out,
         cancel.clone(),
@@ -518,11 +529,11 @@ async fn io_task_chunked<IO: AsyncIO, Type: ProtocolEndpoint>(
 }
 
 #[instrument(skip_all)]
-async fn tx_task<Type: ProtocolEndpoint, IO: AsyncIO>(
+async fn tx_task<Channel: IoChannel<Chunk, Chunk>, Type: ProtocolEndpoint>(
     state: Arc<OutQueues<Type::OutMsg>>,
-    mut framed: SplitSink<Framed<IO, SimpleChunkCodec>, Chunk>,
+    mut framed: SplitSink<Channel, Chunk>,
     cancel: CancellationToken,
-) -> SplitSink<Framed<IO, SimpleChunkCodec>, Chunk> {
+) -> SplitSink<Channel, Chunk> {
     let mut maybe_have_more = false;
     'outer: loop {
         if !maybe_have_more {

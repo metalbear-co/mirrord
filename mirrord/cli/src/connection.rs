@@ -174,7 +174,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
-    let conn = Connection::<Client>::new(
+    let conn = Connection::<Client>::from_stream(
         k8s_api
             .create_connection_portforward(agent_connect_info.clone())
             .await

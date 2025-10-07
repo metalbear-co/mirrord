@@ -105,9 +105,9 @@ impl ClientConnection {
                     .connect(connector.server_name.clone(), stream)
                     .await?;
 
-                Connection::new(tls_stream).await
+                Connection::from_stream(tls_stream).await
             }
-            None => Connection::new(stream).await,
+            None => Connection::from_stream(stream).await,
         }
         .map_err(io::Error::other)?;
 
