@@ -121,6 +121,10 @@ pub(super) enum Commands {
         #[arg(long, default_value_t = 0)]
         port: u16,
 
+        /// Set this when starting the internal proxy from `mirrord ci start`.
+        ///
+        /// Enables mirrord-for-ci intproxy pid saving, and checking for the `MIRRORD_CI_API_KEY`
+        /// env var.
         #[arg(long, default_value_t = false)]
         mirrord_for_ci: bool,
 
