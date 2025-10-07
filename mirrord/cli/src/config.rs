@@ -1065,14 +1065,24 @@ pub(super) struct CiArgs {
     pub command: CiCommand,
 }
 
+/// `mirrord ci` commands.
 #[derive(Subcommand, Debug)]
 pub(super) enum CiCommand {
+    /// Generates a `CiApiKey` that should be set in the ci's environment variable as
+    /// `MIRRORD_CI_API_KEY`.
     ApiKey {
         /// Specify config file to use
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
+    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec`.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
     Start(Box<ExecArgs>),
+
+    /// Stops mirrord for ci.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
     Stop,
 }
 
