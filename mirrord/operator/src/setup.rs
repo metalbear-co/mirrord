@@ -105,7 +105,6 @@ pub struct SetupOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
-    pub stateful_sessions: bool,
     pub mysql_branching: bool,
 }
 
@@ -126,7 +125,6 @@ pub struct Operator {
     client_ca_role_binding: OperatorClientCaRoleBinding,
     sqs_splitting: bool,
     kafka_splitting: bool,
-    stateful_sessions: bool,
     mysql_branching: bool,
 }
 
@@ -140,7 +138,6 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            stateful_sessions,
             mysql_branching,
         } = options;
 
@@ -157,7 +154,6 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            stateful_sessions,
             mysql_branching,
         });
         let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
@@ -208,7 +204,6 @@ impl Operator {
             client_ca_role_binding,
             sqs_splitting,
             kafka_splitting,
-            stateful_sessions,
             mysql_branching,
         }
     }
@@ -297,10 +292,14 @@ impl OperatorSetup for Operator {
             }
         }
 
-        if self.stateful_sessions {
-            writer.write_all(b"---\n")?;
-            MirrordClusterSession::crd().to_writer(&mut writer)?;
-        }
+        writer.write_all(b"---\n")?;
+        MirrordClusterWorkloadPatch::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterWorkloadPatchRequest::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterSession::crd().to_writer(&mut writer)?;
 
         if self.mysql_branching {
             writer.write_all(b"---\n")?;
@@ -576,7 +575,6 @@ pub struct OperatorClusterRoleOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
-    pub stateful_sessions: bool,
     pub mysql_branching: bool,
 }
 
@@ -692,6 +690,7 @@ impl OperatorClusterRole {
                     MirrordClusterWorkloadPatch::plural(&()).into_owned(),
                     MirrordClusterWorkloadPatchRequest::plural(&()).into_owned(),
                     format!("{}/status", MirrordClusterWorkloadPatchRequest::plural(&())),
+                    MirrordClusterSession::plural(&()).into_owned(),
                 ]),
                 verbs: vec!["*".to_owned()],
                 ..Default::default()
@@ -816,18 +815,6 @@ impl OperatorClusterRole {
                 api_groups: Some(vec!["argoproj.io".to_owned()]),
                 resources: Some(vec!["applications".to_owned()]),
                 verbs: vec!["list".to_owned(), "get".to_owned(), "patch".to_owned()],
-                ..Default::default()
-            });
-        }
-
-        if options.stateful_sessions {
-            rules.push(PolicyRule {
-                api_groups: Some(vec![MirrordClusterSession::group(&()).into_owned()]),
-                resources: Some(vec![MirrordClusterSession::plural(&()).into_owned()]),
-                verbs: ["get", "list", "watch", "create", "delete"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
                 ..Default::default()
             });
         }
