@@ -189,10 +189,8 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
                 tokio::spawn(io_task_legacy::<_, Type>(framed, outbound_rx, inbound_tx))
             }
             Mode::Chunked => {
-                let raw_io = framed.into_parts().io;
-                let chunk_codec = Framed::new(raw_io, SimpleChunkCodec);
                 tokio::spawn(io_task_chunked::<_, Type>(
-                    chunk_codec,
+                    framed.replace_codec(SimpleChunkCodec),
                     outbound_rx,
                     inbound_tx,
                 ))
