@@ -49,7 +49,7 @@ RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.to
 RUN cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
-FROM ghcr.io/metalbear-co/ci-agent-runtime:6bb5df4eb00ae4971c389844ec3eb93ac9eadc2c
+FROM ghcr.io/metalbear-co/ci-agent-runtime-staging:8eb42f31a7164aeab4d4ccf28dfb1b04681f1576
 COPY --from=builder /mirrord-agent /
 
 CMD ["./mirrord-agent"]
