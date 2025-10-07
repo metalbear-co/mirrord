@@ -43,6 +43,34 @@ use crate::{
     main_tasks::{LayerClosed, LayerForked, ToLayer},
 };
 
+/// Normalizes unspecified addresses (0.0.0.0, ::) to localhost for connection purposes.
+/// 
+/// This is needed because while servers can bind to unspecified addresses (meaning "listen on all interfaces"),
+/// clients need a specific address to connect to. On Windows, connecting to unspecified addresses
+/// can be problematic due to networking stack behavior and security policies.
+#[cfg(target_os = "windows")]
+fn normalize_connection_address(listen_addr: SocketAddr) -> SocketAddr {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    
+    match listen_addr.ip() {
+        std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
+            tracing::debug!("Converting IPv4 unspecified {} to localhost for Windows compatibility", listen_addr);
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_addr.port())
+        }
+        std::net::IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
+            tracing::debug!("Converting IPv6 unspecified {} to localhost for Windows compatibility", listen_addr);
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), listen_addr.port())
+        }
+        _ => listen_addr,
+    }
+}
+
+/// On non-Windows platforms, unspecified addresses typically work fine for connections.
+#[cfg(not(target_os = "windows"))]
+fn normalize_connection_address(listen_addr: SocketAddr) -> SocketAddr {
+    listen_addr
+}
+
 mod bound_socket;
 mod http;
 mod http_gateway;
@@ -283,12 +311,16 @@ impl IncomingProxy {
             port: request.port,
             version: request.version(),
         };
+
+        let server_addr = normalize_connection_address(subscription.listening_on);
+        tracing::info!("Using server address {} for connection", server_addr);
+
         let tx = self.tasks.register(
             HttpGatewayTask::new(
                 request,
                 self.client_store.clone(),
                 is_steal.then_some(self.response_mode),
-                subscription.listening_on,
+                server_addr,
                 transport,
             ),
             if is_steal {
@@ -356,6 +388,8 @@ impl IncomingProxy {
         let socket = BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())
             .map_err(IncomingProxyError::SocketSetupFailed)?;
 
+        let peer_address = normalize_connection_address(subscription.listening_on);
+
         self.metadata_store.expect(
             ConnMetadataRequest {
                 listener_address: subscription.listening_on,
@@ -380,7 +414,7 @@ impl IncomingProxy {
                 connection_id,
                 LocalTcpConnection::FromTheStart {
                     socket,
-                    peer: subscription.listening_on,
+                    peer: peer_address,
                     transport,
                     tls_setup: self.tls_setup.clone(),
                 },

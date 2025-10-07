@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use futures::FutureExt;
 use hyper::{Uri, Version};
 use mirrord_protocol::tcp::IncomingTrafficTransportType;
 use mirrord_tls_util::{MaybeTls, UriExt};
@@ -78,9 +77,21 @@ impl ClientStore {
             tls_setup,
         };
 
-        tokio::spawn(cleanup_task(store.clone(), timeout));
+        // Only spawn cleanup task if connection pooling is enabled
+        if Self::should_enable_connection_pooling() {
+            tokio::spawn(cleanup_task(store.clone(), timeout));
+        }
 
         store
+    }
+
+    /// Determines whether connection pooling should be enabled.
+    /// 
+    /// On Windows, connection pooling is disabled due to "channel closed" errors
+    /// that occur when reusing HTTP connections in rapid succession scenarios.
+    #[inline]
+    fn should_enable_connection_pooling() -> bool {
+        !cfg!(target_os = "windows")
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].
@@ -96,45 +107,109 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
-            && self.tls_setup.is_some();
-
-        if let Some(ready) = self
-            .wait_for_ready(server_addr, version, uses_tls)
-            .now_or_never()
-        {
-            tracing::debug!(?ready, "Reused an idle client");
-            return Ok(ready);
+        if Self::should_enable_connection_pooling() {
+            self.get_with_pooling(server_addr, version, transport, request_uri).await
+        } else {
+            self.get_without_pooling(server_addr, version, transport, request_uri).await
         }
+    }
 
-        tokio::select! {
-            biased;
+    /// Gets a client with connection pooling (reuses existing connections).
+    async fn get_with_pooling(
+        &self,
+        server_addr: SocketAddr,
+        version: Version,
+        transport: &IncomingTrafficTransportType,
+        request_uri: &Uri,
+    ) -> Result<LocalHttpClient, LocalHttpError> {
+        let uses_tls = match transport {
+            IncomingTrafficTransportType::Tcp => false,
+            IncomingTrafficTransportType::Tls { .. } => true,
+        };
 
-            ready = self.wait_for_ready(server_addr, version, uses_tls) => {
-                tracing::debug!(?ready, "Reused an idle client");
-                Ok(ready)
-            },
+        loop {
+            let client = {
+                let Ok(mut guard) = self.clients.lock() else {
+                    tracing::error!("ClientStore mutex is poisoned, this is a bug");
+                    return Err(LocalHttpError::StoreIsPoisoned);
+                };
 
-            result = self.make_client(server_addr, version, transport, request_uri) => {
-                let client = result?;
-                tracing::debug!(?client, "Made a new client");
-                Ok(client)
-            },
+                guard
+                    .iter()
+                    .position(|idle_client| {
+                        idle_client.client.local_server_address() == server_addr
+                            && idle_client.client.handles_version(version)
+                            && idle_client.client.uses_tls() == uses_tls
+                    })
+                    .map(|index| guard.swap_remove(index))
+                    .map(|idle_client| idle_client.client)
+            };
+
+            if let Some(client) = client {
+                // Simply return the client - we remove connection testing for simplicity
+                return Ok(client);
+            }
+
+            match tokio::time::timeout(
+                Duration::from_secs(10),
+                self.wait_for_ready(server_addr, version, uses_tls),
+            )
+            .await
+            {
+                Ok(client) => return Ok(client),
+                Err(_) => return self.make_client(server_addr, version, transport, request_uri).await,
+            }
         }
+    }
+
+    /// Gets a client without connection pooling (always creates new connections).
+    async fn get_without_pooling(
+        &self,
+        server_addr: SocketAddr,
+        version: Version,
+        transport: &IncomingTrafficTransportType,
+        request_uri: &Uri,
+    ) -> Result<LocalHttpClient, LocalHttpError> {
+        let client = self.make_client(server_addr, version, transport, request_uri).await?;
+        tracing::debug!(?client, "Created new HTTP client");
+        Ok(client)
     }
 
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub fn push_idle(&self, client: LocalHttpClient) {
-        let mut guard = self
-            .clients
-            .lock()
-            .expect("ClientStore mutex is poisoned, this is a bug");
-        guard.push(IdleLocalClient {
+        if Self::should_enable_connection_pooling() {
+            self.push_idle_with_pooling(client);
+        } else {
+            self.push_idle_without_pooling(client);
+        }
+    }
+
+    /// Stores a client for reuse (connection pooling enabled).
+    fn push_idle_with_pooling(&self, client: LocalHttpClient) {
+        let idle_client = IdleLocalClient {
             client,
             last_used: Instant::now(),
-        });
-        self.notify.notify_waiters();
+        };
+
+        let Ok(mut guard) = self.clients.lock() else {
+            tracing::error!("ClientStore mutex is poisoned, this is a bug");
+            return;
+        };
+
+        guard.push(idle_client);
+        self.notify.notify_one();
+    }
+
+    /// Drops a client immediately (connection pooling disabled).
+    fn push_idle_without_pooling(&self, client: LocalHttpClient) {
+        #[cfg(target_os = "windows")]
+        tracing::trace!(?client, "Dropping HTTP client (connection pooling disabled on Windows)");
+        
+        #[cfg(not(target_os = "windows"))]
+        tracing::trace!(?client, "Dropping HTTP client (connection pooling disabled)");
+        
+        std::mem::drop(client);
     }
 
     /// Waits until there is a ready unused client.

@@ -3,7 +3,7 @@
 /// until it becomes layer's LayerSetup
 use std::{net::SocketAddr, sync::OnceLock};
 
-use mirrord_config::{LayerConfig, feature::network::outgoing::OutgoingConfig, target::Target};
+use mirrord_config::{LayerConfig, feature::network::{incoming::IncomingConfig, outgoing::OutgoingConfig}, target::Target};
 
 use crate::{
     error::{LayerError, LayerResult},
@@ -57,6 +57,10 @@ impl LayerSetup {
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {
         &self.layer_config().feature.network.outgoing
+    }
+
+    pub fn incoming_config(&self) -> &IncomingConfig {
+        &self.layer_config().feature.network.incoming
     }
 
     pub fn remote_dns_enabled(&self) -> bool {

@@ -102,6 +102,9 @@ pub enum LocalHttpError {
 
     #[error("failed to prepare TLS client configuration: {0}")]
     TlsSetupError(#[from] LocalTlsSetupError),
+
+    #[error("client store mutex is poisoned")]
+    StoreIsPoisoned,
 }
 
 impl LocalHttpError {
@@ -111,7 +114,8 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..)
             | Self::UnsupportedHttpVersion(..)
-            | Self::TlsSetupError(..) => false,
+            | Self::TlsSetupError(..)
+            | Self::StoreIsPoisoned => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
                 .is_parse()
