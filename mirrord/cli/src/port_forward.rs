@@ -180,7 +180,7 @@ impl PortForwarder {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_agent(
         &mut self,
         message: DaemonMessage,
@@ -367,7 +367,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_listener_stream(
         &mut self,
         message: (SocketAddr, Result<TcpStream, std::io::Error>),
@@ -423,7 +423,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_task(
         &mut self,
         message: PortForwardMessage,
@@ -753,6 +753,7 @@ impl LocalConnectionTask {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     pub async fn run(&mut self) -> Result<(), PortForwardError> {
         let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
         let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
