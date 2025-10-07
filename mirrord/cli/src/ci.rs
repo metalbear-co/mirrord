@@ -166,7 +166,7 @@ impl MirrordCi {
             Err(CiError::UserPidAlreadyPresent)
         } else {
             match tokio::process::Command::new(binary_path)
-                .args(binary_args.into_iter().skip(1))
+                .args(binary_args.iter().skip(1))
                 .envs(env_vars)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
