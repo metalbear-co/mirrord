@@ -179,8 +179,8 @@ jobs:
             (Get-Content $file -Raw).Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
           }
 
-          $exeHash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-          $dllHash = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
+          $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
           $exeExpect = GetExpectedSha "$exe.sha256"
           $dllShaPath = if (Test-Path "$dll.sha256") { "$dll.sha256" } else { (Join-Path (Split-Path $dll -Parent) 'mirrord_layer_win.dll.sha256') }
           $dllExpect = GetExpectedSha $dllShaPath
@@ -240,9 +240,17 @@ jobs:
           $md += ''
           $md += '| Check | Result | Notes |'
           $md += '|------:|:------:|-------|'
+
           foreach ($r in $rows) {
-            $md += "| $($r.Check) | $($r.Result) | $($r.Notes -replace '\r',' ' -replace '\n',' ') |"
+            $c = [string]$r.Check
+            $res = [string]$r.Result
+            $n = [string]$r.Notes
+            # sanitize notes for Markdown table
+            $n = $n -replace '\r',' ' -replace '\n',' '
+            $n = $n -replace '\|','\|'
+            $md += ("| {0} | {1} | {2} |" -f $c, $res, $n)
           }
+
           $md += ''
           $md += '**`mirrord --version`**'
           $md += '```'
@@ -254,6 +262,7 @@ jobs:
           $md += $helpOut
           $md += '```'
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+
 
       - name: Run Rust unit tests (single loop)
         run: |
