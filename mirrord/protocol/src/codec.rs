@@ -14,10 +14,16 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
-    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse}, file::*, io::{QueueId, Queueable}, outgoing::{
+    ResponseError,
+    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
+    file::*,
+    io::{QueueId, Queueable},
+    outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    }, tcp::{ChunkedRequest, ChunkedResponse, DaemonTcp, LayerTcp, LayerTcpSteal}, vpn::{ClientVpn, ServerVpn}, ResponseError
+    },
+    tcp::{ChunkedRequest, ChunkedResponse, DaemonTcp, LayerTcp, LayerTcpSteal},
+    vpn::{ClientVpn, ServerVpn},
 };
 
 /// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].
@@ -185,9 +191,9 @@ impl Queueable for ClientMessage {
                     ChunkedResponse::Body(c) => Tcp(c.connection_id),
                     ChunkedResponse::Error(c) => Tcp(c.connection_id),
                 },
-				_ => Normal(discriminant(self))
+                _ => Normal(discriminant(self)),
             },
-			_ => Normal(discriminant(self)),
+            _ => Normal(discriminant(self)),
         }
     }
 }
@@ -264,6 +270,17 @@ pub struct ProtocolCodec<I, O> {
     /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
+}
+
+impl<I, O> Copy for ProtocolCodec<I, O> {}
+impl<I, O> Clone for ProtocolCodec<I, O> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            _phantom_incoming_message: self._phantom_incoming_message.clone(),
+            _phantom_outgoing_message: self._phantom_outgoing_message.clone(),
+        }
+    }
 }
 
 // Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
