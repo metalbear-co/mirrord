@@ -34,14 +34,12 @@ impl CiStopCommandHandler {
             Some((intproxy_pid, user_pid)) => {
                 let kill_intproxy = Command::new("kill")
                     .arg(intproxy_pid.to_string())
-                    .spawn()?
-                    .wait()
+                    .status()
                     .await?;
 
                 let _ = Command::new("kill")
                     .arg(user_pid.to_string())
-                    .spawn()?
-                    .wait()
+                    .status()
                     .await?;
 
                 mirrord_ci.clear().await?;
