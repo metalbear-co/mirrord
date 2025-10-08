@@ -11,11 +11,9 @@ use std::{collections::HashMap, io, net::SocketAddr, ops::Not, sync::Arc, time::
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
-use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
-    MessageId, PortSubscription, ProxyToLayerMessage,
+    IncomingRequest, LayerId, MessageId, PortSubscription, SocketMetadataResponse,
 };
 use mirrord_protocol::{
     ClientMessage, ConnectionId, RequestId, ResponseError,
@@ -40,13 +38,13 @@ use crate::{
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
-    main_tasks::{LayerClosed, LayerForked, ToLayer},
+    local_sockets::LocalSockets,
+    main_tasks::{LayerClosed, LayerForked},
 };
 
 mod bound_socket;
 mod http;
 mod http_gateway;
-mod metadata_store;
 mod port_subscription_ext;
 mod subscriptions;
 mod tasks;
@@ -172,8 +170,6 @@ struct HttpGatewayHandle {
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
     subscriptions: SubscriptionsManager,
-    /// For managing intercepted connections metadata.
-    metadata_store: MetadataStore,
     /// What HTTP response flavor we produce.
     response_mode: ResponseMode,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
@@ -193,6 +189,9 @@ pub struct IncomingProxy {
 
     /// [`mirrord_protocol`] version negotiated with the agent.
     protocol_version: Option<Version>,
+
+    /// Stores remote addresses corresponding to local sockets.
+    local_sockets: LocalSockets,
 }
 
 impl IncomingProxy {
@@ -202,12 +201,12 @@ impl IncomingProxy {
     pub fn new(
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
+        local_sockets: LocalSockets,
     ) -> Self {
         let tls_setup = LocalTlsSetup::from_config(https_delivery);
 
         Self {
             subscriptions: Default::default(),
-            metadata_store: Default::default(),
             response_mode: Default::default(),
             client_store: ClientStore::new_with_timeout(
                 idle_local_http_connection_timeout,
@@ -218,6 +217,7 @@ impl IncomingProxy {
             http_gateways: Default::default(),
             tasks: Default::default(),
             protocol_version: None,
+            local_sockets,
         }
     }
 
@@ -355,18 +355,14 @@ impl IncomingProxy {
 
         let socket = BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())
             .map_err(IncomingProxyError::SocketSetupFailed)?;
-
-        self.metadata_store.expect(
-            ConnMetadataRequest {
-                listener_address: subscription.listening_on,
-                peer_address: socket
-                    .local_addr()
-                    .map_err(IncomingProxyError::SocketSetupFailed)?,
-            },
-            connection_id,
-            ConnMetadataResponse {
-                remote_source: SocketAddr::new(remote_address, source_port),
-                local_address,
+        let local_addr = socket
+            .local_addr()
+            .map_err(IncomingProxyError::SocketSetupFailed)?;
+        let guard = self.local_sockets.insert(
+            local_addr.into(),
+            SocketMetadataResponse {
+                agent_address: SocketAddr::new(local_address, destination_port).into(),
+                peer_address: SocketAddr::new(remote_address, source_port).into(),
             },
         );
 
@@ -384,6 +380,7 @@ impl IncomingProxy {
                     transport,
                     tls_setup: self.tls_setup.clone(),
                 },
+                Some(guard),
                 is_steal.not(),
             ),
             id,
@@ -657,18 +654,6 @@ impl IncomingProxy {
                         message_bus.send(msg).await;
                     }
                 }
-                IncomingRequest::ConnMetadata(req) => {
-                    let res = self.metadata_store.get(req);
-                    message_bus
-                        .send(ToLayer {
-                            message_id,
-                            layer_id,
-                            message: ProxyToLayerMessage::Incoming(IncomingResponse::ConnMetadata(
-                                res,
-                            )),
-                        })
-                        .await;
-                }
             },
 
             IncomingProxyMessage::AgentMirror(msg) => {
@@ -738,8 +723,6 @@ impl IncomingProxy {
                     }
                     Ok(()) => {}
                 };
-
-                self.metadata_store.no_longer_expect(connection_id);
 
                 let send_close = self
                     .tcp_proxies
@@ -848,6 +831,7 @@ impl IncomingProxy {
                             TcpProxyTask::new(
                                 id.connection_id,
                                 LocalTcpConnection::AfterUpgrade(on_upgrade),
+                                None,
                                 is_steal.not(),
                             ),
                             if is_steal {

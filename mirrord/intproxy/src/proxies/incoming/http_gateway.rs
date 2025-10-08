@@ -707,6 +707,7 @@ mod test {
             TcpProxyTask::new(
                 update.0,
                 LocalTcpConnection::AfterUpgrade(on_upgrade),
+                None,
                 is_steal.not(),
             ),
             1,

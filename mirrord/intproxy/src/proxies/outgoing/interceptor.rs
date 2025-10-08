@@ -3,11 +3,13 @@
 
 use std::io;
 
+use bytes::Bytes;
 use tracing::Level;
 
 use super::InterceptorId;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
+    local_sockets::LocalSocketEntry,
     proxies::outgoing::net_protocol_ext::PreparedSocket,
 };
 
@@ -17,23 +19,25 @@ use crate::{
 pub struct Interceptor {
     id: InterceptorId,
     socket: Option<PreparedSocket>,
+    guard: Option<LocalSocketEntry>,
 }
 
 impl Interceptor {
     /// Creates a new instance. This instance will use the provided [`PreparedSocket`] to accept the
     /// layer's connection and manage it.
-    pub fn new(id: InterceptorId, socket: PreparedSocket) -> Self {
+    pub fn new(id: InterceptorId, socket: PreparedSocket, guard: LocalSocketEntry) -> Self {
         Self {
             id,
             socket: Some(socket),
+            guard: Some(guard),
         }
     }
 }
 
 impl BackgroundTask for Interceptor {
     type Error = io::Error;
-    type MessageIn = Vec<u8>;
-    type MessageOut = Vec<u8>;
+    type MessageIn = Bytes;
+    type MessageOut = Bytes;
 
     /// Accepts one connection the owned [`PreparedSocket`] and transparently proxies bytes between
     /// the [`MessageBus`] and the new
@@ -59,6 +63,7 @@ impl BackgroundTask for Interceptor {
         let Some(socket) = self.socket.take() else {
             return Ok(());
         };
+        let _guard = self.guard.take();
 
         let mut connected_socket = tokio::select! {
             socket = socket.accept() => socket?,

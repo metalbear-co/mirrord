@@ -18,7 +18,10 @@ use super::{
     tasks::{InProxyTaskError, InProxyTaskMessage},
     tls::LocalTlsSetup,
 };
-use crate::background_tasks::{BackgroundTask, MessageBus};
+use crate::{
+    background_tasks::{BackgroundTask, MessageBus},
+    local_sockets::LocalSocketEntry,
+};
 
 /// Local TCP connections between the [`TcpProxyTask`] and the user application.
 #[derive(Debug)]
@@ -103,6 +106,9 @@ pub struct TcpProxyTask {
     _connection_id: ConnectionId,
     /// The local connection between this task and the user application.
     connection: Option<LocalTcpConnection>,
+    /// If [`LocalSockets`](crate::local_sockets::LocalSockets) stores the remote addresses
+    /// corresponding to our socket, this is the entry guard.
+    guard: Option<LocalSocketEntry>,
     /// Whether this task should silently discard data coming from the user application.
     ///
     /// The data is discarded only when the remote connection is mirrored.
@@ -122,11 +128,13 @@ impl TcpProxyTask {
     pub fn new(
         connection_id: ConnectionId,
         connection: LocalTcpConnection,
+        guard: Option<LocalSocketEntry>,
         discard_data: bool,
     ) -> Self {
         Self {
             _connection_id: connection_id,
             connection: Some(connection),
+            guard,
             discard_data,
         }
     }
@@ -147,6 +155,7 @@ impl BackgroundTask for TcpProxyTask {
             .connection
             .take()
             .expect("task should have a valid connection before run");
+        let _guard = self.guard.take();
 
         let (mut stream, read_buf) = connection.connect().await?;
 

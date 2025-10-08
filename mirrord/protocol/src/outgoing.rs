@@ -18,7 +18,7 @@ pub mod tcp;
 pub mod udp;
 
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Hash)]
 pub enum SocketAddress {
     Ip(StdIpSocketAddr),
     Unix(UnixAddr),
@@ -34,7 +34,7 @@ impl SocketAddress {
 }
 
 /// A unix socket address type with rust member types (not libc stuff).
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Hash)]
 pub enum UnixAddr {
     Pathname(PathBuf),
     Abstract(Vec<u8>),

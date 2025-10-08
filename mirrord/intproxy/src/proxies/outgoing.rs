@@ -2,13 +2,16 @@
 
 use std::{collections::HashMap, fmt, io};
 
+use bytes::Bytes;
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-    ProxyToLayerMessage,
+    ProxyToLayerMessage, SocketMetadataResponse,
 };
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
-    outgoing::{DaemonConnect, DaemonRead, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing},
+    outgoing::{
+        DaemonConnect, DaemonRead, SocketAddress, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
+    },
 };
 use thiserror::Error;
 use tracing::Level;
@@ -19,9 +22,10 @@ use crate::{
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
-    error::{UnexpectedAgentMessage, agent_lost_io_error},
+    error::UnexpectedAgentMessage,
+    local_sockets::{LocalSocketEntry, LocalSockets},
     main_tasks::ToLayer,
-    proxies::outgoing::net_protocol_ext::NetProtocolExt,
+    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     request_queue::RequestQueue,
 };
 
@@ -41,14 +45,15 @@ pub enum OutgoingProxyError {
     #[error(transparent)]
     UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
     /// The proxy failed to prepare a new local socket for the intercepted connection.
-    #[error("failed to prepare local socket: {0}")]
+    #[error("failed to prepare a local socket: {0}")]
     SocketSetupError(#[from] io::Error),
 }
 
 /// Id of a single [`Interceptor`] task.
+///
 /// Used to manage [`Interceptor`]s with the [`BackgroundTasks`] struct.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct InterceptorId {
+struct InterceptorId {
     /// Id of the intercepted connection.
     pub connection_id: ConnectionId,
     /// Network protocol used.
@@ -65,56 +70,58 @@ impl fmt::Display for InterceptorId {
     }
 }
 
-/// Lightweight (no allocations) [`ProxyMessage`] to be returned when connection with the
-/// mirrord-agent is lost. Must be converted into real [`ProxyMessage`] via [`From`].
-pub struct AgentLostOutgoingResponse(LayerId, MessageId);
-
-impl From<AgentLostOutgoingResponse> for ToLayer {
-    fn from(value: AgentLostOutgoingResponse) -> Self {
-        let AgentLostOutgoingResponse(layer_id, message_id) = value;
-        let error = agent_lost_io_error();
-
-        ToLayer {
-            layer_id,
-            message_id,
-            message: ProxyToLayerMessage::OutgoingConnect(Err(error)),
-        }
-    }
+#[derive(Debug)]
+struct ConnectionInProgress {
+    local_socket: PreparedSocket,
+    entry_guard: LocalSocketEntry,
+    remote_address: SocketAddress,
 }
 
 /// Handles logic and state of the `outgoing` feature.
-/// Run as a [`BackgroundTask`].
+///
+/// Run as one of the main [`BackgroundTask`]s of the internal proxy.
 ///
 /// # Flow
 ///
-/// 1. Proxy receives an [`OutgoingConnectRequest`] from the layer and sends a corresponding
-///    [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect) to the agent.
-/// 2. Proxy receives a confirmation from the agent.
-/// 3. Proxy creates a new socket and starts a new outgoing [`Interceptor`] background task to
-///    manage it.
-/// 4. Proxy sends a confirmation to the layer.
-/// 5. The layer connects to the socket managed by the [`Interceptor`] task.
-/// 6. The proxy passes the data between the agent and the [`Interceptor`] task.
-/// 7. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
-///    agent. If the agent closes the connection, the proxy shuts down the [`Interceptor`].
-#[derive(Default)]
+/// 1. Receive [`OutgoingConnectRequest`] from the layer.
+/// 2. Prepare a local socket (e.g. TPC listener), and send its address to the layer. After this
+///    step, user app can use the socket for connect attemps (blocking or non-blocking).
+/// 3. Send connect request to the agent.
+/// 4. Receive response from the agent. Drop the socket on error, start an [`Interceptor`] on
+///    success.
+/// 5. Layer connects to the socket.
+/// 6. Proxy data between the agent and the [`Interceptor`] task.
+/// 7. If the layer closes the connection, the [`Interceptor`] exits. Notify the agent. If the agent
+///    closes the connection, the shut down the [`Interceptor`].
 pub struct OutgoingProxy {
-    /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Datagrams`].
-    datagrams_reqs: RequestQueue,
-    /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Stream`].
-    stream_reqs: RequestQueue,
+    /// In progress remote connect requests for [`NetProtocol::Datagrams`].
+    datagrams_reqs: RequestQueue<ConnectionInProgress>,
+    /// In progress remote connect requests for [`NetProtocol::Stream`].
+    stream_reqs: RequestQueue<ConnectionInProgress>,
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
-    background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
+    background_tasks: BackgroundTasks<InterceptorId, Bytes, io::Error>,
+    /// Stores remote addresses corresponding to local sockets.
+    local_sockets: LocalSockets,
 }
 
 impl OutgoingProxy {
     /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
 
+    pub fn new(local_sockets: LocalSockets) -> Self {
+        Self {
+            datagrams_reqs: Default::default(),
+            stream_reqs: Default::default(),
+            txs: Default::default(),
+            background_tasks: Default::default(),
+            local_sockets,
+        }
+    }
+
     /// Retrieves correct [`RequestQueue`] for the given [`NetProtocol`].
-    fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue {
+    fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue<ConnectionInProgress> {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams_reqs,
             NetProtocol::Stream => &mut self.stream_reqs,
@@ -147,7 +154,7 @@ impl OutgoingProxy {
             return Ok(());
         };
 
-        interceptor.send(bytes.into_vec()).await;
+        interceptor.send(bytes.0).await;
 
         Ok(())
     }
@@ -155,121 +162,116 @@ impl OutgoingProxy {
     /// Handles agent's response to a connection request.
     /// Prepares a local socket and registers a new [`Interceptor`] task for this connection.
     /// Replies to the layer's request.
-    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err)]
-    async fn handle_connect_response(
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
+    fn handle_connect_response(
         &mut self,
         connect: RemoteResult<DaemonConnect>,
         protocol: NetProtocol,
-        message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let (message_id, layer_id) = self.queue(protocol).pop_front().ok_or_else(|| {
-            let message = match protocol {
-                NetProtocol::Datagrams => {
-                    DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect.clone()))
-                }
-                NetProtocol::Stream => {
-                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect.clone()))
-                }
-            };
-            UnexpectedAgentMessage(message)
-        })?;
+        let (message_id, layer_id, in_progress) =
+            self.queue(protocol).pop_front_with_data().ok_or_else(|| {
+                let message = match protocol {
+                    NetProtocol::Datagrams => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect.clone()))
+                    }
+                    NetProtocol::Stream => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect.clone()))
+                    }
+                };
+                UnexpectedAgentMessage(message)
+            })?;
 
         let connect = match connect {
             Ok(connect) => connect,
-            Err(e) => {
-                message_bus
-                    .send(ToLayer {
-                        message: ProxyToLayerMessage::OutgoingConnect(Err(e)),
-                        message_id,
-                        layer_id,
-                    })
-                    .await;
-
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    message_id,
+                    layer_id = layer_id.0,
+                    remote_address = %in_progress.remote_address,
+                    "Outgoing connect request failed"
+                );
                 return Ok(());
             }
         };
 
         let DaemonConnect {
             connection_id,
-            remote_address,
             local_address,
+            ..
         } = connect;
-
-        let prepared_socket = protocol.prepare_socket(remote_address).await?;
-        let layer_address = prepared_socket.local_address()?;
+        in_progress
+            .entry_guard
+            .modify(|response| response.agent_address = local_address);
 
         let id = InterceptorId {
             connection_id,
             protocol,
         };
-
         tracing::debug!(%id, "Starting interceptor task");
         let interceptor = self.background_tasks.register(
-            Interceptor::new(id, prepared_socket),
+            Interceptor::new(id, in_progress.local_socket, in_progress.entry_guard),
             id,
             Self::CHANNEL_SIZE,
         );
         self.txs.insert(id, interceptor);
 
-        message_bus
-            .send(ToLayer {
-                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                    layer_address,
-                    in_cluster_address: local_address,
-                })),
-                message_id,
-                layer_id,
-            })
-            .await;
-
         Ok(())
     }
 
     /// Saves the layer's request id and sends the connection request to the agent.
-    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err)]
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
         session_id: LayerId,
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
-    ) {
-        self.queue(request.protocol)
-            .push_back(message_id, session_id);
+    ) -> Result<(), OutgoingProxyError> {
+        let local_socket = request
+            .protocol
+            .prepare_socket(&request.remote_address)
+            .await?;
+        let layer_address = local_socket.local_address()?;
+        let entry_guard = self.local_sockets.insert(
+            layer_address.clone(),
+            SocketMetadataResponse {
+                agent_address: layer_address.clone(),
+                peer_address: request.remote_address.clone(),
+            },
+        );
+        self.queue(request.protocol).push_back_with_data(
+            message_id,
+            session_id,
+            ConnectionInProgress {
+                local_socket,
+                entry_guard,
+                remote_address: request.remote_address.clone(),
+            },
+        );
 
-        let msg = request.protocol.wrap_agent_connect(request.remote_address);
-        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+        let to_layer = ToLayer {
+            layer_id: session_id,
+            message_id,
+            message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                layer_address,
+            })),
+        };
+        message_bus.send(to_layer).await;
+
+        let to_agent = request.protocol.wrap_agent_connect(request.remote_address);
+        message_bus.send(to_agent).await;
+
+        Ok(())
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
-    async fn handle_connection_refresh(&mut self, message_bus: &mut MessageBus<Self>) {
+    fn handle_connection_refresh(&mut self) {
         tracing::debug!("Closing all local connections");
-        self.txs.clear();
-        self.background_tasks.clear();
-
-        tracing::debug!(
-            responses = self.datagrams_reqs.len(),
-            "Flushing error responses to UDP connect requests"
-        );
-        while let Some((message_id, layer_id)) = self.datagrams_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostOutgoingResponse(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
-
-        tracing::debug!(
-            responses = self.stream_reqs.len(),
-            "Flushing error responses to TCP connect requests"
-        );
-        while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostOutgoingResponse(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
+        self.txs = Default::default();
+        self.background_tasks = Default::default();
+        self.datagrams_reqs = Default::default();
+        self.stream_reqs = Default::default();
     }
 }
 
@@ -301,7 +303,7 @@ impl BackgroundTask for OutgoingProxy {
                             self.txs.remove(&id);
                         },
                         DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
-                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, message_bus).await?,
+                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream)?,
                     }
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
@@ -309,15 +311,15 @@ impl BackgroundTask for OutgoingProxy {
                             self.txs.remove(&id);
                         }
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
-                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, message_bus).await?,
+                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams)?,
                     }
                     Some(OutgoingProxyMessage::LayerConnect(req, message_id, session_id)) => self.handle_connect_request(
                         message_id,
                         session_id,
                         req,
-                        message_bus
-                    ).await,
-                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
+                        message_bus,
+                    ).await?,
+                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(),
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {
@@ -378,7 +380,7 @@ mod test {
 
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
             BackgroundTasks::default();
-        let outgoing = background_tasks.register(OutgoingProxy::default(), (), 8);
+        let outgoing = background_tasks.register(OutgoingProxy::new(Default::default()), (), 8);
 
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.
@@ -392,6 +394,18 @@ mod test {
                     LayerId(0),
                 ))
                 .await;
+            let message = background_tasks.next().await.unwrap().1.unwrap_message();
+            match message {
+                ProxyMessage::ToLayer(ToLayer {
+                    message_id,
+                    layer_id: LayerId(0),
+                    message: ProxyToLayerMessage::OutgoingConnect(Ok(..)),
+                }) => {
+                    assert_eq!(message_id, i);
+                }
+                other => panic!("unexpected message from outgoing proxy: {other:?}"),
+            }
+
             let message = background_tasks.next().await.unwrap().1.unwrap_message();
             assert_eq!(
                 message,
@@ -412,18 +426,6 @@ mod test {
                     })),
                 ))
                 .await;
-            let message = background_tasks.next().await.unwrap().1.unwrap_message();
-            match message {
-                ProxyMessage::ToLayer(ToLayer {
-                    message_id,
-                    layer_id: LayerId(0),
-                    message: ProxyToLayerMessage::OutgoingConnect(Ok(..)),
-                }) => {
-                    assert_eq!(message_id, i);
-                }
-                other => panic!("unexpected message from outgoing proxy: {other:?}"),
-            }
-
             // Connection with the operator was reset.
             outgoing.send(OutgoingProxyMessage::ConnectionRefresh).await;
         }

@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
@@ -28,7 +28,7 @@ use tokio::{
 pub trait NetProtocolExt: Sized {
     /// Creates a [`LayerWrite`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage;
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage;
 
     /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
@@ -39,11 +39,12 @@ pub trait NetProtocolExt: Sized {
     fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage;
 
     /// Opens a new socket for intercepting a connection to the given remote address.
-    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket>;
+    async fn prepare_socket(self, for_remote_address: &SocketAddress)
+    -> io::Result<PreparedSocket>;
 }
 
 impl NetProtocolExt for NetProtocol {
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage {
         match self {
             Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
                 connection_id,
@@ -80,7 +81,10 @@ impl NetProtocolExt for NetProtocol {
         }
     }
 
-    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket> {
+    async fn prepare_socket(
+        self,
+        for_remote_address: &SocketAddress,
+    ) -> io::Result<PreparedSocket> {
         let socket = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {
@@ -113,6 +117,7 @@ impl NetProtocolExt for NetProtocol {
 }
 
 /// A socket prepared to accept an intercepted connection.
+#[derive(Debug)]
 pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),

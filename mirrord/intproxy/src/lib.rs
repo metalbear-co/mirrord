@@ -20,6 +20,7 @@ use mirrord_config::{
 };
 use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
+    ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -43,6 +44,7 @@ use crate::{
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
+    local_sockets::LocalSockets,
     main_tasks::{ConnectionRefresh, LayerClosed},
 };
 
@@ -52,6 +54,7 @@ pub mod error;
 mod failover_strategy;
 mod layer_conn;
 mod layer_initializer;
+pub mod local_sockets;
 pub mod main_tasks;
 mod ping_pong;
 pub mod proxies;
@@ -100,6 +103,9 @@ pub struct IntProxy {
 
     /// Interval for logging connected process information
     process_logging_interval: Interval,
+
+    /// Stores remote addresses corresponding to local sockets.
+    local_sockets: LocalSockets,
 }
 
 impl IntProxy {
@@ -123,6 +129,7 @@ impl IntProxy {
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             Default::default();
+        let local_sockets = LocalSockets::default();
 
         let agent_conn_reconnectable = agent_conn.reconnectable();
 
@@ -160,7 +167,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
-            OutgoingProxy::default(),
+            OutgoingProxy::new(local_sockets.clone()),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
         );
@@ -168,6 +175,7 @@ impl IntProxy {
             IncomingProxy::new(
                 Duration::from_millis(experimental.idle_local_http_connection_timeout),
                 https_delivery,
+                local_sockets.clone(),
             ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
@@ -204,6 +212,7 @@ impl IntProxy {
             ping_pong_update_allowed: false,
             connected_layers: HashMap::new(),
             process_logging_interval,
+            local_sockets,
         }
     }
 
@@ -610,7 +619,20 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
-            other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
+            LayerToProxyMessage::SocketMetadataRequest(request) => {
+                let response = self.local_sockets.get(&request.local_address);
+                if let Some(tx) = self.task_txs.layers.get(&layer_id) {
+                    tx.send(LocalMessage {
+                        message_id,
+                        inner: ProxyToLayerMessage::SocketMetadataResponse(response),
+                    })
+                    .await;
+                }
+            }
+
+            other @ LayerToProxyMessage::NewSession(..) => {
+                Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?
+            }
         }
 
         Ok(())

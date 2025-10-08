@@ -2,11 +2,7 @@
 //! This protocol does not have to be backwards compatible and can be changed freely, as the
 //! internal proxy and the layer are shipped together in a single binary.
 
-use std::{
-    collections::HashMap,
-    fmt,
-    net::{IpAddr, SocketAddr},
-};
+use std::{collections::HashMap, fmt, net::SocketAddr};
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
@@ -51,6 +47,8 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
+    /// Return remote addresses corresponding to a local proxy socket.
+    SocketMetadataRequest(SocketMetadataRequest),
 }
 
 /// Layer process information
@@ -137,42 +135,26 @@ pub enum IncomingRequest {
     PortSubscribe(PortSubscribe),
     /// A request made by the layer when it closes the socket listening for mirrored connections.
     PortUnsubscribe(PortUnsubscribe),
-    /// A request made by the layer when it accepts a connection on the socket that is listening
-    /// for mirrored connections.
-    ConnMetadata(ConnMetadataRequest),
 }
 
 /// A request for additional metadata for accepted connection.
 /// The layer should use this each time it accepts a connection on a socket that is listening for
 /// mirrored connections ([`PortSubscribe`]).
 #[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
-pub struct ConnMetadataRequest {
+pub struct SocketMetadataRequest {
     /// Address of the listener that accepted the connection.
-    pub listener_address: SocketAddr,
-    /// Address of connection peer.
-    pub peer_address: SocketAddr,
+    pub local_address: SocketAddress,
 }
 
-/// A response to layer's [`ConnMetadataRequest`].
+/// A response to layer's [`SocketMetadataRequest`].
+///
 /// Contains metadata useful for hooking `getsockname` and `getpeername`.
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
-pub struct ConnMetadataResponse {
-    /// Original source of data, provided by the agent. Meant to be exposed to the user instead of
-    /// the real source, which will always be localhost.
-    ///
-    /// # Note
-    ///
-    /// Due to limitiations of the `intproxy <-> agent` protocol, HTTP connections will send the
-    /// real source (localhost).
-    pub remote_source: SocketAddr,
-    /// Address of the local socket, provided by the agent. Meant to be exposed to the user instead
-    /// of real source, which will always be localhost.
-    ///
-    /// # Note
-    ///
-    /// Due to limitations of the `intproxy <-> agent` protocol, HTTP connections will send the
-    /// real address (localhost).
-    pub local_address: IpAddr,
+pub struct SocketMetadataResponse {
+    /// Local address of the socket managed by the agent.
+    pub agent_address: SocketAddress,
+    /// Peer address of the socket managed by the agent.
+    pub peer_address: SocketAddress,
 }
 
 /// A request to start proxying incoming connections.
@@ -221,6 +203,8 @@ pub enum ProxyToLayerMessage {
     Incoming(IncomingResponse),
     /// A response to layer's [`LayerToProxyMessage::GetEnv`].
     GetEnv(RemoteResult<HashMap<String, String>>),
+    /// A response to layer's [`SocketMetadataRequest`].
+    SocketMetadataResponse(Option<SocketMetadataResponse>),
     /// Internal proxy encountered a fatal error.
     ProxyFailed(String),
 }
@@ -234,8 +218,6 @@ pub enum IncomingResponse {
     /// [`ResponseError::PortAlreadyStolen`](mirrord_protocol::error::ResponseError::PortAlreadyStolen).
     /// Other errors will make the internal proxy terminate.
     PortSubscribe(RemoteResult<()>),
-    /// A response to layers' [`ConnMetadataRequest`].
-    ConnMetadata(ConnMetadataResponse),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
@@ -243,8 +225,6 @@ pub enum IncomingResponse {
 pub struct OutgoingConnectResponse {
     /// The address the layer should connect to instead of the address requested by the user.
     pub layer_address: SocketAddress,
-    /// In-cluster address of the pod.
-    pub in_cluster_address: SocketAddress,
 }
 
 /// A helper trait for `layer -> proxy` requests.
@@ -480,10 +460,10 @@ impl_request!(
 );
 
 impl_request!(
-    req = ConnMetadataRequest,
-    res = ConnMetadataResponse,
-    req_path = LayerToProxyMessage::Incoming => IncomingRequest::ConnMetadata,
-    res_path = ProxyToLayerMessage::Incoming => IncomingResponse::ConnMetadata,
+    req = SocketMetadataRequest,
+    res = Option<SocketMetadataResponse>,
+    req_path = LayerToProxyMessage::SocketMetadataRequest,
+    res_path = ProxyToLayerMessage::SocketMetadataResponse,
 );
 
 impl_request!(
