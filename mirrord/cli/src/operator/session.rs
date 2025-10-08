@@ -13,7 +13,7 @@ use mirrord_operator::{
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
-use crate::{CliError, CliResult, MirrordCi, SessionCommand};
+use crate::{CliError, CliResult, SessionCommand};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
 pub(super) struct SessionCommandHandler {
@@ -37,7 +37,6 @@ impl SessionCommandHandler {
     pub(super) async fn new(
         command: SessionCommand,
         config_file: Option<PathBuf>,
-        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
@@ -52,25 +51,15 @@ impl SessionCommandHandler {
             match OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
                 .await?
             {
-                Some(api) => match mirrord_for_ci {
-                    Some(mirrord_for_ci) => {
-                        api.with_ci_api_key(
-                            &mut NullReporter::default(),
-                            &progress,
-                            &layer_config,
-                            mirrord_for_ci.api_key(),
-                        )
-                        .await
-                    }
-                    None => {
-                        api.with_client_certificate(
-                            &mut NullReporter::default(),
-                            &progress,
-                            &layer_config,
-                        )
-                        .await
-                    }
-                },
+                Some(api) => {
+                    api.with_client_certificate(
+                        &mut NullReporter::default(),
+                        &progress,
+                        &layer_config,
+                    )
+                    .await
+                }
+
                 None => {
                     subtask.failure(Some("operator not found"));
                     return Err(CliError::OperatorNotInstalled);
