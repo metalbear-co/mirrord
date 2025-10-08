@@ -47,36 +47,29 @@ jobs:
           rustc -V
           cargo -V
           rustup show
-
       - name: Prepare artifacts (download OR build+sign)
         id: prep
         run: |
           $ErrorActionPreference = 'Stop'
-
           function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append }
-
           $Target = 'x86_64-pc-windows-msvc'
           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
           $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
           New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
-
           if ($env:MODE -eq 'reuse') {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
               throw "gcloud not found on PATH. Ensure the runner is authenticated."
             }
             $dest = Join-Path $Tmp 'picked'
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
-
             Write-Host "Downloading from: $($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*"
             gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
             if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
-
             $exe = (Get-ChildItem -Path $dest -Filter 'mirrord.exe' -File -Recurse | Select-Object -First 1).FullName
             $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
             if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
             if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
-
             # Ensure .sha256 files exist
             foreach ($f in @($exe,$dll)) {
               $sha = "$f.sha256"
@@ -85,7 +78,6 @@ jobs:
                 "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
               }
             }
-
             Set-Env "MIRRORD_EXE" $exe
             Set-Env "MIRRORD_LAYER_FILE" $dll
             Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
@@ -94,53 +86,42 @@ jobs:
             Write-Host "Picked DLL: $dll"
             exit 0
           }
-
           # === build_sign path ===
           rustup target add $Target
-
           # 1) Build layer (DLL)
           cargo build -p mirrord-layer-win --target $Target
-
           $dll = if (Test-Path (Join-Path $DbgDir  'mirrord_layer_win.dll')) { Join-Path $DbgDir  'mirrord_layer_win.dll' }
                  elseif (Test-Path (Join-Path $RelDir 'mirrord_layer_win.dll')) { Join-Path $RelDir 'mirrord_layer_win.dll' }
                  else { throw "Layer DLL not found in debug or release directories." }
-
           # 2) Sign DLL
           & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
           & signtool.exe verify /pa "$dll"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL" }
-
           # 3) Build CLI with embedded *signed* DLL
           $env:MIRRORD_LAYER_FILE = $dll
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg  = $meta.packages | Where-Object { $_.targets | Where-Object { $_.kind -contains 'bin' -and $_.name -eq 'mirrord' } } | Select-Object -First 1
           if (-not $pkg) { throw "No bin target named 'mirrord' found in workspace." }
-
           cargo build -p $pkg.name --bin mirrord --target $Target
-
           $exe = if (Test-Path (Join-Path $DbgDir  'mirrord.exe')) { Join-Path $DbgDir  'mirrord.exe' }
                  elseif (Test-Path (Join-Path $RelDir 'mirrord.exe')) { Join-Path $RelDir 'mirrord.exe' }
                  else { throw "mirrord.exe not found (debug/release)" }
-
           # 4) Sign EXE
           & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
           & signtool.exe verify /pa "$exe"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE" }
-
           # 5) Checksums
           foreach ($f in @($exe,$dll)) {
             $sha = "$f.sha256"
             $h = (Get-FileHash -Algorithm SHA256 $f).Hash
             "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
           }
-
           # 6) Export env
           Set-Env "MIRRORD_LAYER_FILE" $dll
           Set-Env "MIRRORD_EXE" $exe
           Set-Env "MIRRORD_PKG" $pkg.name
           Set-Env "MIRRORD_VERSION" $pkg.version
           Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
-
       - name: Upload to GCS (build_sign only)
         if: ${{ env.MODE == 'build_sign' }}
         run: |
@@ -150,14 +131,12 @@ jobs:
           }
           $exe = $env:MIRRORD_EXE; $dll = $env:MIRRORD_LAYER_FILE
           if (-not (Test-Path $exe) -or -not (Test-Path $dll)) { throw "EXE/DLL missing" }
-
           $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
           Copy-Item $exe $staging -Force
           Copy-Item $dll $staging -Force
           Copy-Item "$exe.sha256" $staging -Force
           Copy-Item "$dll.sha256" $staging -Force
-
           $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
           $sha7 = $env:GITHUB_SHA.Substring(0,7)
           $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
@@ -165,8 +144,6 @@ jobs:
           Write-Host "Uploading to $dest"
           Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
           gcloud --quiet storage ls $dest
-
-
       - name: Run Rust unit tests (single loop)
         run: |
           $ErrorActionPreference = 'Stop'
