@@ -104,7 +104,7 @@ impl FoundTargets {
             tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
 
             let api = api
-                .prepare_client_cert(&mut reporter, &progress, &layer_config, None)
+                .with_client_certificate(&mut reporter, &progress, &layer_config)
                 .await;
 
             api.inspect_cert_error(

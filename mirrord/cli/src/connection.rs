@@ -76,15 +76,18 @@ where
     }
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    let api = api
-        .prepare_client_cert(
-            analytics,
-            progress,
-            layer_config,
-            mirrord_for_ci.as_ref().map(|ci| ci.api_key()),
-        )
-        .await
-        .into_certified()?;
+    let api = match mirrord_for_ci {
+        Some(mirrord_for_ci) => {
+            api.with_ci_api_key(analytics, progress, layer_config, mirrord_for_ci.api_key())
+                .await
+        }
+        None => {
+            api.with_client_certificate(analytics, progress, layer_config)
+                .await
+        }
+    }
+    .into_certified()?;
+
     user_cert_subtask.success(Some("user credentials prepared"));
 
     let target = ResolvedTarget::new(

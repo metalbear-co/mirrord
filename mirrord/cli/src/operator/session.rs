@@ -52,15 +52,25 @@ impl SessionCommandHandler {
             match OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
                 .await?
             {
-                Some(api) => {
-                    api.prepare_client_cert(
-                        &mut NullReporter::default(),
-                        &progress,
-                        &layer_config,
-                        mirrord_for_ci.map(|ci| ci.api_key()),
-                    )
-                    .await
-                }
+                Some(api) => match mirrord_for_ci {
+                    Some(mirrord_for_ci) => {
+                        api.with_ci_api_key(
+                            &mut NullReporter::default(),
+                            &progress,
+                            &layer_config,
+                            mirrord_for_ci.api_key(),
+                        )
+                        .await
+                    }
+                    None => {
+                        api.with_client_certificate(
+                            &mut NullReporter::default(),
+                            &progress,
+                            &layer_config,
+                        )
+                        .await
+                    }
+                },
                 None => {
                     subtask.failure(Some("operator not found"));
                     return Err(CliError::OperatorNotInstalled);
