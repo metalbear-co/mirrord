@@ -30,23 +30,26 @@ impl CiStopCommandHandler {
     pub(super) async fn handle(self) -> CiResult<ExitStatus> {
         let Self { mirrord_ci } = self;
 
-        match mirrord_ci.intproxy_pid.zip(mirrord_ci.user_pid) {
-            Some((intproxy_pid, user_pid)) => {
-                let kill_intproxy = Command::new("kill")
-                    .arg(intproxy_pid.to_string())
-                    .status()
-                    .await?;
-
-                let _ = Command::new("kill")
-                    .arg(user_pid.to_string())
-                    .status()
-                    .await?;
-
-                mirrord_ci.clear().await?;
-
-                Ok(kill_intproxy)
-            }
+        let intproxy_killed = match mirrord_ci.intproxy_pid {
+            Some(pid) => Command::new("kill")
+                .arg(pid.to_string())
+                .status()
+                .await
+                .map_err(From::from),
             None => Err(CiError::IntproxyPidMissing),
-        }
+        };
+
+        let user_killed = match mirrord_ci.user_pid {
+            Some(pid) => Command::new("kill")
+                .arg(pid.to_string())
+                .status()
+                .await
+                .map_err(From::from),
+            None => Err(CiError::UserPidMissing),
+        };
+
+        mirrord_ci.clear().await?;
+
+        Ok(intproxy_killed.and(user_killed)?)
     }
 }
