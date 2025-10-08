@@ -240,15 +240,15 @@ jobs:
           $md += ''
           $md += '| Check | Result | Notes |'
           $md += '|------:|:------:|-------|'
-
+          
           foreach ($r in $rows) {
             $c = [string]$r.Check
             $res = [string]$r.Result
             $n = [string]$r.Notes
-            # sanitize notes for Markdown table
             $n = $n -replace '\r',' ' -replace '\n',' '
             $n = $n -replace '\|','\|'
-            $md += ("| {0} | {1} | {2} |" -f $c, $res, $n)
+
+            $md += "| $c | $res | $n |"
           }
 
           $md += ''
