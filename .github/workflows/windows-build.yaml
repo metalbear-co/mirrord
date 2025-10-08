@@ -166,103 +166,6 @@ jobs:
           Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
           gcloud --quiet storage ls $dest
 
-      - name: Smoke + Summary
-        if: always()
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = $env:MIRRORD_EXE; $dll = $env:MIRRORD_LAYER_FILE
-          if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
-          if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
-
-          function GetExpectedSha([string]$file){
-            if (-not (Test-Path $file)) { return $null }
-            (Get-Content $file -Raw).Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
-          }
-
-          $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-          $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
-          $exeExpect = GetExpectedSha "$exe.sha256"
-          $dllShaPath = if (Test-Path "$dll.sha256") { "$dll.sha256" } else { (Join-Path (Split-Path $dll -Parent) 'mirrord_layer_win.dll.sha256') }
-          $dllExpect = GetExpectedSha $dllShaPath
-
-          $sigExe = $null; $sigDll = $null
-          if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
-            & signtool.exe verify /pa "$exe" | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
-            & signtool.exe verify /pa "$dll" | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
-          }
-
-          # DLL load test in a child
-          $dllLoadOk = $false; $dllCrash = $false
-          $loader = @"
-          try {
-            Add-Type -TypeDefinition @'
-          using System;
-          using System.Runtime.InteropServices;
-          public static class L {
-            [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-            public static extern IntPtr LoadLibrary(string lpFileName);
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern bool FreeLibrary(IntPtr hModule);
-          }
-          '@;
-            var ptr = L.LoadLibrary(@"{($dll -replace '"','""')}");
-            if (ptr == IntPtr.Zero) Environment.Exit(2);
-            L.FreeLibrary(ptr);
-            Environment.Exit(0);
-          } catch { Environment.Exit(3); }
-          "@
-          $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
-          Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
-          $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
-          $childExit = $p.ExitCode
-          if ($childExit -eq 0) { $dllLoadOk = $true }
-          if ($childExit -in 3221225477,-1073741819) { $dllCrash = $true }
-
-          $verOut = & $exe --version 2>&1; $verRc = $LASTEXITCODE
-          $helpOut = & $exe --help 2>&1;     $helpRc = $LASTEXITCODE
-
-          $rows = @(
-            @{Check='SHA256 (exe)';  Result=($(if($exeExpect -and $exeHash -eq $exeExpect){'✅ OK'}elseif($exeExpect){'❌ Mismatch'}else{'⚠️ None'})); Notes="hash=$exeHash expected=$exeExpect"},
-            @{Check='SHA256 (dll)';  Result=($(if($dllExpect -and $dllHash -eq $dllExpect){'✅ OK'}elseif($dllExpect){'❌ Mismatch'}else{'⚠️ None'})); Notes="hash=$dllHash expected=$dllExpect"},
-            @{Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes='signtool verify /pa'},
-            @{Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes='signtool verify /pa'},
-            @{Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes="child-exit=$childExit"},
-            @{Check='CLI --version';  Result="exit $verRc"; Notes=($verOut -split "`n")[0]},
-            @{Check='CLI --help';     Result="exit $helpRc"; Notes=($helpOut -split "`n")[0]}
-          )
-
-          $md = @()
-          $md += '### Windows build & tests'
-          $md += ''
-          $md += "**Mode:** `${env:MODE}`  "
-          $md += "**EXE:**  `$exe`  "
-          $md += "**DLL:**  `$dll`"
-          $md += ''
-          $md += '| Check | Result | Notes |'
-          $md += '|------:|:------:|-------|'
-          
-          foreach ($r in $rows) {
-            $c = [string]$r.Check
-            $res = [string]$r.Result
-            $n = [string]$r.Notes
-            $n = $n -replace '\r',' ' -replace '\n',' '
-            $n = $n -replace '\|','\|'
-
-            $md += "| $c | $res | $n |"
-          }
-
-          $md += ''
-          $md += '**`mirrord --version`**'
-          $md += '```'
-          $md += $verOut
-          $md += '```'
-          $md += ''
-          $md += '**`mirrord --help`**'
-          $md += '```'
-          $md += $helpOut
-          $md += '```'
-          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
-
 
       - name: Run Rust unit tests (single loop)
         run: |
@@ -287,3 +190,95 @@ jobs:
             }
             if ($LASTEXITCODE -ne 0) { throw "Tests failed for $($t.name)" }
           }
+      
+      # ==================================
+      # === Pretty summary to step tab ===
+      # ==================================
+      - name: Publish Windows test results (summary table, sandboxed)
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = $env:MIRRORD_EXE
+          $dll = $env:MIRRORD_LAYER_FILE
+          if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
+          if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
+          $base = Split-Path $exe -Parent
+          function Get-ExpectedSha256([string]$shaFile) {
+            if (-not (Test-Path $shaFile)) { return $null }
+            $raw = Get-Content $shaFile -Raw
+            $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
+          }
+          $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
+          $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
+          if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
+          $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
+          $exeExpect = Get-ExpectedSha256 $exeShaFile
+          $dllExpect = Get-ExpectedSha256 $dllShaFile
+          $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
+          $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
+          $sigExe = $null; $sigDll = $null
+          if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
+            & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
+            & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
+          }
+          # DLL load/unload in child so crashes don't kill the step
+          $dllLoadOk = $false
+          $dllCrash = $false
+          $loader = @"
+          try {
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class L {
+            [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+            public static extern IntPtr LoadLibrary(string lpFileName);
+            [DllImport("kernel32.dll", SetLastError=true)]
+            public static extern bool FreeLibrary(IntPtr hModule);
+          }
+          '@;
+            var ptr = L.LoadLibrary(@"{($dll -replace '"','""')}");
+            if (ptr == IntPtr.Zero) Environment.Exit(2);
+            L.FreeLibrary(ptr);
+            Environment.Exit(0);
+          } catch { Environment.Exit(3); }
+          "@
+          $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
+          Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
+          $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
+          $childExit = $p.ExitCode
+          if ($childExit -eq 0) { $dllLoadOk = $true }
+          if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
+          $verRc = $null; $verText = ""
+          try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
+          $helpRc = $null; $helpText = ""
+          try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
+          $exeSize = (Get-Item $exe).Length
+          $dllSize = (Get-Item $dll).Length
+          $rows = @()
+          $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
+          $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
+          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
+          $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
+          $md = @()
+          $md += '### Windows test results'
+          $md += ''
+          $md += ('**Mode:** `{0}`  ' -f $env:MODE)
+          $md += ('**EXE:** `{0}`  ' -f $exe)
+          $md += ('**DLL:** `{0}`' -f $dll)
+          $md += ''
+          $md += '| Check | Result | Notes |'
+          $md += '|------:|:------:|-------|'
+          foreach ($r in $rows) {
+            $c = ($r.Check  -replace '\|','\|')
+            $res = ($r.Result -replace '\|','\|')
+            $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
+            $md += "| $c | $res | $n |"
+          }
+          $md += ''
+          $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
+          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
