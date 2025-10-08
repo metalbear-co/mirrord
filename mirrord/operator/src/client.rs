@@ -297,7 +297,6 @@ impl OperatorApi<NoClientCert> {
 
         let result = try {
             let certificate = if let Some(CiApiKey::V1(credentials)) = ci_api_key {
-                tracing::info!(?credentials, "it's the ci stuff");
                 credentials.as_ref().clone()
             } else {
                 self.get_client_certificate().await?
