@@ -20,12 +20,16 @@ use mirrord_protocol::{
 use winapi::{
     shared::{
         minwindef::INT,
+        winerror::ERROR_SUCCESS,
         ws2def::{
             ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN, SOCKADDR_STORAGE,
         },
         ws2ipdef::SOCKADDR_IN6,
     },
-    um::winsock2::{HOSTENT, INVALID_SOCKET, SOCK_STREAM, SOCKET, WSAEFAULT},
+    um::winsock2::{
+        HOSTENT, INVALID_SOCKET, SOCK_STREAM, SOCKET, SOCKET_ERROR, WSAEFAULT, closesocket,
+        getpeername, getsockname,
+    },
 };
 
 /// Macro to safely allocate memory for Windows structures with error handling
@@ -37,6 +41,8 @@ macro_rules! unsafe_alloc {
         if ptr.is_null() { Err($err) } else { Ok(ptr) }
     }};
 }
+
+const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS as i32;
 
 /// RAII wrapper for automatically closing sockets on error
 /// The socket will be automatically closed when dropped unless explicitly released
@@ -52,11 +58,11 @@ impl AutoCloseSocket {
             should_close: true,
         }
     }
-    
+
     pub fn get(&self) -> SOCKET {
         self.socket
     }
-    
+
     /// Release the socket from automatic cleanup (call this on success)
     pub fn release(mut self) -> SOCKET {
         self.should_close = false;
@@ -69,8 +75,11 @@ impl Drop for AutoCloseSocket {
         if self.should_close && self.socket != INVALID_SOCKET {
             // Use WinAPI directly to close the socket to avoid circular dependencies
             unsafe {
-                winapi::um::winsock2::closesocket(self.socket);
-                tracing::debug!("AutoCloseSocket -> automatically closed socket {}", self.socket);
+                closesocket(self.socket);
+                tracing::debug!(
+                    "AutoCloseSocket -> automatically closed socket {}",
+                    self.socket
+                );
             }
         }
     }
@@ -956,12 +965,10 @@ impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
 }
 
 /// Get the peer address from a connected socket
-pub fn get_peer_address_from_socket(socket: winapi::um::winsock2::SOCKET) -> HookResult<SocketAddr> {
-    use winapi::um::winsock2::{getpeername, SOCKET_ERROR};
-    
+pub fn get_peer_address_from_socket(socket: SOCKET) -> HookResult<SocketAddr> {
     let mut addr_storage: SOCKADDR_STORAGE = unsafe { mem::zeroed() };
     let mut addr_len = mem::size_of::<SOCKADDR_STORAGE>() as INT;
-    
+
     let result = unsafe {
         getpeername(
             socket,
@@ -969,11 +976,60 @@ pub fn get_peer_address_from_socket(socket: winapi::um::winsock2::SOCKET) -> Hoo
             &mut addr_len,
         )
     };
-    
+
     if result == SOCKET_ERROR {
         return Err(HookError::IO(std::io::Error::last_os_error()));
     }
-    
+
     SocketAddr::try_from_raw(&addr_storage as *const _ as *const SOCKADDR, addr_len)
         .ok_or_else(|| HookError::IO(std::io::Error::last_os_error()))
+}
+
+/// Helper function to get the actual bound address from a socket
+pub unsafe fn get_actual_bound_address(socket: SOCKET, requested_addr: SocketAddr) -> SocketAddr {
+    let mut actual_addr_storage: SOCKADDR_STORAGE = unsafe { std::mem::zeroed() };
+    let mut actual_addr_len = std::mem::size_of::<SOCKADDR_STORAGE>() as INT;
+
+    let getsockname_result = unsafe {
+        getsockname(
+            socket,
+            &mut actual_addr_storage as *mut _ as *mut SOCKADDR,
+            &mut actual_addr_len,
+        )
+    };
+
+    if getsockname_result == ERROR_SUCCESS_I32 {
+        match SocketAddr::try_from_raw(
+            &actual_addr_storage as *const _ as *const SOCKADDR,
+            actual_addr_len,
+        ) {
+            Some(addr) => addr,
+            None => {
+                tracing::error!(
+                    "get_actual_bound_address -> failed to convert actual bound address"
+                );
+                requested_addr
+            }
+        }
+    } else {
+        tracing::error!("get_actual_bound_address -> getsockname failed");
+        requested_addr
+    }
+}
+
+/// Helper function to determine the appropriate local binding address
+pub fn determine_local_address(requested_addr: SocketAddr) -> SocketAddr {
+    if requested_addr.ip().is_loopback() || requested_addr.ip().is_unspecified() {
+        requested_addr
+    } else if requested_addr.is_ipv4() {
+        SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            requested_addr.port(),
+        )
+    } else {
+        SocketAddr::new(
+            std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            requested_addr.port(),
+        )
+    }
 }

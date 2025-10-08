@@ -87,7 +87,7 @@ impl ClientStore {
     }
 
     /// Determines whether connection pooling should be enabled.
-    /// 
+    ///
     /// On Windows, connection pooling is disabled due to "channel closed" errors
     /// that occur when reusing HTTP connections in rapid succession scenarios.
     #[inline]
@@ -109,9 +109,11 @@ impl ClientStore {
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         if Self::should_enable_connection_pooling() {
-            self.get_with_pooling(server_addr, version, transport, request_uri).await
+            self.get_with_pooling(server_addr, version, transport, request_uri)
+                .await
         } else {
-            self.get_without_pooling(server_addr, version, transport, request_uri).await
+            self.get_without_pooling(server_addr, version, transport, request_uri)
+                .await
         }
     }
 
@@ -158,7 +160,9 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let client = self.make_client(server_addr, version, transport, request_uri).await?;
+        let client = self
+            .make_client(server_addr, version, transport, request_uri)
+            .await?;
         tracing::debug!(?client, "Created new HTTP client");
         Ok(client)
     }
@@ -192,11 +196,17 @@ impl ClientStore {
     /// Drops a client immediately (connection pooling disabled).
     fn push_idle_without_pooling(&self, client: LocalHttpClient) {
         #[cfg(target_os = "windows")]
-        tracing::trace!(?client, "Dropping HTTP client (connection pooling disabled on Windows)");
-        
+        tracing::trace!(
+            ?client,
+            "Dropping HTTP client (connection pooling disabled on Windows)"
+        );
+
         #[cfg(not(target_os = "windows"))]
-        tracing::trace!(?client, "Dropping HTTP client (connection pooling disabled)");
-        
+        tracing::trace!(
+            ?client,
+            "Dropping HTTP client (connection pooling disabled)"
+        );
+
         std::mem::drop(client);
     }
 

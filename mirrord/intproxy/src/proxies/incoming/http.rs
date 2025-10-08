@@ -102,9 +102,6 @@ pub enum LocalHttpError {
 
     #[error("failed to prepare TLS client configuration: {0}")]
     TlsSetupError(#[from] LocalTlsSetupError),
-
-    #[error("client store mutex is poisoned")]
-    StoreIsPoisoned,
 }
 
 impl LocalHttpError {

@@ -3,7 +3,11 @@
 /// until it becomes layer's LayerSetup
 use std::{net::SocketAddr, sync::OnceLock};
 
-use mirrord_config::{LayerConfig, feature::network::{incoming::IncomingConfig, outgoing::OutgoingConfig}, target::Target};
+use mirrord_config::{
+    LayerConfig,
+    feature::network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
+    target::Target,
+};
 
 use crate::{
     error::{LayerError, LayerResult},
