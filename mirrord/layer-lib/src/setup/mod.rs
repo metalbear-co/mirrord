@@ -6,14 +6,24 @@
 pub mod windows;
 
 use std::sync::OnceLock;
-
+use std::net::SocketAddr;
 use mirrord_config::LayerConfig;
+    
+use crate:: {
+    setup::windows::LayerSetup,
+    error::{LayerError, LayerResult},
+};
 
-/// Holds LayerConfig for platform specific LayerSetup for layer-lib accessibilty
-/// This is used to access the configuration from anywhere in the layer-lib
-/// Initialized in LayerSetup
-pub static CONFIG: OnceLock<LayerConfig> = OnceLock::new();
+static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
-pub fn layer_config() -> &'static LayerConfig {
-    CONFIG.get().expect("Layer config not initialized")
+pub fn layer_setup() -> &'static LayerSetup {
+    SETUP.get().expect("LayerSetup is not initialized")
+}
+
+pub fn init_setup(config: LayerConfig, proxy_address: SocketAddr) -> LayerResult<()> {
+    let state = LayerSetup::new(config, proxy_address);
+    SETUP
+        .set(state)
+        .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer setup already initialized"))?;
+    Ok(())
 }

@@ -8,7 +8,7 @@ use tracing::trace;
 use crate::{
     error::HostnameResolveError,
     proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
-    setup::layer_config,
+    setup::layer_setup,
     socket::dns::update_dns_reverse_mapping,
 };
 
@@ -94,7 +94,7 @@ pub trait HostnameResolver {
 
     fn is_enabled(check_enabled: bool) -> bool {
         // Check if hostname feature is enabled
-        let hostname_enabled = layer_config().feature.hostname;
+        let hostname_enabled = layer_setup().local_hostname();
         if check_enabled && !hostname_enabled {
             tracing::debug!("Hostname feature disabled");
             return false;

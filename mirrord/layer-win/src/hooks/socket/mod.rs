@@ -12,12 +12,12 @@ use std::{net::SocketAddr, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, PortSubscribe, PortSubscription,
+    ConnMetadataRequest, ConnMetadataResponse, PortSubscribe,
 };
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
-    setup::windows::layer_setup,
+    setup::layer_setup,
     socket::{
         Bound, ConnectResult, Connected, SocketDescriptor, SocketKind, SocketState,
         get_bound_address, get_connected_addresses, get_socket, get_socket_state,
@@ -28,7 +28,6 @@ use mirrord_layer_lib::{
 };
 use mirrord_protocol::{
     outgoing::SocketAddress,
-    tcp::{MirrorType, StealType},
 };
 use socket2::SockAddr;
 use winapi::{
@@ -533,19 +532,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         .copied()
         .unwrap_or_else(|| bound_state.requested_address.port());
 
-    // Create subscription based on mode like Unix layer
-    let subscription = match setup.incoming_config().mode {
-        mirrord_config::feature::network::incoming::IncomingMode::Steal => {
-            PortSubscription::Steal(StealType::All(mapped_port))
-        }
-        mirrord_config::feature::network::incoming::IncomingMode::Mirror => {
-            PortSubscription::Mirror(MirrorType::All(mapped_port))
-        }
-        _ => {
-            // This shouldn't happen as we check above, but fallback to mirror
-            PortSubscription::Mirror(MirrorType::All(mapped_port))
-        }
-    };
+    let subscription = setup.incoming_mode().subscription(mapped_port);
 
     let port_subscribe = PortSubscribe {
         listening_on: bound_state.address,

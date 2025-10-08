@@ -1,78 +1,82 @@
 /// Windows supported subset of LayerSetup
 /// this will fill up over time
 /// until it becomes layer's LayerSetup
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use mirrord_config::{
     LayerConfig,
-    feature::network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
+    feature::{
+        network::{
+            incoming::{
+                IncomingConfig,
+                http_filter::{HttpFilterConfig, InnerFilter},
+            },
+            outgoing::OutgoingConfig,
+        },
+    },
     target::Target,
+};
+use mirrord_intproxy_protocol::PortSubscription;
+use mirrord_protocol::{
+    Port,
+    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
 };
 
 use crate::{
-    error::{LayerError, LayerResult},
-    setup::CONFIG,
     socket::{DnsSelector, OutgoingSelector},
 };
-
-static SETUP: OnceLock<LayerSetup> = OnceLock::new();
-
-pub fn init_setup(config: LayerConfig, proxy_address: SocketAddr) -> LayerResult<()> {
-    let state = LayerSetup::new(config, proxy_address);
-    SETUP
-        .set(state)
-        .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer setup already initialized"))?;
-    Ok(())
-}
-
-pub fn layer_setup() -> &'static LayerSetup {
-    SETUP.get().expect("LayerSetup is not initialized")
-}
 
 /// Windows supported layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
 /// the layer.
 #[derive(Debug)]
 pub struct LayerSetup {
-    // config: LayerConfig,
+    config: LayerConfig,
     outgoing_selector: OutgoingSelector,
     dns_selector: DnsSelector,
     proxy_address: SocketAddr,
+    incoming_mode: IncomingMode,
     local_hostname: bool,
 }
 
 impl LayerSetup {
-    pub fn new(config: LayerConfig, proxy_address: SocketAddr) -> Self {
+    pub fn new(mut config: LayerConfig, proxy_address: SocketAddr) -> Self {
         let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
+
         let dns_selector = DnsSelector::from(&config.feature.network.dns);
+
         let local_hostname = !config.feature.hostname;
+        
+        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
+        tracing::info!(?incoming_mode, ?config, "incoming has changed");
         Self {
-            // config,
+            config,
             outgoing_selector,
             dns_selector,
             proxy_address,
+            incoming_mode,
             local_hostname,
         }
     }
 
     pub fn layer_config(&self) -> &LayerConfig {
-        CONFIG.get().expect("Layer config not initialized")
-    }
-
-    pub fn outgoing_config(&self) -> &OutgoingConfig {
-        &self.layer_config().feature.network.outgoing
+        &self.config
     }
 
     pub fn incoming_config(&self) -> &IncomingConfig {
-        &self.layer_config().feature.network.incoming
+        &self.config.feature.network.incoming
+    }
+
+    pub fn outgoing_config(&self) -> &OutgoingConfig {
+        &self.config.feature.network.outgoing
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.layer_config().feature.network.dns.enabled
+        self.config.feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {
-        self.layer_config()
+        self.config
             .target
             .path
             .as_ref()
@@ -92,7 +96,154 @@ impl LayerSetup {
         self.proxy_address
     }
 
+    pub fn incoming_mode(&self) -> &IncomingMode {
+        &self.incoming_mode
+    }
+
     pub fn local_hostname(&self) -> bool {
         self.local_hostname
+    }
+}
+
+/// Settings for handling HTTP feature.
+#[derive(Debug)]
+pub struct HttpSettings {
+    /// The HTTP filter to use.
+    pub filter: HttpFilter,
+    /// Ports to filter HTTP on.
+    pub ports: HashSet<Port>,
+}
+
+#[derive(Debug)]
+pub struct IncomingMode {
+    pub steal: bool,
+    pub http_settings: Option<HttpSettings>,
+}
+
+impl IncomingMode {
+    /// Creates a new instance from the given [`IncomingConfig`].
+    /// # Params
+    ///
+    /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
+    fn new(config: &mut IncomingConfig) -> Self {
+        let http_settings = config.http_filter.is_filter_set().then(|| {
+            let ports = config
+                .http_filter
+                .ports
+                .get_or_insert_default()
+                .iter()
+                .copied()
+                .collect();
+
+            let filter = Self::parse_http_filter(&config.http_filter);
+
+            HttpSettings { filter, ports }
+        });
+
+        Self {
+            steal: config.is_steal(),
+            http_settings,
+        }
+    }
+
+    fn parse_http_filter(http_filter_config: &HttpFilterConfig) -> HttpFilter {
+        match http_filter_config {
+            HttpFilterConfig {
+                path_filter: Some(path),
+                header_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Path(Filter::new(path.into()).expect("invalid filter expression")),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: Some(header),
+                method_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Header(Filter::new(header.into()).expect("invalid filter expression")),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: Some(method),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Method(
+                HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+            ),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                all_of: Some(filters),
+                any_of: None,
+                ports: _ports,
+            } => Self::make_composite_filter(true, filters),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                all_of: None,
+                any_of: Some(filters),
+                ports: _ports,
+            } => Self::make_composite_filter(false, filters),
+
+            _ => panic!("No HTTP filters specified, this should have been caught earlier"),
+        }
+    }
+
+    fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
+        let filters = filters
+            .iter()
+            .map(|filter| match filter {
+                InnerFilter::Path { path } => {
+                    HttpFilter::Path(Filter::new(path.clone()).expect("invalid filter expression"))
+                }
+                InnerFilter::Header { header } => HttpFilter::Header(
+                    Filter::new(header.clone()).expect("invalid filter expression"),
+                ),
+                InnerFilter::Method { method } => HttpFilter::Method(
+                    HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+                ),
+            })
+            .collect();
+
+        HttpFilter::Composite { all, filters }
+    }
+
+    /// Returns [`PortSubscription`] request to be used for the given port.
+    pub fn subscription(&self, port: Port) -> PortSubscription {
+        if self.steal {
+            let steal_type = match &self.http_settings {
+                None => StealType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        StealType::FilteredHttpEx(port, settings.filter.clone())
+                    } else {
+                        StealType::All(port)
+                    }
+                }
+            };
+            PortSubscription::Steal(steal_type)
+        } else {
+            let mirror_type = match &self.http_settings {
+                None => MirrorType::All(port),
+                Some(settings) => {
+                    if settings.ports.contains(&port) {
+                        MirrorType::FilteredHttp(port, settings.filter.clone())
+                    } else {
+                        MirrorType::All(port)
+                    }
+                }
+            };
+            PortSubscription::Mirror(mirror_type)
+        }
     }
 }
