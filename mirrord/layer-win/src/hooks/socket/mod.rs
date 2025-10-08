@@ -2652,8 +2652,5 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         WSA_RECV_FROM_ORIGINAL
     )?;
 
-    tracing::info!(
-        "Socket hooks initialized successfully (including Node.js WSA async I/O support)"
-    );
     Ok(())
 }

@@ -9,7 +9,7 @@ use mirrord_config::{
         network::{
             incoming::{
                 IncomingConfig,
-                http_filter::{HttpFilterConfig, InnerFilter},
+                http_filter::{HttpFilterConfig, InnerFilter, PortList},
             },
             outgoing::OutgoingConfig,
         },
@@ -130,10 +130,9 @@ impl IncomingMode {
             let ports = config
                 .http_filter
                 .ports
-                .get_or_insert_default()
-                .iter()
-                .copied()
-                .collect();
+                .as_ref()
+                .map(|port_list| port_list.iter().copied().collect())
+                .unwrap_or(PortList::default().into());
 
             let filter = Self::parse_http_filter(&config.http_filter);
 
