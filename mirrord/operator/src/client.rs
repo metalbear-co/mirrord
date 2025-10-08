@@ -323,7 +323,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
 
         let result = try {
-            let header = Self::make_client_cert_header(&certificate)?;
+            let header = Self::make_client_cert_header(certificate)?;
 
             let mut config = self.client_cert.base_config;
             config
