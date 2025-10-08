@@ -6,10 +6,8 @@ use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
 #[cfg(not(target_os = "windows"))]
-use std::os::unix::prelude::MetadataExt;
-#[cfg(target_os = "windows")]
-use std::os::windows::fs::MetadataExt;
-use std::{fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock};
+use std::os::{fs::Metadata, unix::prelude::MetadataExt};
+use std::{io::SeekFrom, path::PathBuf, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]

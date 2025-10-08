@@ -42,7 +42,7 @@ macro_rules! unsafe_alloc {
     }};
 }
 
-const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS as i32;
+pub const ERROR_SUCCESS_I32: i32 = ERROR_SUCCESS as i32;
 
 /// RAII wrapper for automatically closing sockets on error
 /// The socket will be automatically closed when dropped unless explicitly released

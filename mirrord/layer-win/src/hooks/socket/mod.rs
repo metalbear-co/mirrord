@@ -35,7 +35,7 @@ use winapi::{
     ctypes::c_void,
     shared::{
         minwindef::{BOOL, FALSE, INT, TRUE},
-        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA, ERROR_SUCCESS},
+        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{
             ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
         },

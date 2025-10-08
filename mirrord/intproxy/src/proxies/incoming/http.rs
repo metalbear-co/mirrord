@@ -111,8 +111,7 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..)
             | Self::UnsupportedHttpVersion(..)
-            | Self::TlsSetupError(..)
-            | Self::StoreIsPoisoned => false,
+            | Self::TlsSetupError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
                 .is_parse()
