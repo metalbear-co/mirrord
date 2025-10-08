@@ -4326,6 +4326,7 @@ dependencies = [
  "humantime",
  "hyper 1.7.0",
  "hyper-util",
+ "is_ci",
  "k8s-openapi",
  "kube",
  "local-ip-address",
