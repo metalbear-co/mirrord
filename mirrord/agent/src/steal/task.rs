@@ -22,7 +22,7 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
+    incoming::{BypassedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -115,7 +115,7 @@ impl TcpStealerTask {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, ret)]
+    #[tracing::instrument(level = Level::TRACE)]
     async fn handle_stolen_traffic(
         clients: &HashMap<ClientId, Client>,
         traffic: StolenTraffic,
@@ -173,6 +173,7 @@ impl TcpStealerTask {
                     StealerMessage::StolenHttp(http.steal())
                 } else {
                     http.pass_through();
+
                     StealerMessage::Log(LogMessage::error(format!(
                         "An HTTP request was not stolen due to mirrord-protocol version requirement: {}",
                         protocol_version_req,
@@ -241,6 +242,26 @@ impl TcpStealerTask {
                 .message_tx
                 .send(StealerMessage::StolenHttp(http.steal()))
                 .await;
+        } else if let Some((parts, client)) = filters.iter().find_map(|(id, http_filter)| {
+            let parts = http.parts_mut();
+            let client = clients.get(id);
+            http_filter
+                .matches(parts)
+                .not()
+                .then(|| parts.clone())
+                .zip(client)
+        }) {
+            // Only used by the operator to count bypassed requests, so we can just send it to
+            // whatever client, and have it ignored by mirrord.
+            let _ = client
+                .message_tx
+                .send(StealerMessage::BypassedHttp(BypassedHttp {
+                    info: http.info().clone(),
+                    parts,
+                }))
+                .await;
+
+            http.pass_through();
         } else {
             http.pass_through();
         }

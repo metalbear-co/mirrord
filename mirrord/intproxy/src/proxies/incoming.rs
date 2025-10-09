@@ -623,6 +623,7 @@ impl IncomingProxy {
                     message_bus.send(msg).await;
                 }
             }
+            DaemonTcp::HttpRequestBypassed(..) => {}
         }
 
         Ok(())
