@@ -4756,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.163.0"
+version = "3.164.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.163.0"
+version = "3.164.0"
 dependencies = [
  "anyhow",
  "bincode",
