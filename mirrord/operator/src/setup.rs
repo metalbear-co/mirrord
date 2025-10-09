@@ -286,6 +286,9 @@ impl OperatorSetup for Operator {
             writer.write_all(b"---\n")?;
             MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
 
+            writer.write_all(b"---\n")?;
+            MirrordKafkaSession::crd().to_writer(&mut writer)?;
+
             if let Some(role) = self.role.as_ref() {
                 writer.write_all(b"---\n")?;
                 role.to_writer(&mut writer)?;
