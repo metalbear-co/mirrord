@@ -335,6 +335,7 @@ pub struct Session {
     pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
+    pub kafka: Option<Vec<MirrordKafkaSession>>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -724,6 +725,120 @@ pub struct MirrordSqsSessionSpec {
 
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
+
+    /// The id of the mirrord exec session, from the operator.
+    // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
+    // so we save that field as a (HEX) string even though its source is a u64
+    pub session_id: String,
+}
+
+/// Kafka split details for a session.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename = "KafkaSplitDetails", rename_all = "camelCase")]
+pub struct KafkaSplitDetails {
+    /// Topic ID -> old and new topic names.
+    pub topic_names: BTreeMap<String, TopicNameUpdate>,
+
+    /// Env var name -> old and new topic names.
+    pub env_updates: BTreeMap<String, TopicNameUpdate>,
+}
+
+/// Update information for a Kafka topic name.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicNameUpdate {
+    /// Original topic name.
+    pub original_name: String,
+    /// Output topic name (ephemeral topic created by mirrord).
+    pub output_name: String,
+}
+
+/// Representation of Kafka errors for the status of Kafka session resources.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KafkaSessionError {
+    /// HTTP code for operator response.
+    pub status_code: u16,
+
+    /// Human-readable explanation of what went wrong.
+    pub reason: String,
+}
+
+impl Display for KafkaSessionError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.reason)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename = "KafkaSessionStatus")]
+pub enum KafkaSessionStatus {
+    // kube-rs does not allow mixing unit variants with tuple/struct variants, so this variant
+    // has to be a tuple/struct too. If we leave the tuple empty, k8s complains about an object
+    // without any items, and kube-rs does not support internally tagged enums, so we actually
+    // have to put something in there, even if we don't actually care about that info.
+    Starting {
+        start_time_utc: String,
+    },
+    /// Kafka operator sets this status before it starts registering filters, so that if anything
+    /// fails during the registration of filters, we have all the topics we need to delete on
+    /// cleanup.
+    RegisteringFilters(KafkaSplitDetails),
+    Ready(KafkaSplitDetails),
+    StartError(KafkaSessionError),
+    CleanupError {
+        error: KafkaSessionError,
+        details: Option<KafkaSplitDetails>,
+    },
+}
+
+impl KafkaSessionStatus {
+    pub fn get_split_details(&self) -> Option<&KafkaSplitDetails> {
+        match self {
+            KafkaSessionStatus::RegisteringFilters(details)
+            | KafkaSessionStatus::Ready(details) => Some(details),
+            KafkaSessionStatus::CleanupError { details, .. } => details.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+/// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
+/// To be used in [`kube::runtime::wait::await_condition`].
+pub fn is_kafka_session_ready(session: Option<&MirrordKafkaSession>) -> bool {
+    session
+        .and_then(|session| session.status.as_ref())
+        .map(|status| {
+            matches!(
+                status,
+                KafkaSessionStatus::Ready(..)
+                    | KafkaSessionStatus::StartError(..)
+                    | KafkaSessionStatus::CleanupError { .. }
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// The operator creates this object when a user runs mirrord against a target that is a Kafka
+/// topic consumer.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "queues.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordKafkaSession",
+    root = "MirrordKafkaSession",
+    status = "KafkaSessionStatus",
+    namespaced
+)]
+#[serde(rename_all = "camelCase")] // topic_filters -> topicFilters
+pub struct MirrordKafkaSessionSpec {
+    /// For each topic_id, a mapping from header name, to header value regex.
+    /// The topic_id for a topic is determined at the topic registry. It is not (necessarily)
+    /// The name of the topic on Kafka.
+    pub topic_filters: HashMap<String, BTreeMap<String, String>>,
+
+    /// The target of this session.
+    pub topic_consumer: QueueConsumer,
 
     /// The id of the mirrord exec session, from the operator.
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)

@@ -30,7 +30,10 @@ use thiserror::Error;
 use crate::crd::{
     MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
     MirrordWorkloadQueueRegistry, TargetCrd,
-    kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
+    kafka::{
+        MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaSession,
+        MirrordKafkaTopicsConsumer,
+    },
     mysql_branching::MysqlBranchDatabase,
     patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
     policy::{MirrordClusterPolicy, MirrordPolicy},
@@ -806,6 +809,65 @@ impl OperatorClusterRole {
                     api_groups: Some(vec![ConfigMap::group(&()).into_owned()]),
                     resources: Some(vec![ConfigMap::plural(&()).into_owned()]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
+            ]);
+        }
+
+        if options.kafka_splitting {
+            rules.extend([
+                // Allow the operator to control mirrord Kafka session objects.
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaSession::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaSession::plural(&()).into_owned()]),
+                    verbs: vec![
+                        "create".to_owned(),
+                        "watch".to_owned(),
+                        "list".to_owned(),
+                        "get".to_owned(),
+                        "delete".to_owned(),
+                        "deletecollection".to_owned(),
+                        "patch".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the Kafka controller to update Kafka session status.
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaSession::group(&()).into_owned()]),
+                    resources: Some(vec![format!("{}/status", MirrordKafkaSession::plural(&()))]),
+                    verbs: vec![
+                        // For setting the status in the Kafka controller.
+                        "update".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the operator to control mirrord Kafka topics consumer objects.
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaTopicsConsumer::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaTopicsConsumer::plural(&()).into_owned()]),
+                    verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
+                // Allow the operator to control mirrord Kafka client config objects.
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaClientConfig::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaClientConfig::plural(&()).into_owned()]),
+                    verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
+                // Allow the operator to control mirrord Kafka ephemeral topic objects.
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaEphemeralTopic::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaEphemeralTopic::plural(&()).into_owned()]),
+                    verbs: vec![
+                        "create".to_owned(),
+                        "watch".to_owned(),
+                        "list".to_owned(),
+                        "get".to_owned(),
+                        "delete".to_owned(),
+                        "deletecollection".to_owned(),
+                        "patch".to_owned(),
+                    ],
                     ..Default::default()
                 },
             ]);
