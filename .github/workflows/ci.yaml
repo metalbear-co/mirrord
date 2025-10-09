@@ -72,6 +72,7 @@ jobs:
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
+      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}   # <-- ADDED
     steps:
       - uses: actions/checkout@v4
         with:
@@ -122,6 +123,20 @@ jobs:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
+      # Detect Windows-related changes so Linux tests run when Windows code changes
+      - name: get Windows-related changes
+        id: changed-windows
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            mirrord/layer-win/**
+            mirrord/str-win/**
+            mirrord/**/windows/**
+            mirrord/**/win32/**
+            mirrord/**/win/**
+            scripts/**/*.ps1
+            **/*.ps1
+            .github/workflows/windows-build.yaml
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -139,10 +154,13 @@ jobs:
           echo ${{ steps.changed-protocol.outputs.any_changed }};
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
+          echo ${{ steps.changed-windows.outputs.any_changed }};           # <-- ADDED
+          echo ${{ steps.changed-windows.outputs.all_changed_files }};     # <-- ADDED
+
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -183,7 +201,7 @@ jobs:
 
   cargo-deny:
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -194,7 +212,7 @@ jobs:
   check-rust-docs:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
@@ -212,7 +230,7 @@ jobs:
   test_agent:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
@@ -233,7 +251,7 @@ jobs:
   test_agent_image:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -255,7 +273,7 @@ jobs:
   test_cli_image:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -272,7 +290,7 @@ jobs:
   integration_tests:
     runs-on: ubuntu-24.04
     needs: [changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -540,7 +558,7 @@ jobs:
         container-runtime: ["docker", "containerd"]
     name: e2e
     needs: [test_agent_image, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
