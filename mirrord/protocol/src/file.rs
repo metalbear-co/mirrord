@@ -5,9 +5,11 @@ use std::fs::DirEntry;
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-use std::{
-    fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf, sync::LazyLock,
-};
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::prelude::MetadataExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::MetadataExt;
+use std::{fs::Metadata, io::SeekFrom, path::PathBuf, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]
@@ -67,11 +69,11 @@ pub struct MetadataInternal {
     /// file size, st_size
     pub size: u64,
     /// time is in nano seconds, can be converted to seconds by dividing by 1e9
-    /// access time, st_atime_ns
+    /// access time, st_atime_ns or FILETIME (windows)
     pub access_time: i64,
-    /// modification time, st_mtime_ns
+    /// modification time, st_mtime_ns (unix) or FILETIME (windows)
     pub modification_time: i64,
-    /// creation time, st_ctime_ns
+    /// creation time, st_ctime_ns (unix) or FILETIME (windows)
     pub creation_time: i64,
     /// block size, st_blksize
     pub block_size: u64,
@@ -79,6 +81,7 @@ pub struct MetadataInternal {
     pub blocks: u64,
 }
 
+#[cfg(not(target_os = "windows"))]
 impl From<Metadata> for MetadataInternal {
     fn from(metadata: Metadata) -> Self {
         Self {

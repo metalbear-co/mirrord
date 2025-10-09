@@ -25,6 +25,7 @@ mod targetless_tests {
     ///
     /// Running this test on a cluster that does not have any pods, also proves that we don't use
     /// any existing pod and the agent pod is completely independent.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -39,6 +40,7 @@ mod targetless_tests {
     }
 
     /// Test spawning a targetless agent pod with a given priority class.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
