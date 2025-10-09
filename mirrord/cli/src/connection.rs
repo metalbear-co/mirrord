@@ -3,7 +3,6 @@ use std::{collections::HashSet, time::Duration};
 use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
-    config::ConfigError,
     target::{Target, TargetDisplay},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
