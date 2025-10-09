@@ -15,6 +15,7 @@ use crate::utils::{
 ///
 /// This test runs only with ephemeral agents, because it's easier to get their status
 /// (it's always part of the target pod status).
+#[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]

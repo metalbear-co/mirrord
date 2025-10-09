@@ -12,6 +12,12 @@ let received = 0;
 client.on('data', (data) => {
     console.log(`received ${data.length} bytes of data`);
     received += data.length
+    if (received === expected) {
+        console.log(`received all expected bytes`);
+    } else if (received > expected) {
+        console.error(`received ${received} bytes, expected ${expected} bytes`);
+        process.exit(-1);
+    }
 });
 
 client.on('close', (hadError) => {

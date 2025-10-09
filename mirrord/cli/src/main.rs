@@ -240,11 +240,12 @@
 #![allow(clippy::large_enum_variant)]
 // TODO(alex): Get a big `Box` for the big variants.
 #![allow(clippy::result_large_err)]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
+#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
-use std::{
-    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
-    time::Duration,
-};
+use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+#[cfg(not(target_os = "windows"))]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
@@ -258,6 +259,8 @@ use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
+#[cfg(target_os = "windows")]
+use libc::EXIT_FAILURE;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -284,6 +287,7 @@ use tracing::{error, info, trace, warn};
 use which::which;
 
 mod browser;
+mod ci;
 mod config;
 mod connection;
 mod container;
@@ -313,6 +317,8 @@ mod wsl;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
+#[cfg(target_os = "windows")]
+use crate::execution::windows::command::WindowsCommand;
 use crate::{
     newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
 };
@@ -379,7 +385,7 @@ where
     };
 
     #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
+    let (_did_sip_patch, binary) = (false, args.binary.clone());
 
     let mut env_vars: HashMap<String, String> = vars().collect();
     env_vars.extend(execution_info.environment.clone());
@@ -394,15 +400,9 @@ where
         .map(Clone::clone)
         .collect::<Vec<_>>();
 
-    // since execvpe doesn't exist on macOS, resolve path with which and use execve
-    let binary_path = match which(&binary) {
-        Ok(pathbuf) => pathbuf,
-        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
-    };
-    let path = CString::new(binary_path.as_os_str().as_bytes())?;
-
     sub_progress.success(Some("ready to launch process"));
 
+    #[cfg(not(target_os = "windows"))]
     if config.experimental.browser_extension_config {
         browser::init_browser_extension(&config.feature.network, progress);
     }
@@ -411,7 +411,7 @@ where
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
         &sub_progress_config,
-        &binary_args,
+        Some(&binary_args),
         &config,
         config_file_path,
         execution_info.uses_operator,
@@ -422,6 +422,40 @@ where
 
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data, progress).await;
+
+    let sub_progress = progress.subtask("running process");
+
+    execve_process(
+        binary,
+        binary_args,
+        env_vars,
+        _did_sip_patch,
+        sub_progress,
+        analytics,
+    )
+    .await
+}
+
+fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn execve_process<P>(
+    binary: String,
+    binary_args: Vec<String>,
+    env_vars: HashMap<String, String>,
+    _did_sip_patch: bool,
+    mut progress: P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = process_which(&binary)?;
+
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
 
     let args = binary_args
         .clone()
@@ -458,17 +492,87 @@ where
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
+#[cfg(target_os = "windows")]
+async fn execve_process<P>(
+    binary: String,
+    binary_args: Vec<String>,
+    env_vars: HashMap<String, String>,
+    _did_sip_patch: bool,
+    mut progress: P,
+    analytics: &mut AnalyticsReporter,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+    // Add .exe extension if necessary on Windows
+    // From CreateProcessW documentation:
+    // lpApplicationName - This parameter must include the file name extension; no default extension
+    // is assumed.
+    let binary_name = if binary.ends_with(".exe") {
+        binary.clone()
+    } else {
+        format!("{}.exe", binary)
+    };
+
+    let binary_path = process_which(&binary_name).map_err(|e| {
+        error!("process_which failed: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        e
+    })?;
+
+    let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
+        .and_then(|os_str| os_str.into_string().ok())
+        .ok_or_else(|| {
+            CliError::LayerFilePathMissing(
+                binary.clone(),
+                binary_args.clone(),
+                std::env::vars().collect(),
+            )
+        })?;
+
+    let mut env_vars = env_vars.clone();
+    env_vars
+        .entry("MIRRORD_LAYER_FILE".to_string())
+        .or_insert(layer_path.clone());
+
+    let cmd = WindowsCommand::new(&binary_path)
+        .args(&binary_args)
+        .envs(env_vars)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    // On Windows, we need to manually handle process replacement
+    let mut process = cmd.inject_and_spawn(layer_path).map_err(|e| {
+        error!("Failed to create process: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+    })?;
+
+    progress.success(Some("Ready!"));
+
+    // Wait for process and handle I/O
+    let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
+        error!("Process failed: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        EXIT_FAILURE
+    });
+    std::process::exit(exit_code);
+}
+
 /// Prints config summary as multiple info messages, using the given [`Progress`].
-fn print_config<P>(
+pub(crate) fn print_config<P>(
     progress: &P,
-    command: &[String],
+    command: Option<&[String]>,
     config: &LayerConfig,
     config_file_path: Option<&str>,
     operator_used: bool,
 ) where
     P: Progress,
 {
-    progress.info(&format!("Running command: {}", command.join(" ")));
+    if let Some(cmd) = command {
+        progress.info(&format!("Running command: {}", cmd.join(" ")));
+    }
 
     let target_and_config_path_info = format!(
         "{}, {}",
@@ -665,7 +769,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     }
     result?;
 
-    let execution_result = exec_process(
+    let res = exec_process(
         config,
         config_file_path.as_deref(),
         args,
@@ -675,11 +779,10 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     )
     .await;
 
-    if execution_result.is_err() && !analytics.has_error() {
+    if res.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
     }
-
-    execution_result
+    res
 }
 
 async fn port_forward(
@@ -845,7 +948,9 @@ fn main() -> miette::Result<()> {
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch, &mut user_data).await?,
-            Commands::Dump(args) => dump_command(&args, watch, &user_data).await?,
+            Commands::Dump(args) => windows_unsupported!(args, "dump", {
+                dump_command(&args, watch, &user_data).await?
+            }),
             Commands::Extract { path } => {
                 extract_library(
                     Some(path),
@@ -861,10 +966,12 @@ fn main() -> miette::Result<()> {
 
                 list::print_targets(*args, rich_output).await?
             }
-            Commands::Operator(args) => operator_command(*args).await?,
-            Commands::ExtensionExec(args) => {
-                extension_exec(*args, watch, &user_data).await?;
+            Commands::Operator(args) => {
+                windows_unsupported!(args, "operator", { operator_command(*args).await? })
             }
+            Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
+                extension_exec(*args, watch, &user_data).await?;
+            }),
             Commands::InternalProxy { port, .. } => {
                 let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_intproxy_tracing_registry(&config)?;
@@ -875,9 +982,11 @@ fn main() -> miette::Result<()> {
                 let mut cmd: clap::Command = Cli::command();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
-            Commands::Teams => teams::navigate_to_intro().await,
+            Commands::Teams => {
+                windows_unsupported!((), "teams", { teams::navigate_to_intro().await })
+            }
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => {
+            Commands::Container(args) => windows_unsupported!(args, "container", {
                 let (runtime_args, exec_params) = args.into_parts();
 
                 let exit_code =
@@ -886,19 +995,22 @@ fn main() -> miette::Result<()> {
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
-            }
-            Commands::ExtensionContainer(args) => {
+            }),
+            Commands::ExtensionContainer(args) => windows_unsupported!(args, "container-ext", {
                 container_ext_command(args.config_file, args.target, watch, &user_data).await?
-            }
-            Commands::ExternalProxy { port, .. } => {
+            }),
+            Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;
 
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
-            }
+            }),
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
-            Commands::Vpn(args) => vpn::vpn_command(*args).await?,
+            Commands::Vpn(args) => {
+                windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
+            }
             Commands::Newsletter => newsletter::newsletter_command().await,
+            Commands::Ci(args) => ci::ci_command(*args).await?,
         };
 
         Ok(())

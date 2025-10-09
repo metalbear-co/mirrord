@@ -8,6 +8,62 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.165.0](https://github.com/metalbear-co/mirrord/tree/3.165.0) - 2025-10-09
+
+### Changed
+
+- intproxy compiles on Windows.
+  [#.531](https://github.com/metalbear-co/mirrord/issues/.531)
+- All configuration snippets for agent are now self-contained.
+  [#3610](https://github.com/metalbear-co/mirrord/issues/3610)
+
+### Fixed
+
+- Fixed the check that disallows operator-only targets when the operator is not
+  in use.
+
+### Internal
+
+- The agent's docker image is now distroless, making it smaller and more
+  secure.
+  [#distroless-agent-runtime](https://github.com/metalbear-co/mirrord/issues/distroless-agent-runtime)
+- Added a GitHub action to build Windows builds.
+- Added more traffic mirroring tests.
+
+## [3.164.0](https://github.com/metalbear-co/mirrord/tree/3.164.0) - 2025-10-06
+
+
+### Added
+
+- Added a new command to generate mirrord CI API key for operator users.
+
+
+### Changed
+
+- Improves the agent handling of background tasks by having them run in a
+  separate tokio runtime. Also adds a timeout for waiting on these tasks to
+  finish (timeout of 5 seconds).
+- Removed the outdated operator version check.
+
+
+### Fixed
+
+- Disallow nested `mirrord exec` and `mirrord container` executions.
+- Fixed an issue where mirrord sessions would sometimes fail after reconnecting
+  to the operator.
+
+
+### Internal
+
+- Added a new CRD for persisting workload patches.
+- Allow config to be printed in IDE that supports it
+- Pinned `ci-agent-runtime` image to specific commit.
+- Removed an unused `test.json` file from the repo.
+- Removed legacy `MirrordOperatorUser` CRD.
+- The `dirty_iptables::agent_exits_on_dirty_tables` E2E test no longer depends
+  on `/bin/sh` being present in the agent image.
+- Verify correct Prometheus metrics in SQS E2E tests.
+
 ## [3.163.0](https://github.com/metalbear-co/mirrord/tree/3.163.0) - 2025-09-19
 
 

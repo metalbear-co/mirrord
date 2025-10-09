@@ -1,3 +1,8 @@
+# Cross compilable mirrord workspace
+# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
+# On Unix: Default cargo build will build the Unix-compatible crates
+# All platforms: mirrord/* in members ensures all crates are available for explicit builds
+# This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
 [workspace]
 
 members = [
@@ -31,7 +36,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.163.0"
+version = "3.165.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -59,14 +64,14 @@ categories = ["development-tools", "backend", "devtool"]
 [workspace.dependencies]
 actix-codec = "0.5"
 
-# Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`.
+# Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`, `auth`.
 bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 
 # Used by `protocol`
 derive_more = "2.0.1"
 
-tokio = { version = "1" }
+tokio = { version = "1", features = ["fs", "net", "io-util"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -201,6 +206,36 @@ hex = "0.4"
 # Used by `config`, `protocol`.
 strum = "0.27.1"
 strum_macros = "0.27.1"
+
+# Used by `cli`
+dll-syringe = "0.16.0"
+
+# Used by `layer` and `layerlib`
+frida-gum = { version = "0.17", features = ["auto-download", "std"] }
+
+# Used by `layer-win`
+anyhow = "1.0"
+minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs.git", rev = "4bfbf5717c6829f91b527180a038ec591b8265ca" }
+windows-strings = "0.4"
+
+# Used by `cli`, `intproxy`
+windows = { version = "0.61", features = [
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+] }
+
+# Used by `layer-win`
+winapi = { version = "0.3.9", features = [
+    "winbase", "minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi", 
+    "winsock2", "mswsock", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi", 
+    "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv",
+    "winioctl", "memoryapi", "timezoneapi"
+] }
+
+
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
