@@ -1,0 +1,1 @@
+Fix the check that disallows operator-only targets when the operator is not in use.

@@ -1,7 +1,10 @@
 use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::Reporter;
-use mirrord_config::{LayerConfig, target::Target};
+use mirrord_config::{
+    LayerConfig,
+    target::{Target, TargetDisplay},
+};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
@@ -176,6 +179,16 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
 /// operator.
 fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -> CliResult<()> {
+    // operator is disabled, but target requires it.
+    if let Some(target) = config.target.path.as_ref()
+        && Target::requires_operator(target)
+    {
+        return Err(CliError::FeatureRequiresOperatorError(format!(
+            "target type {}",
+            target.type_()
+        )));
+    }
+
     if config.feature.copy_target.enabled {
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
@@ -288,4 +301,42 @@ where
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
     progress.print("You can get started with mirrord for Teams at this link: https://metalbear.com/mirrord/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_config::{
+        LayerFileConfig,
+        config::{ConfigContext, MirrordConfig},
+        target::{Target, TargetFileConfig, pod::PodTarget, service::ServiceTarget},
+    };
+    use mirrord_progress::NullProgress;
+    use rstest::rstest;
+
+    use crate::connection::process_config_oss;
+
+    /// Ensure that when `process_config_oss` is called, operator-only target types are disallowed.
+    /// This occurs when `create_and_connect` fails to establish a connection with the operator.
+    #[rstest]
+    #[case(Target::Pod(PodTarget{pod: "my-pet-pod".into(),container: None}))]
+    #[case(Target::Service(
+        ServiceTarget{service: "service-for-world-domination".into(),container: None}
+    ))]
+    fn deny_non_oss_targets_without_operator(#[case] target: Target) {
+        let allowed = !target.requires_operator();
+
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let mut config = LayerFileConfig {
+            target: Some(TargetFileConfig::Simple(Some(target))),
+            ..Default::default()
+        }
+        .generate_config(&mut cfg_context)
+        .unwrap();
+        let mut progress = NullProgress {};
+
+        assert_eq!(
+            process_config_oss(&mut config, &mut progress).is_ok(),
+            allowed
+        )
+    }
 }

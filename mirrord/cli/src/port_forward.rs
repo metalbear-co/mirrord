@@ -180,7 +180,7 @@ impl PortForwarder {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_agent(
         &mut self,
         message: DaemonMessage,
@@ -357,7 +357,7 @@ impl PortForwarder {
             | DaemonMessage::UdpOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)) => {
-                // includes unexepcted DaemonMessage::Pong
+                // includes unexpected DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
                 )));
@@ -367,7 +367,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_listener_stream(
         &mut self,
         message: (SocketAddr, Result<TcpStream, std::io::Error>),
@@ -378,7 +378,7 @@ impl PortForwarder {
             Err(error) => {
                 // error from TcpStream
                 tracing::error!(
-                    "error occured while listening to local socket {local_socket}: {error}"
+                    "error occurred while listening to local socket {local_socket}: {error}"
                 );
                 self.listeners.remove(&local_socket);
                 return Ok(());
@@ -423,7 +423,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_task(
         &mut self,
         message: PortForwardMessage,
@@ -753,6 +753,7 @@ impl LocalConnectionTask {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     pub async fn run(&mut self) -> Result<(), PortForwardError> {
         let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
         let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
@@ -1063,7 +1064,7 @@ pub enum PortForwardError {
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
-    #[error("multiple port forwarding mappings found for desination port `{0:?}`")]
+    #[error("multiple port forwarding mappings found for destination port `{0:?}`")]
     ReversePortMapSetupError(RemotePort),
 
     #[error("agent closed connection with error: `{0}`")]
