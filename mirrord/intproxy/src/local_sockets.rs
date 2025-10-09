@@ -50,21 +50,6 @@ pub struct LocalSocketEntry {
     local_address: SocketAddress,
 }
 
-impl LocalSocketEntry {
-    /// Uses the given function to modify the entry in place.
-    pub fn modify<F>(&self, f: F)
-    where
-        F: FnOnce(&mut SocketMetadataResponse),
-    {
-        self.sockets
-            .0
-            .write()
-            .expect("local sockets mutex is poisoned")
-            .get_mut(&self.local_address)
-            .map(f);
-    }
-}
-
 impl fmt::Debug for LocalSocketEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.local_address.fmt(f)

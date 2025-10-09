@@ -23,7 +23,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     error::UnexpectedAgentMessage,
-    local_sockets::{LocalSocketEntry, LocalSockets},
+    local_sockets::LocalSockets,
     main_tasks::ToLayer,
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     request_queue::RequestQueue,
@@ -73,7 +73,6 @@ impl fmt::Display for InterceptorId {
 #[derive(Debug)]
 struct ConnectionInProgress {
     local_socket: PreparedSocket,
-    entry_guard: LocalSocketEntry,
     remote_address: SocketAddress,
 }
 
@@ -198,11 +197,15 @@ impl OutgoingProxy {
         let DaemonConnect {
             connection_id,
             local_address,
-            ..
+            remote_address,
         } = connect;
-        in_progress
-            .entry_guard
-            .modify(|response| response.agent_address = local_address);
+        let entry_guard = self.local_sockets.insert(
+            in_progress.local_socket.local_address()?,
+            SocketMetadataResponse {
+                agent_address: local_address,
+                peer_address: remote_address,
+            },
+        );
 
         let id = InterceptorId {
             connection_id,
@@ -210,7 +213,7 @@ impl OutgoingProxy {
         };
         tracing::debug!(%id, "Starting interceptor task");
         let interceptor = self.background_tasks.register(
-            Interceptor::new(id, in_progress.local_socket, in_progress.entry_guard),
+            Interceptor::new(id, in_progress.local_socket, entry_guard),
             id,
             Self::CHANNEL_SIZE,
         );
@@ -233,19 +236,11 @@ impl OutgoingProxy {
             .prepare_socket(&request.remote_address)
             .await?;
         let local_address = local_socket.local_address()?;
-        let entry_guard = self.local_sockets.insert(
-            local_address.clone(),
-            SocketMetadataResponse {
-                agent_address: local_address.clone(), // for now, the agent socket doesn't exist yet
-                peer_address: request.remote_address.clone(),
-            },
-        );
         self.queue(request.protocol).push_back_with_data(
             message_id,
             session_id,
             ConnectionInProgress {
                 local_socket,
-                entry_guard,
                 remote_address: request.remote_address.clone(),
             },
         );
