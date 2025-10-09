@@ -28,12 +28,9 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
-    MirrordWorkloadQueueRegistry, TargetCrd,
-    kafka::{
-        MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaSession,
-        MirrordKafkaTopicsConsumer,
-    },
+    MirrordClusterOperatorUserCredential, MirrordKafkaSession, MirrordOperatorCrd,
+    MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
     patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
     policy::{MirrordClusterPolicy, MirrordPolicy},
