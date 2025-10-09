@@ -566,6 +566,12 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
+            DaemonMessage::OutgoingV2(outgoing) => {
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentOutgoing(outgoing))
+                    .await;
+            }
             message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(
                     UnexpectedAgentMessage(message),

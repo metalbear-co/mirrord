@@ -6,18 +6,17 @@ use std::io;
 use bytes::Bytes;
 use tracing::Level;
 
-use super::InterceptorId;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     local_sockets::LocalSocketEntry,
-    proxies::outgoing::net_protocol_ext::PreparedSocket,
+    proxies::outgoing::{ConnectionId, net_protocol_ext::PreparedSocket},
 };
 
 /// Manages a single intercepted connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`OutgoingProxy`](super::OutgoingProxy)
 /// to manage individual connections.
 pub struct Interceptor {
-    id: InterceptorId,
+    id: ConnectionId,
     socket: Option<PreparedSocket>,
     guard: Option<LocalSocketEntry>,
 }
@@ -25,7 +24,7 @@ pub struct Interceptor {
 impl Interceptor {
     /// Creates a new instance. This instance will use the provided [`PreparedSocket`] to accept the
     /// layer's connection and manage it.
-    pub fn new(id: InterceptorId, socket: PreparedSocket, guard: LocalSocketEntry) -> Self {
+    pub fn new(id: ConnectionId, socket: PreparedSocket, guard: LocalSocketEntry) -> Self {
         Self {
             id,
             socket: Some(socket),

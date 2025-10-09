@@ -8,11 +8,14 @@ use mirrord_intproxy_protocol::{
     ProxyToLayerMessage, SocketMetadataResponse,
 };
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, RemoteResult, ResponseError,
+    ClientMessage, DaemonMessage, Payload, ResponseError,
     outgoing::{
-        DaemonConnect, DaemonRead, SocketAddress, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
+        DaemonConnect, OUTGOING_V2_VERSION, SocketAddress, tcp::DaemonTcpOutgoing,
+        udp::DaemonUdpOutgoing, v2,
     },
+    uid::Uid,
 };
+use semver::Version;
 use thiserror::Error;
 use tracing::Level;
 
@@ -36,37 +39,44 @@ mod net_protocol_ext;
 #[derive(Error, Debug)]
 pub enum OutgoingProxyError {
     /// The agent sent an error not bound to any [`ConnectionId`].
+    ///
     /// This is assumed to be a general agent error.
-    /// Originates only from the [`RemoteResult<DaemonRead>`] message.
+    /// Originates only from the [`DaemonTcpOutgoing::Connect`]/[`DaemonUdpOutgoing::Connect`]
+    /// messages.
     #[error("agent error: {0}")]
     ResponseError(#[from] ResponseError),
-    /// The agent sent a [`DaemonConnect`] response, but the [`RequestQueue`] for layer's connec
-    /// requests was empty. This should never happen.
+
+    /// The agent sent a [`DaemonConnect`]/[`v2::DaemonOutgoing::Connect`] response,
+    /// but the proxy is unable to match it to any known request in progress.
     #[error(transparent)]
     UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
+
     /// The proxy failed to prepare a new local socket for the intercepted connection.
     #[error("failed to prepare a local socket: {0}")]
     SocketSetupError(#[from] io::Error),
 }
 
-/// Id of a single [`Interceptor`] task.
-///
-/// Used to manage [`Interceptor`]s with the [`BackgroundTasks`] struct.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-struct InterceptorId {
-    /// Id of the intercepted connection.
-    pub connection_id: ConnectionId,
-    /// Network protocol used.
-    pub protocol: NetProtocol,
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ConnectionId {
+    V1(mirrord_protocol::ConnectionId, NetProtocol),
+    V2(mirrord_protocol::uid::Uid),
 }
 
-impl fmt::Display for InterceptorId {
+impl fmt::Debug for ConnectionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "outgoing interceptor {}-{}",
-            self.connection_id, self.protocol
-        )
+        match self {
+            Self::V1(id, proto) => write!(f, "{id}-{proto}"),
+            Self::V2(id) => id.fmt(f),
+        }
+    }
+}
+
+impl fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::V1(id, proto) => write!(f, "{id}-{proto}"),
+            Self::V2(id) => id.fmt(f),
+        }
     }
 }
 
@@ -93,16 +103,24 @@ struct ConnectionInProgress {
 /// 7. If the layer closes the connection, the [`Interceptor`] exits. Notify the agent. If the agent
 ///    closes the connection, the shut down the [`Interceptor`].
 pub struct OutgoingProxy {
-    /// In progress remote connect requests for [`NetProtocol::Datagrams`].
+    /// In progress v1 remote connect requests for [`NetProtocol::Datagrams`]
+    /// ([`LayerUdpOutgoing::Connect`](mirrord_protocol::outgoing::udp::LayerUdpOutgoing::Connect)).
     datagrams_reqs: RequestQueue<ConnectionInProgress>,
-    /// In progress remote connect requests for [`NetProtocol::Stream`].
+    /// In progress v1 remote connect requests for [`NetProtocol::Stream`].
+    /// ([`LayerTcpOutgoing::Connect`](mirrord_protocol::outgoing::tcp::LayerTcpOutgoing::Connect)).
     stream_reqs: RequestQueue<ConnectionInProgress>,
+    /// In progress [`v2`](mirrord_protocol::outgoing::v2) remote connect requests.
+    reqs: HashMap<Uid, ConnectionInProgress>,
+
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
-    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
+    txs: HashMap<ConnectionId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
-    background_tasks: BackgroundTasks<InterceptorId, Bytes, io::Error>,
+    background_tasks: BackgroundTasks<ConnectionId, Bytes, io::Error>,
+
     /// Stores remote addresses corresponding to local sockets.
     local_sockets: LocalSockets,
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    protocol_version: Option<Version>,
 }
 
 impl OutgoingProxy {
@@ -113,13 +131,15 @@ impl OutgoingProxy {
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
+            reqs: Default::default(),
             txs: Default::default(),
             background_tasks: Default::default(),
             local_sockets,
+            protocol_version: None,
         }
     }
 
-    /// Retrieves correct [`RequestQueue`] for the given [`NetProtocol`].
+    /// Retrieves correct v1 [`RequestQueue`] for the given [`NetProtocol`].
     fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue<ConnectionInProgress> {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams_reqs,
@@ -128,96 +148,178 @@ impl OutgoingProxy {
     }
 
     /// Passes the data to the correct [`Interceptor`] task.
-    /// Fails when the agent sends an error, because this error cannot be traced back to an exact
-    /// connection.
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn handle_agent_read(
+    async fn handle_data(&self, data: Payload, connection_id: ConnectionId) {
+        let data_len = data.len();
+        let connection_known = if let Some(interceptor) = self.txs.get(&connection_id) {
+            interceptor.send(data.0).await;
+            true
+        } else {
+            false
+        };
+        tracing::debug!(
+            %connection_id,
+            data_len,
+            connection_known,
+            "Received remote data from an outgoing connection.",
+        );
+    }
+
+    fn handle_close(&mut self, connection_id: ConnectionId) {
+        let connection_known = self.txs.remove(&connection_id).is_some();
+        tracing::debug!(
+            %connection_id,
+            connection_known,
+            "Received remote close of an outgoing connection.",
+        );
+    }
+
+    fn handle_error_v1(
         &mut self,
-        read: RemoteResult<DaemonRead>,
         protocol: NetProtocol,
+        error: ResponseError,
     ) -> Result<(), OutgoingProxyError> {
-        let DaemonRead {
-            connection_id,
-            bytes,
-        } = read?;
+        match self.queue(protocol).pop_front_with_data() {
+            Some((_, _, in_progress)) => {
+                tracing::warn!(
+                    %error,
+                    remote_address = %in_progress.remote_address,
+                    "Received remote error of an outgoing connect attempt.",
+                );
+                Ok(())
+            }
+            None => {
+                let message = match protocol {
+                    NetProtocol::Datagrams => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Err(error)))
+                    }
+                    NetProtocol::Stream => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Err(error)))
+                    }
+                };
+                Err(UnexpectedAgentMessage(message).into())
+            }
+        }
+    }
 
-        let id = InterceptorId {
-            connection_id,
-            protocol,
-        };
-
-        let Some(interceptor) = self.txs.get(&id) else {
-            tracing::trace!(
-                "{id} does not exist, received data for connection that is already closed"
+    fn handle_error_v2(&mut self, error: v2::OutgoingError) {
+        let v2::OutgoingError {
+            id: connection_id,
+            error,
+        } = error;
+        if let Some(in_progress) = self.reqs.remove(&connection_id) {
+            tracing::warn!(
+                %connection_id,
+                %error,
+                remote_address = %in_progress.remote_address,
+                "Received remote error of an outgoing connect attempt."
             );
-            return Ok(());
-        };
+        } else {
+            let connection_known = self.txs.remove(&ConnectionId::V2(connection_id)).is_some();
+            tracing::warn!(
+                %connection_id,
+                connection_known,
+                %error,
+                "Received remote error of an outgoing connection."
+            );
+        }
+    }
 
-        interceptor.send(bytes.0).await;
+    fn handle_connect_v1(
+        &mut self,
+        connect: DaemonConnect,
+        proto: NetProtocol,
+    ) -> Result<(), OutgoingProxyError> {
+        let in_progress = match self.queue(proto).pop_front_with_data() {
+            Some((_, _, in_progress)) => in_progress,
+            None => {
+                let message = match proto {
+                    NetProtocol::Datagrams => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(connect)))
+                    }
+                    NetProtocol::Stream => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(connect)))
+                    }
+                };
+                return Err(UnexpectedAgentMessage(message).into());
+            }
+        };
+        let DaemonConnect {
+            connection_id,
+            local_address: agent_local_address,
+            remote_address: agent_peer_address,
+        } = connect;
+        let connection_id = ConnectionId::V1(connection_id, proto);
+        let requested_remote_address = in_progress.remote_address;
+        let interceptor_address = in_progress.local_socket.local_address()?;
+
+        tracing::debug!(
+            %connection_id,
+            %agent_local_address,
+            %agent_peer_address,
+            %requested_remote_address,
+            %interceptor_address,
+            "Received remote connect confirmation for an outgoing connection.",
+        );
+        let entry_guard = self.local_sockets.insert(
+            interceptor_address,
+            SocketMetadataResponse {
+                agent_address: agent_local_address,
+                peer_address: agent_peer_address,
+            },
+        );
+
+        let interceptor = self.background_tasks.register(
+            Interceptor::new(connection_id, in_progress.local_socket, entry_guard),
+            connection_id,
+            Self::CHANNEL_SIZE,
+        );
+        self.txs.insert(connection_id, interceptor);
 
         Ok(())
     }
 
-    /// Handles agent's response to a connection request.
-    /// Prepares a local socket and registers a new [`Interceptor`] task for this connection.
-    /// Replies to the layer's request.
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
-    fn handle_connect_response(
+    fn handle_connect_v2(
         &mut self,
-        connect: RemoteResult<DaemonConnect>,
-        protocol: NetProtocol,
+        connect: v2::OutgoingConnectResponse,
     ) -> Result<(), OutgoingProxyError> {
-        let (message_id, layer_id, in_progress) =
-            self.queue(protocol).pop_front_with_data().ok_or_else(|| {
-                let message = match protocol {
-                    NetProtocol::Datagrams => {
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect.clone()))
-                    }
-                    NetProtocol::Stream => {
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect.clone()))
-                    }
-                };
-                UnexpectedAgentMessage(message)
-            })?;
-
-        let connect = match connect {
-            Ok(connect) => connect,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    message_id,
-                    layer_id = layer_id.0,
-                    remote_address = %in_progress.remote_address,
-                    "Outgoing connect request failed"
-                );
-                return Ok(());
+        let in_progress = match self.reqs.remove(&connect.id) {
+            Some(in_progress) => in_progress,
+            None => {
+                let message = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(connect));
+                return Err(UnexpectedAgentMessage(message).into());
             }
         };
-
-        let DaemonConnect {
-            connection_id,
-            local_address,
-            remote_address,
+        let v2::OutgoingConnectResponse {
+            id,
+            agent_local_address,
+            agent_peer_address,
         } = connect;
+        let connection_id = ConnectionId::V2(id);
+        let requested_remote_address = in_progress.remote_address;
+        let interceptor_address = in_progress.local_socket.local_address()?;
+
+        tracing::debug!(
+            %connection_id,
+            %agent_local_address,
+            %agent_peer_address,
+            %requested_remote_address,
+            %interceptor_address,
+            "Received remote connect confirmation for an outgoing connection.",
+        );
         let entry_guard = self.local_sockets.insert(
-            in_progress.local_socket.local_address()?,
+            interceptor_address,
             SocketMetadataResponse {
-                agent_address: local_address,
-                peer_address: remote_address,
+                agent_address: agent_local_address,
+                peer_address: agent_peer_address,
             },
         );
 
-        let id = InterceptorId {
-            connection_id,
-            protocol,
-        };
-        tracing::debug!(%id, "Starting interceptor task");
         let interceptor = self.background_tasks.register(
-            Interceptor::new(id, in_progress.local_socket, entry_guard),
-            id,
+            Interceptor::new(connection_id, in_progress.local_socket, entry_guard),
+            connection_id,
             Self::CHANNEL_SIZE,
         );
-        self.txs.insert(id, interceptor);
+        self.txs.insert(connection_id, interceptor);
 
         Ok(())
     }
@@ -236,14 +338,39 @@ impl OutgoingProxy {
             .prepare_socket(&request.remote_address)
             .await?;
         let local_address = local_socket.local_address()?;
-        self.queue(request.protocol).push_back_with_data(
-            message_id,
-            session_id,
-            ConnectionInProgress {
-                local_socket,
-                remote_address: request.remote_address.clone(),
-            },
-        );
+
+        let to_agent = if self
+            .protocol_version
+            .as_ref()
+            .is_some_and(|version| OUTGOING_V2_VERSION.matches(version))
+        {
+            let id = Uid::random();
+            self.reqs.insert(
+                id,
+                ConnectionInProgress {
+                    local_socket,
+                    remote_address: request.remote_address.clone(),
+                },
+            );
+            ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
+                id,
+                address: request.remote_address,
+                protocol: match request.protocol {
+                    NetProtocol::Datagrams => v2::OutgoingProtocol::Udp,
+                    NetProtocol::Stream => v2::OutgoingProtocol::Tcp,
+                },
+            }))
+        } else {
+            self.queue(request.protocol).push_back_with_data(
+                message_id,
+                session_id,
+                ConnectionInProgress {
+                    local_socket,
+                    remote_address: request.remote_address.clone(),
+                },
+            );
+            request.protocol.wrap_agent_connect(request.remote_address)
+        };
 
         let to_layer = ToLayer {
             layer_id: session_id,
@@ -253,8 +380,6 @@ impl OutgoingProxy {
             })),
         };
         message_bus.send(to_layer).await;
-
-        let to_agent = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(to_agent).await;
 
         Ok(())
@@ -267,6 +392,8 @@ impl OutgoingProxy {
         self.background_tasks = Default::default();
         self.datagrams_reqs = Default::default();
         self.stream_reqs = Default::default();
+        self.reqs = Default::default();
+        self.protocol_version = None;
     }
 }
 
@@ -276,6 +403,7 @@ pub enum OutgoingProxyMessage {
     AgentDatagrams(DaemonUdpOutgoing),
     LayerConnect(OutgoingConnectRequest, MessageId, LayerId),
     ConnectionRefresh,
+    AgentOutgoing(v2::DaemonOutgoing),
 }
 
 impl BackgroundTask for OutgoingProxy {
@@ -292,36 +420,84 @@ impl BackgroundTask for OutgoingProxy {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(());
                     },
+
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
-                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                            self.txs.remove(&id);
+                            self.handle_close(ConnectionId::V1(close, NetProtocol::Stream));
                         },
-                        DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
-                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream)?,
-                    }
+                        DaemonTcpOutgoing::Read(Err(error)) => {
+                            // This error cannot be tracked to any specific connection.
+                            // This is a protocol artifact, we can just exit here.
+                            break Err(error.into());
+                        },
+                        DaemonTcpOutgoing::Read(Ok(data)) => {
+                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, NetProtocol::Stream)).await;
+                        },
+                        DaemonTcpOutgoing::Connect(Err(error)) => {
+                            self.handle_error_v1(NetProtocol::Stream, error)?;
+                        },
+                        DaemonTcpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, NetProtocol::Stream)?,
+                    },
+
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
-                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                            self.txs.remove(&id);
+                            self.handle_close(ConnectionId::V1(close, NetProtocol::Datagrams));
+                        },
+                        DaemonUdpOutgoing::Read(Err(error)) => {
+                            // This error cannot be tracked to any specific connection.
+                            // This is a protocol artifact, we can just exit here.
+                            break Err(error.into());
+                        },
+                        DaemonUdpOutgoing::Read(Ok(data)) => {
+                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, NetProtocol::Datagrams)).await;
+                        },
+                        DaemonUdpOutgoing::Connect(Err(error)) => {
+                            self.handle_error_v1(NetProtocol::Datagrams, error)?;
+                        },
+                        DaemonUdpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, NetProtocol::Datagrams)?,
+                    },
+
+                    Some(OutgoingProxyMessage::AgentOutgoing(msg)) => match msg {
+                        v2::DaemonOutgoing::Connect(msg) => {
+                            self.handle_connect_v2(msg)?;
                         }
-                        DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
-                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams)?,
-                    }
+                        v2::DaemonOutgoing::Data(msg) => {
+                            self.handle_data(msg.data, ConnectionId::V2(msg.id)).await;
+                        }
+                        v2::DaemonOutgoing::Close(msg) => {
+                            self.handle_close(ConnectionId::V2(msg.id));
+                        }
+                        v2::DaemonOutgoing::Error(msg) => {
+                            self.handle_error_v2(msg);
+                        }
+                    },
+
                     Some(OutgoingProxyMessage::LayerConnect(req, message_id, session_id)) => self.handle_connect_request(
                         message_id,
                         session_id,
                         req,
                         message_bus,
                     ).await?,
+
                     Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(),
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
-                        let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
+                        let msg = match id {
+                            ConnectionId::V1(id, proto) => {
+                                proto.wrap_agent_write(id, bytes)
+                            }
+                            ConnectionId::V2(id) => {
+                                ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData {
+                                    id,
+                                    data: bytes.into(),
+                                }))
+                            }
+                        };
                         message_bus.send(ProxyMessage::ToAgent(msg)).await;
                     }
+
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
                             Ok(()) => tracing::debug!(%id, "Interceptor finished"),
@@ -335,8 +511,17 @@ impl BackgroundTask for OutgoingProxy {
 
                         if self.txs.remove(&id).is_some() {
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
-                            let msg = id.protocol.wrap_agent_close(id.connection_id);
-                            let _ = message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                            let msg = match id {
+                                ConnectionId::V1(id, proto) => {
+                                    proto.wrap_agent_close(id)
+                                }
+                                ConnectionId::V2(id) => {
+                                    ClientMessage::OutgoingV2(v2::ClientOutgoing::Close(v2::OutgoingClose {
+                                        id,
+                                    }))
+                                }
+                            };
+                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
                             self.txs.remove(&id);
                         }
                     }
