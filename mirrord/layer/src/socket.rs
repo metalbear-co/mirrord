@@ -91,37 +91,12 @@ pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = La
         .unwrap_or_default()
 });
 
-/// Contains the addresses of a mirrord connected socket.
-///
-/// - `layer_address` is only used for the outgoing feature.
+/// Socket is connected to a local socket managed by the internal proxy.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct Connected {
-    /// The address requested by the user that we're "connected" to.
-    ///
-    /// Whenever the user calls [`libc::getpeername`], this is the address we return to them.
-    ///
-    /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
-    /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
-    remote_address: SocketAddress,
-
-    /// Local address (pod-wise)
-    ///
-    /// ## Example
-    ///
-    /// ```sh
-    /// $ kubectl get pod -o wide
-    ///
-    /// NAME             READY   STATUS    IP
-    /// impersonated-pod 0/1     Running   1.2.3.4
-    /// ```
-    ///
-    /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
-    /// port.
-    local_address: SocketAddress,
-
     /// The address of the interceptor socket, this is what we're really connected to in the
     /// outgoing feature.
-    layer_address: Option<SocketAddress>,
+    interceptor_address: SocketAddress,
 }
 
 /// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.

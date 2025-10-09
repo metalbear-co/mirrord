@@ -224,7 +224,9 @@ pub enum IncomingResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectResponse {
     /// The address the layer should connect to instead of the address requested by the user.
-    pub layer_address: SocketAddress,
+    ///
+    /// This is the address of a local socket managed by the internal proxy.
+    pub interceptor_address: SocketAddress,
 }
 
 /// A helper trait for `layer -> proxy` requests.

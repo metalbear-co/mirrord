@@ -17,8 +17,8 @@ use std::{
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
-    OutgoingConnectResponse, PortSubscribe,
+    NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
+    SocketMetadataRequest, SocketMetadataResponse,
 };
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
@@ -37,6 +37,7 @@ use tracing::{error, trace};
 use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
 use crate::{
+    common::make_proxy_request_with_response,
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
@@ -494,13 +495,12 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let response = common::make_proxy_request_with_response(request)??;
 
         let OutgoingConnectResponse {
-            layer_address,
-            in_cluster_address,
+            interceptor_address,
         } = response;
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address.clone())?;
+            let layer_address = SockAddr::try_from(interceptor_address.clone())?;
 
             unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
@@ -519,9 +519,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         }
 
         let connected = Connected {
-            remote_address,
-            local_address: in_cluster_address,
-            layer_address: Some(layer_address),
+            interceptor_address,
         };
 
         trace!("we are connected {connected:#?}");
@@ -739,22 +737,26 @@ pub(super) fn getpeername(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> Detour<i32> {
-    let remote_address = {
+    let intproxy_socket_address = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => {
-                    Detour::Success(connected.remote_address.clone())
+                    Detour::Success(connected.interceptor_address.clone())
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    trace!("getpeername -> remote_address {:#?}", remote_address);
+    let SocketMetadataResponse { peer_address, .. } =
+        make_proxy_request_with_response(SocketMetadataRequest {
+            local_address: intproxy_socket_address,
+        })??;
 
-    fill_address(address, address_len, remote_address.try_into()?)
+    trace!("getpeername -> remote_address {}", peer_address);
+    fill_address(address, address_len, peer_address.try_into()?)
 }
 
 /// Resolve the fake local address to the real local address.
@@ -769,34 +771,31 @@ pub(super) fn getsockname(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> Detour<i32> {
-    let local_address = {
-        SOCKETS
-            .lock()?
-            .get(&sockfd)
-            .bypass(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => {
-                    Detour::Success(connected.local_address.clone())
-                }
-                SocketState::Bound(Bound {
-                    requested_address,
-                    address,
-                }) => {
-                    if requested_address.port() == 0 {
-                        Detour::Success(
-                            SocketAddr::new(requested_address.ip(), address.port()).into(),
-                        )
-                    } else {
-                        Detour::Success((*requested_address).into())
-                    }
-                }
-                SocketState::Listening(bound) => Detour::Success(bound.requested_address.into()),
-                _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
-            })?
+    let socket_state = SOCKETS
+        .lock()?
+        .get(&sockfd)
+        .bypass(Bypass::LocalFdNotFound(sockfd))?
+        .clone();
+
+    let local_address = match &socket_state.state {
+        SocketState::Connected(connected) => {
+            let SocketMetadataResponse { agent_address, .. } =
+                make_proxy_request_with_response(SocketMetadataRequest {
+                    local_address: connected.interceptor_address.clone(),
+                })??;
+            agent_address
+        }
+        SocketState::Bound(bound) | SocketState::Listening(bound) => {
+            if bound.requested_address.port() == 0 {
+                SocketAddr::new(bound.requested_address.ip(), bound.address.port()).into()
+            } else {
+                bound.requested_address.into()
+            }
+        }
+        SocketState::Initialized => return Detour::Bypass(Bypass::InvalidState(sockfd)),
     };
 
-    trace!("getsockname -> local_address {:#?}", local_address);
-
+    trace!("getsockname -> local_address {}", local_address);
     fill_address(address, address_len, local_address.try_into()?)
 }
 
@@ -809,22 +808,15 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (domain, protocol, type_, port, listener_address) = {
+    let (domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Listening(Bound {
-                    requested_address,
-                    address,
-                }) => Detour::Success((
-                    socket.domain,
-                    socket.protocol,
-                    socket.type_,
-                    requested_address.port(),
-                    *address,
-                )),
+                SocketState::Listening(Bound { .. }) => {
+                    Detour::Success((socket.domain, socket.protocol, socket.type_))
+                }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
@@ -836,25 +828,20 @@ pub(super) fn accept(
         peer_address?
     };
 
-    let ConnMetadataResponse {
-        remote_source,
-        local_address,
-    } = common::make_proxy_request_with_response(ConnMetadataRequest {
-        listener_address,
-        peer_address,
-    })?;
-
     let state = SocketState::Connected(Connected {
-        remote_address: remote_source.into(),
-        local_address: SocketAddr::new(local_address, port).into(),
-        layer_address: None,
+        interceptor_address: peer_address.into(),
     });
-
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
-
-    fill_address(address, address_len, remote_source.into())?;
-
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
+
+    let peer_address = match make_proxy_request_with_response(SocketMetadataRequest {
+        local_address: peer_address.into(),
+    })? {
+        Some(response) => response.peer_address,
+        None => peer_address.into(),
+    };
+
+    fill_address(address, address_len, peer_address.try_into()?)?;
 
     Detour::Success(new_fd)
 }
@@ -1260,9 +1247,10 @@ pub(super) fn recv_from(
         .lock()?
         .get(&sockfd)
         .and_then(|socket| match &socket.state {
-            SocketState::Connected(Connected { remote_address, .. }) => {
-                Some(remote_address.clone())
-            }
+            SocketState::Connected(Connected {
+                interceptor_address,
+                ..
+            }) => Some(interceptor_address.clone()),
             _ => None,
         })
         .map(SocketAddress::try_into)?
@@ -1300,20 +1288,6 @@ fn send_dns_patch(
                         .then_some(*address)
                 } else {
                     (*requested_address == destination).then_some(*address)
-                }
-            }
-            SocketState::Connected(Connected {
-                remote_address,
-                layer_address,
-                ..
-            }) => {
-                let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
-                let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
-
-                if remote_address == destination {
-                    Some(layer_address)
-                } else {
-                    None
                 }
             }
             _ => None,
@@ -1404,17 +1378,17 @@ pub(super) fn send_to(
             NetProtocol::Datagrams,
         )?;
 
-        let layer_address: SockAddr = SOCKETS
+        let interceptor_address: SockAddr = SOCKETS
             .lock()?
             .get(&sockfd)
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => connected.layer_address.clone(),
+            .map(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.interceptor_address.clone(),
                 _ => unreachable!(),
             })
             .map(SocketAddress::try_into)??;
 
-        let raw_interceptor_address = layer_address.as_ptr();
-        let raw_interceptor_length = layer_address.len();
+        let raw_interceptor_address = interceptor_address.as_ptr();
+        let raw_interceptor_length = interceptor_address.len();
 
         unsafe {
             FN_SEND_TO(
@@ -1497,17 +1471,17 @@ pub(super) fn sendmsg(
             NetProtocol::Datagrams,
         )?;
 
-        let layer_address: SockAddr = SOCKETS
+        let interceptor_address: SockAddr = SOCKETS
             .lock()?
             .get(&sockfd)
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => connected.layer_address.clone(),
+            .map(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.interceptor_address.clone(),
                 _ => unreachable!(),
             })
             .map(SocketAddress::try_into)??;
 
-        let raw_interceptor_address = layer_address.as_ptr() as *const _;
-        let raw_interceptor_length = layer_address.len();
+        let raw_interceptor_address = interceptor_address.as_ptr() as *const _;
+        let raw_interceptor_length = interceptor_address.len();
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
         unsafe {

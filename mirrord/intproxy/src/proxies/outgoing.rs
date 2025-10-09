@@ -232,11 +232,11 @@ impl OutgoingProxy {
             .protocol
             .prepare_socket(&request.remote_address)
             .await?;
-        let layer_address = local_socket.local_address()?;
+        let local_address = local_socket.local_address()?;
         let entry_guard = self.local_sockets.insert(
-            layer_address.clone(),
+            local_address.clone(),
             SocketMetadataResponse {
-                agent_address: layer_address.clone(),
+                agent_address: local_address.clone(), // for now, the agent socket doesn't exist yet
                 peer_address: request.remote_address.clone(),
             },
         );
@@ -254,7 +254,7 @@ impl OutgoingProxy {
             layer_id: session_id,
             message_id,
             message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                layer_address,
+                interceptor_address: local_address,
             })),
         };
         message_bus.send(to_layer).await;
