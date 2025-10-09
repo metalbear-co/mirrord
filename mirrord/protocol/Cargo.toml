@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.21.1"
+version = "1.22.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -31,6 +31,7 @@ fancy-regex = { workspace = true }
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
 derive_more = { workspace = true, features = ["from", "into", "deref"] }
+uuid = { version = "1.18", features = ["v4"] }
 
 mirrord-macros = { path = "../macros" }
 

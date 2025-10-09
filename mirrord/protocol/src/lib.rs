@@ -68,6 +68,7 @@ pub mod outgoing;
 pub mod pause;
 pub mod payload;
 pub mod tcp;
+pub mod uid;
 pub mod vpn;
 
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};

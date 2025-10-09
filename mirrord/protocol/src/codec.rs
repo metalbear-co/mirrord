@@ -19,6 +19,7 @@ use crate::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        v2::{ClientOutgoing, DaemonOutgoing},
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
@@ -110,6 +111,7 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
 
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
 pub enum ClientMessage {
     Close,
     /// TCP sniffer message.
@@ -148,6 +150,7 @@ pub enum ClientMessage {
     ///
     /// Has the same ID that we got from the [`DaemonMessage::OperatorPing`].
     OperatorPong(u128),
+    OutgoingV2(ClientOutgoing),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -204,6 +207,7 @@ pub enum DaemonMessage {
     ///
     /// Holds the unique id of this ping.
     OperatorPing(u128),
+    OutgoingV2(DaemonOutgoing),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]

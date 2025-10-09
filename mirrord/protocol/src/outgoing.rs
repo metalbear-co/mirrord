@@ -4,9 +4,11 @@ use std::{
     io,
     net::SocketAddr as StdIpSocketAddr,
     path::PathBuf,
+    sync::LazyLock,
 };
 
 use bincode::{Decode, Encode};
+use semver::VersionReq;
 use socket2::SockAddr as OsSockAddr;
 
 use crate::{
@@ -14,8 +16,16 @@ use crate::{
     outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
 };
 
+/// V1 of messages for the outgoing TPC traffic feature.
 pub mod tcp;
+/// V1 of messages for the outgoing UDP traffic feature.
 pub mod udp;
+/// V2 of messages for the outgoing traffic feature.
+pub mod v2;
+
+/// Minimal protocol version that allows for sending [`v2`] outgoing messages.
+pub static OUTGOING_V2_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
 
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Hash)]
