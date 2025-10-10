@@ -5,13 +5,13 @@
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-use std::sync::OnceLock;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::OnceLock};
+
 use mirrord_config::LayerConfig;
-    
-use crate:: {
-    setup::windows::LayerSetup,
+
+use crate::{
     error::{LayerError, LayerResult},
+    setup::windows::LayerSetup,
 };
 
 static SETUP: OnceLock<LayerSetup> = OnceLock::new();

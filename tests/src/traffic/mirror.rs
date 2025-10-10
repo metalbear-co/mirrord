@@ -21,8 +21,7 @@ use crate::utils::{
 async fn mirror_with_http_header_filter_unix_only(
     #[future] basic_service: KubeService,
     #[future] kube_client: Client,
-    #[values(Application::PythonFastApiHTTP)]
-    application: Application,
+    #[values(Application::PythonFastApiHTTP)] application: Application,
 ) {
     mirror_with_http_header_filter(basic_service, kube_client, application).await;
 }
@@ -36,11 +35,7 @@ async fn mirror_with_http_header_filter_unix_only(
 async fn mirror_with_http_header_filter(
     #[future] basic_service: KubeService,
     #[future] kube_client: Client,
-    #[values(
-        Application::PythonFlaskHTTP,
-        Application::NodeHTTP
-    )]
-    application: Application,
+    #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
 ) {
     let service = basic_service.await;
     let kube_client = kube_client.await;

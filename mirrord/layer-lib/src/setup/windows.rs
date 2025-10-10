@@ -5,14 +5,12 @@ use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use mirrord_config::{
     LayerConfig,
-    feature::{
-        network::{
-            incoming::{
-                IncomingConfig,
-                http_filter::{HttpFilterConfig, InnerFilter, PortList},
-            },
-            outgoing::OutgoingConfig,
+    feature::network::{
+        incoming::{
+            IncomingConfig,
+            http_filter::{HttpFilterConfig, InnerFilter, PortList},
         },
+        outgoing::OutgoingConfig,
     },
     target::Target,
 };
@@ -22,9 +20,7 @@ use mirrord_protocol::{
     tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
 };
 
-use crate::{
-    socket::{DnsSelector, OutgoingSelector},
-};
+use crate::socket::{DnsSelector, OutgoingSelector};
 
 /// Windows supported layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -46,7 +42,7 @@ impl LayerSetup {
         let dns_selector = DnsSelector::from(&config.feature.network.dns);
 
         let local_hostname = !config.feature.hostname;
-        
+
         let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
         tracing::info!(?incoming_mode, ?config, "incoming has changed");
         Self {
@@ -125,7 +121,7 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    fn new(config: &mut IncomingConfig) -> Self {
+    pub fn new(config: &mut IncomingConfig) -> Self {
         let http_settings = config.http_filter.is_filter_set().then(|| {
             let ports = config
                 .http_filter

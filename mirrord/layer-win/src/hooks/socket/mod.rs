@@ -11,9 +11,7 @@ mod utils;
 use std::{net::SocketAddr, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, PortSubscribe,
-};
+use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortSubscribe};
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
@@ -26,9 +24,7 @@ use mirrord_layer_lib::{
         set_socket_state,
     },
 };
-use mirrord_protocol::{
-    outgoing::SocketAddress,
-};
+use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
