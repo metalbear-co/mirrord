@@ -29,6 +29,15 @@ pub struct ConfigContext {
     /// Warnings collected during config verification.
     warnings: Vec<String>,
 
+    /// Adds to this context that whatever we're running, it has to be run with the operator.
+    ///
+    /// Used by `mirrord ci start|stop`, preventing the command from going forward if the user has
+    /// set `operator: Some(false)` in their config.
+    ///
+    /// The user can still leave the `operator: None` in their config (which means they don't
+    /// explicitily add the `operator` to the config), and the check for this field won't be
+    /// triggered (we'll just go with the normal flow of checking if the operator is available, and
+    /// so on).
     mandatory_operator: bool,
 }
 
