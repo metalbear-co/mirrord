@@ -138,11 +138,13 @@ impl ConfigContext {
         self.warnings.is_empty().not()
     }
 
+    /// Sets the [`ConfigContext::mandatory_operator`] value.
     pub fn set_mandatory_operator(mut self, mandatory: bool) -> Self {
         self.mandatory_operator = mandatory;
         self
     }
 
+    /// Gets the [`ConfigContext::mandatory_operator`] value.
     pub fn is_mandatory_operator(&self) -> bool {
         self.mandatory_operator
     }
