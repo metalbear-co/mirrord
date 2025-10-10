@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bincode::{Decode, Encode};
 
 use crate::{Payload, ResponseError, outgoing::SocketAddress, uid::Uid};
@@ -67,10 +69,20 @@ pub struct OutgoingClose {
 }
 
 /// Transport layer protocol of an outgoing connection.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum OutgoingProtocol {
     Udp,
     Tcp,
+}
+
+impl fmt::Display for OutgoingProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::Tcp => "tcp",
+            Self::Udp => "udp",
+        };
+        f.write_str(as_str)
+    }
 }
 
 /// Fatal failure of an outgoing connection, sent from the daemon to the client.

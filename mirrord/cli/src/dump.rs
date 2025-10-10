@@ -444,6 +444,7 @@ impl DumpSession {
                 | DaemonMessage::SwitchProtocolVersionResponse(..)
                 | DaemonMessage::TcpOutgoing(..)
                 | DaemonMessage::UdpOutgoing(..)
+                | DaemonMessage::OutgoingV2(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)) => {
                     return Err(DumpSessionError::UnexpectedAgentMessage(message));

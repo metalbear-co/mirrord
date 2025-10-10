@@ -1,414 +1,611 @@
-use std::{collections::HashMap, fmt, time::Duration};
-
-use bytes::Bytes;
-use mirrord_protocol::{
-    ConnectionId, DaemonMessage, LogMessage, RemoteError, ResponseError,
-    outgoing::{tcp::*, *},
+use std::{
+    collections::{HashMap, VecDeque, hash_map::Entry},
+    fmt, io,
+    ops::{ControlFlow, RangeInclusive},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
 };
-use socket_stream::SocketStream;
-use streammap_ext::StreamMap;
+
+use futures::{Stream, StreamExt, stream::FuturesUnordered};
+use mirrord_protocol::{
+    DaemonMessage, LogMessage, Payload, RemoteError, ResponseError,
+    outgoing::{
+        DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        v2,
+    },
+    uid::Uid,
+};
 use tokio::{
-    io::{self, AsyncWriteExt, ReadHalf, WriteHalf},
-    select,
-    sync::mpsc::{self, Receiver, Sender, error::SendError},
+    sync::mpsc::{self, Receiver, Sender},
     time,
 };
-use tokio_stream::StreamExt;
-use tokio_util::io::ReaderStream;
-use tracing::Level;
+use tokio_stream::{StreamMap, StreamNotifyClose};
 
 use crate::{
-    error::AgentResult,
-    metrics::TCP_OUTGOING_CONNECTION,
+    error::{AgentError, AgentResult},
+    outgoing::socket::{ReadHalf, WriteHalf},
     task::{
         BgTaskRuntime,
         status::{BgTaskStatus, IntoStatus},
     },
+    util::path_resolver::InTargetPathResolver,
 };
 
-mod socket_stream;
-mod udp;
+mod socket;
 
-pub(crate) use udp::UdpOutgoingApi;
-
-/// An interface for a background task handling [`LayerTcpOutgoing`] messages.
-/// Each agent client has their own independent instance (neither this wrapper nor the background
-/// task are shared).
-pub(crate) struct TcpOutgoingApi {
-    task_status: BgTaskStatus,
-
-    /// Sends the layer messages to the [`TcpOutgoingTask`].
-    layer_tx: Sender<LayerTcpOutgoing>,
-
-    /// Reads the daemon messages from the [`TcpOutgoingTask`].
-    daemon_rx: Receiver<DaemonMessage>,
+pub(crate) enum OutgoingApiMessage {
+    UdpV1(LayerUdpOutgoing),
+    TcpV1(LayerTcpOutgoing),
+    V2(v2::ClientOutgoing),
 }
 
-impl TcpOutgoingApi {
-    /// Spawns a new background task for handling the `outgoing` feature and creates a new instance
-    /// of this struct to serve as an interface.
-    ///
-    /// # Params
-    ///
-    /// * `runtime` - tokio runtime to spawn the background task on.
+pub(crate) struct OutgoingApi {
+    task_status: BgTaskStatus,
+    tx: Sender<OutgoingApiMessage>,
+    rx: Receiver<DaemonMessage>,
+}
+
+impl OutgoingApi {
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`.
         // Do not remove this.
         let _rt = runtime.handle().enter();
 
-        let (layer_tx, layer_rx) = mpsc::channel(1000);
-        let (daemon_tx, daemon_rx) = mpsc::channel(1000);
+        let (layer_tx, layer_rx) = mpsc::channel(128);
+        let (daemon_tx, daemon_rx) = mpsc::channel(128);
 
         let pid = runtime.target_pid();
-        let task_status = tokio::spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("TcpOutgoingTask");
+        let task_status = tokio::spawn(OutgoingTask::new(pid, layer_rx, daemon_tx).run())
+            .into_status("OutgoingTask");
 
         Self {
             task_status,
-            layer_tx,
-            daemon_rx,
+            tx: layer_tx,
+            rx: daemon_rx,
         }
     }
 
-    /// Sends the [`LayerTcpOutgoing`] message to the background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> AgentResult<()> {
-        if self.layer_tx.send(message).await.is_ok() {
+    pub(crate) async fn recv(&mut self) -> AgentResult<DaemonMessage> {
+        match self.rx.recv().await {
+            Some(message) => Ok(message),
+            None => Err(self.task_status.wait_assert_running().await),
+        }
+    }
+
+    pub(crate) async fn send(&self, message: OutgoingApiMessage) -> AgentResult<()> {
+        if self.tx.send(message).await.is_ok() {
             Ok(())
         } else {
             Err(self.task_status.wait_assert_running().await)
         }
     }
+}
 
-    /// Receives a [`DaemonTcpOutgoing`] message from the background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonMessage> {
-        match self.daemon_rx.recv().await {
-            Some(msg) => Ok(msg),
-            None => Err(self.task_status.wait_assert_running().await),
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ConnectionId {
+    V1(mirrord_protocol::ConnectionId, v2::OutgoingProtocol),
+    V2(Uid),
+}
+
+impl fmt::Debug for ConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::V1(id, proto) => write!(f, "{id}-{proto}"),
+            Self::V2(id) => id.fmt(f),
         }
     }
 }
 
-/// Handles outgoing connections for one client (layer).
-struct TcpOutgoingTask {
-    next_connection_id: ConnectionId,
-    /// Writing halves of peer connections made on layer's requests.
-    writers: HashMap<ConnectionId, WriteHalf<SocketStream>>,
-    /// Reading halves of peer connections made on layer's requests.
-    readers: StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>>,
-    /// Optional pid of agent's target. Used in [`SocketStream::connect`].
-    pid: Option<u64>,
-    layer_rx: Receiver<LayerTcpOutgoing>,
-    daemon_tx: Sender<DaemonMessage>,
-}
-
-impl Drop for TcpOutgoingTask {
-    fn drop(&mut self) {
-        let connections = self.readers.keys().chain(self.writers.keys()).count();
-        TCP_OUTGOING_CONNECTION.fetch_sub(connections, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-impl fmt::Debug for TcpOutgoingTask {
+impl fmt::Display for ConnectionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TcpOutgoingTask")
-            .field("next_connection_id", &self.next_connection_id)
-            .field("writers", &self.writers.len())
-            .field("readers", &self.readers.len())
-            .field("pid", &self.pid)
-            .finish()
+        match self {
+            Self::V1(id, proto) => write!(f, "{id}-{proto}"),
+            Self::V2(id) => id.fmt(f),
+        }
     }
 }
 
-impl TcpOutgoingTask {
-    /// Buffer size for reading from the outgoing connections.
-    const READ_BUFFER_SIZE: usize = 64 * 1024;
+struct OutgoingTask {
+    path_resolver: Option<Arc<InTargetPathResolver>>,
+    rx: Receiver<OutgoingApiMessage>,
+    tx: Sender<DaemonMessage>,
 
-    /// Timeout for connect attempts.
-    ///
-    /// # TODO(alex)
-    /// This timeout works around the issue where golang tries to connect
-    /// to an invalid socket address and hangs until the socket times out.
+    connection_ids_v1: RangeInclusive<mirrord_protocol::ConnectionId>,
+
+    connects_v1: ConnectQueue,
+    connects_v2: FuturesUnordered<ConnectFut>,
+
+    writers: HashMap<ConnectionId, WriteHalf>,
+    readers: StreamMap<ConnectionId, StreamNotifyClose<ReadHalf>>,
+}
+
+impl OutgoingTask {
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
-    fn new(
-        pid: Option<u64>,
-        layer_rx: Receiver<LayerTcpOutgoing>,
-        daemon_tx: Sender<DaemonMessage>,
-    ) -> Self {
+    fn new(pid: Option<u64>, rx: Receiver<OutgoingApiMessage>, tx: Sender<DaemonMessage>) -> Self {
         Self {
-            next_connection_id: 0,
+            path_resolver: pid.map(InTargetPathResolver::new).map(Arc::new),
+            rx,
+            tx,
+            connection_ids_v1: (mirrord_protocol::ConnectionId::MIN
+                ..=mirrord_protocol::ConnectionId::MAX),
+            connects_v1: Default::default(),
+            connects_v2: Default::default(),
             writers: Default::default(),
             readers: Default::default(),
-            pid,
-            layer_rx,
-            daemon_tx,
         }
     }
 
-    /// Runs this task as long as the channels connecting it with the [`TcpOutgoingApi`] are open.
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn run(mut self) {
+    async fn run(mut self) -> Result<(), AgentError> {
         loop {
-            let channel_closed = select! {
-                biased;
-
-                message = self.layer_rx.recv() => match message {
-                    // We have a message from the layer to be handled.
-                    Some(message) => {
-                        self.handle_layer_msg(message).await.is_err()
-                    },
-                    // Our channel with the layer is closed, this task is no longer needed.
-                    None => true,
+            let result = tokio::select! {
+                message = self.rx.recv() => match message {
+                    Some(OutgoingApiMessage::TcpV1(msg)) => self.handle_tcp_v1_message(msg).await.map_break(Ok),
+                    Some(OutgoingApiMessage::UdpV1(msg)) => self.handle_udp_v1_message(msg).await.map_break(Ok),
+                    Some(OutgoingApiMessage::V2(msg)) => self.handle_v2_message(msg).await.map_break(Ok),
+                    None => ControlFlow::Break(Ok(()))
                 },
 
-                // We have data coming from one of our peers.
-                Some((connection_id, remote_read)) = self.readers.next() => {
-                    self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
-                },
+                Some(result) = self.connects_v1.next() => {
+                    self.handle_connect_result(result).await
+                }
+
+                Some(result) = self.connects_v2.next() => {
+                    self.handle_connect_result(result).await
+                }
+
+                Some((id, result)) = self.readers.next() => {
+                    self.handle_read(id, result).await.map_break(Ok)
+                }
             };
 
-            if channel_closed {
-                tracing::trace!("Client channel closed, exiting");
-                break;
+            if let Some(result) = result.break_value() {
+                break result;
             }
         }
     }
 
-    /// Returns [`Err`] only when the client has disconnected.
-    #[tracing::instrument(
-        level = Level::TRACE,
-        skip(read),
-        fields(read = ?read.as_ref().map(|data| data.as_ref().map(Bytes::len).unwrap_or_default()))
-        err(level = Level::TRACE)
-    )]
-    async fn handle_connection_read(
-        &mut self,
-        connection_id: ConnectionId,
-        read: io::Result<Option<Bytes>>,
-    ) -> Result<(), SendError<DaemonMessage>> {
-        match read {
-            // New bytes came in from a peer connection.
-            // We pass them to the layer.
-            Ok(Some(read)) => {
-                let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
-                    connection_id,
-                    bytes: read.into(),
-                }));
-                self.daemon_tx
-                    .send(DaemonMessage::TcpOutgoing(message))
-                    .await?;
-            }
-
-            // An error occurred when reading from a peer connection.
-            // We remove both io halves and inform the layer that the connection is closed.
-            // We remove the reader, because otherwise the `StreamMap` will produce an extra `None`
-            // item from the related stream.
-            Err(error) => {
-                tracing::trace!(
-                    ?error,
-                    connection_id,
-                    "Reading from peer connection failed, sending close message.",
-                );
-
-                self.readers.remove(&connection_id);
-                self.writers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                self.daemon_tx
-                    .send(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                        "read from outgoing connection {connection_id} failed: {error}"
-                    ))))
-                    .await?;
-                self.daemon_tx
-                    .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
-                        connection_id,
-                    )))
-                    .await?;
-            }
-
-            // EOF occurred in one of peer connections.
-            // We send 0-sized read to the layer to inform about the shutdown condition.
-            // Reader removal is handled internally by the `StreamMap`.
-            Ok(None) => {
-                tracing::trace!(
-                    connection_id,
-                    "Peer connection shutdown, sending 0-sized read message.",
-                );
-
-                let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
-                    connection_id,
-                    bytes: vec![].into(),
-                }));
-                self.daemon_tx
-                    .send(DaemonMessage::TcpOutgoing(message))
-                    .await?;
-
-                // If the writing half is not found, it means that the layer has already shut down
-                // its side of the connection. We send a closing message to clean
-                // everything up.
-                if !self.writers.contains_key(&connection_id) {
-                    tracing::trace!(
-                        connection_id,
-                        "Layer connection is shut down as well, sending close message.",
-                    );
-
-                    TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                    self.daemon_tx
-                        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
-                            connection_id,
-                        )))
-                        .await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Returns [`Err`] only when the client has disconnected.
-    #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_layer_msg(
-        &mut self,
-        message: LayerTcpOutgoing,
-    ) -> Result<(), SendError<DaemonMessage>> {
+    async fn handle_tcp_v1_message(&mut self, message: LayerTcpOutgoing) -> ControlFlow<()> {
         match message {
-            // We make connection to the requested address, split the stream into halves with
-            // `io::split`, and put them into respective maps.
             LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
-                let daemon_connect = time::timeout(
-                    Self::CONNECT_TIMEOUT,
-                    SocketStream::connect(remote_address.clone(), self.pid),
-                )
-                .await
-                .unwrap_or_else(|_elapsed| {
-                    Err(ResponseError::Remote(RemoteError::ConnectTimedOut(
-                        remote_address.clone(),
-                    )))
-                })
-                .and_then(|remote_stream| {
-                    let agent_address = remote_stream.local_addr()?;
-                    let connection_id = self.next_connection_id;
-                    self.next_connection_id += 1;
-
-                    let (read_half, write_half) = io::split(remote_stream);
-                    self.writers.insert(connection_id, write_half);
-                    self.readers.insert(
-                        connection_id,
-                        ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
-                    );
-                    TCP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                    Ok(DaemonConnect {
-                        connection_id,
-                        remote_address,
-                        local_address: agent_address,
-                    })
-                });
-
-                tracing::trace!(
-                    result = ?daemon_connect,
-                    "Connection attempt finished.",
-                );
-
-                self.daemon_tx
-                    .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(
-                        daemon_connect,
-                    )))
-                    .await?;
-
-                Ok(())
+                let fut = Box::pin(Self::connect(
+                    remote_address,
+                    v2::OutgoingProtocol::Tcp,
+                    self.path_resolver.clone(),
+                    None,
+                ));
+                self.connects_v1.push(fut);
+                ControlFlow::Continue(())
             }
 
-            // This message handles two cases:
-            // 1. 0-sized writes mean shutdown condition on the layer side. We call shutdown on this
-            //    connection's writer and remove it. If we don't find the reader, it means that the
-            //    peer has already shut down the connection. In this case we send a closing message
-            //    to the layer.
-            // 2. all other writes mean that the layer sent some data through the connection. We
-            //    pass it to this connection's writer.
             LayerTcpOutgoing::Write(LayerWrite {
                 connection_id,
                 bytes,
             }) => {
-                let write_result = match self.writers.get_mut(&connection_id) {
-                    Some(writer) if bytes.is_empty() => {
-                        tracing::trace!(
-                            connection_id,
-                            "Received 0-sized write from layer, shutting down peer connection."
-                        );
+                let id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp);
+                self.handle_write(id, bytes).await
+            }
 
-                        writer.shutdown().await.map_err(ResponseError::from)
-                    }
+            LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
+                let connection_id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp);
+                self.readers.remove(&connection_id);
+                self.writers.remove(&connection_id);
+                ControlFlow::Continue(())
+            }
+        }
+    }
 
-                    Some(writer) => writer.write_all(&bytes).await.map_err(ResponseError::from),
+    async fn handle_udp_v1_message(&mut self, message: LayerUdpOutgoing) -> ControlFlow<()> {
+        match message {
+            LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
+                let fut = Box::pin(Self::connect(
+                    remote_address,
+                    v2::OutgoingProtocol::Udp,
+                    self.path_resolver.clone(),
+                    None,
+                ));
+                self.connects_v1.push(fut);
+                ControlFlow::Continue(())
+            }
 
-                    None => Err(ResponseError::NotFound(connection_id)),
-                };
+            LayerUdpOutgoing::Write(LayerWrite {
+                connection_id,
+                bytes,
+            }) => {
+                let id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp);
+                self.handle_write(id, bytes).await
+            }
 
-                match write_result {
-                    Ok(()) if bytes.is_empty() => {
-                        self.writers.remove(&connection_id);
+            LayerUdpOutgoing::Close(LayerClose { connection_id }) => {
+                let connection_id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp);
+                self.readers.remove(&connection_id);
+                self.writers.remove(&connection_id);
+                ControlFlow::Continue(())
+            }
+        }
+    }
 
-                        if self.readers.contains_key(&connection_id) {
-                            Ok(())
-                        } else {
-                            tracing::trace!(
-                                connection_id,
-                                "Peer connection is shut down as well, sending close message to the client.",
-                            );
-                            TCP_OUTGOING_CONNECTION
-                                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    async fn handle_v2_message(&mut self, message: v2::ClientOutgoing) -> ControlFlow<()> {
+        match message {
+            v2::ClientOutgoing::Connect(connect) => {
+                let fut = Box::pin(Self::connect(
+                    connect.address,
+                    connect.protocol,
+                    self.path_resolver.clone(),
+                    Some(connect.id),
+                ));
+                self.connects_v2.push(fut);
+                ControlFlow::Continue(())
+            }
+            v2::ClientOutgoing::Data(data) => {
+                self.handle_write(ConnectionId::V2(data.id), data.data)
+                    .await
+            }
+            v2::ClientOutgoing::Close(close) => {
+                let connection_id = ConnectionId::V2(close.id);
+                self.readers.remove(&connection_id);
+                self.writers.remove(&connection_id);
+                ControlFlow::Continue(())
+            }
+        }
+    }
 
-                            self.daemon_tx
-                                .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
-                                    connection_id,
-                                )))
-                                .await?;
+    async fn handle_write(
+        &mut self,
+        connection_id: ConnectionId,
+        bytes: Payload,
+    ) -> ControlFlow<()> {
+        match self.writers.entry(connection_id) {
+            Entry::Occupied(e) if bytes.is_empty() => {
+                e.remove();
+                if self.readers.contains_key(&connection_id) {
+                    ControlFlow::Continue(())
+                } else {
+                    let message = match connection_id {
+                        ConnectionId::V1(id, v2::OutgoingProtocol::Tcp) => {
+                            DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(id))
+                        }
+                        ConnectionId::V1(id, v2::OutgoingProtocol::Udp) => {
+                            DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(id))
+                        }
+                        ConnectionId::V2(id) => DaemonMessage::OutgoingV2(
+                            v2::DaemonOutgoing::Close(v2::OutgoingClose { id }),
+                        ),
+                    };
+                    self.send(message).await
+                }
+            }
 
-                            Ok(())
+            Entry::Occupied(mut e) => match e.get_mut().write(&bytes).await {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(error) => {
+                    e.remove();
+                    self.readers.remove(&connection_id);
+                    match connection_id {
+                        ConnectionId::V1(id, v2::OutgoingProtocol::Tcp) => {
+                            let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                "write to outgoing TCP connection {id} failed: {error}"
+                            )));
+                            self.send(log).await?;
+                            let close = DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(id));
+                            self.send(close).await
+                        }
+                        ConnectionId::V1(id, v2::OutgoingProtocol::Udp) => {
+                            let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                "write to outgoing UDP connection {id} failed: {error}"
+                            )));
+                            self.send(log).await?;
+                            let close = DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(id));
+                            self.send(close).await
+                        }
+                        ConnectionId::V2(id) => {
+                            let error = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(
+                                v2::OutgoingError {
+                                    id,
+                                    error: error.into(),
+                                },
+                            ));
+                            self.send(error).await
                         }
                     }
+                }
+            },
 
-                    Ok(()) => Ok(()),
+            Entry::Vacant(..) => ControlFlow::Continue(()),
+        }
+    }
 
-                    Err(error) => {
-                        self.writers.remove(&connection_id);
-                        self.readers.remove(&connection_id);
-                        TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                        tracing::trace!(
+    async fn handle_read(
+        &mut self,
+        connection_id: ConnectionId,
+        result: Option<io::Result<Vec<u8>>>,
+    ) -> ControlFlow<()> {
+        match result {
+            Some(Ok(data)) => {
+                let message = match connection_id {
+                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(DaemonRead {
                             connection_id,
-                            ?error,
-                            "Failed to handle layer write, sending close message to the client.",
-                        );
-                        self.daemon_tx
-                            .send(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                "write to outgoing connection {connection_id} failed: {error}"
-                            ))))
-                            .await?;
-                        self.daemon_tx
-                            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
-                                connection_id,
-                            )))
-                            .await?;
+                            bytes: data.into(),
+                        })))
+                    }
+                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(DaemonRead {
+                            connection_id,
+                            bytes: data.into(),
+                        })))
+                    }
+                    ConnectionId::V2(id) => {
+                        DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(v2::OutgoingData {
+                            id,
+                            data: data.into(),
+                        }))
+                    }
+                };
+                self.send(message).await
+            }
 
-                        Ok(())
+            Some(Err(error)) => {
+                self.writers.remove(&connection_id);
+                match connection_id {
+                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
+                        let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
+                            "read from outgoing TCP connection {connection_id} failed: {error}"
+                        )));
+                        self.send(log).await?;
+                        let close =
+                            DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id));
+                        self.send(close).await
+                    }
+                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
+                        let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
+                            "read from outgoing UDP connection {connection_id} failed: {error}"
+                        )));
+                        self.send(log).await?;
+                        let close =
+                            DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id));
+                        self.send(close).await
+                    }
+                    ConnectionId::V2(id) => {
+                        let error = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(
+                            v2::OutgoingError {
+                                id,
+                                error: error.into(),
+                            },
+                        ));
+                        self.send(error).await
                     }
                 }
             }
 
-            // Layer closed a connection entirely.
-            // We remove io halves and forget about it.
-            LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
-                self.writers.remove(&connection_id);
-                self.readers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            None if self.writers.contains_key(&connection_id) => match connection_id {
+                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
+                    let read =
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(DaemonRead {
+                            connection_id,
+                            bytes: Default::default(),
+                        })));
+                    self.send(read).await
+                }
+                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
+                    let read =
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(DaemonRead {
+                            connection_id,
+                            bytes: Default::default(),
+                        })));
+                    self.send(read).await
+                }
+                ConnectionId::V2(id) => {
+                    let read =
+                        DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(v2::OutgoingData {
+                            id,
+                            data: Default::default(),
+                        }));
+                    self.send(read).await
+                }
+            },
 
-                Ok(())
+            None => match connection_id {
+                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
+                    let close = DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id));
+                    self.send(close).await
+                }
+                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
+                    let close = DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id));
+                    self.send(close).await
+                }
+                ConnectionId::V2(id) => {
+                    let close =
+                        DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Close(v2::OutgoingClose {
+                            id,
+                        }));
+                    self.send(close).await
+                }
+            },
+        }
+    }
+
+    async fn send(&self, message: DaemonMessage) -> ControlFlow<()> {
+        if self.tx.send(message).await.is_ok() {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
+    }
+
+    async fn connect(
+        address: SocketAddress,
+        protocol: v2::OutgoingProtocol,
+        path_resolver: Option<Arc<InTargetPathResolver>>,
+        connection_id: Option<Uid>,
+    ) -> Result<ConnectOk, ConnectErr> {
+        time::timeout(
+            Self::CONNECT_TIMEOUT,
+            socket::connect(&address, protocol, path_resolver.as_deref()),
+        )
+        .await
+        .unwrap_or_else(|_elapsed| Err(RemoteError::ConnectTimedOut(address.clone()).into()))
+        .and_then(|(read, write)| {
+            let local_address = write.local_address()?;
+            let peer_address = write.peer_address()?;
+            Ok(ConnectOk {
+                connection_id,
+                protocol,
+                write,
+                read,
+                local_address,
+                peer_address,
+            })
+        })
+        .map_err(|error| ConnectErr {
+            connection_id,
+            protocol,
+            error,
+        })
+    }
+
+    async fn handle_connect_result(
+        &mut self,
+        result: Result<ConnectOk, ConnectErr>,
+    ) -> ControlFlow<AgentResult<()>> {
+        match result {
+            Ok(ConnectOk {
+                connection_id: Some(id),
+                read,
+                write,
+                local_address,
+                peer_address,
+                ..
+            }) => {
+                let message = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(
+                    v2::OutgoingConnectResponse {
+                        id,
+                        agent_local_address: local_address,
+                        agent_peer_address: peer_address,
+                    },
+                ));
+                self.send(message).await.map_break(Ok)?;
+                self.writers.insert(ConnectionId::V2(id), write);
+                self.readers
+                    .insert(ConnectionId::V2(id), StreamNotifyClose::new(read));
+                ControlFlow::Continue(())
+            }
+
+            Ok(ConnectOk {
+                connection_id: None,
+                protocol,
+                read,
+                write,
+                local_address,
+                peer_address,
+            }) => {
+                let Some(connection_id) = self.connection_ids_v1.next() else {
+                    return ControlFlow::Break(Err(AgentError::ExhaustedConnectionId));
+                };
+                let message = Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: peer_address,
+                    local_address,
+                });
+                let message = match protocol {
+                    v2::OutgoingProtocol::Tcp => {
+                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(message))
+                    }
+                    v2::OutgoingProtocol::Udp => {
+                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(message))
+                    }
+                };
+                self.send(message).await.map_break(Ok)?;
+                self.writers
+                    .insert(ConnectionId::V1(connection_id, protocol), write);
+                self.readers.insert(
+                    ConnectionId::V1(connection_id, protocol),
+                    StreamNotifyClose::new(read),
+                );
+                ControlFlow::Continue(())
+            }
+
+            Err(ConnectErr {
+                connection_id: Some(id),
+                error,
+                ..
+            }) => {
+                let message =
+                    DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(v2::OutgoingError {
+                        id,
+                        error,
+                    }));
+                self.send(message).await.map_break(Ok)
+            }
+
+            Err(ConnectErr {
+                connection_id: None,
+                protocol: v2::OutgoingProtocol::Tcp,
+                error,
+            }) => {
+                let message = DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Err(error)));
+                self.send(message).await.map_break(Ok)
+            }
+
+            Err(ConnectErr {
+                connection_id: None,
+                protocol: v2::OutgoingProtocol::Udp,
+                error,
+            }) => {
+                let message = DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Err(error)));
+                self.send(message).await.map_break(Ok)
             }
         }
+    }
+}
+
+struct ConnectOk {
+    connection_id: Option<Uid>,
+    protocol: v2::OutgoingProtocol,
+    write: WriteHalf,
+    read: ReadHalf,
+    local_address: SocketAddress,
+    peer_address: SocketAddress,
+}
+
+struct ConnectErr {
+    connection_id: Option<Uid>,
+    protocol: v2::OutgoingProtocol,
+    error: ResponseError,
+}
+
+type ConnectFut = Pin<Box<dyn Future<Output = Result<ConnectOk, ConnectErr>> + Send + Sync>>;
+
+#[derive(Default)]
+struct ConnectQueue {
+    inner: VecDeque<ConnectFut>,
+}
+
+impl ConnectQueue {
+    fn push(&mut self, fut: ConnectFut) {
+        self.inner.push_back(fut);
+    }
+}
+
+impl Stream for ConnectQueue {
+    type Item = Result<ConnectOk, ConnectErr>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let Some(first) = this.inner.front_mut() else {
+            return Poll::Ready(None);
+        };
+        let result = std::task::ready!(Pin::new(first).poll(cx));
+
+        this.inner.pop_front();
+        if this.inner.len() < this.inner.capacity() / 2 {
+            this.inner.shrink_to_fit();
+        }
+
+        Poll::Ready(Some(result))
     }
 }

@@ -4409,7 +4409,6 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2 0.5.10",
- "streammap-ext",
  "tempfile",
  "thiserror 2.0.16",
  "tokio",
@@ -7046,15 +7045,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "streammap-ext"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dbee97d8a0194bb89424f83dad6e17ac44c4faa9a7df69e52796d07d10d559d"
-dependencies = [
- "tokio-stream",
-]
 
 [[package]]
 name = "strsim"

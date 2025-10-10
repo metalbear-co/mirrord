@@ -356,7 +356,8 @@ impl PortForwarder {
             | DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::UdpOutgoing(..)
             | DaemonMessage::Vpn(..)
-            | DaemonMessage::TcpSteal(..)) => {
+            | DaemonMessage::TcpSteal(..)
+            | DaemonMessage::OutgoingV2(..)) => {
                 // includes unexepcted DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
@@ -630,7 +631,8 @@ impl ReversePortForwarder {
             | message @ DaemonMessage::PauseTarget(_)
             | message @ DaemonMessage::SwitchProtocolVersionResponse(_)
             | message @ DaemonMessage::Vpn(_)
-            | message @ DaemonMessage::Pong => {
+            | message @ DaemonMessage::Pong
+            | message @ DaemonMessage::OutgoingV2(_) => {
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
                 )));

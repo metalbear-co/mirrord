@@ -42,7 +42,7 @@ use crate::{
     metrics,
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
-    outgoing::{TcpOutgoingApi, UdpOutgoingApi},
+    outgoing::{OutgoingApi, OutgoingApiMessage},
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{StealerCommand, TcpStealerApi},
@@ -260,8 +260,7 @@ struct ClientConnectionHandler {
     tcp_mirror_api: Option<TcpMirrorApi>,
     /// [`None`] when targetless.
     tcp_stealer_api: Option<TcpStealerApi>,
-    tcp_outgoing_api: TcpOutgoingApi,
-    udp_outgoing_api: UdpOutgoingApi,
+    outgoing_api: OutgoingApi,
     dns_api: DnsApi,
     state: State,
     /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
@@ -308,8 +307,7 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
-        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
+        let outgoing_api = OutgoingApi::new(&state.network_runtime);
 
         let client_handler = Self {
             id,
@@ -317,8 +315,7 @@ impl ClientConnectionHandler {
             connection,
             tcp_mirror_api,
             tcp_stealer_api,
-            tcp_outgoing_api,
-            udp_outgoing_api,
+            outgoing_api,
             dns_api,
             state,
             ready_for_logs: false,
@@ -441,12 +438,8 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
-                message = self.tcp_outgoing_api.recv_from_task() => match message {
+                message = self.outgoing_api.recv() => match message {
                     Ok(message) => self.respond(message).await?,
-                    Err(e) => break e,
-                },
-                message = self.udp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
                     Err(e) => break e,
                 },
                 message = self.dns_api.recv() => match message {
@@ -497,10 +490,19 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpOutgoing(layer_message) => {
-                self.tcp_outgoing_api.send_to_task(layer_message).await?
+                self.outgoing_api
+                    .send(OutgoingApiMessage::TcpV1(layer_message))
+                    .await?;
             }
             ClientMessage::UdpOutgoing(layer_message) => {
-                self.udp_outgoing_api.send_to_task(layer_message).await?
+                self.outgoing_api
+                    .send(OutgoingApiMessage::UdpV1(layer_message))
+                    .await?;
+            }
+            ClientMessage::OutgoingV2(layer_message) => {
+                self.outgoing_api
+                    .send(OutgoingApiMessage::V2(layer_message))
+                    .await?;
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
