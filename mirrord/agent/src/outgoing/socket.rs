@@ -76,7 +76,9 @@ pub async fn connect(
         }
 
         (SocketAddress::Unix(UnixAddr::Unnamed), v2::OutgoingProtocol::Tcp) => {
-            return Err(ResponseError::Remote(RemoteError::InvalidAddress(address.clone())).into());
+            return Err(ResponseError::Remote(RemoteError::InvalidAddress(
+                address.clone(),
+            )));
         }
 
         (SocketAddress::Unix(..), v2::OutgoingProtocol::Udp) => {

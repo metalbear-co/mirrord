@@ -49,7 +49,7 @@ pub enum OutgoingProxyError {
     /// The agent sent a [`DaemonConnect`]/[`v2::DaemonOutgoing::Connect`] response,
     /// but the proxy is unable to match it to any known request in progress.
     #[error(transparent)]
-    UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
+    UnexpectedAgentMessage(#[from] Box<UnexpectedAgentMessage>),
 
     /// The proxy failed to prepare a new local socket for the intercepted connection.
     #[error("failed to prepare a local socket: {0}")]
@@ -196,7 +196,7 @@ impl OutgoingProxy {
                         DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Err(error)))
                     }
                 };
-                Err(UnexpectedAgentMessage(message).into())
+                Err(Box::new(UnexpectedAgentMessage(message)).into())
             }
         }
     }
@@ -240,7 +240,7 @@ impl OutgoingProxy {
                         DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(connect)))
                     }
                 };
-                return Err(UnexpectedAgentMessage(message).into());
+                return Err(Box::new(UnexpectedAgentMessage(message)).into());
             }
         };
         let DaemonConnect {
@@ -286,7 +286,7 @@ impl OutgoingProxy {
             Some(in_progress) => in_progress,
             None => {
                 let message = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(connect));
-                return Err(UnexpectedAgentMessage(message).into());
+                return Err(Box::new(UnexpectedAgentMessage(message)).into());
             }
         };
         let v2::OutgoingConnectResponse {
