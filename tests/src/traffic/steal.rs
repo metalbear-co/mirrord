@@ -28,8 +28,24 @@ mod steal_tests {
         send_request, send_requests,
         services::{basic_service, http2_service, tcp_echo_service, websocket_service},
     };
-
+    
+    
+    /// See steal_http_traffic for details
+    /// This is a unix-only version of the test for cases using subprocessing which is not yet
+    /// supported on Windows.
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg_attr(target_os = "windows", ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn steal_http_traffic_unix(
+        #[future] basic_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonFastApiHTTP)] application: Application,
+    ) {
+        steal_http_traffic(basic_service, kube_client, application).await;
+    }
+
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -37,12 +53,7 @@ mod steal_tests {
     async fn steal_http_traffic(
         #[future] basic_service: KubeService,
         #[future] kube_client: Client,
-        #[values(
-            Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP,
-            Application::NodeHTTP
-        )]
-        application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
@@ -168,7 +179,6 @@ mod steal_tests {
 
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
     /// closes a socket.
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -358,9 +368,28 @@ mod steal_tests {
         .await;
     }
 
+    /// See filter_with_single_client_and_only_matching_requests for details
+    /// This is a unix-only version of the test for cases using subprocessing which is not yet
+    /// supported on Windows.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[cfg_attr(target_os = "windows", ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
+    async fn filter_with_single_client_and_only_matching_requests_unix(
+        #[future] basic_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonFastApiHTTP)] application: Application,
+    ) {
+        filter_with_single_client_and_only_matching_requests(
+            basic_service,
+            kube_client,
+            application,
+        )
+        .await;
+    }
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -368,12 +397,7 @@ mod steal_tests {
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] basic_service: KubeService,
         #[future] kube_client: Client,
-        #[values(
-            Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP,
-            Application::NodeHTTP
-        )]
-        application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
@@ -407,7 +431,6 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -452,7 +475,6 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -536,7 +558,6 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -607,9 +628,29 @@ mod steal_tests {
         application.assert(&mirrored_process).await;
     }
 
+    /// see filter_with_single_client_and_some_matching_requests for details.
+    /// This is a unix-only version of the test for cases using subprocessing which is not yet
+    /// supported on Windows.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[cfg_attr(target_os = "windows", ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
+    async fn filter_with_single_client_and_some_matching_requests_unix(
+        #[future] basic_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonFastApiHTTP)] application: Application,
+    ) {
+        filter_with_single_client_and_some_matching_requests(
+            basic_service,
+            kube_client,
+            application,
+        )
+        .await;
+    }
+
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -617,12 +658,7 @@ mod steal_tests {
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] basic_service: KubeService,
         #[future] kube_client: Client,
-        #[values(
-            Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP,
-            Application::NodeHTTP
-        )]
-        application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
@@ -674,11 +710,27 @@ mod steal_tests {
         application.assert(&mirrorded_process).await;
     }
 
+    /// See complete_passthrough for details.
+    /// This is a unix-only version of the test for cases using subprocessing which is not yet
+    /// supported on Windows.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[cfg_attr(target_os = "windows", ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
+    async fn complete_passthrough_unix(
+        #[future] tcp_echo_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonFastApiHTTP)] application: Application,
+        #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
+    ) {
+        complete_passthrough(tcp_echo_service, kube_client, application, tcp_data).await
+    }
+
     /// Test the case where running with `steal` set and an http header filter, but getting a
     /// connection of an unsupported protocol.
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -686,7 +738,7 @@ mod steal_tests {
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
-        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Application::NodeHTTP)] application: Application,
         #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
     ) {
         let service = tcp_echo_service.await;
@@ -740,13 +792,34 @@ mod steal_tests {
         application.assert(&mirrorded_process).await;
     }
 
+    /// See websocket_upgrade_no_filter_match for details.
+    /// This is a unix-only version of the test for cases using subprocessing which is not yet
+    /// supported on Windows.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[cfg_attr(target_os = "windows", ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    async fn websocket_upgrade_no_filter_match_unix(
+        #[future] websocket_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonFastApiHTTP)] application: Application,
+        #[values(
+            "Hello, websocket!\n".to_string(),
+            "websocket\n".to_string()
+        )]
+        write_data: String,
+    ) {
+        websocket_upgrade_no_filter_match(websocket_service, kube_client, application, write_data)
+            .await;
+    }
+
     /// Test the case where we're running with `steal` set and an http header filter, the target
     /// gets an HTTP upgrade request, but the request does not match the filter and should not
     /// reach the local app.
     ///
     /// We verify that the traffic is handled by the deployed app, and the local
     /// app does not see the traffic.
-    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -754,7 +827,7 @@ mod steal_tests {
     async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
         #[future] kube_client: Client,
-        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Application::NodeHTTP)] application: Application,
         #[values(
             "Hello, websocket!\n".to_string(),
             "websocket\n".to_string()
@@ -835,7 +908,6 @@ mod steal_tests {
     /// connection should be handled by the local app.
     ///
     /// We verify that the traffic is handled by the local app.
-    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
