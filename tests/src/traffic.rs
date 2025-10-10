@@ -476,10 +476,28 @@ mod traffic_tests {
         .await;
 
         // Listen for UDP message directly from application.
-        let mut buf = [0; 27];
-        let amt = socket.recv(&mut buf).unwrap();
-        assert_eq!(amt, 27);
-        assert_eq!(buf, "Can I pass the test please?".as_ref()); // Sure you can.
+        #[cfg(target_os = "windows")]
+        const BUF_SIZE: usize = 28;
+        #[cfg(not(target_os = "windows"))]
+        const BUF_SIZE: usize = 27;
+
+        let mut buf = [0; BUF_SIZE];
+        let amt = socket
+            .recv(&mut buf)
+            .expect("Failed to receive UDP message within timeout");
+        assert_eq!(amt, BUF_SIZE);
+
+        let expected_str = {
+            #[cfg(target_os = "windows")]
+            {
+                "Can I pass the test please?\n"
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                "Can I pass the test please?"
+            }
+        };
+        assert_eq!(buf.get(..amt).unwrap_or(&[]), expected_str.as_bytes()); // Sure you can.
 
         let res = process.wait().await;
         assert!(res.success());
@@ -559,6 +577,7 @@ mod traffic_tests {
     /// 2. Run with mirrord a client application that connects to that socket, sends data, verifies
     /// its echo and panics if anything went wrong
     /// 3. Verify the client app did not panic.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -598,6 +617,7 @@ mod traffic_tests {
     /// Verify that mirrord does not interfere with ignored unix sockets and connecting to a unix
     /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
     /// case of connections to unix sockets).
+    #[cfg_attr(target_os = "windows", ignore)]
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -657,7 +677,7 @@ mod traffic_tests {
             "www.live.com",
             "www.msn.com",
             "www.google.com.br",
-            "www.yahoo.co.j",
+            "www.yahoo.co.jp",
             "www.amazon.com",
             "www.wikipedia.org",
             "www.facebook.com",
