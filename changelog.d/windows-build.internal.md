@@ -1,0 +1,1 @@
+Added a github action to build windows builds, now supporting windows
