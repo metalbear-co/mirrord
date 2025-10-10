@@ -46,7 +46,6 @@ async fn operator_setup(
         sqs_splitting,
         kafka_splitting,
         application_auto_pause,
-        stateful_sessions,
         mysql_branching,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
@@ -100,7 +99,6 @@ async fn operator_setup(
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            stateful_sessions,
             mysql_branching,
         });
 
