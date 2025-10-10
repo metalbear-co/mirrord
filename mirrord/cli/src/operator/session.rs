@@ -52,9 +52,14 @@ impl SessionCommandHandler {
                 .await?
             {
                 Some(api) => {
-                    api.prepare_client_cert(&mut NullReporter::default(), &progress, &layer_config)
-                        .await
+                    api.with_client_certificate(
+                        &mut NullReporter::default(),
+                        &progress,
+                        &layer_config,
+                    )
+                    .await
                 }
+
                 None => {
                     subtask.failure(Some("operator not found"));
                     return Err(CliError::OperatorNotInstalled);

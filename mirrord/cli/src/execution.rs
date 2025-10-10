@@ -38,7 +38,7 @@ use crate::extract::extract_arm64;
 #[cfg(unix)]
 use crate::util::reparent_to_init;
 use crate::{
-    CliResult,
+    CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
     extract::extract_library,
@@ -193,6 +193,7 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")] args: Option<&[OsString]>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
+        mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<Self>
     where
         P: Progress,
@@ -207,7 +208,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name)
+            create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
@@ -298,8 +299,13 @@ impl MirrordExecution {
 
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+        proxy_command.arg("intproxy");
+
+        if mirrord_for_ci.is_some() {
+            proxy_command.arg("--mirrord-for-ci");
+        }
+
         proxy_command
-            .arg("intproxy")
             // Start of debug args. Don't add real args after this point,
             // `_debug_args` Clap field will swallow them.
             .arg("--log-destination")
@@ -464,7 +470,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
 
         let (connect_info, mut connection) =
-            create_and_connect(config, progress, analytics, branch_name)
+            create_and_connect(config, progress, analytics, branch_name, None)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 

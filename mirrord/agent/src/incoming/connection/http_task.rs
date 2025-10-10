@@ -395,7 +395,7 @@ impl RequestDestination for PassthroughConnection {
 
     async fn wait_for_upgrade(&mut self) -> Result<Option<Self::Upgraded>, ConnError> {
         match (&mut self.upgrade).await {
-            Err(..) => todo!("task panicked"),
+            Err(..) => unimplemented!("task panicked"),
             Ok(Err(error)) => Err(error),
             Ok(Ok(Some(upgraded))) => Ok(Some(UpgradedPassthroughConnection {
                 upgraded: TokioIo::new(upgraded),

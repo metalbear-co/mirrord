@@ -11,7 +11,8 @@
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
-    env, io,
+    env::{self},
+    io,
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
 };
@@ -58,7 +59,7 @@ pub(crate) async fn proxy(
     listen_port: u16,
     watch: drain::Watch,
     user_data: &UserData,
-) -> CliResult<(), InternalProxyError> {
+) -> Result<(), InternalProxyError> {
     tracing::info!(
         ?config,
         listen_port,

@@ -18,6 +18,7 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
+    ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
     dump::DumpSessionError,
     port_forward::PortForwardError,
@@ -472,6 +473,10 @@ pub(crate) enum CliError {
     ))]
     NestedExec,
 
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    MirrordForCi(#[from] CiError),
+
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
 }
@@ -576,6 +581,9 @@ impl From<OperatorApiError> for CliError {
                 operation: operation.to_string(),
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
+            OperatorApiError::ApiKey(fail) => {
+                Self::OperatorApiForbidden(OperatorOperation::SessionManagement, fail.to_string())
+            }
         }
     }
 }
