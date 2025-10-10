@@ -248,9 +248,11 @@ impl MirrordCi {
     /// always need to match a `mirrord ci start` with a `mirrord ci stop`.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn clear(self) -> CiResult<()> {
-        tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE)).await?;
-        tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_USER_TMP_FILE)).await?;
+        let intproxy_removed =
+            tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE)).await;
+        let user_removed =
+            tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_USER_TMP_FILE)).await;
 
-        Ok(())
+        Ok(intproxy_removed.and(user_removed)?)
     }
 }
