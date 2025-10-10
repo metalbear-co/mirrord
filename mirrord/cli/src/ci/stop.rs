@@ -50,6 +50,6 @@ impl CiStopCommandHandler {
 
         mirrord_ci.clear().await?;
 
-        Ok(intproxy_killed.and(user_killed)?)
+        intproxy_killed.and(user_killed)
     }
 }
