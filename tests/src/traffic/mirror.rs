@@ -14,10 +14,10 @@ use crate::utils::{
     services::basic_service,
 };
 
+#[cfg_attr(not(target_os = "windows"), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]
-#[cfg(not(target_os = "windows"))]
 async fn mirror_with_http_header_filter_unix_only(
     #[future] basic_service: KubeService,
     #[future] kube_client: Client,
