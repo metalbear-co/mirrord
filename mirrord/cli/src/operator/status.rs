@@ -153,6 +153,11 @@ impl StatusCommandHandler {
         session_id: String,
         user: &String,
     ) -> Option<HashMap<QueueConsumer, Vec<Row>>> {
+        tracing::info!(
+            "kafka_rows called with session_id: {}, user: {}",
+            session_id,
+            user
+        );
         /// The info we need to put in the rows when reporting the Kafka status.
         struct TopicDisplayInfo<'a> {
             names: &'a BTreeMap<String, TopicNameUpdate>,
@@ -161,68 +166,124 @@ impl StatusCommandHandler {
         }
 
         let mut rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
+        let topics_vec: Vec<_> = topics.collect();
+        tracing::info!("Processing {} Kafka topics", topics_vec.len());
 
         // Loop over the `MirrordKafkaSession` crds to build the list of rows.
-        for TopicDisplayInfo {
-            names,
-            consumer,
-            filters,
-        } in topics.filter_map(|topic| {
-            // Dig into the `MirrordKafkaSession` crd and get the meaningful parts.
-            Some(TopicDisplayInfo {
-                names: &topic
-                    .status
-                    .as_ref()?
-                    .get_split_details()
-                    .as_ref()?
-                    .topic_names,
-                consumer: &topic.spec.topic_consumer,
-                filters: &topic.spec.topic_filters,
-            })
-        }) {
-            // From the list of topic names, loop over them so we can match the `TopicId`
-            // of a name with the `TopicId` of a filter.
-            for (
-                topic_id,
-                TopicNameUpdate {
-                    original_name,
-                    output_name,
-                },
-            ) in names.iter()
+        for (index, topic) in topics_vec.iter().enumerate() {
+            tracing::info!("Processing Kafka topic {}: {:?}", index, topic);
+
+            let topic_display_info = match topic.status.as_ref() {
+                Some(status) => {
+                    tracing::info!("Topic {} has status: {:?}", index, status);
+                    match status.get_split_details().as_ref() {
+                        Some(split_details) => {
+                            tracing::info!(
+                                "Topic {} has split_details with {} topic_names",
+                                index,
+                                split_details.topic_names.len()
+                            );
+                            Some(TopicDisplayInfo {
+                                names: &split_details.topic_names,
+                                consumer: &topic.spec.topic_consumer,
+                                filters: &topic.spec.topic_filters,
+                            })
+                        }
+                        None => {
+                            tracing::warn!("Topic {} has no split_details", index);
+                            None
+                        }
+                    }
+                }
+                None => {
+                    tracing::warn!("Topic {} has no status", index);
+                    None
+                }
+            };
+
+            if let Some(TopicDisplayInfo {
+                names,
+                consumer,
+                filters,
+            }) = topic_display_info
             {
-                // Basically `filter.topic_id == name.topic_id`.
-                if let Some(filters_by_id) = filters.get(topic_id) {
-                    // Loop over the filters and start building the rows.
-                    for (filter_key, filter) in filters_by_id.iter() {
-                        // Group rows by the topic `consumer`.
-                        match rows.entry(consumer.clone()) {
-                            Entry::Occupied(mut consumer_rows) => {
-                                consumer_rows.get_mut().push(row![
-                                    session_id,
-                                    topic_id,
-                                    user,
-                                    original_name,
-                                    output_name,
-                                    format!("{filter_key}:{filter}")
-                                ]);
-                            }
-                            Entry::Vacant(consumer_rows) => {
-                                consumer_rows.insert(vec![row![
-                                    session_id,
-                                    topic_id,
-                                    user,
-                                    original_name,
-                                    output_name,
-                                    format!("{filter_key}:{filter}")
-                                ]]);
+                tracing::info!(
+                    "Processing topic names: {} names, {} filters",
+                    names.len(),
+                    filters.len()
+                );
+
+                // From the list of topic names, loop over them so we can match the `TopicId`
+                // of a name with the `TopicId` of a filter.
+                for (
+                    topic_id,
+                    TopicNameUpdate {
+                        original_name,
+                        output_name,
+                    },
+                ) in names.iter()
+                {
+                    tracing::info!(
+                        "Processing topic_id: {}, original_name: {}, output_name: {}",
+                        topic_id,
+                        original_name,
+                        output_name
+                    );
+
+                    // Basically `filter.topic_id == name.topic_id`.
+                    if let Some(filters_by_id) = filters.get(topic_id) {
+                        tracing::info!(
+                            "Found {} filters for topic_id: {}",
+                            filters_by_id.len(),
+                            topic_id
+                        );
+
+                        // Loop over the filters and start building the rows.
+                        for (filter_key, filter) in filters_by_id.iter() {
+                            tracing::info!(
+                                "Adding row for consumer: {}, filter: {}:{}",
+                                consumer,
+                                filter_key,
+                                filter
+                            );
+
+                            // Group rows by the topic `consumer`.
+                            match rows.entry(consumer.clone()) {
+                                Entry::Occupied(mut consumer_rows) => {
+                                    consumer_rows.get_mut().push(row![
+                                        session_id,
+                                        topic_id,
+                                        user,
+                                        original_name,
+                                        output_name,
+                                        format!("{filter_key}:{filter}")
+                                    ]);
+                                }
+                                Entry::Vacant(consumer_rows) => {
+                                    consumer_rows.insert(vec![row![
+                                        session_id,
+                                        topic_id,
+                                        user,
+                                        original_name,
+                                        output_name,
+                                        format!("{filter_key}:{filter}")
+                                    ]]);
+                                }
                             }
                         }
+                    } else {
+                        tracing::warn!("No filters found for topic_id: {}", topic_id);
                     }
                 }
             }
         }
 
         // If it's empty, we don't want to display anything.
+        tracing::info!(
+            "kafka_rows returning {} rows for {} consumers",
+            rows.values().map(|v| v.len()).sum::<usize>(),
+            rows.len()
+        );
         rows.is_empty().not().then_some(rows)
     }
 
@@ -261,6 +322,11 @@ Operator License
             .status
             .as_ref()
             .ok_or(CliError::OperatorStatusNotFound)?;
+
+        tracing::info!(
+            "Operator status retrieved with {} sessions",
+            status.sessions.len()
+        );
 
         if let Some(copy_targets) = status.copy_targets.as_ref() {
             if copy_targets.is_empty() {
@@ -319,7 +385,15 @@ Operator License
         let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
         let mut kafka_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
 
-        for session in &status.sessions {
+        for (session_index, session) in status.sessions.iter().enumerate() {
+            tracing::info!(
+                "Processing session {}: id={:?}, target={}, user={}",
+                session_index,
+                session.id,
+                session.target,
+                session.user
+            );
+
             let locked_ports = session
                 .locked_ports
                 .as_deref()
@@ -353,51 +427,87 @@ Operator License
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);
 
-            if let Some(sqs_in_status) = session.sqs.as_ref().and_then(|sqs| {
-                Self::sqs_rows(
+            // Check for SQS data
+            if let Some(sqs) = session.sqs.as_ref() {
+                tracing::info!("Session {} has {} SQS sessions", session_index, sqs.len());
+                if let Some(sqs_in_status) = Self::sqs_rows(
                     sqs.iter(),
                     session.id.clone().unwrap_or_default(),
                     &session.user,
-                )
-            }) {
-                // Merge each session SQS into our map keyed by consumer.
-                for (consumer, rows) in sqs_in_status {
-                    match sqs_rows.entry(consumer) {
-                        Entry::Occupied(mut consumer_rows) => consumer_rows.get_mut().extend(rows),
-                        Entry::Vacant(consumer_rows) => {
-                            consumer_rows.insert(rows);
+                ) {
+                    tracing::info!(
+                        "Session {} SQS processing returned {} consumers",
+                        session_index,
+                        sqs_in_status.len()
+                    );
+                    // Merge each session SQS into our map keyed by consumer.
+                    for (consumer, rows) in sqs_in_status {
+                        match sqs_rows.entry(consumer) {
+                            Entry::Occupied(mut consumer_rows) => {
+                                consumer_rows.get_mut().extend(rows)
+                            }
+                            Entry::Vacant(consumer_rows) => {
+                                consumer_rows.insert(rows);
+                            }
                         }
                     }
+                } else {
+                    tracing::warn!("Session {} SQS processing returned None", session_index);
                 }
+            } else {
+                tracing::info!("Session {} has no SQS data", session_index);
             }
 
-            if let Some(kafka_in_status) = session.kafka.as_ref().and_then(|kafka| {
-                Self::kafka_rows(
+            // Check for Kafka data
+            if let Some(kafka) = session.kafka.as_ref() {
+                tracing::info!(
+                    "Session {} has {} Kafka sessions",
+                    session_index,
+                    kafka.len()
+                );
+                if let Some(kafka_in_status) = Self::kafka_rows(
                     kafka.iter(),
                     session.id.clone().unwrap_or_default(),
                     &session.user,
-                )
-            }) {
-                // Merge each session Kafka into our map keyed by consumer.
-                for (consumer, rows) in kafka_in_status {
-                    match kafka_rows.entry(consumer) {
-                        Entry::Occupied(mut consumer_rows) => consumer_rows.get_mut().extend(rows),
-                        Entry::Vacant(consumer_rows) => {
-                            consumer_rows.insert(rows);
+                ) {
+                    tracing::info!(
+                        "Session {} Kafka processing returned {} consumers",
+                        session_index,
+                        kafka_in_status.len()
+                    );
+                    // Merge each session Kafka into our map keyed by consumer.
+                    for (consumer, rows) in kafka_in_status {
+                        match kafka_rows.entry(consumer) {
+                            Entry::Occupied(mut consumer_rows) => {
+                                consumer_rows.get_mut().extend(rows)
+                            }
+                            Entry::Vacant(consumer_rows) => {
+                                consumer_rows.insert(rows);
+                            }
                         }
                     }
+                } else {
+                    tracing::warn!("Session {} Kafka processing returned None", session_index);
                 }
+            } else {
+                tracing::info!("Session {} has no Kafka data", session_index);
             }
         }
 
         sessions.printstd();
         println!();
 
+        tracing::info!(
+            "Final results: {} SQS consumers, {} Kafka consumers",
+            sqs_rows.len(),
+            kafka_rows.len()
+        );
+
         // The SQS queue statuses are grouped by queue consumer.
         for (sqs_consumer, sqs_row) in sqs_rows {
             let mut sqs_table = Table::new();
             sqs_table.add_row(row![
-                "Session ID",
+                "Session ID2",
                 "Queue ID",
                 "User",
                 "Original Name",
@@ -415,7 +525,18 @@ Operator License
         }
 
         // The Kafka topic statuses are grouped by topic consumer.
+        if kafka_rows.is_empty() {
+            tracing::info!("No Kafka rows to display");
+        } else {
+            tracing::info!("Displaying {} Kafka consumers", kafka_rows.len());
+        }
+
         for (kafka_consumer, kafka_row) in kafka_rows {
+            tracing::info!(
+                "Displaying Kafka consumer: {} with {} rows",
+                kafka_consumer,
+                kafka_row.len()
+            );
             let mut kafka_table = Table::new();
             kafka_table.add_row(row![
                 "Session ID",
