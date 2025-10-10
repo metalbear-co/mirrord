@@ -14,7 +14,7 @@ use crate::utils::{
     services::basic_service,
 };
 
-#[cfg_attr(not(target_os = "windows"), ignore)]
+#[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]

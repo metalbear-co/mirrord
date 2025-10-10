@@ -4,9 +4,9 @@
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
 
-mod hostname;
-mod ops;
-mod utils;
+pub(crate) mod hostname;
+pub(crate) mod ops;
+pub(crate) mod utils;
 
 use std::{net::SocketAddr, sync::OnceLock};
 
@@ -38,9 +38,9 @@ use winapi::{
     um::{
         minwinbase::OVERLAPPED,
         winsock2::{
-            HOSTENT, INVALID_SOCKET, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET, SOCKET_ERROR,
-            WSA_IO_PENDING, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT, WSAGetLastError,
-            WSAOVERLAPPED, WSASetLastError, fd_set, timeval,
+            HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
+            SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
+            WSAGetLastError, WSAOVERLAPPED, WSASetLastError, fd_set, timeval,
         },
     },
 };
@@ -57,7 +57,7 @@ use self::{
         create_thread_local_hostent, determine_local_address, get_actual_bound_address,
     },
 };
-use crate::apply_hook;
+use crate::{apply_hook, process::elevation::require_elevation};
 
 // Function type definitions for original Windows socket functions
 type SocketType = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
@@ -400,7 +400,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
     let local_addr = determine_local_address(requested_addr);
 
     // Convert to Windows sockaddr for actual binding
-    let (addr_storage, addr_len) = match local_addr.to_sockaddr() {
+    let (local_addr_storage, local_addr_len) = match local_addr.to_sockaddr() {
         Ok((storage, len)) => (storage, len),
         Err(e) => {
             tracing::error!("bind_detour -> failed to convert local address: {}", e);
@@ -411,46 +411,29 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
     // Attempt primary bind
     let bind_result = bind_fn(
         s,
-        &addr_storage as *const _ as *const SOCKADDR,
-        addr_len,
+        &local_addr_storage as *const _ as *const SOCKADDR,
+        local_addr_len,
         "primary bind",
     );
 
-    // Handle bind failures with appropriate fallbacks
+    // Handle bind failures
     if bind_result != ERROR_SUCCESS_I32 {
-        // If specific port failed, try port 0 (like Unix layer fallback)
-        if local_addr.port() == 0 {
-            tracing::error!("bind_detour -> bind to port 0 failed");
-            return bind_result;
+        // Check for access denied error which may indicate UAC privilege issues
+        // Check if this is a privileged port that requires elevation
+        if WindowsError::wsa_last_error() == WSAEACCES && local_addr.port() < IPPORT_RESERVED as u16
+        {
+            // graceful_exit if process is not elevated.
+            require_elevation(&format!(
+                "mirrord failed to bind to privileged port {} - insufficient UAC privileges. On Windows, binding to privileged ports (< {}) requires running as Administrator or with elevated UAC privileges. Please restart your application with elevated privileges.",
+                local_addr.port(),
+                IPPORT_RESERVED
+            ));
+            // if we are not elevated, this line will not be reachable as require_elevation calls
+            // graceful_exit!()
         }
-        tracing::debug!(
-            "bind_detour -> specific port {} failed, trying random port",
-            local_addr.port()
-        );
-        let fallback_addr = SocketAddr::new(local_addr.ip(), 0);
-        let (fallback_storage, fallback_len) = match fallback_addr.to_sockaddr() {
-            Ok((storage, len)) => (storage, len),
-            Err(e) => {
-                tracing::error!(
-                    "bind_detour -> fallback address {} conversion failed: {}",
-                    fallback_addr,
-                    e
-                );
-                return bind_result;
-            }
-        };
 
-        let fallback_result = bind_fn(
-            s,
-            &fallback_storage as *const _ as *const SOCKADDR,
-            fallback_len,
-            "bind to port 0",
-        );
-        if fallback_result != ERROR_SUCCESS_I32 {
-            tracing::error!("bind_detour -> both specific and fallback bind failed");
-            return bind_result;
-        }
-        tracing::debug!("bind_detour -> fallback to random port succeeded");
+        // return other errors for caller handling
+        return bind_result;
     }
 
     // Get the actual bound address and update socket state

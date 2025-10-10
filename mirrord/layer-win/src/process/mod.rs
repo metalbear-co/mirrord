@@ -5,6 +5,7 @@ use std::ffi::c_void;
 use str_win::{string_to_u8_buffer, string_to_u16_buffer};
 use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress};
 
+pub mod elevation;
 pub mod macros;
 pub mod memory;
 
