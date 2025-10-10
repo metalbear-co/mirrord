@@ -1,5 +1,6 @@
 use std::{process::ExitStatus, sync::Arc};
 
+use mirrord_protocol::uid::Uid;
 use thiserror::Error;
 
 use crate::{
@@ -46,6 +47,9 @@ pub(crate) enum AgentError {
 
     #[error("Exhausted possible identifiers for remote connections.")]
     ExhaustedConnectionId,
+
+    #[error("Received a duplicate outgoing connection id {0}.")]
+    DuplicateOutgoingConnectionId(Uid),
 
     #[error("Failed to parse the given HTTP filter: {0}")]
     InvalidHttpFilter(#[from] fancy_regex::Error),

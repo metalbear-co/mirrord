@@ -1,7 +1,9 @@
+//! Implementation of the outgoing traffic feature.
+
 use std::{
-    collections::{HashMap, VecDeque, hash_map::Entry},
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt, io,
-    ops::{ControlFlow, RangeInclusive},
+    ops::{ControlFlow, Not, RangeInclusive},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -37,12 +39,15 @@ use crate::{
 
 mod socket;
 
+/// [`mirrord_protocol`] messages consumed by the [`OutgoingApi`].
 pub(crate) enum OutgoingApiMessage {
     UdpV1(LayerUdpOutgoing),
     TcpV1(LayerTcpOutgoing),
     V2(v2::ClientOutgoing),
 }
 
+/// Opaque handle to a background task driving IO of the outgoing connections for a **single** agent
+/// client.
 pub(crate) struct OutgoingApi {
     task_status: BgTaskStatus,
     tx: Sender<OutgoingApiMessage>,
@@ -50,6 +55,7 @@ pub(crate) struct OutgoingApi {
 }
 
 impl OutgoingApi {
+    /// Creates a new instance backed by a dedicated background task.
     pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`.
         // Do not remove this.
@@ -85,6 +91,7 @@ impl OutgoingApi {
     }
 }
 
+/// Compatibility wrapper for v1 and v2 outgoing connection ids.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum ConnectionId {
     V1(mirrord_protocol::ConnectionId, v2::OutgoingProtocol),
@@ -109,21 +116,45 @@ impl fmt::Display for ConnectionId {
     }
 }
 
+/// Background tasks that drives IO for the [`OutgoingApi`].
 struct OutgoingTask {
+    /// Used to resolve paths to unix sockets in the target container.
+    ///
+    /// [`None`] if there is no target container.
     path_resolver: Option<Arc<InTargetPathResolver>>,
+    /// For receiving messages from the [`OutgoingApi`].
     rx: Receiver<OutgoingApiMessage>,
+    /// For sending messages to the [`OutgoingApi`].
     tx: Sender<DaemonMessage>,
 
+    /// Pool of v1 connection ids.
     connection_ids_v1: RangeInclusive<mirrord_protocol::ConnectionId>,
 
+    /// In progress v1 connect requests.
+    ///
+    /// These requests are processed **strictly sequentially**,
+    /// and [`ConnectFut`]s are progressed one at a time. Rationale:
+    ///
+    /// 1. The order of responses sent back to the client matters.
+    /// 2. We don't want to make connections concurrently, because head of line blocking could make
+    ///    other connections sit idle, and possibly be broken by the peers due to inactivity. Thus,
+    ///    we don't use [`futures::stream::FuturesOrdered`].
     connects_v1: ConnectQueue,
+    /// In progress v2 connect requests.
+    ///
+    /// Requests are processed concurrently.
     connects_v2: FuturesUnordered<ConnectFut>,
+    /// Ids of in progress v2 connect requests.
+    connects_v2_ids: HashSet<Uid>,
 
+    /// Writing halves of open connections.
     writers: HashMap<ConnectionId, WriteHalf>,
+    /// Reading halves of open connections.
     readers: StreamMap<ConnectionId, StreamNotifyClose<ReadHalf>>,
 }
 
 impl OutgoingTask {
+    /// Hard timeout for connect attempts.
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
     fn new(pid: Option<u64>, rx: Receiver<OutgoingApiMessage>, tx: Sender<DaemonMessage>) -> Self {
@@ -135,6 +166,7 @@ impl OutgoingTask {
                 ..=mirrord_protocol::ConnectionId::MAX),
             connects_v1: Default::default(),
             connects_v2: Default::default(),
+            connects_v2_ids: Default::default(),
             writers: Default::default(),
             readers: Default::default(),
         }
@@ -146,7 +178,7 @@ impl OutgoingTask {
                 message = self.rx.recv() => match message {
                     Some(OutgoingApiMessage::TcpV1(msg)) => self.handle_tcp_v1_message(msg).await.map_break(Ok),
                     Some(OutgoingApiMessage::UdpV1(msg)) => self.handle_udp_v1_message(msg).await.map_break(Ok),
-                    Some(OutgoingApiMessage::V2(msg)) => self.handle_v2_message(msg).await.map_break(Ok),
+                    Some(OutgoingApiMessage::V2(msg)) => self.handle_v2_message(msg).await,
                     None => ControlFlow::Break(Ok(()))
                 },
 
@@ -229,9 +261,20 @@ impl OutgoingTask {
         }
     }
 
-    async fn handle_v2_message(&mut self, message: v2::ClientOutgoing) -> ControlFlow<()> {
+    async fn handle_v2_message(
+        &mut self,
+        message: v2::ClientOutgoing,
+    ) -> ControlFlow<AgentResult<()>> {
         match message {
             v2::ClientOutgoing::Connect(connect) => {
+                if self.connects_v2_ids.insert(connect.id).not()
+                    || self.readers.contains_key(&ConnectionId::V2(connect.id))
+                    || self.writers.contains_key(&ConnectionId::V2(connect.id))
+                {
+                    return ControlFlow::Break(Err(AgentError::DuplicateOutgoingConnectionId(
+                        connect.id,
+                    )));
+                }
                 let fut = Box::pin(Self::connect(
                     connect.address,
                     connect.protocol,
@@ -241,10 +284,10 @@ impl OutgoingTask {
                 self.connects_v2.push(fut);
                 ControlFlow::Continue(())
             }
-            v2::ClientOutgoing::Data(data) => {
-                self.handle_write(ConnectionId::V2(data.id), data.data)
-                    .await
-            }
+            v2::ClientOutgoing::Data(data) => self
+                .handle_write(ConnectionId::V2(data.id), data.data)
+                .await
+                .map_break(Ok),
             v2::ClientOutgoing::Close(close) => {
                 let connection_id = ConnectionId::V2(close.id);
                 self.readers.remove(&connection_id);
@@ -260,6 +303,7 @@ impl OutgoingTask {
         bytes: Payload,
     ) -> ControlFlow<()> {
         match self.writers.entry(connection_id) {
+            // Empty write means partial shutdown.
             Entry::Occupied(e) if bytes.is_empty() => {
                 e.remove();
                 if self.readers.contains_key(&connection_id) {
@@ -481,6 +525,7 @@ impl OutgoingTask {
                 peer_address,
                 ..
             }) => {
+                self.connects_v2_ids.remove(&id);
                 let message = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(
                     v2::OutgoingConnectResponse {
                         id,
@@ -534,6 +579,7 @@ impl OutgoingTask {
                 error,
                 ..
             }) => {
+                self.connects_v2_ids.remove(&id);
                 let message =
                     DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(v2::OutgoingError {
                         id,
