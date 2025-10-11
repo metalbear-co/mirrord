@@ -1,6 +1,6 @@
 //! Module responsible for registering hooks targetting process creation.
 
-use std::sync::OnceLock;
+use std::{ffi::OsString, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::windows::layer_setup};
@@ -13,16 +13,18 @@ use winapi::{
     um::{
         minwinbase::LPSECURITY_ATTRIBUTES,
         processenv::GetEnvironmentStringsW,
-        processthreadsapi::{LPPROCESS_INFORMATION, LPSTARTUPINFOW},
-        winbase::CREATE_UNICODE_ENVIRONMENT,
+        processthreadsapi::{ResumeThread, LPPROCESS_INFORMATION, LPSTARTUPINFOW},
+        winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT},
         winnt::PHANDLE,
     },
 };
 
-use crate::apply_hook;
+use crate::{
+    MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64, MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID,
+    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID, MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR, apply_hook,
+};
 
-const MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR: &str = "MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR";
-const MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64: &str = "MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR";
+use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 
 fn environment_from_lpvoid(is_w16_env: bool, environment: LPVOID) -> Vec<String> {
     unsafe {
@@ -115,12 +117,23 @@ unsafe extern "system" fn create_process_internal_w_hook(
         let is_w16_env = (creation_flags & CREATE_UNICODE_ENVIRONMENT) != 0;
         let rust_environment = environment_from_lpvoid(is_w16_env, environment);
 
+        let parent_process_id = std::process::id();
+        let env_parent_process_id =
+            format!("{MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID}={parent_process_id}");
+
         let proxy_addr = PROXY_CONNECTION
             .get()
             .expect("Couldn't get proxy connection")
             .proxy_addr()
             .to_string();
         let env_proxy_entry = format!("{MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR}={proxy_addr}");
+
+        let layer_id = PROXY_CONNECTION
+            .get()
+            .expect("Couldn't get proxy connection")
+            .layer_id()
+            .0;
+        let env_layer_id = format!("{MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID}={layer_id}");
 
         let cfg_base64 = layer_setup()
             .layer_config()
@@ -133,11 +146,15 @@ unsafe extern "system" fn create_process_internal_w_hook(
             .into_iter()
             .filter(|x| {
                 !(x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR)
-                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64))
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64)
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID)
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID))
             })
             .collect();
 
         // Add the environment entries
+        rust_environment.push(env_parent_process_id);
+        rust_environment.push(env_layer_id);
         rust_environment.push(env_proxy_entry);
         rust_environment.push(env_cfg_entry);
 
@@ -159,8 +176,10 @@ unsafe extern "system" fn create_process_internal_w_hook(
         // Set environment variable
         environment = windows_environment.as_mut_ptr() as _;
 
+        creation_flags |= CREATE_SUSPENDED;
+
         let original = CREATE_PROCESS_INTERNAL_W_ORIGINAL.get().unwrap();
-        original(
+        let res = original(
             user_token,
             application_name,
             command_line,
@@ -173,7 +192,18 @@ unsafe extern "system" fn create_process_internal_w_hook(
             startup_info,
             process_information,
             restricted_user_token,
-        )
+        );
+
+        let dll_path = std::env::var("MIRRORD_LAYER_FILE").unwrap();
+
+        let injector_process = InjectorOwnedProcess::from_pid((*process_information).dwProcessId).unwrap();
+        let syringe = Syringe::for_process(injector_process);
+        let payload_path = OsString::from(dll_path.clone());
+        let _ = syringe.inject(payload_path).unwrap();
+        
+        ResumeThread((*process_information).hThread);
+
+        res
     }
 }
 
