@@ -737,9 +737,11 @@ pub struct MirrordSqsSessionSpec {
 #[serde(rename = "KafkaSplitDetails", rename_all = "camelCase")]
 pub struct KafkaSplitDetails {
     /// Topic ID -> old and new topic names.
+    #[serde(default)]
     pub topic_names: BTreeMap<String, TopicNameUpdate>,
 
     /// Env var name -> old and new topic names.
+    #[serde(default)]
     pub env_updates: BTreeMap<String, TopicNameUpdate>,
 }
 
