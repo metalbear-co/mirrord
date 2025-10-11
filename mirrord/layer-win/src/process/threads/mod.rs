@@ -56,11 +56,10 @@ pub fn change_all_state(state: ThreadState) {
                     }
                     ThreadState::Unfrozen => {
                         let mut count = 0u32;
-
                         // Make sure thread is *actually* resumed (suspend count is 0)
                         loop {
                             let status = NtResumeThread(next_thread, &mut count);
-                            if count == 0 || !NT_SUCCESS(status) {
+                            if count == 1 || !NT_SUCCESS(status) {
                                 break;
                             }
                         }
