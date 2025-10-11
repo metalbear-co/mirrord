@@ -29,7 +29,8 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::{
-        libloaderapi::{LoadLibraryA, LoadLibraryW}, processthreadsapi::GetCurrentProcessId, winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH}
+        libloaderapi::LoadLibraryA,
+        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
     },
 };
 
@@ -199,13 +200,15 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
         use process::{threads, threads::ThreadState};
-        
+
         // NOTE(gabriela): workaround for proxy connection thread freeze once we freeze all threads.
         //
         // ```cpp
         // Provider = DCATALOG::LoadProvider((DCATALOG *)v15, (struct PROTO_CATALOG_ITEM *)v20);
         // ```
-        unsafe { LoadLibraryA(c"mswsock.dll".as_ptr()); }
+        unsafe {
+            LoadLibraryA(c"mswsock.dll".as_ptr());
+        }
 
         // Before doing anything, suspend all other threads.
         // NOTE(gabriela): otherwise, other logic might run before

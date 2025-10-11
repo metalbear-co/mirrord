@@ -91,10 +91,10 @@ pub struct NewSessionRequest {
     /// this is its parent layer id.
     ///
     /// # Note
-    /// 
+    ///
     /// ## Unix
     /// The layer inherits state from its parent.
-    /// 
+    ///
     /// ## Windows
     /// The layer inherits environment variables from its parent.
     pub parent_layer: Option<LayerId>,

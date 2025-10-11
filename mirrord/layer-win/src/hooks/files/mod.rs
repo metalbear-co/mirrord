@@ -321,9 +321,9 @@ unsafe extern "system" fn nt_create_file_hook(
                 }
             };
 
-            if managed_handle.is_some() {
+            if let Some(handle) = managed_handle {
                 // Write managed handle at the provided pointer
-                *file_handle = *managed_handle.unwrap();
+                *file_handle = *handle;
                 tracing::info!(
                     "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
                     linux_path,
@@ -1173,7 +1173,7 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
             && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+            && let Ok(_handle_context) = managed_handle.clone().try_read()
         {}
 
         let original = NT_DEVICE_IO_CONTROL_FILE_ORIGINAL.get().unwrap();

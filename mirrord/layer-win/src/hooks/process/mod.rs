@@ -2,6 +2,7 @@
 
 use std::{ffi::OsString, sync::OnceLock};
 
+use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::windows::layer_setup};
 use str_win::{string_to_u16_buffer, u8_multi_buffer_to_strings, u16_multi_buffer_to_strings};
@@ -13,7 +14,7 @@ use winapi::{
     um::{
         minwinbase::LPSECURITY_ATTRIBUTES,
         processenv::GetEnvironmentStringsW,
-        processthreadsapi::{ResumeThread, LPPROCESS_INFORMATION, LPSTARTUPINFOW},
+        processthreadsapi::{LPPROCESS_INFORMATION, LPSTARTUPINFOW, ResumeThread},
         winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT},
         winnt::PHANDLE,
     },
@@ -23,8 +24,6 @@ use crate::{
     MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64, MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID,
     MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID, MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR, apply_hook,
 };
-
-use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 
 fn environment_from_lpvoid(is_w16_env: bool, environment: LPVOID) -> Vec<String> {
     unsafe {
@@ -196,11 +195,12 @@ unsafe extern "system" fn create_process_internal_w_hook(
 
         let dll_path = std::env::var("MIRRORD_LAYER_FILE").unwrap();
 
-        let injector_process = InjectorOwnedProcess::from_pid((*process_information).dwProcessId).unwrap();
+        let injector_process =
+            InjectorOwnedProcess::from_pid((*process_information).dwProcessId).unwrap();
         let syringe = Syringe::for_process(injector_process);
         let payload_path = OsString::from(dll_path.clone());
         let _ = syringe.inject(payload_path).unwrap();
-        
+
         ResumeThread((*process_information).hThread);
 
         res
