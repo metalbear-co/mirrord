@@ -4,17 +4,18 @@
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
 #![feature(slice_pattern)]
+#![feature(ptr_metadata)]
 
 #[cfg(test)]
 mod tests;
 
-mod console;
 mod hooks;
 mod macros;
 pub mod process;
 
-use std::{net::SocketAddr, thread};
+use std::{io::Write, net::SocketAddr, thread};
 
+use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 pub use mirrord_layer_lib::setup::windows::layer_setup;
@@ -137,8 +138,37 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(|| {
-        mirrord_start().expect("Failed call to mirrord_start");
-        tracing::info!("mirrord-layer-win fully initialized!");
+        use process::{threads, threads::ThreadState};
+
+        // Before doing anything, suspend all other threads.
+        // NOTE(gabriela): otherwise, other logic might run before
+        // our hooks are applied.
+        //
+        // NOTE(gabriela): assumptions:
+        // 1. This process will be initiated early enough in the process lifetime, that there will
+        //    be 0 threads that *should* and *must* stay frozen.
+        //
+        // 1.1. Likewise, the [`mirrord_start`] operation, although it may create
+        //      threads at will, it should not allow for any threads that are meant to be frozen
+        //      to continue for long enough that it might come to be problematic with the freeze
+        //      logic.
+        //
+        // 2. There should be no other code intercepting execution in the same matter as mirrord
+        //    does, creating threads within the process at this time. It may work, but it has not
+        //    been tested.
+        threads::change_all_state(ThreadState::Frozen);
+
+        if let Err(e) = mirrord_start() {
+            tracing::error!("Failed call to mirrord_start: {e}");
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().flush();
+            std::process::exit(EXIT_FAILURE);
+        }
+
+        // Unsuspend other threads
+        threads::change_all_state(ThreadState::Unfrozen);
+
+        tracing::info!("mirrord-layer-win fully initialized, threads resumed!");
     });
 
     TRUE
@@ -183,11 +213,6 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
-    // Create Windows console, and redirects std handles.
-    if let Err(e) = console::create() {
-        tracing::warn!("WARNING: couldn't initialize console: {:?}", e);
-    }
-
     initialize_windows_proxy_connection()?;
     tracing::info!("ProxyConnection initialized");
 

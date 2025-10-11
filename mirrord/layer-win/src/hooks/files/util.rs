@@ -30,7 +30,9 @@ pub fn remove_root_dir_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
     }
 
     // Rust doesn't know how to separate the components in this case.
-    path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
+    if path.starts_with(GLOBAL_NAMESPACE_PATH) {
+        path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
+    }
 
     // Skip root dir
     let new_path: PathBuf = path.components().skip(1).collect();

@@ -7,6 +7,7 @@ use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress};
 
 pub mod macros;
 pub mod memory;
+pub mod threads;
 
 /// Obtains the base address of a module. `NULL` is returned if not found.
 ///
