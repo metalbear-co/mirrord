@@ -346,6 +346,18 @@ pub enum LayerError {
     GlobalAlreadyInitialized(&'static str),
 
     #[cfg(target_os = "windows")]
+    #[error("Environment variable for layer id not present")]
+    MissingLayerIdEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Environment variable for layer id not valid u64")]
+    MalformedLayerIdEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Environment variable for config not present")]
+    MissingConfigEnv,
+
+    #[cfg(target_os = "windows")]
     #[error("Console failure")]
     WindowsConsoleError(#[from] ConsoleError),
 }
