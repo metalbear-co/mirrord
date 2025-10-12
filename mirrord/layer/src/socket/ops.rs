@@ -17,8 +17,8 @@ use std::{
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
-    SocketMetadataRequest, SocketMetadataResponse,
+    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe, SocketMetadataRequest,
+    SocketMetadataResponse,
 };
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
@@ -481,7 +481,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
-    protocol: NetProtocol,
+    protocol: v2::OutgoingProtocol,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
@@ -701,15 +701,15 @@ pub(super) fn connect(
     let enabled_tcp_outgoing = crate::setup().outgoing_config().tcp;
     let enabled_udp_outgoing = crate::setup().outgoing_config().udp;
 
-    match NetProtocol::from(user_socket_info.kind) {
-        NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true>(
+    match v2::OutgoingProtocol::from(user_socket_info.kind) {
+        v2::OutgoingProtocol::Udp if enabled_udp_outgoing => connect_outgoing::<true>(
             sockfd,
             remote_address,
             user_socket_info,
-            NetProtocol::Datagrams,
+            v2::OutgoingProtocol::Udp,
         ),
 
-        NetProtocol::Stream => match user_socket_info.state {
+        v2::OutgoingProtocol::Tcp => match user_socket_info.state {
             SocketState::Initialized | SocketState::Bound(..)
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
@@ -718,7 +718,7 @@ pub(super) fn connect(
                     sockfd,
                     remote_address,
                     user_socket_info,
-                    NetProtocol::Stream,
+                    v2::OutgoingProtocol::Tcp,
                 )
             }
 
@@ -1375,7 +1375,7 @@ pub(super) fn send_to(
             sockfd,
             destination,
             user_socket_info,
-            NetProtocol::Datagrams,
+            v2::OutgoingProtocol::Udp,
         )?;
 
         let interceptor_address: SockAddr = SOCKETS
@@ -1468,7 +1468,7 @@ pub(super) fn sendmsg(
             sockfd,
             destination,
             user_socket_info,
-            NetProtocol::Datagrams,
+            v2::OutgoingProtocol::Udp,
         )?;
 
         let interceptor_address: SockAddr = SOCKETS

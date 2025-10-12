@@ -2,14 +2,14 @@
 //! This protocol does not have to be backwards compatible and can be changed freely, as the
 //! internal proxy and the layer are shipped together in a single binary.
 
-use std::{collections::HashMap, fmt, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr};
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
     FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
     dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
-    outgoing::SocketAddress,
+    outgoing::{SocketAddress, v2},
     tcp::{MirrorType, StealType},
 };
 
@@ -92,40 +92,13 @@ pub struct NewSessionRequest {
     pub process_info: ProcessInfo,
 }
 
-/// Supported network protocols when intercepting outgoing connections.
-#[derive(Encode, Decode, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum NetProtocol {
-    /// Data stream over IP (TCP) or UDS.
-    Stream,
-    /// Datagrams over IP (UDP). UDS is not supported.
-    ///
-    /// # Note
-    ///
-    /// In reality, this is a connectionless protocol.
-    /// However, one can call [`connect`](https://man7.org/linux/man-pages/man2/connect.2.html) on a datagram socket,
-    /// which alters this socket's behavior. Currently, we require this call to happen before we
-    /// intercept outgoing UDP.
-    Datagrams,
-}
-
-impl fmt::Display for NetProtocol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_str = match self {
-            Self::Stream => "STREAM",
-            Self::Datagrams => "DGRAM",
-        };
-
-        f.write_str(as_str)
-    }
-}
-
 /// A request to initiate a new outgoing connection.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectRequest {
     /// The address the user application tries to connect to.
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
-    pub protocol: NetProtocol,
+    pub protocol: v2::OutgoingProtocol,
 }
 
 /// Requests related to incoming connections.

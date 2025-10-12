@@ -4,13 +4,13 @@ use std::{collections::HashMap, fmt, io};
 
 use bytes::Bytes;
 use mirrord_intproxy_protocol::{
-    LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-    ProxyToLayerMessage, SocketMetadataResponse,
+    LayerId, MessageId, OutgoingConnectRequest, OutgoingConnectResponse, ProxyToLayerMessage,
+    SocketMetadataResponse,
 };
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, Payload, ResponseError,
     outgoing::{
-        DaemonConnect, OUTGOING_V2_VERSION, SocketAddress, tcp::DaemonTcpOutgoing,
+        DaemonConnect, LayerWrite, OUTGOING_V2_VERSION, SocketAddress, tcp::DaemonTcpOutgoing,
         udp::DaemonUdpOutgoing, v2,
     },
     uid::Uid,
@@ -28,7 +28,7 @@ use crate::{
     error::UnexpectedAgentMessage,
     local_sockets::LocalSockets,
     main_tasks::ToLayer,
-    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
+    proxies::outgoing::net_protocol_ext::{PreparedSocket, prepare_socket},
     request_queue::RequestQueue,
 };
 
@@ -58,7 +58,7 @@ pub enum OutgoingProxyError {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum ConnectionId {
-    V1(mirrord_protocol::ConnectionId, NetProtocol),
+    V1(mirrord_protocol::ConnectionId, v2::OutgoingProtocol),
     V2(mirrord_protocol::uid::Uid),
 }
 
@@ -139,11 +139,11 @@ impl OutgoingProxy {
         }
     }
 
-    /// Retrieves correct v1 [`RequestQueue`] for the given [`NetProtocol`].
-    fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue<ConnectionInProgress> {
+    /// Retrieves correct v1 [`RequestQueue`] for the given [`v2::OutgoingProtocol`].
+    fn queue(&mut self, protocol: v2::OutgoingProtocol) -> &mut RequestQueue<ConnectionInProgress> {
         match protocol {
-            NetProtocol::Datagrams => &mut self.datagrams_reqs,
-            NetProtocol::Stream => &mut self.stream_reqs,
+            v2::OutgoingProtocol::Udp => &mut self.datagrams_reqs,
+            v2::OutgoingProtocol::Tcp => &mut self.stream_reqs,
         }
     }
 
@@ -175,7 +175,7 @@ impl OutgoingProxy {
 
     fn handle_error_v1(
         &mut self,
-        protocol: NetProtocol,
+        protocol: v2::OutgoingProtocol,
         error: ResponseError,
     ) -> Result<(), OutgoingProxyError> {
         match self.queue(protocol).pop_front_with_data() {
@@ -188,14 +188,7 @@ impl OutgoingProxy {
                 Ok(())
             }
             None => {
-                let message = match protocol {
-                    NetProtocol::Datagrams => {
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Err(error)))
-                    }
-                    NetProtocol::Stream => {
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Err(error)))
-                    }
-                };
+                let message = protocol.v1_daemon_connect(Err(error));
                 Err(Box::new(UnexpectedAgentMessage(message)).into())
             }
         }
@@ -227,19 +220,12 @@ impl OutgoingProxy {
     fn handle_connect_v1(
         &mut self,
         connect: DaemonConnect,
-        proto: NetProtocol,
+        proto: v2::OutgoingProtocol,
     ) -> Result<(), OutgoingProxyError> {
         let in_progress = match self.queue(proto).pop_front_with_data() {
             Some((_, _, in_progress)) => in_progress,
             None => {
-                let message = match proto {
-                    NetProtocol::Datagrams => {
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(connect)))
-                    }
-                    NetProtocol::Stream => {
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(connect)))
-                    }
-                };
+                let message = proto.v1_daemon_connect(Ok(connect));
                 return Err(Box::new(UnexpectedAgentMessage(message)).into());
             }
         };
@@ -333,10 +319,7 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let local_socket = request
-            .protocol
-            .prepare_socket(&request.remote_address)
-            .await?;
+        let local_socket = prepare_socket(&request.remote_address, request.protocol).await?;
         let local_address = local_socket.local_address()?;
 
         let to_agent = if self
@@ -355,10 +338,7 @@ impl OutgoingProxy {
             ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
                 id,
                 address: request.remote_address,
-                protocol: match request.protocol {
-                    NetProtocol::Datagrams => v2::OutgoingProtocol::Udp,
-                    NetProtocol::Stream => v2::OutgoingProtocol::Tcp,
-                },
+                protocol: request.protocol,
             }))
         } else {
             self.queue(request.protocol).push_back_with_data(
@@ -369,7 +349,7 @@ impl OutgoingProxy {
                     remote_address: request.remote_address.clone(),
                 },
             );
-            request.protocol.wrap_agent_connect(request.remote_address)
+            request.protocol.v1_layer_connect(request.remote_address)
         };
 
         let to_layer = ToLayer {
@@ -423,7 +403,7 @@ impl BackgroundTask for OutgoingProxy {
 
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
-                            self.handle_close(ConnectionId::V1(close, NetProtocol::Stream));
+                            self.handle_close(ConnectionId::V1(close, v2::OutgoingProtocol::Tcp));
                         },
                         DaemonTcpOutgoing::Read(Err(error)) => {
                             // This error cannot be tracked to any specific connection.
@@ -431,17 +411,17 @@ impl BackgroundTask for OutgoingProxy {
                             break Err(error.into());
                         },
                         DaemonTcpOutgoing::Read(Ok(data)) => {
-                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, NetProtocol::Stream)).await;
+                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Tcp)).await;
                         },
                         DaemonTcpOutgoing::Connect(Err(error)) => {
-                            self.handle_error_v1(NetProtocol::Stream, error)?;
+                            self.handle_error_v1(v2::OutgoingProtocol::Tcp, error)?;
                         },
-                        DaemonTcpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, NetProtocol::Stream)?,
+                        DaemonTcpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Tcp)?,
                     },
 
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
-                            self.handle_close(ConnectionId::V1(close, NetProtocol::Datagrams));
+                            self.handle_close(ConnectionId::V1(close, v2::OutgoingProtocol::Udp));
                         },
                         DaemonUdpOutgoing::Read(Err(error)) => {
                             // This error cannot be tracked to any specific connection.
@@ -449,12 +429,12 @@ impl BackgroundTask for OutgoingProxy {
                             break Err(error.into());
                         },
                         DaemonUdpOutgoing::Read(Ok(data)) => {
-                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, NetProtocol::Datagrams)).await;
+                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Udp)).await;
                         },
                         DaemonUdpOutgoing::Connect(Err(error)) => {
-                            self.handle_error_v1(NetProtocol::Datagrams, error)?;
+                            self.handle_error_v1(v2::OutgoingProtocol::Udp, error)?;
                         },
-                        DaemonUdpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, NetProtocol::Datagrams)?,
+                        DaemonUdpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Udp)?,
                     },
 
                     Some(OutgoingProxyMessage::AgentOutgoing(msg)) => match msg {
@@ -486,7 +466,7 @@ impl BackgroundTask for OutgoingProxy {
                     (id, TaskUpdate::Message(bytes)) => {
                         let msg = match id {
                             ConnectionId::V1(id, proto) => {
-                                proto.wrap_agent_write(id, bytes)
+                                proto.v1_layer_write(LayerWrite { connection_id: id, bytes: bytes.into() })
                             }
                             ConnectionId::V2(id) => {
                                 ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData {
@@ -513,7 +493,7 @@ impl BackgroundTask for OutgoingProxy {
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = match id {
                                 ConnectionId::V1(id, proto) => {
-                                    proto.wrap_agent_close(id)
+                                    proto.v1_layer_close(id)
                                 }
                                 ConnectionId::V2(id) => {
                                     ClientMessage::OutgoingV2(v2::ClientOutgoing::Close(v2::OutgoingClose {
@@ -535,14 +515,13 @@ impl BackgroundTask for OutgoingProxy {
 mod test {
     use std::net::SocketAddr;
 
-    use mirrord_intproxy_protocol::{
-        LayerId, NetProtocol, OutgoingConnectRequest, ProxyToLayerMessage,
-    };
+    use mirrord_intproxy_protocol::{LayerId, OutgoingConnectRequest, ProxyToLayerMessage};
     use mirrord_protocol::{
         ClientMessage,
         outgoing::{
             DaemonConnect, LayerConnect, SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+            v2,
         },
     };
 
@@ -568,7 +547,7 @@ mod test {
                 .send(OutgoingProxyMessage::LayerConnect(
                     OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
-                        protocol: NetProtocol::Stream,
+                        protocol: v2::OutgoingProtocol::Tcp,
                     },
                     i,
                     LayerId(0),

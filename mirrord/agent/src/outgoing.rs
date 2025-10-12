@@ -15,9 +15,7 @@ use mirrord_protocol::{
     DaemonMessage, LogMessage, Payload, RemoteError, ResponseError,
     outgoing::{
         DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        v2,
+        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, v2,
     },
     uid::Uid,
 };
@@ -310,12 +308,7 @@ impl OutgoingTask {
                     ControlFlow::Continue(())
                 } else {
                     let message = match connection_id {
-                        ConnectionId::V1(id, v2::OutgoingProtocol::Tcp) => {
-                            DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(id))
-                        }
-                        ConnectionId::V1(id, v2::OutgoingProtocol::Udp) => {
-                            DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(id))
-                        }
+                        ConnectionId::V1(id, proto) => proto.v1_daemon_close(id),
                         ConnectionId::V2(id) => DaemonMessage::OutgoingV2(
                             v2::DaemonOutgoing::Close(v2::OutgoingClose { id }),
                         ),
@@ -330,20 +323,12 @@ impl OutgoingTask {
                     e.remove();
                     self.readers.remove(&connection_id);
                     match connection_id {
-                        ConnectionId::V1(id, v2::OutgoingProtocol::Tcp) => {
+                        ConnectionId::V1(id, proto) => {
                             let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                "write to outgoing TCP connection {id} failed: {error}"
+                                "write to outgoing {proto} connection {id} failed: {error}"
                             )));
                             self.send(log).await?;
-                            let close = DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(id));
-                            self.send(close).await
-                        }
-                        ConnectionId::V1(id, v2::OutgoingProtocol::Udp) => {
-                            let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                "write to outgoing UDP connection {id} failed: {error}"
-                            )));
-                            self.send(log).await?;
-                            let close = DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(id));
+                            let close = proto.v1_daemon_close(id);
                             self.send(close).await
                         }
                         ConnectionId::V2(id) => {
@@ -371,18 +356,10 @@ impl OutgoingTask {
         match result {
             Some(Ok(data)) => {
                 let message = match connection_id {
-                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(DaemonRead {
-                            connection_id,
-                            bytes: data.into(),
-                        })))
-                    }
-                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(DaemonRead {
-                            connection_id,
-                            bytes: data.into(),
-                        })))
-                    }
+                    ConnectionId::V1(connection_id, proto) => proto.v1_daemon_read(DaemonRead {
+                        connection_id,
+                        bytes: data.into(),
+                    }),
                     ConnectionId::V2(id) => {
                         DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(v2::OutgoingData {
                             id,
@@ -396,22 +373,12 @@ impl OutgoingTask {
             Some(Err(error)) => {
                 self.writers.remove(&connection_id);
                 match connection_id {
-                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
+                    ConnectionId::V1(connection_id, proto) => {
                         let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "read from outgoing TCP connection {connection_id} failed: {error}"
+                            "read from outgoing {proto} connection {connection_id} failed: {error}"
                         )));
                         self.send(log).await?;
-                        let close =
-                            DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id));
-                        self.send(close).await
-                    }
-                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
-                        let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "read from outgoing UDP connection {connection_id} failed: {error}"
-                        )));
-                        self.send(log).await?;
-                        let close =
-                            DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id));
+                        let close = proto.v1_daemon_close(connection_id);
                         self.send(close).await
                     }
                     ConnectionId::V2(id) => {
@@ -427,20 +394,11 @@ impl OutgoingTask {
             }
 
             None if self.writers.contains_key(&connection_id) => match connection_id {
-                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
-                    let read =
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(DaemonRead {
-                            connection_id,
-                            bytes: Default::default(),
-                        })));
-                    self.send(read).await
-                }
-                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
-                    let read =
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(DaemonRead {
-                            connection_id,
-                            bytes: Default::default(),
-                        })));
+                ConnectionId::V1(connection_id, proto) => {
+                    let read = proto.v1_daemon_read(DaemonRead {
+                        connection_id,
+                        bytes: Default::default(),
+                    });
                     self.send(read).await
                 }
                 ConnectionId::V2(id) => {
@@ -454,12 +412,8 @@ impl OutgoingTask {
             },
 
             None => match connection_id {
-                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp) => {
-                    let close = DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id));
-                    self.send(close).await
-                }
-                ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp) => {
-                    let close = DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id));
+                ConnectionId::V1(connection_id, proto) => {
+                    let close = proto.v1_daemon_close(connection_id);
                     self.send(close).await
                 }
                 ConnectionId::V2(id) => {
@@ -556,14 +510,7 @@ impl OutgoingTask {
                     remote_address: peer_address,
                     local_address,
                 });
-                let message = match protocol {
-                    v2::OutgoingProtocol::Tcp => {
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(message))
-                    }
-                    v2::OutgoingProtocol::Udp => {
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(message))
-                    }
-                };
+                let message = protocol.v1_daemon_connect(message);
                 self.send(message).await.map_break(Ok)?;
                 self.writers
                     .insert(ConnectionId::V1(connection_id, protocol), write);
@@ -590,19 +537,10 @@ impl OutgoingTask {
 
             Err(ConnectErr {
                 connection_id: None,
-                protocol: v2::OutgoingProtocol::Tcp,
+                protocol,
                 error,
             }) => {
-                let message = DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Err(error)));
-                self.send(message).await.map_break(Ok)
-            }
-
-            Err(ConnectErr {
-                connection_id: None,
-                protocol: v2::OutgoingProtocol::Udp,
-                error,
-            }) => {
-                let message = DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Err(error)));
+                let message = protocol.v1_daemon_connect(Err(error));
                 self.send(message).await.map_break(Ok)
             }
         }

@@ -16,9 +16,10 @@ use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+use mirrord_intproxy_protocol::PortUnsubscribe;
 use mirrord_protocol::{
-    DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
+    DnsLookupError, ResolveErrorKindInternal, ResponseError,
+    outgoing::{SocketAddress, v2},
 };
 use socket2::SockAddr;
 use tracing::warn;
@@ -141,11 +142,11 @@ impl SocketKind {
     }
 }
 
-impl From<SocketKind> for NetProtocol {
+impl From<SocketKind> for v2::OutgoingProtocol {
     fn from(kind: SocketKind) -> Self {
         match kind {
-            SocketKind::Tcp(..) => Self::Stream,
-            SocketKind::Udp(..) => Self::Datagrams,
+            SocketKind::Tcp(..) => Self::Tcp,
+            SocketKind::Udp(..) => Self::Udp,
         }
     }
 }
@@ -310,7 +311,7 @@ impl OutgoingSelector {
     fn get_connection_through(
         &self,
         address: SocketAddr,
-        protocol: NetProtocol,
+        protocol: v2::OutgoingProtocol,
     ) -> HookResult<ConnectionThrough> {
         let (filters, selector_is_local) = match self {
             Self::Unfiltered => return Ok(ConnectionThrough::Remote(address)),
@@ -390,7 +391,7 @@ trait ProtocolAndAddressFilterExt {
     fn matches(
         &self,
         address: SocketAddr,
-        protocol: NetProtocol,
+        protocol: v2::OutgoingProtocol,
         force_local_dns: bool,
     ) -> HookResult<bool>;
 }
@@ -399,11 +400,11 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
     fn matches(
         &self,
         address: SocketAddr,
-        protocol: NetProtocol,
+        protocol: v2::OutgoingProtocol,
         force_local_dns: bool,
     ) -> HookResult<bool> {
-        if let (ProtocolFilter::Tcp, NetProtocol::Datagrams)
-        | (ProtocolFilter::Udp, NetProtocol::Stream) = (self.protocol, protocol)
+        if let (ProtocolFilter::Tcp, v2::OutgoingProtocol::Udp)
+        | (ProtocolFilter::Udp, v2::OutgoingProtocol::Tcp) = (self.protocol, protocol)
         {
             return Ok(false);
         };
@@ -419,7 +420,7 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
             libc::AF_INET6
         };
 
-        let addr_protocol = if matches!(protocol, NetProtocol::Stream) {
+        let addr_protocol = if matches!(protocol, v2::OutgoingProtocol::Tcp) {
             libc::SOCK_STREAM
         } else {
             libc::SOCK_DGRAM

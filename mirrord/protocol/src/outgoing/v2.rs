@@ -2,7 +2,15 @@ use std::fmt;
 
 use bincode::{Decode, Encode};
 
-use crate::{Payload, ResponseError, outgoing::SocketAddress, uid::Uid};
+use crate::{
+    ClientMessage, ConnectionId, DaemonMessage, Payload, RemoteResult, ResponseError,
+    outgoing::{
+        DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    },
+    uid::Uid,
+};
 
 /// Client messages for the outgoing traffic feature.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -69,10 +77,64 @@ pub struct OutgoingClose {
 }
 
 /// Transport layer protocol of an outgoing connection.
+///
+/// Provides convenience methods for wrapping v1 outgoing messages into [`DaemonMessage`]s.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum OutgoingProtocol {
     Udp,
     Tcp,
+}
+
+impl OutgoingProtocol {
+    pub fn v1_daemon_close(self, connection_id: ConnectionId) -> DaemonMessage {
+        match self {
+            Self::Tcp => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id)),
+            Self::Udp => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id)),
+        }
+    }
+
+    pub fn v1_daemon_read(self, read: DaemonRead) -> DaemonMessage {
+        match self {
+            Self::Tcp => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(read))),
+            Self::Udp => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(read))),
+        }
+    }
+
+    pub fn v1_daemon_connect(self, connect: RemoteResult<DaemonConnect>) -> DaemonMessage {
+        match self {
+            Self::Tcp => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect)),
+            Self::Udp => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect)),
+        }
+    }
+
+    pub fn v1_layer_close(self, connection_id: ConnectionId) -> ClientMessage {
+        match self {
+            Self::Tcp => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
+            }
+            Self::Udp => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
+            }
+        }
+    }
+
+    pub fn v1_layer_write(self, write: LayerWrite) -> ClientMessage {
+        match self {
+            Self::Tcp => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(write)),
+            Self::Udp => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(write)),
+        }
+    }
+
+    pub fn v1_layer_connect(self, remote_address: SocketAddress) -> ClientMessage {
+        match self {
+            Self::Tcp => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                remote_address,
+            })),
+            Self::Udp => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+                remote_address,
+            })),
+        }
+    }
 }
 
 impl fmt::Display for OutgoingProtocol {

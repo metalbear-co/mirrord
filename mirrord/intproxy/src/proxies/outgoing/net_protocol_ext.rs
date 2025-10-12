@@ -7,15 +7,8 @@ use std::{
     path::PathBuf,
 };
 
-use bytes::{Bytes, BytesMut};
-use mirrord_intproxy_protocol::NetProtocol;
-use mirrord_protocol::{
-    ClientMessage, ConnectionId,
-    outgoing::{
-        LayerClose, LayerConnect, LayerWrite, SocketAddress, UnixAddr, tcp::LayerTcpOutgoing,
-        udp::LayerUdpOutgoing,
-    },
-};
+use bytes::BytesMut;
+use mirrord_protocol::outgoing::{SocketAddress, UnixAddr, v2};
 use rand::distr::{Alphanumeric, SampleString};
 use tokio::{
     fs,
@@ -23,97 +16,43 @@ use tokio::{
     net::{TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream},
 };
 
-/// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
-/// network protocols. Allows to unify logic.
-pub trait NetProtocolExt: Sized {
-    /// Creates a [`LayerWrite`] message and wraps it into the common [`ClientMessage`] type.
-    /// The enum path used here depends on this protocol.
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage;
+/// Opens a new socket for intercepting a connection to the given remote address.
+pub async fn prepare_socket(
+    remote_address: &SocketAddress,
+    proto: v2::OutgoingProtocol,
+) -> io::Result<PreparedSocket> {
+    let socket = match remote_address {
+        SocketAddress::Ip(addr) => {
+            let ip_addr = match addr.ip() {
+                IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            };
+            let bind_at = SocketAddr::new(ip_addr, 0);
 
-    /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
-    /// The enum path used here depends on this protocol.
-    fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage;
-
-    /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
-    /// The enum path used here depends on this protocol.
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage;
-
-    /// Opens a new socket for intercepting a connection to the given remote address.
-    async fn prepare_socket(self, for_remote_address: &SocketAddress)
-    -> io::Result<PreparedSocket>;
-}
-
-impl NetProtocolExt for NetProtocol {
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage {
-        match self {
-            Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
-                connection_id,
-                bytes: bytes.into(),
-            })),
-            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-                connection_id,
-                bytes: bytes.into(),
-            })),
-        }
-    }
-
-    fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage {
-        match self {
-            Self::Datagrams => {
-                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
-            }
-            Self::Stream => {
-                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
-            }
-        }
-    }
-
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
-        match self {
-            Self::Datagrams => {
-                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-                    remote_address,
-                }))
-            }
-            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-                remote_address,
-            })),
-        }
-    }
-
-    async fn prepare_socket(
-        self,
-        for_remote_address: &SocketAddress,
-    ) -> io::Result<PreparedSocket> {
-        let socket = match for_remote_address {
-            SocketAddress::Ip(addr) => {
-                let ip_addr = match addr.ip() {
-                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
-                };
-                let bind_at = SocketAddr::new(ip_addr, 0);
-
-                match self {
-                    Self::Datagrams => PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?),
-                    Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
+            match proto {
+                v2::OutgoingProtocol::Udp => {
+                    PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?)
+                }
+                v2::OutgoingProtocol::Tcp => {
+                    PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?)
                 }
             }
-            SocketAddress::Unix(..) => match self {
-                Self::Stream => {
-                    let path = PreparedSocket::generate_uds_path().await?;
-                    PreparedSocket::UnixListener(UnixListener::bind(path)?)
-                }
-                Self::Datagrams => {
-                    tracing::error!(
-                        "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
-                    );
-                    panic!("layer requested outgoing datagrams over unix sockets");
-                }
-            },
-        };
+        }
+        SocketAddress::Unix(..) => match proto {
+            v2::OutgoingProtocol::Tcp => {
+                let path = PreparedSocket::generate_uds_path().await?;
+                PreparedSocket::UnixListener(UnixListener::bind(path)?)
+            }
+            v2::OutgoingProtocol::Udp => {
+                tracing::error!(
+                    "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
+                );
+                panic!("layer requested outgoing datagrams over unix sockets");
+            }
+        },
+    };
 
-        Ok(socket)
-    }
+    Ok(socket)
 }
 
 /// A socket prepared to accept an intercepted connection.
