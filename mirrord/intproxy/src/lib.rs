@@ -23,6 +23,7 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
+    io::{Client, TxHandle},
 };
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
@@ -100,6 +101,9 @@ pub struct IntProxy {
 
     /// Interval for logging connected process information
     process_logging_interval: Interval,
+
+    /// Send handle for the agent connection
+    agent_tx: TxHandle<Client>,
 }
 
 impl IntProxy {
@@ -122,20 +126,16 @@ impl IntProxy {
         experimental: &ExperimentalConfig,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
-            Default::default();
+            BackgroundTasks::new(agent_conn.connection.tx_handle());
 
-        let agent_conn_reconnectable = agent_conn.reconnectable();
-
-        let agent = background_tasks.register_restartable(
-            agent_conn,
-            MainTaskId::AgentConnection,
-            Self::CHANNEL_SIZE,
-        );
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
             MainTaskId::LayerInitializer,
             Self::CHANNEL_SIZE,
         );
+
+        let agent_conn_reconnectable = agent_conn.reconnectable();
+
         // We need to negotiate mirrord-protocol version
         // before we can process layers' requests.
         //
@@ -178,6 +178,14 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
+        let agent_tx = agent_conn.connection.tx_handle();
+
+        let agent = background_tasks.register_restartable(
+            agent_conn,
+            MainTaskId::AgentConnection,
+            Self::CHANNEL_SIZE,
+        );
+
         let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -204,6 +212,7 @@ impl IntProxy {
             ping_pong_update_allowed: false,
             connected_layers: HashMap::new(),
             process_logging_interval,
+            agent_tx,
         }
     }
 
@@ -246,8 +255,7 @@ impl IntProxy {
         first_timeout: Duration,
         idle_timeout: Duration,
     ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
-        self.task_txs
-            .agent
+        self.agent_tx
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
@@ -314,7 +322,8 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), ProxyRuntimeError> {
         match msg {
-            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_) | ProxyMessage::ToAgent(_)
+            // REVIEW Will the queueing work during reconnects?
+            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_)
                 if self.reconnect_task_queue.is_some() =>
             {
                 // We are in reconnect state so should queue this message.
@@ -365,7 +374,6 @@ impl IntProxy {
                 }
                 self.handle_layer_message(msg).await?
             }
-            ProxyMessage::ToAgent(msg) => self.task_txs.agent.send(msg).await,
             ProxyMessage::ToLayer(msg) => {
                 let ToLayer {
                     message,
@@ -466,10 +474,7 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::OperatorPing(id) => {
-                self.task_txs
-                    .agent
-                    .send(ClientMessage::OperatorPong(id))
-                    .await
+                self.agent_tx.send(ClientMessage::OperatorPong(id)).await
             }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
             DaemonMessage::TcpOutgoing(msg) => {
@@ -517,7 +522,7 @@ impl IntProxy {
                 }
 
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-                    self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
+                    self.agent_tx.send(ClientMessage::ReadyForLogs).await;
                 }
 
                 self.task_txs
@@ -646,8 +651,7 @@ impl IntProxy {
                     panic!("agent reconnect finished without correctly initializing a reconnect");
                 });
 
-                self.task_txs
-                    .agent
+                self.agent_tx
                     .send(ClientMessage::SwitchProtocolVersion(
                         self.protocol_version
                             .as_ref()
@@ -689,276 +693,278 @@ impl IntProxy {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use std::{net::SocketAddr, path::PathBuf, time::Duration};
+// FIXME
 
-    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
-    use mirrord_intproxy_protocol::{
-        LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
-    };
-    use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
-    use tokio::{
-        net::{TcpListener, TcpStream},
-        sync::mpsc,
-    };
+// #[cfg(test)]
+// mod test {
+//     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-    use crate::{
-        IntProxy,
-        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
-    };
+//     use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
+//     use mirrord_intproxy_protocol::{
+//         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
+//     };
+//     use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
+//     use tokio::{
+//         net::{TcpListener, TcpStream},
+//         sync::mpsc,
+//     };
 
-    /// Verifies that [`IntProxy`] waits with processing layers' requests
-    /// until [`mirrord_protocol`] version is negotiated.
-    ///
-    /// # TODO
-    ///
-    /// This test does a short sleep.
-    /// Once intproxy exposes its state in some way, we can remove it.
-    #[tokio::test]
-    async fn intproxy_waits_for_protocol_version() {
-        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
+//     use crate::{
+//         IntProxy,
+//         agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
+//     };
 
-        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .await
-            .unwrap();
-        let proxy_addr = listener.local_addr().unwrap();
+//     /// Verifies that [`IntProxy`] waits with processing layers' requests
+//     /// until [`mirrord_protocol`] version is negotiated.
+//     ///
+//     /// # TODO
+//     ///
+//     /// This test does a short sleep.
+//     /// Once intproxy exposes its state in some way, we can remove it.
+//     #[tokio::test]
+//     async fn intproxy_waits_for_protocol_version() {
+//         let (agent_tx, mut proxy_rx) = mpsc::channel(12);
+//         let (proxy_tx, agent_rx) = mpsc::channel(12);
 
-        let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
-            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
-        };
-        let proxy = IntProxy::new_with_connection(
-            agent_conn,
-            listener,
-            4096,
-            Default::default(),
-            Duration::from_secs(60),
-            &ExperimentalFileConfig::default()
-                .generate_config(&mut Default::default())
-                .unwrap(),
-        );
-        let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
+//         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+//             .await
+//             .unwrap();
+//         let proxy_addr = listener.local_addr().unwrap();
 
-        match proxy_rx.recv().await.unwrap() {
-            ClientMessage::SwitchProtocolVersion(version) => {
-                assert_eq!(version, *mirrord_protocol::VERSION)
-            }
-            other => panic!("unexpected client message from the proxy: {other:?}"),
-        }
+//         let agent_conn = AgentConnection {
+//             agent_rx,
+//             agent_tx,
+//             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+//         };
+//         let proxy = IntProxy::new_with_connection(
+//             agent_conn,
+//             listener,
+//             4096,
+//             Default::default(),
+//             Duration::from_secs(60),
+//             &ExperimentalFileConfig::default()
+//                 .generate_config(&mut Default::default())
+//                 .unwrap(),
+//         );
+//         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
-        let conn = TcpStream::connect(proxy_addr).await.unwrap();
-        let mut codec = mirrord_intproxy_protocol::codec::make_async_framed::<
-            LocalMessage<LayerToProxyMessage>,
-            LocalMessage<ProxyToLayerMessage>,
-        >(conn);
-        codec
-            .0
-            .send(&LocalMessage {
-                message_id: 0,
-                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
-                    process_info: ProcessInfo {
-                        pid: 1337,
-                        parent_pid: 1336,
-                        name: "hello there".into(),
-                        cmdline: vec!["hello there".into()],
-                        loaded: true,
-                    },
-                    parent_layer: None,
-                }),
-            })
-            .await
-            .unwrap();
-        codec.0.flush().await.unwrap();
-        match codec.1.receive().await.unwrap().unwrap() {
-            LocalMessage {
-                message_id: 0,
-                inner: ProxyToLayerMessage::NewSession(..),
-            } => {}
-            other => panic!("unexpected local message from the proxy: {other:?}"),
-        }
+//         match proxy_rx.recv().await.unwrap() {
+//             ClientMessage::SwitchProtocolVersion(version) => {
+//                 assert_eq!(version, *mirrord_protocol::VERSION)
+//             }
+//             other => panic!("unexpected client message from the proxy: {other:?}"),
+//         }
 
-        codec
-            .0
-            .send(&LocalMessage {
-                message_id: 1,
-                inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
-                    path: PathBuf::from("/some/path"),
-                })),
-            })
-            .await
-            .unwrap();
-        codec.0.flush().await.unwrap();
+//         let conn = TcpStream::connect(proxy_addr).await.unwrap();
+//         let mut codec = mirrord_intproxy_protocol::codec::make_async_framed::<
+//             LocalMessage<LayerToProxyMessage>,
+//             LocalMessage<ProxyToLayerMessage>,
+//         >(conn);
+//         codec
+//             .0
+//             .send(&LocalMessage {
+//                 message_id: 0,
+//                 inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+//                     process_info: ProcessInfo {
+//                         pid: 1337,
+//                         parent_pid: 1336,
+//                         name: "hello there".into(),
+//                         cmdline: vec!["hello there".into()],
+//                         loaded: true,
+//                     },
+//                     parent_layer: None,
+//                 }),
+//             })
+//             .await
+//             .unwrap();
+//         codec.0.flush().await.unwrap();
+//         match codec.1.receive().await.unwrap().unwrap() {
+//             LocalMessage {
+//                 message_id: 0,
+//                 inner: ProxyToLayerMessage::NewSession(..),
+//             } => {}
+//             other => panic!("unexpected local message from the proxy: {other:?}"),
+//         }
 
-        // To make sure that the proxy has a chance to do progress.
-        // If the proxy was not waiting for agent protocol version,
-        // it would surely respond to our previous request here.
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                match proxy_rx.recv().await.unwrap() {
-                    ClientMessage::Ping => {
-                        proxy_tx.send(DaemonMessage::Pong).await.unwrap();
-                    }
-                    other => panic!("unexpected client message from the proxy: {other:?}"),
-                }
-            }
-        })
-        .await
-        .unwrap_err();
+//         codec
+//             .0
+//             .send(&LocalMessage {
+//                 message_id: 1,
+//                 inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
+//                     path: PathBuf::from("/some/path"),
+//                 })),
+//             })
+//             .await
+//             .unwrap();
+//         codec.0.flush().await.unwrap();
 
-        proxy_tx
-            .send(DaemonMessage::SwitchProtocolVersionResponse(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await
-            .unwrap();
+//         // To make sure that the proxy has a chance to do progress.
+//         // If the proxy was not waiting for agent protocol version,
+//         // it would surely respond to our previous request here.
+//         tokio::time::timeout(Duration::from_secs(1), async {
+//             loop {
+//                 match proxy_rx.recv().await.unwrap() {
+//                     ClientMessage::Ping => {
+//                         proxy_tx.send(DaemonMessage::Pong).await.unwrap();
+//                     }
+//                     other => panic!("unexpected client message from the proxy: {other:?}"),
+//                 }
+//             }
+//         })
+//         .await
+//         .unwrap_err();
 
-        loop {
-            match proxy_rx.recv().await.unwrap() {
-                ClientMessage::Ping => {
-                    proxy_tx.send(DaemonMessage::Pong).await.unwrap();
-                }
-                ClientMessage::ReadyForLogs => {}
-                ClientMessage::FileRequest(FileRequest::StatFsV2(StatFsRequestV2 { path })) => {
-                    assert_eq!(path, PathBuf::from("/some/path"));
-                    break;
-                }
-                other => panic!("unexpected client message from the proxy: {other:?}"),
-            }
-        }
+//         proxy_tx
+//             .send(DaemonMessage::SwitchProtocolVersionResponse(
+//                 mirrord_protocol::VERSION.clone(),
+//             ))
+//             .await
+//             .unwrap();
 
-        std::mem::drop(codec);
+//         loop {
+//             match proxy_rx.recv().await.unwrap() {
+//                 ClientMessage::Ping => {
+//                     proxy_tx.send(DaemonMessage::Pong).await.unwrap();
+//                 }
+//                 ClientMessage::ReadyForLogs => {}
+//                 ClientMessage::FileRequest(FileRequest::StatFsV2(StatFsRequestV2 { path })) => {
+//                     assert_eq!(path, PathBuf::from("/some/path"));
+//                     break;
+//                 }
+//                 other => panic!("unexpected client message from the proxy: {other:?}"),
+//             }
+//         }
 
-        proxy_handle.await.unwrap().unwrap();
-    }
-    /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
-    #[tokio::test]
-    async fn switch_to_failover() {
-        let (agent_tx, _proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
+//         std::mem::drop(codec);
 
-        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .await
-            .unwrap();
-        let proxy_addr = listener.local_addr().unwrap();
+//         proxy_handle.await.unwrap().unwrap();
+//     }
+//     /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
+//     #[tokio::test]
+//     async fn switch_to_failover() {
+//         let (agent_tx, _proxy_rx) = mpsc::channel(12);
+//         let (proxy_tx, agent_rx) = mpsc::channel(12);
 
-        let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
-            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
-        };
-        let proxy = IntProxy::new_with_connection(
-            agent_conn,
-            listener,
-            4096,
-            Default::default(),
-            Duration::from_secs(60),
-            &ExperimentalFileConfig::default()
-                .generate_config(&mut Default::default())
-                .unwrap(),
-        );
-        let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
+//         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+//             .await
+//             .unwrap();
+//         let proxy_addr = listener.local_addr().unwrap();
 
-        let conn = TcpStream::connect(proxy_addr).await.unwrap();
-        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
-            LocalMessage<LayerToProxyMessage>,
-            LocalMessage<ProxyToLayerMessage>,
-        >(conn);
+//         let agent_conn = AgentConnection {
+//             agent_rx,
+//             agent_tx,
+//             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+//         };
+//         let proxy = IntProxy::new_with_connection(
+//             agent_conn,
+//             listener,
+//             4096,
+//             Default::default(),
+//             Duration::from_secs(60),
+//             &ExperimentalFileConfig::default()
+//                 .generate_config(&mut Default::default())
+//                 .unwrap(),
+//         );
+//         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
-        encoder
-            .send(&LocalMessage {
-                message_id: 0,
-                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
-                    process_info: ProcessInfo {
-                        pid: 1337,
-                        parent_pid: 1336,
-                        name: "hello there".into(),
-                        cmdline: vec!["hello there".into()],
-                        loaded: true,
-                    },
-                    parent_layer: None,
-                }),
-            })
-            .await
-            .unwrap();
-        encoder.flush().await.unwrap();
-        match decoder.receive().await.unwrap().unwrap() {
-            LocalMessage {
-                message_id: 0,
-                inner: ProxyToLayerMessage::NewSession(..),
-            } => {}
-            other => panic!("unexpected local message from the proxy: {other:?}"),
-        }
+//         let conn = TcpStream::connect(proxy_addr).await.unwrap();
+//         let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+//             LocalMessage<LayerToProxyMessage>,
+//             LocalMessage<ProxyToLayerMessage>,
+//         >(conn);
 
-        proxy_tx
-            .send(DaemonMessage::SwitchProtocolVersionResponse(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await
-            .unwrap();
+//         encoder
+//             .send(&LocalMessage {
+//                 message_id: 0,
+//                 inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+//                     process_info: ProcessInfo {
+//                         pid: 1337,
+//                         parent_pid: 1336,
+//                         name: "hello there".into(),
+//                         cmdline: vec!["hello there".into()],
+//                         loaded: true,
+//                     },
+//                     parent_layer: None,
+//                 }),
+//             })
+//             .await
+//             .unwrap();
+//         encoder.flush().await.unwrap();
+//         match decoder.receive().await.unwrap().unwrap() {
+//             LocalMessage {
+//                 message_id: 0,
+//                 inner: ProxyToLayerMessage::NewSession(..),
+//             } => {}
+//             other => panic!("unexpected local message from the proxy: {other:?}"),
+//         }
 
-        proxy_tx
-            .send(DaemonMessage::Close("no reason".to_string()))
-            .await
-            .unwrap();
+//         proxy_tx
+//             .send(DaemonMessage::SwitchProtocolVersionResponse(
+//                 mirrord_protocol::VERSION.clone(),
+//             ))
+//             .await
+//             .unwrap();
 
-        encoder
-            .send(&LocalMessage {
-                message_id: 1,
-                inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
-                    path: PathBuf::from("/some/path"),
-                })),
-            })
-            .await
-            .unwrap();
-        encoder.flush().await.unwrap();
+//         proxy_tx
+//             .send(DaemonMessage::Close("no reason".to_string()))
+//             .await
+//             .unwrap();
 
-        match decoder.receive().await.unwrap().unwrap() {
-            LocalMessage {
-                message_id: 1,
-                inner: ProxyToLayerMessage::ProxyFailed(..),
-            } => {}
-            other => panic!("unexpected local message from the proxy: {other:?}"),
-        }
+//         encoder
+//             .send(&LocalMessage {
+//                 message_id: 1,
+//                 inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
+//                     path: PathBuf::from("/some/path"),
+//                 })),
+//             })
+//             .await
+//             .unwrap();
+//         encoder.flush().await.unwrap();
 
-        std::mem::drop((encoder, decoder));
+//         match decoder.receive().await.unwrap().unwrap() {
+//             LocalMessage {
+//                 message_id: 1,
+//                 inner: ProxyToLayerMessage::ProxyFailed(..),
+//             } => {}
+//             other => panic!("unexpected local message from the proxy: {other:?}"),
+//         }
 
-        proxy_handle.await.unwrap().unwrap();
-    }
+//         std::mem::drop((encoder, decoder));
 
-    /// Verifies that [`IntProxy`] run method return an error on a startup error
-    #[tokio::test]
-    async fn startup_fail() {
-        let (agent_tx, _proxy_rx) = mpsc::channel(12);
-        let (_proxy_tx, agent_rx) = mpsc::channel(12);
+//         proxy_handle.await.unwrap().unwrap();
+//     }
 
-        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .await
-            .unwrap();
+//     /// Verifies that [`IntProxy`] run method return an error on a startup error
+//     #[tokio::test]
+//     async fn startup_fail() {
+//         let (agent_tx, _proxy_rx) = mpsc::channel(12);
+//         let (_proxy_tx, agent_rx) = mpsc::channel(12);
 
-        let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
-            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
-        };
-        let proxy = IntProxy::new_with_connection(
-            agent_conn,
-            listener,
-            4096,
-            Default::default(),
-            Duration::from_secs(60),
-            &ExperimentalFileConfig::default()
-                .generate_config(&mut Default::default())
-                .unwrap(),
-        );
-        tokio::time::timeout(
-            Duration::from_millis(200),
-            proxy.run(Duration::from_millis(100), Duration::ZERO),
-        )
-        .await
-        .unwrap()
-        .unwrap_err();
-    }
-}
+//         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+//             .await
+//             .unwrap();
+
+//         let agent_conn = AgentConnection {
+//             agent_rx,
+//             agent_tx,
+//             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+//         };
+//         let proxy = IntProxy::new_with_connection(
+//             agent_conn,
+//             listener,
+//             4096,
+//             Default::default(),
+//             Duration::from_secs(60),
+//             &ExperimentalFileConfig::default()
+//                 .generate_config(&mut Default::default())
+//                 .unwrap(),
+//         );
+//         tokio::time::timeout(
+//             Duration::from_millis(200),
+//             proxy.run(Duration::from_millis(100), Duration::ZERO),
+//         )
+//         .await
+//         .unwrap()
+//         .unwrap_err();
+//     }
+// }

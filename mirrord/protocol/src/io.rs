@@ -6,23 +6,16 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
-use bincode::{Decode, Encode, error::DecodeError};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt, stream::SplitSink};
+use actix_codec::{AsyncRead, AsyncWrite, Framed};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use rand::seq::IteratorRandom;
-use semver::Version;
 use tokio::{
     select,
-    sync::{Notify, mpsc},
+    sync::{Notify, futures::OwnedNotified, mpsc},
 };
-use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
-use crate::{
-    ClientMessage, ConnectionId, DaemonMessage, Payload, ProtocolCodec, ToPayload, VERSION,
-    file::CHUNKED_PROTOCOL_VERSION,
-};
+use crate::{ClientMessage, ConnectionId, DaemonMessage, ProtocolCodec};
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + Unpin + 'static {}
 impl<T: AsyncWrite + AsyncRead + Send + Unpin + 'static> AsyncIO for T {}
@@ -56,19 +49,9 @@ pub trait Queueable: Sized {
     fn queue_id(&self) -> QueueId<Self>;
 }
 
-pub struct NegotiationResult<Type: ProtocolEndpoint> {
-    mode: Mode,
-    version: Option<Version>,
-    first_unprocessed_message: Option<Type::InMsg>,
-}
-
 pub trait ProtocolEndpoint: 'static + Sized {
     type InMsg: bincode::Decode<()> + Send;
     type OutMsg: bincode::Encode + Send + Queueable;
-
-    fn negotiate<Channel: Transport<Self::InMsg, Self::OutMsg>>(
-        io: &mut Channel,
-    ) -> impl Future<Output = Result<NegotiationResult<Self>, ProtocolError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -85,205 +68,71 @@ pub struct Agent;
 impl ProtocolEndpoint for Client {
     type InMsg = DaemonMessage;
     type OutMsg = ClientMessage;
-
-    async fn negotiate<Channel: Transport<Self::InMsg, Self::OutMsg>>(
-        io: &mut Channel,
-    ) -> Result<NegotiationResult<Self>, ProtocolError> {
-        io.send(ClientMessage::SwitchProtocolVersion(VERSION.clone()))
-            .await?;
-
-        let version = match io.next().await {
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "unable to receive agent response",
-                )
-                .into());
-            }
-            Some(Err(err)) => return Err(err.into()),
-            Some(Ok(DaemonMessage::SwitchProtocolVersionResponse(version))) => Some(version),
-            Some(Ok(_)) => {
-                return Err(ProtocolError::UnexpectedPeerMessage);
-            }
-        };
-
-        let mode = match &version {
-            Some(v) if CHUNKED_PROTOCOL_VERSION.matches(v) => Mode::Chunked,
-            _ => Mode::Legacy,
-        };
-
-        Ok(NegotiationResult {
-            mode,
-            version,
-            first_unprocessed_message: None,
-        })
-    }
 }
 
 impl ProtocolEndpoint for Agent {
     type InMsg = ClientMessage;
     type OutMsg = DaemonMessage;
-
-    async fn negotiate<Channel: Transport<Self::InMsg, Self::OutMsg>>(
-        io: &mut Channel,
-    ) -> Result<NegotiationResult<Self>, ProtocolError> {
-        // REVIEW: Fix multiple switchprotocolversions taking place
-        match io.next().await {
-            None => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "unable to receive client switch protocol requst",
-            )
-            .into()),
-            Some(Err(err)) => Err(err.into()),
-            Some(Ok(ClientMessage::SwitchProtocolVersion(client_version))) => {
-                let version = Ord::min(&client_version, &VERSION).clone();
-                io.send(DaemonMessage::SwitchProtocolVersionResponse(
-                    version.clone(),
-                ))
-                .await?;
-
-                Ok(NegotiationResult {
-                    mode: if CHUNKED_PROTOCOL_VERSION.matches(&version) {
-                        Mode::Chunked
-                    } else {
-                        Mode::Legacy
-                    },
-                    version: Some(version),
-                    first_unprocessed_message: None,
-                })
-            }
-            Some(Ok(other)) => Ok(NegotiationResult {
-                mode: Mode::Legacy,
-                version: None,
-                first_unprocessed_message: Some(other),
-            }),
-        }
-    }
 }
 
 pub struct Connection<Type: ProtocolEndpoint> {
-    pub tx: mpsc::Sender<Type::OutMsg>,
     pub rx: mpsc::Receiver<Type::InMsg>,
-    pub version: Option<Version>,
+    tx_handle: TxHandle<Type>,
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
     pub async fn from_stream<IO: AsyncIO>(inner: IO) -> Result<Self, ProtocolError> {
-        let mut framed = Framed::new(inner, ProtocolCodec::<Type::InMsg, Type::OutMsg>::default());
-
-        let NegotiationResult {
-            mode,
-            version,
-            first_unprocessed_message,
-        } = Type::negotiate(&mut framed).await?;
+        let framed = Framed::new(inner, ProtocolCodec::<Type::InMsg, Vec<u8>>::default());
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
-        let (outbound_tx, outbound_rx) = mpsc::channel(64);
 
-        if let Some(msg) = first_unprocessed_message {
-            inbound_tx.send(msg).await.unwrap();
-        };
+        let out_queues = Arc::new(OutQueues {
+            queues: Mutex::new(HashMap::new()),
+            nonempty: Arc::new(Notify::new()),
+        });
 
-        match mode {
-            Mode::Legacy => {
-                tokio::spawn(io_task_legacy::<_, Type>(framed, outbound_rx, inbound_tx))
-            }
-            Mode::Chunked => tokio::spawn(io_task_chunked::<_, Type>(
-                framed.replace_codec(SimpleChunkCodec),
-                outbound_rx,
-                inbound_tx,
-            )),
-        };
+        let tx_handle = TxHandle(out_queues.clone());
+
+        tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
 
         Ok(Self {
-            tx: outbound_tx,
             rx: inbound_rx,
-            version,
+            tx_handle,
         })
-    }
-
-    pub async fn from_channel<In, Out, Underlying, E>(channel: Underlying) -> Result<Self, ProtocolError>
-    where
-        io::Error: From<E>,
-        Underlying: Transport<In, Out>,
-        BytesMut: TryFrom<In, Error = E>,
-        Out: From<Bytes>,
-    {
-        let mut codec = ProtocolCodec::<Type::InMsg, Type::OutMsg>::default();
-
-        let legacy = channel
-            .with(move |o| async move {
-                let mut buf = BytesMut::new();
-                codec.encode(o, &mut buf).unwrap();
-                Ok::<_, io::Error>(Out::from(buf.freeze()))
-            })
-            .try_filter_map(move |i| async move {
-                let mut buf = BytesMut::try_from(i)?;
-                let msg = codec.decode(&mut buf)?.unwrap();
-                Ok(Some(msg))
-            });
-
-        let NegotiationResult {
-            mode,
-            version,
-            first_unprocessed_message,
-        } = Type::negotiate(&mut legacy).await?;
-
-        let (inbound_tx, inbound_rx) = mpsc::channel(64);
-        let (outbound_tx, outbound_rx) = mpsc::channel(64);
-
-        if let Some(msg) = first_unprocessed_message {
-            inbound_tx.send(msg).await.unwrap();
-        };
-
-        match mode {
-            Mode::Legacy => {
-                tokio::spawn(io_task_legacy::<_, Type>(legacy, outbound_rx, inbound_tx))
-            }
-            Mode::Chunked => tokio::spawn(io_task_chunked::<_, Type>(
-                legacy.replace_codec(SimpleChunkCodec),
-                outbound_rx,
-                inbound_tx,
-            )),
-        };
-
-        Ok(Self {
-            tx: outbound_tx,
-            rx: inbound_rx,
-            version,
-        })
-    }
-
-    #[inline]
-    pub async fn send(
-        &self,
-        msg: Type::OutMsg,
-    ) -> Result<(), mpsc::error::SendError<Type::OutMsg>> {
-        self.tx.send(msg).await
     }
 
     #[inline]
     pub async fn recv(&mut self) -> Option<Type::InMsg> {
         self.rx.recv().await
     }
+
+    #[inline]
+    pub async fn send(&self, msg: Type::OutMsg) {
+        self.tx_handle.send(msg).await
+    }
+
+    #[inline]
+    pub fn tx_handle(&self) -> TxHandle<Type> {
+        self.tx_handle.clone()
+    }
 }
 
 #[instrument(skip_all)]
-async fn io_task_legacy<Channel, Type>(
+async fn io_task<Channel, Type>(
     mut framed: Channel,
-    mut rx: mpsc::Receiver<Type::OutMsg>,
+    queues: Arc<OutQueues<Type::OutMsg>>,
     tx: mpsc::Sender<Type::InMsg>,
 ) where
     Type: ProtocolEndpoint,
-    Channel: Transport<Type::InMsg, Type::OutMsg>,
+    Channel: Transport<Type::InMsg, Vec<u8>>,
 {
     loop {
         select! {
-            to_send = rx.recv() => {
+            to_send = queues.next() => {
                 let Some(to_send) = to_send else {
-                    tracing::info!("io task rx channel closed");
-                    break;
+                    continue;
                 };
+
                 if let Err(err) = framed.send(to_send).await {
                     tracing::error!(?err, "failed to send message");
                     break;
@@ -311,123 +160,6 @@ async fn io_task_legacy<Channel, Type>(
     }
 
     let _ = framed.close().await;
-}
-
-type MessageId = u16;
-type PayloadLen = u32;
-
-#[derive(Debug, Encode, Decode)]
-struct Chunk {
-    id: MessageId,
-    payload: Payload,
-}
-
-impl Chunk {
-    const ID_SIZE: usize = size_of::<MessageId>();
-    const PAYLOAD_LEN_SIZE: usize = size_of::<PayloadLen>();
-
-    const HEADER_SIZE: usize = Self::ID_SIZE + Self::PAYLOAD_LEN_SIZE;
-}
-
-struct OutMessage {
-    encoded: Bytes,
-    next_chunk_offset: u32,
-    id: MessageId,
-}
-
-impl OutMessage {
-    fn encode<T: bincode::Encode>(message: T, id: MessageId) -> Self {
-        let encoded: Bytes = bincode::encode_to_vec(message, bincode::config::standard())
-            .expect("failed to encode message")
-            .into();
-
-        Self {
-            encoded,
-            next_chunk_offset: 0,
-            id,
-        }
-    }
-}
-
-/// REVIEW make this configurable
-const CHUNK_SIZE: u32 = 1024 * 128;
-
-impl Iterator for OutMessage {
-    type Item = Chunk;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let size = Ord::min(
-            CHUNK_SIZE,
-            self.encoded.len() as PayloadLen - self.next_chunk_offset,
-        );
-
-        if size == 0 {
-            return None;
-        }
-
-        let payload = self
-            .encoded
-            .slice(self.next_chunk_offset as usize..(self.next_chunk_offset + size) as usize)
-            .into();
-
-        self.next_chunk_offset += size;
-
-        Some(Chunk {
-            id: self.id,
-            payload,
-        })
-    }
-}
-
-#[derive(Default)]
-struct InBuffers {
-    partially_received: HashMap<MessageId, Vec<u8>>,
-}
-
-struct SimpleChunkCodec;
-
-// Seems to be a little faster than bincode
-impl Encoder<Chunk> for SimpleChunkCodec {
-    type Error = io::Error;
-
-    fn encode(&mut self, chunk: Chunk, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.put_u16(chunk.id);
-        dst.put_u32(chunk.payload.len() as PayloadLen);
-        dst.put(chunk.payload.0);
-        Ok(())
-    }
-}
-
-impl Decoder for SimpleChunkCodec {
-    type Item = Chunk;
-
-    type Error = io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() < Chunk::ID_SIZE + Chunk::PAYLOAD_LEN_SIZE + 1 {
-            return Ok(None);
-        }
-
-        let expected_len = PayloadLen::from_be_bytes(
-            src[Chunk::ID_SIZE..Chunk::ID_SIZE + Chunk::PAYLOAD_LEN_SIZE]
-                .try_into()
-                .unwrap(),
-        ) as usize;
-
-        let actual_payload_size = src.len() - Chunk::HEADER_SIZE;
-
-        if expected_len > actual_payload_size {
-            src.reserve(expected_len - actual_payload_size);
-            return Ok(None);
-        }
-
-        let id = MessageId::from_be_bytes(src[0..Chunk::ID_SIZE].try_into().unwrap());
-        let payload = (&src[Chunk::HEADER_SIZE..Chunk::HEADER_SIZE + expected_len]).to_payload();
-
-        src.advance(expected_len + Chunk::HEADER_SIZE);
-
-        Ok(Some(Chunk { id, payload }))
-    }
 }
 
 pub enum QueueId<T> {
@@ -470,165 +202,88 @@ impl<T> Eq for QueueId<T> {}
 
 #[derive(Default)]
 struct OutQueue {
-    messages: VecDeque<OutMessage>,
+    messages: VecDeque<Vec<u8>>,
+    used_bytes: usize,
+
+    free: Arc<Notify>,
 }
 
 struct OutQueues<T> {
     queues: Mutex<HashMap<QueueId<T>, OutQueue>>,
-    can_send: Notify,
+    nonempty: Arc<Notify>,
 }
 
-#[instrument(skip_all)]
-async fn io_task_chunked<Channel, Type: ProtocolEndpoint>(
-    stream: Channel,
-    mut rx: mpsc::Receiver<Type::OutMsg>,
-    tx: mpsc::Sender<Type::InMsg>,
-) where
-    Channel: Transport<Chunk, Chunk>,
-{
-    let out_queues = Arc::new(OutQueues {
-        queues: Mutex::new(HashMap::new()),
-        can_send: Notify::new(),
-    });
+impl<T> OutQueues<T> {
+    const MAX_CAPACITY: usize = 1024 * 16;
+    fn try_push(
+        &self,
+        queue_id: QueueId<T>,
+        encoded: Vec<u8>,
+    ) -> Result<(), (Vec<u8>, OwnedNotified)> {
+        let mut lock = self.queues.lock().unwrap();
+        let queue = lock.entry(queue_id.clone()).or_default();
 
-    let mut in_buffers = InBuffers::default();
+        if queue.used_bytes > Self::MAX_CAPACITY {
+            return Err((encoded, queue.free.clone().notified_owned()));
+        }
 
-    let mut tx_id: MessageId = 0;
+        queue.used_bytes += encoded.len();
+        queue.messages.push_back(encoded);
 
-    let (framed_out, mut framed_in) = stream.split();
+        drop(lock);
 
-    let cancel = CancellationToken::new();
+        self.nonempty.notify_waiters();
 
-    let tx_task_handle = tokio::spawn(tx_task::<_, Type>(
-        out_queues.clone(),
-        framed_out,
-        cancel.clone(),
-    ));
+        Ok(())
+    }
 
-    loop {
-        select! {
-            to_send = rx.recv() => {
-                let Some(to_send) = to_send else {
-                    tracing::info!("no more messages, closing task");
-                    break;
-                };
+    async fn next(&self) -> Option<Vec<u8>> {
+        self.nonempty.notified().await;
 
-                let queue_id = to_send.queue_id();
-                let encoded = OutMessage::encode(to_send, tx_id);
+        let mut lock = self.queues.lock().unwrap();
+        let mut rng = rand::rng();
 
-                // By the time we overflow, the first messages will
-                // most certainly have been received.
-                tx_id = tx_id.overflowing_add(1).0;
+        loop {
+            let random_key = lock.keys().choose(&mut rng).cloned()?;
+            let queue = lock.get_mut(&random_key).unwrap();
+            let Some(next) = queue.messages.pop_front() else {
+                lock.remove(&random_key);
+                continue;
+            };
 
-                out_queues.queues.lock().unwrap().entry(queue_id).or_default().messages.push_back(encoded);
-                out_queues.can_send.notify_one();
+            let was_full = queue.used_bytes >= Self::MAX_CAPACITY;
+
+            queue.used_bytes -= next.len();
+
+            if was_full && queue.used_bytes < Self::MAX_CAPACITY {
+                queue.free.notify_waiters();
             }
-            received = framed_in.next() => {
-                let Chunk { id, payload } = match received {
-                    Some(Ok(c)) => c,
-                    Some(Err(err)) => {
-                        tracing::error!(?err, "failed to receive chunk");
-                        break;
-                    },
-                    None => {
-                        tracing::info!("stream closed, exiting task");
-                        break;
-                    },
-                };
 
-                let buffer = in_buffers
-                    .partially_received
-                    .entry(id)
-                    .or_default();
-                buffer.extend_from_slice(&payload);
+            return Some(next);
+        }
+    }
+}
 
-                drop(payload);
+pub struct TxHandle<Type: ProtocolEndpoint>(Arc<OutQueues<Type::OutMsg>>);
+impl<Type: ProtocolEndpoint> Clone for TxHandle<Type> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 
-                let decode_result = bincode::decode_from_slice(&buffer, bincode::config::standard());
+impl<Type: ProtocolEndpoint> TxHandle<Type> {
+    pub async fn send(&self, msg: Type::OutMsg) {
+        let queue_id = msg.queue_id();
+        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
 
-                match decode_result {
-                    Ok((message, size)) => {
-                        let buffer = in_buffers.partially_received.remove(&id).unwrap();
-                        assert_eq!(size, buffer.len());
-                        drop(buffer);
-
-                        if let Err(err) = tx.send(message).await {
-                            tracing::info!(?err, "io task channel closed");
-                            break;
-                        }
-                    },
-                    Err(DecodeError::UnexpectedEnd { .. } ) => (),
-                    Err(e) => {
-                        tracing::error!("chunk decoding error: {e}");
-                        break;
-                    },
+        loop {
+            match self.0.try_push(queue_id.clone(), encoded) {
+                Ok(()) => break,
+                Err((r, notify)) => {
+                    encoded = r;
+                    notify.await;
                 }
             }
-            _ = cancel.cancelled() => break
         }
     }
-
-    cancel.cancel();
-
-    let framed_out = tx_task_handle.await.expect("tx task paniced");
-    let mut framed = framed_in.reunite(framed_out).unwrap();
-
-    let _ = framed.close().await;
-}
-
-#[instrument(skip_all)]
-async fn tx_task<Channel: Transport<Chunk, Chunk>, Type: ProtocolEndpoint>(
-    state: Arc<OutQueues<Type::OutMsg>>,
-    mut framed: SplitSink<Channel, Chunk>,
-    cancel: CancellationToken,
-) -> SplitSink<Channel, Chunk> {
-    let mut maybe_have_more = false;
-    'outer: loop {
-        if !maybe_have_more {
-            select! {
-                _ = state.can_send.notified() => (),
-                _ = cancel.cancelled() => break,
-            }
-        } else {
-            if cancel.is_cancelled() {
-                break;
-            }
-        }
-
-        let next_chunk = {
-            let mut lock = state.queues.lock().unwrap();
-            let mut rng = rand::rng();
-
-            'find_queue: loop {
-                let Some(id) = lock.keys().choose(&mut rng).cloned() else {
-                    maybe_have_more = false;
-                    continue 'outer;
-                };
-                let queue = lock.get_mut(&id).unwrap();
-
-                break loop {
-                    let Some(msg) = queue.messages.front_mut() else {
-                        lock.remove(&id);
-                        continue 'find_queue;
-                    };
-
-                    match msg.next() {
-                        Some(chunk) => break chunk,
-                        None => {
-                            queue.messages.pop_front();
-                        }
-                    }
-                };
-            }
-        };
-
-        if let Err(err) = framed.send(next_chunk).await {
-            tracing::error!(?err, "sending chunk failed");
-            cancel.cancel();
-            break 'outer;
-        }
-        maybe_have_more = true;
-    }
-
-    framed
 }

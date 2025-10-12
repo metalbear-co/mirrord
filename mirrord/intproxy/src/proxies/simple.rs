@@ -166,7 +166,7 @@ impl BackgroundTask for SimpleProxy {
                     self.addr_info_reqs.push_back(message_id, session_id);
                     if self.addr_info_v2() {
                         message_bus
-                            .send(ClientMessage::GetAddrInfoRequestV2(req))
+                            .send_agent(ClientMessage::GetAddrInfoRequestV2(req))
                             .await;
                     } else {
                         if matches!(req.family, AddressFamily::Ipv6Only) {
@@ -178,7 +178,7 @@ impl BackgroundTask for SimpleProxy {
                             )
                         }
                         message_bus
-                            .send(ClientMessage::GetAddrInfoRequest(req.into()))
+                            .send_agent(ClientMessage::GetAddrInfoRequest(req.into()))
                             .await;
                     }
                 }
@@ -205,7 +205,7 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::GetEnvReq(message_id, layer_id, req) => {
                     self.get_env_reqs.push_back(message_id, layer_id);
                     message_bus
-                        .send(ClientMessage::GetEnvVarsRequest(req))
+                        .send_agent(ClientMessage::GetEnvVarsRequest(req))
                         .await;
                 }
                 SimpleProxyMessage::GetEnvRes(res) => {

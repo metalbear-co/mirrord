@@ -147,6 +147,7 @@ impl fmt::Debug for ClientConnection {
 mod test {
     use std::sync::Arc;
 
+    use actix_codec::Framed;
     use futures::StreamExt;
     use mirrord_protocol::ClientCodec;
     use tokio::net::{TcpListener, TcpStream};

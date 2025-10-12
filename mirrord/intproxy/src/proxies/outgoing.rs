@@ -106,7 +106,7 @@ pub struct OutgoingProxy {
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
-    background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
+    background_tasks: Option<BackgroundTasks<InterceptorId, Vec<u8>, io::Error>>,
 }
 
 impl OutgoingProxy {
@@ -204,7 +204,7 @@ impl OutgoingProxy {
         };
 
         tracing::debug!(%id, "Starting interceptor task");
-        let interceptor = self.background_tasks.register(
+        let interceptor = self.background_tasks.as_mut().unwrap().register(
             Interceptor::new(id, prepared_socket),
             id,
             Self::CHANNEL_SIZE,
@@ -238,7 +238,7 @@ impl OutgoingProxy {
             .push_back(message_id, session_id);
 
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
-        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+        message_bus.send_agent(msg).await;
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
@@ -287,6 +287,13 @@ impl BackgroundTask for OutgoingProxy {
 
     #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        match &mut self.background_tasks {
+            Some(tasks) => tasks.set_agent_tx(message_bus.clone_agent_tx()),
+            None => {
+                self.background_tasks = Some(BackgroundTasks::new(message_bus.clone_agent_tx()))
+            }
+        };
+
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
@@ -319,10 +326,10 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
                 },
 
-                Some(task_update) = self.background_tasks.next() => match task_update {
+                Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        message_bus.send_agent(msg).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
@@ -338,7 +345,7 @@ impl BackgroundTask for OutgoingProxy {
                         if self.txs.remove(&id).is_some() {
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
-                            let _ = message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                            let _ = message_bus.send_agent(msg).await;
                             self.txs.remove(&id);
                         }
                     }

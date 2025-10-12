@@ -17,6 +17,7 @@ use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
+    io::{Client, Connection},
     tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION},
 };
 #[cfg(target_os = "macos")]
@@ -37,7 +38,7 @@ use tracing::{Level, debug, error, info, trace, warn};
 use crate::extract::extract_arm64;
 use crate::{
     CliResult,
-    connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
+    connection::{AGENT_CONNECT_INFO_ENV_KEY, create_and_connect},
     error::CliError,
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env, reparent_to_init},
@@ -396,19 +397,14 @@ impl MirrordExecution {
         })
     }
 
-    async fn get_agent_version(connection: &mut AgentConnection) -> CliResult<Version> {
-        let Ok(_) = connection
-            .sender
+    async fn get_agent_version(connection: &mut Connection<Client>) -> CliResult<Version> {
+        connection
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await
-        else {
-            return Err(CliError::InitialAgentCommFailed(
-                "failed to send protocol version request".to_string(),
-            ));
-        };
-        match connection.receiver.recv().await {
+            .await;
+
+        match connection.recv().await {
             Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => Ok(version),
             Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
                 "received unexpected message during agent version check: {msg:?}"
@@ -532,7 +528,7 @@ impl MirrordExecution {
     /// `MirrordExecution::get_remote_env`.
     async fn fetch_env_vars(
         config: &LayerConfig,
-        connection: &mut AgentConnection,
+        connection: &mut Connection<Client>,
     ) -> CliResult<HashMap<String, String>> {
         let (env_vars_exclude, env_vars_include) = match (
             config
@@ -597,23 +593,19 @@ impl MirrordExecution {
     /// Retrieve remote environment from the connected agent.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn get_remote_env(
-        connection: &mut AgentConnection,
+        connection: &mut Connection<Client>,
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
     ) -> CliResult<HashMap<String, String>> {
         connection
-            .sender
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
                 env_vars_select,
             }))
-            .await
-            .map_err(|_| {
-                CliError::InitialAgentCommFailed("agent unexpectedly closed connection".to_string())
-            })?;
+            .await;
 
         loop {
-            let result = match connection.receiver.recv().await {
+            let result = match connection.recv().await {
                 Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
                     tracing::trace!(?remote_env, "Agent responded with the remote env");
                     Ok(remote_env)

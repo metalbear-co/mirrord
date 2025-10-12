@@ -13,26 +13,12 @@ use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
 };
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
-    io::{Client, Connection},
-};
-use tokio::sync::mpsc;
+use mirrord_protocol::io::{Client, Connection};
 use tracing::Level;
 
 use crate::{CliError, CliResult};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
-
-// REVIEW: It would be really nice to replace this struct with
-// mirrord_protocol::io::Connection as they're basically isomorphic.
-// The problem here is the channels could be for an operator task too,
-// and that talks websocket instead of raw tcp. We'd need to come up
-// with a way for mirrord_protocol::io to handle websockets too.
-pub(crate) struct AgentConnection {
-    pub sender: mpsc::Sender<ClientMessage>,
-    pub receiver: mpsc::Receiver<DaemonMessage>,
-}
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
@@ -129,20 +115,20 @@ where
 pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut P,
-    analytics: &mut R,
-    branch_name: Option<String>,
-) -> CliResult<(AgentConnectInfo, AgentConnection)> {
-    if let Some(connection) =
-        try_connect_using_operator(config, progress, analytics, branch_name).await?
-    {
-        return Ok((
-            AgentConnectInfo::Operator(connection.session),
-            AgentConnection {
-                sender: connection.tx,
-                receiver: connection.rx,
-            },
-        ));
-    }
+    _analytics: &mut R,
+    _branch_name: Option<String>,
+) -> CliResult<(AgentConnectInfo, Connection<Client>)> {
+    // if let Some(connection) =
+    //     try_connect_using_operator(config, progress, analytics, branch_name).await?
+    // {   todo!()
+    //     return Ok((
+    //         AgentConnectInfo::Operator(connection.session),
+    //         AgentConnection {
+    //             sender: connection.tx,
+    //             receiver: connection.rx,
+    //         },
+    //     ));
+    // }
 
     process_config_oss(config, progress)?;
 
@@ -184,13 +170,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     )
     .await?;
 
-    Ok((
-        AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        AgentConnection {
-            sender: conn.tx,
-            receiver: conn.rx,
-        },
-    ))
+    Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }
 
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
