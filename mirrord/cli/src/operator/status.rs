@@ -169,7 +169,6 @@ impl StatusCommandHandler {
         let topics_vec: Vec<_> = topics.collect();
         tracing::info!("Processing {} Kafka topics", topics_vec.len());
 
-        // Loop over the `MirrordKafkaSession` crds to build the list of rows.
         for (index, topic) in topics_vec.iter().enumerate() {
             tracing::info!("Processing Kafka topic {}: {:?}", index, topic);
 
@@ -507,7 +506,7 @@ Operator License
         for (sqs_consumer, sqs_row) in sqs_rows {
             let mut sqs_table = Table::new();
             sqs_table.add_row(row![
-                "Session ID2",
+                "Session ID",
                 "Queue ID",
                 "User",
                 "Original Name",
