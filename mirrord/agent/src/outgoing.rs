@@ -204,7 +204,7 @@ impl OutgoingTask {
             LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
                 let fut = Box::pin(Self::connect(
                     remote_address,
-                    v2::OutgoingProtocol::Tcp,
+                    v2::OutgoingProtocol::Stream,
                     self.path_resolver.clone(),
                     None,
                 ));
@@ -216,12 +216,12 @@ impl OutgoingTask {
                 connection_id,
                 bytes,
             }) => {
-                let id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp);
+                let id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Stream);
                 self.handle_write(id, bytes).await
             }
 
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
-                let connection_id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Tcp);
+                let connection_id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Stream);
                 self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
                 ControlFlow::Continue(())
@@ -234,7 +234,7 @@ impl OutgoingTask {
             LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
                 let fut = Box::pin(Self::connect(
                     remote_address,
-                    v2::OutgoingProtocol::Udp,
+                    v2::OutgoingProtocol::Datagrams,
                     self.path_resolver.clone(),
                     None,
                 ));
@@ -246,12 +246,13 @@ impl OutgoingTask {
                 connection_id,
                 bytes,
             }) => {
-                let id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp);
+                let id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Datagrams);
                 self.handle_write(id, bytes).await
             }
 
             LayerUdpOutgoing::Close(LayerClose { connection_id }) => {
-                let connection_id = ConnectionId::V1(connection_id, v2::OutgoingProtocol::Udp);
+                let connection_id =
+                    ConnectionId::V1(connection_id, v2::OutgoingProtocol::Datagrams);
                 self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
                 ControlFlow::Continue(())
@@ -325,7 +326,11 @@ impl OutgoingTask {
                     match connection_id {
                         ConnectionId::V1(id, proto) => {
                             let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                "write to outgoing {proto} connection {id} failed: {error}"
+                                "write to outgoing {} connection {id} failed: {error}",
+                                match proto {
+                                    v2::OutgoingProtocol::Datagrams => "UDP",
+                                    v2::OutgoingProtocol::Stream => "TCP",
+                                },
                             )));
                             self.send(log).await?;
                             let close = proto.v1_daemon_close(id);
@@ -375,7 +380,11 @@ impl OutgoingTask {
                 match connection_id {
                     ConnectionId::V1(connection_id, proto) => {
                         let log = DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "read from outgoing {proto} connection {connection_id} failed: {error}"
+                            "read from outgoing {} connection {connection_id} failed: {error}",
+                            match proto {
+                                v2::OutgoingProtocol::Datagrams => "UDP",
+                                v2::OutgoingProtocol::Stream => "TCP",
+                            },
                         )));
                         self.send(log).await?;
                         let close = proto.v1_daemon_close(connection_id);

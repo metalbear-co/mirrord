@@ -34,13 +34,13 @@ pub async fn connect(
     path_resolver: Option<&InTargetPathResolver>,
 ) -> RemoteResult<(ReadHalf, WriteHalf)> {
     let (read_inner, write_inner) = match (address, protocol) {
-        (SocketAddress::Ip(address), v2::OutgoingProtocol::Tcp) => {
+        (SocketAddress::Ip(address), v2::OutgoingProtocol::Stream) => {
             let stream = TcpStream::connect(address).await?;
             let (read, write) = stream.into_split();
             (ReadHalfInner::Tcp(read), WriteHalfInner::Tcp(write))
         }
 
-        (SocketAddress::Ip(address), v2::OutgoingProtocol::Udp) => {
+        (SocketAddress::Ip(address), v2::OutgoingProtocol::Datagrams) => {
             let bind_address = if address.is_ipv4() {
                 Ipv4Addr::UNSPECIFIED.into()
             } else {
@@ -55,7 +55,7 @@ pub async fn connect(
             )
         }
 
-        (SocketAddress::Unix(UnixAddr::Pathname(path)), v2::OutgoingProtocol::Tcp) => {
+        (SocketAddress::Unix(UnixAddr::Pathname(path)), v2::OutgoingProtocol::Stream) => {
             let path = if let Some(resolver) = path_resolver.as_ref() {
                 Cow::Owned(resolver.resolve(path)?)
             } else {
@@ -66,7 +66,7 @@ pub async fn connect(
             (ReadHalfInner::Unix(read), WriteHalfInner::Unix(write))
         }
 
-        (SocketAddress::Unix(UnixAddr::Abstract(name)), v2::OutgoingProtocol::Tcp) => {
+        (SocketAddress::Unix(UnixAddr::Abstract(name)), v2::OutgoingProtocol::Stream) => {
             let mut path = Vec::with_capacity(name.len() + 1);
             path.push(b'0');
             path.extend_from_slice(name);
@@ -75,20 +75,20 @@ pub async fn connect(
             (ReadHalfInner::Unix(read), WriteHalfInner::Unix(write))
         }
 
-        (SocketAddress::Unix(UnixAddr::Unnamed), v2::OutgoingProtocol::Tcp) => {
+        (SocketAddress::Unix(UnixAddr::Unnamed), v2::OutgoingProtocol::Stream) => {
             return Err(ResponseError::Remote(RemoteError::InvalidAddress(
                 address.clone(),
             )));
         }
 
-        (SocketAddress::Unix(..), v2::OutgoingProtocol::Udp) => {
+        (SocketAddress::Unix(..), v2::OutgoingProtocol::Datagrams) => {
             return Err(RemoteError::InvalidAddress(address.clone()).into());
         }
     };
 
     let metric = match protocol {
-        v2::OutgoingProtocol::Tcp => &TCP_OUTGOING_CONNECTION,
-        v2::OutgoingProtocol::Udp => &UDP_OUTGOING_CONNECTION,
+        v2::OutgoingProtocol::Stream => &TCP_OUTGOING_CONNECTION,
+        v2::OutgoingProtocol::Datagrams => &UDP_OUTGOING_CONNECTION,
     };
     let metric_guard = Arc::new(MetricGuard::new(metric));
 

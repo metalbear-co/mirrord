@@ -145,8 +145,8 @@ impl SocketKind {
 impl From<SocketKind> for v2::OutgoingProtocol {
     fn from(kind: SocketKind) -> Self {
         match kind {
-            SocketKind::Tcp(..) => Self::Tcp,
-            SocketKind::Udp(..) => Self::Udp,
+            SocketKind::Tcp(..) => Self::Stream,
+            SocketKind::Udp(..) => Self::Datagrams,
         }
     }
 }
@@ -403,8 +403,8 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
         protocol: v2::OutgoingProtocol,
         force_local_dns: bool,
     ) -> HookResult<bool> {
-        if let (ProtocolFilter::Tcp, v2::OutgoingProtocol::Udp)
-        | (ProtocolFilter::Udp, v2::OutgoingProtocol::Tcp) = (self.protocol, protocol)
+        if let (ProtocolFilter::Tcp, v2::OutgoingProtocol::Datagrams)
+        | (ProtocolFilter::Udp, v2::OutgoingProtocol::Stream) = (self.protocol, protocol)
         {
             return Ok(false);
         };
@@ -420,10 +420,9 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
             libc::AF_INET6
         };
 
-        let addr_protocol = if matches!(protocol, v2::OutgoingProtocol::Tcp) {
-            libc::SOCK_STREAM
-        } else {
-            libc::SOCK_DGRAM
+        let addr_protocol = match protocol {
+            v2::OutgoingProtocol::Stream => libc::SOCK_STREAM,
+            v2::OutgoingProtocol::Datagrams => libc::SOCK_DGRAM,
         };
 
         match &self.address {

@@ -701,25 +701,18 @@ pub(super) fn connect(
     let enabled_tcp_outgoing = crate::setup().outgoing_config().tcp;
     let enabled_udp_outgoing = crate::setup().outgoing_config().udp;
 
-    match v2::OutgoingProtocol::from(user_socket_info.kind) {
-        v2::OutgoingProtocol::Udp if enabled_udp_outgoing => connect_outgoing::<true>(
-            sockfd,
-            remote_address,
-            user_socket_info,
-            v2::OutgoingProtocol::Udp,
-        ),
+    let proto = v2::OutgoingProtocol::from(user_socket_info.kind);
+    match proto {
+        v2::OutgoingProtocol::Datagrams if enabled_udp_outgoing => {
+            connect_outgoing::<true>(sockfd, remote_address, user_socket_info, proto)
+        }
 
-        v2::OutgoingProtocol::Tcp => match user_socket_info.state {
+        v2::OutgoingProtocol::Stream => match user_socket_info.state {
             SocketState::Initialized | SocketState::Bound(..)
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
-                connect_outgoing::<true>(
-                    sockfd,
-                    remote_address,
-                    user_socket_info,
-                    v2::OutgoingProtocol::Tcp,
-                )
+                connect_outgoing::<true>(sockfd, remote_address, user_socket_info, proto)
             }
 
             _ => Detour::Bypass(Bypass::DisabledOutgoing),
@@ -1375,7 +1368,7 @@ pub(super) fn send_to(
             sockfd,
             destination,
             user_socket_info,
-            v2::OutgoingProtocol::Udp,
+            v2::OutgoingProtocol::Datagrams,
         )?;
 
         let interceptor_address: SockAddr = SOCKETS
@@ -1468,7 +1461,7 @@ pub(super) fn sendmsg(
             sockfd,
             destination,
             user_socket_info,
-            v2::OutgoingProtocol::Udp,
+            v2::OutgoingProtocol::Datagrams,
         )?;
 
         let interceptor_address: SockAddr = SOCKETS

@@ -142,8 +142,8 @@ impl OutgoingProxy {
     /// Retrieves correct v1 [`RequestQueue`] for the given [`v2::OutgoingProtocol`].
     fn queue(&mut self, protocol: v2::OutgoingProtocol) -> &mut RequestQueue<ConnectionInProgress> {
         match protocol {
-            v2::OutgoingProtocol::Udp => &mut self.datagrams_reqs,
-            v2::OutgoingProtocol::Tcp => &mut self.stream_reqs,
+            v2::OutgoingProtocol::Datagrams => &mut self.datagrams_reqs,
+            v2::OutgoingProtocol::Stream => &mut self.stream_reqs,
         }
     }
 
@@ -403,7 +403,7 @@ impl BackgroundTask for OutgoingProxy {
 
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
-                            self.handle_close(ConnectionId::V1(close, v2::OutgoingProtocol::Tcp));
+                            self.handle_close(ConnectionId::V1(close, v2::OutgoingProtocol::Stream));
                         },
                         DaemonTcpOutgoing::Read(Err(error)) => {
                             // This error cannot be tracked to any specific connection.
@@ -411,17 +411,17 @@ impl BackgroundTask for OutgoingProxy {
                             break Err(error.into());
                         },
                         DaemonTcpOutgoing::Read(Ok(data)) => {
-                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Tcp)).await;
+                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Stream)).await;
                         },
                         DaemonTcpOutgoing::Connect(Err(error)) => {
-                            self.handle_error_v1(v2::OutgoingProtocol::Tcp, error)?;
+                            self.handle_error_v1(v2::OutgoingProtocol::Stream, error)?;
                         },
-                        DaemonTcpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Tcp)?,
+                        DaemonTcpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Stream)?,
                     },
 
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
-                            self.handle_close(ConnectionId::V1(close, v2::OutgoingProtocol::Udp));
+                            self.handle_close(ConnectionId::V1(close, v2::OutgoingProtocol::Datagrams));
                         },
                         DaemonUdpOutgoing::Read(Err(error)) => {
                             // This error cannot be tracked to any specific connection.
@@ -429,12 +429,12 @@ impl BackgroundTask for OutgoingProxy {
                             break Err(error.into());
                         },
                         DaemonUdpOutgoing::Read(Ok(data)) => {
-                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Udp)).await;
+                            self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Datagrams)).await;
                         },
                         DaemonUdpOutgoing::Connect(Err(error)) => {
-                            self.handle_error_v1(v2::OutgoingProtocol::Udp, error)?;
+                            self.handle_error_v1(v2::OutgoingProtocol::Datagrams, error)?;
                         },
-                        DaemonUdpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Udp)?,
+                        DaemonUdpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Datagrams)?,
                     },
 
                     Some(OutgoingProxyMessage::AgentOutgoing(msg)) => match msg {
@@ -547,7 +547,7 @@ mod test {
                 .send(OutgoingProxyMessage::LayerConnect(
                     OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
-                        protocol: v2::OutgoingProtocol::Tcp,
+                        protocol: v2::OutgoingProtocol::Stream,
                     },
                     i,
                     LayerId(0),

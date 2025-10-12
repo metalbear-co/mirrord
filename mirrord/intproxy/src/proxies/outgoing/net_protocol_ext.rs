@@ -30,20 +30,20 @@ pub async fn prepare_socket(
             let bind_at = SocketAddr::new(ip_addr, 0);
 
             match proto {
-                v2::OutgoingProtocol::Udp => {
+                v2::OutgoingProtocol::Datagrams => {
                     PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?)
                 }
-                v2::OutgoingProtocol::Tcp => {
+                v2::OutgoingProtocol::Stream => {
                     PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?)
                 }
             }
         }
         SocketAddress::Unix(..) => match proto {
-            v2::OutgoingProtocol::Tcp => {
+            v2::OutgoingProtocol::Stream => {
                 let path = PreparedSocket::generate_uds_path().await?;
                 PreparedSocket::UnixListener(UnixListener::bind(path)?)
             }
-            v2::OutgoingProtocol::Udp => {
+            v2::OutgoingProtocol::Datagrams => {
                 tracing::error!(
                     "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
                 );

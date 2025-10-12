@@ -81,38 +81,38 @@ pub struct OutgoingClose {
 /// Provides convenience methods for wrapping v1 outgoing messages into [`DaemonMessage`]s.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum OutgoingProtocol {
-    Udp,
-    Tcp,
+    Datagrams,
+    Stream,
 }
 
 impl OutgoingProtocol {
     pub fn v1_daemon_close(self, connection_id: ConnectionId) -> DaemonMessage {
         match self {
-            Self::Tcp => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id)),
-            Self::Udp => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id)),
+            Self::Stream => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id)),
+            Self::Datagrams => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(connection_id)),
         }
     }
 
     pub fn v1_daemon_read(self, read: DaemonRead) -> DaemonMessage {
         match self {
-            Self::Tcp => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(read))),
-            Self::Udp => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(read))),
+            Self::Stream => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(read))),
+            Self::Datagrams => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(read))),
         }
     }
 
     pub fn v1_daemon_connect(self, connect: RemoteResult<DaemonConnect>) -> DaemonMessage {
         match self {
-            Self::Tcp => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect)),
-            Self::Udp => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect)),
+            Self::Stream => DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect)),
+            Self::Datagrams => DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect)),
         }
     }
 
     pub fn v1_layer_close(self, connection_id: ConnectionId) -> ClientMessage {
         match self {
-            Self::Tcp => {
+            Self::Stream => {
                 ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
             }
-            Self::Udp => {
+            Self::Datagrams => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
             }
         }
@@ -120,19 +120,21 @@ impl OutgoingProtocol {
 
     pub fn v1_layer_write(self, write: LayerWrite) -> ClientMessage {
         match self {
-            Self::Tcp => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(write)),
-            Self::Udp => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(write)),
+            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(write)),
+            Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(write)),
         }
     }
 
     pub fn v1_layer_connect(self, remote_address: SocketAddress) -> ClientMessage {
         match self {
-            Self::Tcp => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
                 remote_address,
             })),
-            Self::Udp => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-                remote_address,
-            })),
+            Self::Datagrams => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+                    remote_address,
+                }))
+            }
         }
     }
 }
@@ -140,8 +142,8 @@ impl OutgoingProtocol {
 impl fmt::Display for OutgoingProtocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
-            Self::Tcp => "tcp",
-            Self::Udp => "udp",
+            Self::Stream => "stream",
+            Self::Datagrams => "datagrams",
         };
         f.write_str(as_str)
     }
