@@ -151,25 +151,13 @@ pub(crate) async fn connect_and_ping(
 ) -> CliResult<AgentConnection, InternalProxyError> {
     let mut agent_conn = AgentConnection::new(config, connect_info, analytics).await?;
 
-    agent_conn
-        .agent_tx
-        .send(ClientMessage::Ping)
-        .await
-        .map_err(|_| {
-            InternalProxyError::InitialPingPongFailed(
-                "agent closed connection before ping".to_string(),
-            )
-        })?;
+    agent_conn.connection.send(ClientMessage::Ping).await;
 
     loop {
-        match agent_conn.agent_rx.recv().await {
+        match agent_conn.connection.recv().await {
             Some(DaemonMessage::Pong) => break Ok(agent_conn),
             Some(DaemonMessage::OperatorPing(id)) => {
-                agent_conn
-                    .agent_tx
-                    .send(ClientMessage::OperatorPong(id))
-                    .await
-                    .ok();
+                agent_conn.connection.send(ClientMessage::OperatorPong(id)).await;
             }
             Some(DaemonMessage::LogMessage(LogMessage {
                 level: LogLevel::Error,

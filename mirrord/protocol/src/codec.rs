@@ -316,15 +316,23 @@ impl<I: bincode::Decode<()>, O> Decoder for ProtocolCodec<I, O> {
     }
 }
 
-impl<I> Encoder<Vec<u8>> for ProtocolCodec<I, Vec<u8>> {
+impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
-    fn encode(&mut self, msg: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.reserve(msg.len());
-        dst.put(&msg[..]);
+    fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let encoded = match bincode::encode_to_vec(msg, self.config) {
+            Ok(encoded) => encoded,
+            Err(err) => {
+                return Err(io::Error::other(err.to_string()));
+            }
+        };
+        dst.reserve(encoded.len());
+        dst.put(&encoded[..]);
+
         Ok(())
     }
 }
+
 
 // FIXME
 // #[cfg(test)]

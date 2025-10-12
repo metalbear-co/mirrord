@@ -2,11 +2,13 @@ use std::{
     collections::{HashMap, VecDeque},
     hash::Hash,
     io::{self},
+    marker::PhantomData,
     mem::{Discriminant, discriminant},
     sync::{Arc, Mutex},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite, Framed};
+use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
+use bytes::{BufMut, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use rand::seq::IteratorRandom;
 use tokio::{
@@ -80,9 +82,30 @@ pub struct Connection<Type: ProtocolEndpoint> {
     tx_handle: TxHandle<Type>,
 }
 
+// Same as protocolCodec but outputs raw Vec<u8>s
+struct Codec<I>(PhantomData<I>);
+
+impl<I: bincode::Decode<()>> Decoder for Codec<I> {
+    type Item = I;
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+        ProtocolCodec::<I, ()>::default().decode(src)
+    }
+}
+
+impl<I> Encoder<Vec<u8>> for Codec<I> {
+    type Error = io::Error;
+    fn encode(&mut self, encoded: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(encoded.len());
+        dst.put(&encoded[..]);
+        Ok(())
+    }
+}
+
 impl<Type: ProtocolEndpoint> Connection<Type> {
     pub async fn from_stream<IO: AsyncIO>(inner: IO) -> Result<Self, ProtocolError> {
-        let framed = Framed::new(inner, ProtocolCodec::<Type::InMsg, Vec<u8>>::default());
+        let framed = Framed::new(inner, Codec::<Type::InMsg>(PhantomData));
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
