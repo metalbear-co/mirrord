@@ -19,7 +19,7 @@ use crate::client::error::OperatorApiError;
 use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
 
 pub mod copy_target;
-pub mod kafka;
+pub use kafka::MirrordKafkaEphemeralTopic;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mysql_branching;
@@ -335,6 +335,7 @@ pub struct Session {
     pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
+    pub kafka: Option<Vec<MirrordKafkaEphemeralTopic>>,
 }
 
 /// Resource used to access the operator's session management routes.

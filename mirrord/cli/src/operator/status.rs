@@ -10,7 +10,10 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
-    crd::{MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate},
+    crd::{
+        MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate,
+        kafka::MirrordKafkaEphemeralTopic,
+    },
     types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -51,6 +54,56 @@ impl StatusCommandHandler {
         progress.success(None);
 
         Ok(Self { operator_api: api })
+    }
+
+    /// The Kafka information we want to display to the user is in the MirrordKafkaEphemeralTopic
+    /// CRDs. This function extracts the topic information and creates display rows.
+    ///
+    /// Returns the Kafka topic status rows keyed by topic name.
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    fn kafka_rows(
+        topics: Iter<MirrordKafkaEphemeralTopic>,
+        session_id: String,
+        user: &String,
+    ) -> Option<HashMap<String, Vec<Row>>> {
+        let mut rows: HashMap<String, Vec<Row>> = HashMap::new();
+
+        // Loop over the `MirrordKafkaEphemeralTopic` crds to build the list of rows.
+        for topic in topics {
+            let topic_name = &topic.spec.name;
+            let client_config = &topic.spec.client_config;
+
+            let topic_type = if topic_name.contains("-fallback-") {
+                "Fallback"
+            } else {
+                "Filtered"
+            };
+
+            // Group rows by topic name
+            match rows.entry(topic_name.clone()) {
+                Entry::Occupied(mut topic_rows) => {
+                    topic_rows.get_mut().push(row![
+                        session_id,
+                        topic_name,
+                        user,
+                        client_config,
+                        topic_type,
+                    ]);
+                }
+                Entry::Vacant(topic_rows) => {
+                    topic_rows.insert(vec![row![
+                        session_id,
+                        topic_name,
+                        user,
+                        client_config,
+                        topic_type,
+                    ]]);
+                }
+            }
+        }
+
+        // If it's empty, we don't want to display anything.
+        rows.is_empty().not().then_some(rows)
     }
 
     /// The SQS information we want to display to the user is in a mix of different maps, and
@@ -229,6 +282,7 @@ Operator License
         ]);
 
         let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
+        let mut kafka_rows: HashMap<String, Vec<Row>> = HashMap::new();
 
         for session in &status.sessions {
             let locked_ports = session
@@ -281,6 +335,24 @@ Operator License
                     }
                 }
             }
+
+            if let Some(kafka_in_status) = session.kafka.as_ref().and_then(|kafka| {
+                Self::kafka_rows(
+                    kafka.iter(),
+                    session.id.clone().unwrap_or_default(),
+                    &session.user,
+                )
+            }) {
+                // Merge each session Kafka topics into our map keyed by topic name.
+                for (topic_name, rows) in kafka_in_status {
+                    match kafka_rows.entry(topic_name) {
+                        Entry::Occupied(mut topic_rows) => topic_rows.get_mut().extend(rows),
+                        Entry::Vacant(topic_rows) => {
+                            topic_rows.insert(rows);
+                        }
+                    }
+                }
+            }
         }
 
         sessions.printstd();
@@ -305,6 +377,26 @@ Operator License
             }
 
             sqs_table.printstd();
+        }
+
+        // The Kafka topic statuses are grouped by topic name.
+        for (topic_name, kafka_row) in kafka_rows {
+            let mut kafka_table = Table::new();
+            kafka_table.add_row(row![
+                "Session ID",
+                "Topic Name",
+                "User",
+                "Client Config",
+                "Type",
+            ]);
+
+            println!("Kafka Topics for {topic_name}");
+
+            for row in kafka_row {
+                kafka_table.add_row(row);
+            }
+
+            kafka_table.printstd();
         }
 
         Ok(())
