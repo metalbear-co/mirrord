@@ -13,10 +13,7 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    fs::{self},
-    io::AsyncWriteExt,
-};
+use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
 use crate::{CiArgs, CiCommand, CliError, CliResult, ci::error::CiError, user_data::UserData};
