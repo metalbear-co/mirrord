@@ -190,7 +190,7 @@ async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
         let msg = intproxy.recv().await;
         let ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
             id,
-            protocol: v2::OutgoingProtocol::Datagrams,
+            protocol: v2::OutgoingProtocol::Stream,
             address: SocketAddress::Ip(addr),
         })) = msg
         else {
