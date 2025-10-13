@@ -1250,7 +1250,7 @@ pub(super) fn recv_from(
 
     let SocketMetadataResponse { peer_address, .. } =
         make_proxy_request_with_response(SocketMetadataRequest {
-            local_address: interceptor_address.into(),
+            local_address: interceptor_address,
         })??;
     let peer_address = peer_address.try_into()?;
     fill_address(raw_source, source_length, peer_address)?;
