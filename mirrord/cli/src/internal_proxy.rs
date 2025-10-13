@@ -11,8 +11,7 @@
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
-    env::{self},
-    io,
+    env, io,
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
 };
