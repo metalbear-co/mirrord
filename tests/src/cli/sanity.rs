@@ -19,6 +19,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config --ide /path/to/config.json
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
@@ -40,6 +41,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config /path/to/config.json
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
@@ -62,6 +64,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config --ide
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
@@ -81,6 +84,7 @@ mod cli {
     /// ```sh
     /// mirrord verify-config
     /// ```
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
