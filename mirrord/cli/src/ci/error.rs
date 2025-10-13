@@ -7,7 +7,7 @@ pub(crate) enum CiError {
     #[error("File operation failed: {0}!")]
     IO(#[from] std::io::Error),
 
-    #[error("File operation failed: {0}!")]
+    #[error(transparent)]
     CiApiKey(#[from] ApiKeyError),
 
     #[error(
