@@ -73,7 +73,8 @@ pub async fn prepare_socket(
 /// A socket prepared to accept an intercepted connection.
 #[derive(Debug)]
 pub enum PreparedSocket {
-    /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
+    /// There is no real listening/accepting here, see [`v2::OutgoingProtocol::Datagrams`] for more
+    /// info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
     #[cfg(not(target_os = "windows"))]

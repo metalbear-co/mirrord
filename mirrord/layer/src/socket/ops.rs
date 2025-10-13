@@ -792,7 +792,7 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
-/// When the fd is "ours", we accept and use [`ConnMetadataRequest`] to retrieve peer address from
+/// When the fd is "ours", we accept and use [`SocketMetadataRequest`] to retrieve peer address from
 /// the internal proxy.
 #[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn accept(

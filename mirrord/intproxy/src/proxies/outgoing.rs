@@ -103,13 +103,13 @@ struct ConnectionInProgress {
 /// 7. If the layer closes the connection, the [`Interceptor`] exits. Notify the agent. If the agent
 ///    closes the connection, the shut down the [`Interceptor`].
 pub struct OutgoingProxy {
-    /// In progress v1 remote connect requests for [`NetProtocol::Datagrams`]
+    /// In progress v1 remote connect requests for [`v2::OutgoingProtocol::Datagrams`]
     /// ([`LayerUdpOutgoing::Connect`](mirrord_protocol::outgoing::udp::LayerUdpOutgoing::Connect)).
     datagrams_reqs: RequestQueue<ConnectionInProgress>,
-    /// In progress v1 remote connect requests for [`NetProtocol::Stream`].
+    /// In progress v1 remote connect requests for [`v2::OutgoingProtocol::Stream`].
     /// ([`LayerTcpOutgoing::Connect`](mirrord_protocol::outgoing::tcp::LayerTcpOutgoing::Connect)).
     stream_reqs: RequestQueue<ConnectionInProgress>,
-    /// In progress [`v2`](mirrord_protocol::outgoing::v2) remote connect requests.
+    /// In progress [`v2`] remote connect requests.
     reqs: HashMap<Uid, ConnectionInProgress>,
 
     /// [`TaskSender`]s for active [`Interceptor`] tasks.

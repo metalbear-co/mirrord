@@ -532,8 +532,8 @@ pub enum CheckQueryResult {
 /// [`ProtocolAndAddressFilter`] extension.
 /// Advanced filter matching with DNS resolution capability
 pub trait ProtocolAndAddressFilterExt {
-    /// Matches the outgoing connection request (given as [[`SocketAddr`], [`NetProtocol`]] pair)
-    /// against this filter.
+    /// Matches the outgoing connection request (given as [[`SocketAddr`], [`v2::OutgoingProtocol`]]
+    /// pair) against this filter.
     ///
     /// # Note on DNS resolution
     ///
