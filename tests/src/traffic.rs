@@ -755,8 +755,9 @@ mod traffic_tests {
         process.assert_no_error_in_stderr().await;
     }
 
-    /// Test that npm-based Node.js applications work with mirrord (tests Windows non-.exe execution)
-    /// This primarily tests outgoing traffic functionality with npm as a non-.exe binary
+    /// Test that npm-based Node.js applications work with mirrord (tests Windows non-.exe
+    /// execution) This primarily tests outgoing traffic functionality with npm as a non-.exe
+    /// binary
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
