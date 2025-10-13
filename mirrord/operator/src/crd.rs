@@ -19,7 +19,7 @@ use crate::client::error::OperatorApiError;
 use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
 
 pub mod copy_target;
-pub use kafka::MirrordKafkaEphemeralTopic;
+pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mysql_branching;
@@ -29,6 +29,7 @@ pub mod profile;
 pub mod session;
 pub mod steal_tls;
 
+pub use kafka::MirrordKafkaEphemeralTopic;
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
