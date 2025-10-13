@@ -4,26 +4,37 @@ use std::{
     env,
     io::{Read, Write},
     net::{SocketAddr, TcpStream, UdpSocket},
+    ops::Not,
 };
+
+use futures::{StreamExt, stream::FuturesUnordered};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const MESSAGE: &[u8] = "FOO BAR HAM".as_bytes();
 
-fn parse_args() -> Option<(bool, SocketAddr, Vec<SocketAddr>)> {
-    let args: [String; 4] = env::args().collect::<Vec<_>>().try_into().ok()?;
+fn parse_args() -> Option<(bool, SocketAddr, Vec<SocketAddr>, bool)> {
+    let args = env::args().collect::<Vec<_>>();
 
-    let tcp = match args[1].as_str() {
+    let tcp = match args.get(1)?.as_str() {
         "--tcp" => true,
         "--udp" => false,
         _ => None?,
     };
-    let socket = args[2].parse::<SocketAddr>().ok()?;
-    let peers = args[3]
+    let socket = args.get(2)?.parse::<SocketAddr>().ok()?;
+    let peers = args
+        .get(3)?
         .split(',')
         .map(|s| s.parse::<SocketAddr>())
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
 
-    Some((tcp, socket, peers))
+    let non_blocking = match args.get(4) {
+        Some(arg) if arg == "--non-blocking" => true,
+        Some(..) => None?,
+        None => false,
+    };
+
+    Some((tcp, socket, peers, non_blocking))
 }
 
 fn test_tcp(socket: SocketAddr, peer: SocketAddr) {
@@ -44,6 +55,30 @@ fn test_tcp(socket: SocketAddr, peer: SocketAddr) {
 
     let mut response = vec![];
     conn.read_to_end(&mut response).unwrap();
+
+    if response != MESSAGE {
+        panic!("Invalid response received: {response:?}");
+    }
+}
+
+async fn test_tcp_non_blocking(socket: SocketAddr, peer: SocketAddr) {
+    let mut conn = tokio::net::TcpStream::connect(peer).await.unwrap();
+
+    let local = conn.local_addr().unwrap();
+    if local != socket {
+        panic!("Invalid local address from local_addr: {local}.")
+    }
+
+    let remote = conn.peer_addr().unwrap();
+    if remote != peer {
+        panic!("Invalid peer address from peer_addr: {peer}.");
+    }
+
+    conn.write_all(MESSAGE).await.unwrap();
+    conn.flush().await.unwrap();
+
+    let mut response = vec![];
+    conn.read_to_end(&mut response).await.unwrap();
 
     if response != MESSAGE {
         panic!("Invalid response received: {response:?}");
@@ -85,18 +120,36 @@ fn test_udp(socket: SocketAddr, peer: SocketAddr) {
 }
 
 fn main() {
-    let Some((use_tcp, socket, peers)) = parse_args() else {
+    let Some((use_tcp, socket, peers, non_blocking)) = parse_args() else {
         panic!(
-            "USAGE: {} --tcp/--udp <local socket> <peer sockets>",
+            "USAGE: {} --tcp/--udp <local socket> <peer sockets> [--non-blocking]",
             env::args().next().unwrap()
         );
     };
 
-    peers.into_iter().for_each(|peer| {
-        if use_tcp {
-            test_tcp(socket, peer);
-        } else {
-            test_udp(socket, peer);
-        }
-    });
+    if use_tcp.not() && non_blocking {
+        panic!("--non-blocking is only supported with --tcp");
+    }
+
+    if non_blocking {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let futures = FuturesUnordered::new();
+            for peer in peers {
+                futures.push(test_tcp_non_blocking(socket, peer));
+            }
+            futures.collect::<Vec<_>>().await;
+        });
+    } else {
+        peers.into_iter().for_each(|peer| {
+            if use_tcp {
+                test_tcp(socket, peer);
+            } else {
+                test_udp(socket, peer);
+            }
+        });
+    }
 }

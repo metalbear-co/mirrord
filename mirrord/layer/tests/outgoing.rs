@@ -2,7 +2,10 @@
 #![warn(clippy::indexing_slicing)]
 
 use std::{
+    collections::HashMap,
+    io::Write,
     net::{Ipv4Addr, SocketAddr},
+    ops::Not,
     path::Path,
     time::Duration,
 };
@@ -10,12 +13,14 @@ use std::{
 use mirrord_protocol::{
     ClientMessage,
     outgoing::{SocketAddress, v2},
+    uid::Uid,
 };
 use rstest::rstest;
 
 mod common;
 
 pub use common::*;
+use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 
 // TODO: add a test for when DNS lookup is unsuccessful, to make sure the layer returns a valid
@@ -303,6 +308,83 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
                 .into(),
             )
             .await;
+    }
+
+    test_process.wait_assert_success().await;
+}
+
+/// Verifies that `experimental.non_blocking_tcp_connect` allows for making outgoing TCP connections
+/// in parallel.
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(15))]
+async fn outgoing_tcp_non_blocking_connect(dylib_path: &Path) {
+    let config = serde_json::json!({
+        "experimental": {
+            "non_blocking_tcp_connect": true
+        }
+    })
+    .to_string()
+    .into_bytes();
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+    config_file.as_file_mut().write_all(&config).unwrap();
+
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
+        .start_process_with_layer(dylib_path, vec![], Some(config_file.path()))
+        .await;
+
+    let mut connections = RUST_OUTGOING_PEERS
+        .split(',')
+        .map(|s| s.parse::<SocketAddr>().unwrap())
+        .map(|addr| (addr, None))
+        .collect::<HashMap<_, Option<Uid>>>();
+    while connections.values().all(Option::is_some).not() {
+        let msg = intproxy.recv().await;
+        let ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
+            id,
+            protocol: v2::OutgoingProtocol::Stream,
+            address: SocketAddress::Ip(addr),
+        })) = msg
+        else {
+            panic!("Invalid message received from layer: {msg:?}");
+        };
+
+        let duplicate = connections.get_mut(&addr).unwrap().replace(id);
+        if duplicate.is_some() {
+            panic!("Duplicate destination address {addr}");
+        }
+    }
+
+    for (addr, id) in &connections {
+        let id = id.unwrap();
+        intproxy
+            .send(
+                v2::OutgoingConnectResponse {
+                    id,
+                    agent_local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                    agent_peer_address: (*addr).into(),
+                }
+                .into(),
+            )
+            .await;
+    }
+
+    while connections.is_empty().not() {
+        let msg = intproxy.recv().await;
+        let ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData { id, data })) =
+            msg
+        else {
+            panic!("Invalid message received from layer: {msg:?}");
+        };
+
+        let prev_len = connections.len();
+        connections.retain(|_, known_id| id != known_id.unwrap());
+        if connections.len() != prev_len {
+            panic!("Unexpected outgoing connection id {id}");
+        }
+
+        intproxy.send(v2::OutgoingData { id, data }.into()).await;
+        intproxy.send(v2::OutgoingClose { id }.into()).await;
     }
 
     test_process.wait_assert_success().await;

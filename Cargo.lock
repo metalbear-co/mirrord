@@ -5350,6 +5350,10 @@ dependencies = [
 [[package]]
 name = "outgoing"
 version = "3.165.0"
+dependencies = [
+ "futures",
+ "tokio",
+]
 
 [[package]]
 name = "outref"
