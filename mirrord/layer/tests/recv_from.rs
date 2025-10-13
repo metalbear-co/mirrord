@@ -4,11 +4,8 @@
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
-    outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    },
+    ClientMessage,
+    outgoing::{SocketAddress, v2},
 };
 use rstest::rstest;
 
@@ -28,40 +25,37 @@ async fn recv_from(
         .await;
 
     let msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-        remote_address: SocketAddress::Ip(addr),
+    let ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
+        id,
+        protocol: v2::OutgoingProtocol::Datagrams,
+        address: SocketAddress::Ip(addr),
     })) = msg
     else {
         panic!("Invalid message received from layer: {msg:?}");
     };
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: addr.into(),
-                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-            },
-        ))))
+        .send(
+            v2::OutgoingConnectResponse {
+                id,
+                agent_local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                agent_peer_address: addr.into(),
+            }
+            .into(),
+        )
         .await;
 
     let msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
-        connection_id: 0,
-        bytes,
+    let ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData {
+        id: received_id,
+        data,
     })) = msg
     else {
         panic!("Invalid message received from layer: {msg:?}");
     };
+    assert_eq!(received_id, id);
 
     // send back the same bytes, the app asserts that they are the same
-    intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-            DaemonRead {
-                connection_id: 0,
-                bytes,
-            },
-        ))))
-        .await;
+    intproxy.send(v2::OutgoingData { id, data }.into()).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;

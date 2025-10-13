@@ -1,6 +1,7 @@
 use std::fmt;
 
 use bincode::{Decode, Encode};
+use derive_more::From;
 
 use crate::{
     ClientMessage, ConnectionId, DaemonMessage, Payload, RemoteResult, ResponseError,
@@ -13,7 +14,7 @@ use crate::{
 };
 
 /// Client messages for the outgoing traffic feature.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, From)]
 pub enum ClientOutgoing {
     /// Request to open a new remote connection.
     Connect(OutgoingConnectRequest),
@@ -24,7 +25,7 @@ pub enum ClientOutgoing {
 }
 
 /// Daemon messages for the outgoing traffic feature.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, From)]
 pub enum DaemonOutgoing {
     /// Confirmation sent after opening a new remote connection.
     Connect(OutgoingConnectResponse),
@@ -47,6 +48,12 @@ pub struct OutgoingConnectRequest {
     pub protocol: OutgoingProtocol,
 }
 
+impl From<OutgoingConnectRequest> for ClientMessage {
+    fn from(value: OutgoingConnectRequest) -> Self {
+        Self::OutgoingV2(value.into())
+    }
+}
+
 /// Daemon's positive response to client's [`OutgoingConnectRequest`].
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OutgoingConnectResponse {
@@ -56,6 +63,12 @@ pub struct OutgoingConnectResponse {
     pub agent_local_address: SocketAddress,
     /// Peer address of the agent's socket.
     pub agent_peer_address: SocketAddress,
+}
+
+impl From<OutgoingConnectResponse> for DaemonMessage {
+    fn from(value: OutgoingConnectResponse) -> Self {
+        Self::OutgoingV2(value.into())
+    }
 }
 
 /// Data received from one end of an outgoing connection.
@@ -69,11 +82,35 @@ pub struct OutgoingData {
     pub data: Payload,
 }
 
+impl From<OutgoingData> for DaemonMessage {
+    fn from(value: OutgoingData) -> Self {
+        Self::OutgoingV2(value.into())
+    }
+}
+
+impl From<OutgoingData> for ClientMessage {
+    fn from(value: OutgoingData) -> Self {
+        Self::OutgoingV2(value.into())
+    }
+}
+
 /// Close of an outgoing connection.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct OutgoingClose {
     /// ID of the connection.
     pub id: Uid,
+}
+
+impl From<OutgoingClose> for DaemonMessage {
+    fn from(value: OutgoingClose) -> Self {
+        Self::OutgoingV2(value.into())
+    }
+}
+
+impl From<OutgoingClose> for ClientMessage {
+    fn from(value: OutgoingClose) -> Self {
+        Self::OutgoingV2(value.into())
+    }
 }
 
 /// Transport layer protocol of an outgoing connection.
@@ -156,4 +193,10 @@ pub struct OutgoingError {
     pub id: Uid,
     /// The error that failed the connection.
     pub error: ResponseError,
+}
+
+impl From<OutgoingError> for DaemonMessage {
+    fn from(value: OutgoingError) -> Self {
+        Self::OutgoingV2(value.into())
+    }
 }
