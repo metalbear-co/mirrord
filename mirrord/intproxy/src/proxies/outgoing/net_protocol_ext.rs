@@ -5,15 +5,9 @@
 use std::{env, path::PathBuf};
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-#[cfg(not(target_os = "windows"))]
-use ::tokio::fs;
-use ::tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream, UdpSocket},
-};
 use bytes::BytesMut;
 #[cfg(not(target_os = "windows"))]
 use mirrord_protocol::outgoing::UnixAddr;
@@ -21,44 +15,62 @@ use mirrord_protocol::outgoing::{SocketAddress, v2};
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(not(target_os = "windows"))]
-use tokio::net::{UnixListener, UnixStream};
+use tokio::{
+    fs,
+    net::{UnixListener, UnixStream},
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpSocket, TcpStream, UdpSocket},
+};
 
 /// Opens a new socket for intercepting a connection to the given remote address.
 pub async fn prepare_socket(
     remote_address: &SocketAddress,
     proto: v2::OutgoingProtocol,
 ) -> io::Result<PreparedSocket> {
-    match remote_address {
-        SocketAddress::Ip(addr) => {
-            let ip_addr = match addr.ip() {
-                IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+    match (remote_address, proto) {
+        (SocketAddress::Ip(addr), v2::OutgoingProtocol::Stream) => {
+            let socket = if addr.is_ipv4() {
+                let socket = TcpSocket::new_v4()?;
+                socket.bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))?;
+                socket
+            } else {
+                let socket = TcpSocket::new_v6()?;
+                socket.bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0))?;
+                socket
             };
-            let bind_at = SocketAddr::new(ip_addr, 0);
+            let listener = socket.listen(0)?;
+            let dummy = TcpStream::connect(listener.local_addr()?).await?;
+            Ok(PreparedSocket::TcpListener { listener, dummy })
+        }
 
-            match proto {
-                v2::OutgoingProtocol::Datagrams => {
-                    Ok(PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?))
-                }
-                v2::OutgoingProtocol::Stream => Ok(PreparedSocket::TcpListener(
-                    TcpListener::bind(bind_at).await?,
-                )),
-            }
+        (SocketAddress::Ip(addr), v2::OutgoingProtocol::Datagrams) => {
+            let bind_to = if addr.is_ipv4() {
+                Ipv4Addr::LOCALHOST.into()
+            } else {
+                Ipv6Addr::LOCALHOST.into()
+            };
+            let bind_to = SocketAddr::new(bind_to, 0);
+            let socket = UdpSocket::bind(bind_to).await.unwrap();
+            Ok(PreparedSocket::UdpSocket(socket))
         }
 
         #[cfg(not(target_os = "windows"))]
-        SocketAddress::Unix(..) => match proto {
-            v2::OutgoingProtocol::Stream => {
-                let path = PreparedSocket::generate_uds_path().await?;
-                Ok(PreparedSocket::UnixListener(UnixListener::bind(path)?))
-            }
-            v2::OutgoingProtocol::Datagrams => {
-                tracing::error!(
-                    "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
-                );
-                panic!("layer requested outgoing datagrams over unix sockets");
-            }
-        },
+        (SocketAddress::Unix(..), v2::OutgoingProtocol::Stream) => {
+            let path = PreparedSocket::generate_uds_path().await?;
+            let listener = UnixListener::bind(path)?;
+            Ok(PreparedSocket::UnixListener(listener))
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        (SocketAddress::Unix(..), v2::OutgoingProtocol::Datagrams) => {
+            tracing::error!(
+                "layer requested intercepting outgoing datagrams over unix socket, \
+                this is not supported"
+            );
+            panic!("layer requested outgoing datagrams over unix sockets");
+        }
 
         #[cfg(target_os = "windows")]
         _ => {
@@ -76,7 +88,10 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`v2::OutgoingProtocol::Datagrams`] for more
     /// info.
     UdpSocket(UdpSocket),
-    TcpListener(TcpListener),
+    TcpListener {
+        listener: TcpListener,
+        dummy: TcpStream,
+    },
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
@@ -100,7 +115,7 @@ impl PreparedSocket {
     /// Returns the address of this socket.
     pub fn local_address(&self) -> io::Result<SocketAddress> {
         let address = match self {
-            Self::TcpListener(listener) => listener.local_addr()?.into(),
+            Self::TcpListener { listener, .. } => listener.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
             #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
@@ -117,9 +132,15 @@ impl PreparedSocket {
     /// data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected) = match self {
-            Self::TcpListener(listener) => {
-                let (stream, _) = listener.accept().await?;
-                (InnerConnectedSocket::TcpStream(stream), true)
+            Self::TcpListener { listener, dummy } => {
+                let dummy_addr = dummy.local_addr()?;
+                std::mem::drop(dummy);
+                loop {
+                    let (stream, addr) = listener.accept().await?;
+                    if addr != dummy_addr {
+                        break (InnerConnectedSocket::TcpStream(stream), true);
+                    }
+                }
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
             #[cfg(not(target_os = "windows"))]
@@ -214,5 +235,47 @@ impl ConnectedSocket {
             InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{net::SocketAddr, ops::Not, time::Duration};
+
+    use mirrord_protocol::outgoing::{SocketAddress, v2};
+    use tokio::net::TcpStream;
+
+    use crate::proxies::outgoing::net_protocol_ext::{InnerConnectedSocket, prepare_socket};
+
+    /// Verifies making a connection to a TCP [`PreparedSocket`](super::PreparedSocket)
+    /// cannot finish before [`PreparedSocket::accept`](super::PreparedSocket::accept) is called.
+    #[tokio::test]
+    async fn tcp_connect_blocked() {
+        let socket = prepare_socket(
+            &SocketAddress::Ip("127.0.0.1:4444".parse().unwrap()),
+            v2::OutgoingProtocol::Stream,
+        )
+        .await
+        .unwrap();
+        let addr: SocketAddr = socket.local_address().unwrap().try_into().unwrap();
+
+        let connect_task = tokio::spawn(TcpStream::connect(addr));
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(connect_task.is_finished().not());
+
+        let connected = socket.accept().await.unwrap();
+        let InnerConnectedSocket::TcpStream(stream_server) = connected.inner else {
+            unreachable!();
+        };
+        let stream_client = connect_task.await.unwrap().unwrap();
+        assert_eq!(
+            stream_server.peer_addr().unwrap(),
+            stream_client.local_addr().unwrap()
+        );
+        assert_eq!(
+            stream_client.peer_addr().unwrap(),
+            stream_server.local_addr().unwrap()
+        );
     }
 }
