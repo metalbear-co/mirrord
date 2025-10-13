@@ -1,16 +1,13 @@
 import HomepageReturning from "@/components/HomepageReturning";
 import HomepageNewUser from "../components/HomepageNewUser";
+import { useContext } from "react";
+import { ConfigDataContextProvider, UserDataContext } from "@/components/UserDataContext";
 
-interface HomepageProps {
-  isReturning: boolean;
-}
-
-const Homepage = ({ isReturning }: HomepageProps) => {
-  if (isReturning) {
-    return <HomepageReturning />;
-  } else {
-    return <HomepageNewUser />
-  }
+const Homepage = () => {
+  const isReturning = useContext(UserDataContext);
+  return (<ConfigDataContextProvider>
+    {isReturning ? <HomepageReturning /> : <HomepageNewUser />}
+  </ConfigDataContextProvider>);
 };
 
 export default Homepage;

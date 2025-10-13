@@ -1,4 +1,4 @@
-import { useState, useEffect, ReactNode } from "react";
+import { useState, useEffect, ReactNode, useContext } from "react";
 import { WizardStep, Wizard } from "@/components/Wizard";
 import {
   Card,
@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/card";
 import { ArrowRight, BookOpen, Plus, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ConfigData } from "@/types/config";
+import { UserDataContext, ConfigDataContext, ConfigDataContextProvider } from "./UserDataContext";
 
 interface PanelProps {
   title: ReactNode;
@@ -17,7 +17,6 @@ interface PanelProps {
   buttonText: string;
   buttonColor: "purple" | "gray";
   steps: WizardStep[];
-  isReturning: boolean;
 }
 
 const Panel = ({
@@ -26,9 +25,9 @@ const Panel = ({
   buttonText,
   buttonColor,
   steps,
-  isReturning,
 }: PanelProps) => {
   const [showWizard, setShowWizard] = useState(false);
+  const isReturning = useContext(UserDataContext);
 
   const handleWizardOpen = (steps: WizardStep[]) => {
     // TODO: take steps param and open correct wizard
@@ -66,15 +65,11 @@ const Panel = ({
     <div>
       <div className="grid gap-6 sm:gap-8 max-w-4xl mx-auto">
         <Wizard
-          steps={steps}
-          isOpen={showWizard}
-          onClose={() => setShowWizard(false)}
-          onComplete={(data) => {
-            console.log("Wizard completed with data:", data);
-            setShowWizard(false);
-          }}
-          className="w-full"
-        />
+            steps={steps}
+            isOpen={showWizard}
+            onClose={() => setShowWizard(false)}
+            className="w-full"
+          />
         <Card className="bg-gradient-card border-border/50 hover:shadow-glow transition-all duration-300">
           <CardHeader>
             {title}

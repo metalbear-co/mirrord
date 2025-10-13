@@ -64,16 +64,11 @@ import DownloadButton from "./DownloadButton";
 import { generateConfigJson, validateJson, updateConfigFromJson } from "./JsonUtils";
 import { WizardHeader } from "./WizardHeader";
 import { WizardFooter } from "./WizardFooter";
-import type {
-  FeatureConfig,
-  ConfigData as SharedConfigData,
-} from "@/types/config";
-type ConfigData = SharedConfigData;
 
 interface ConfigWizardProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (config: ConfigData) => void;
+  onSave: (config: any) => void;
   isOverview?: boolean;
   isReturning: boolean;
 }
@@ -176,7 +171,7 @@ export function ConfigWizard({
   const [showPortMapping, setShowPortMapping] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const [config, setConfig] = useState<ConfigData>({
+  const [config, setConfig] = useState<any>({
     name: "",
     target: "",
     targetType: "deployment",
@@ -233,66 +228,7 @@ export function ConfigWizard({
     config.network.incoming.httpFilter,
     config.fileSystem.rules,
   ]);
-  const handleBoilerplateSelect = (boilerplateId: string) => {
-    setSelectedBoilerplate(boilerplateId);
-    const baseConfig = {
-      ...config,
-      name: `${boilerplateId}-config`,
-      targetType: "deployment",
-    };
-    switch (boilerplateId) {
-      case "replace":
-        setConfig({
-          ...baseConfig,
-          network: {
-            ...baseConfig.network,
-            incoming: {
-              ...baseConfig.network.incoming,
-              mode: "steal",
-            },
-          },
-          agent: {
-            scaledown: true,
-            copyTarget: true,
-          },
-        });
-        break;
-      case "mirror":
-        setConfig({
-          ...baseConfig,
-          network: {
-            ...baseConfig.network,
-            incoming: {
-              ...baseConfig.network.incoming,
-              mode: "mirror",
-            },
-          },
-          agent: {
-            scaledown: false,
-            copyTarget: false,
-          },
-        });
-        break;
-      case "steal":
-        setConfig({
-          ...baseConfig,
-          network: {
-            ...baseConfig.network,
-            incoming: {
-              ...baseConfig.network.incoming,
-              mode: "steal",
-            },
-          },
-          agent: {
-            scaledown: false,
-            copyTarget: false,
-          },
-        });
-        break;
-    }
-    // Automatically advance to config step
-    setOnboardingStep("config");
-  };
+  
   const handleFollowUpComplete = () => {
     if (selectedBoilerplate === "steal") {
       const filterValue =
@@ -391,7 +327,7 @@ export function ConfigWizard({
                 </div>
               )}
 
-              {onboardingStep === "boilerplate" && (
+              {/* {onboardingStep === "boilerplate" && (
                 <div className="space-y-6">
                   <div className="flex flex-col gap-2">
                     {boilerplateConfigs.map((boilerplate) => (
@@ -404,7 +340,7 @@ export function ConfigWizard({
                     ))}
                   </div>
                 </div>
-              )}
+              )} */}
             </>
           )}
 
