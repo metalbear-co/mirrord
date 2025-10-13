@@ -4,10 +4,7 @@ use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
-    outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    },
+    outgoing::{SocketAddress, v2},
 };
 use rstest::rstest;
 
@@ -35,8 +32,10 @@ async fn test_issue1776(
     println!("Application started, preparing to resolve DNS with sendmsg/recvmsg.");
 
     let client_msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-        remote_address: SocketAddress::Ip(addr),
+    let ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
+        id,
+        protocol: v2::OutgoingProtocol::Datagrams,
+        address: SocketAddress::Ip(addr),
     })) = client_msg
     else {
         panic!("Invalid message received from layer: {client_msg:?}");
@@ -45,34 +44,38 @@ async fn test_issue1776(
     println!("connecting to address {addr:#?}");
 
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: addr.into(),
-                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+        .send(DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(
+            v2::OutgoingConnectResponse {
+                id,
+                agent_local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                agent_peer_address: addr.into(),
             },
-        ))))
+        )))
         .await;
 
     let client_msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
-        connection_id: 0, ..
+    let ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData {
+        id: received_id,
+        data,
     })) = client_msg
     else {
         panic!("Invalid message received from layer: {client_msg:?}");
     };
+    assert_eq!(received_id, id);
+    assert_eq!(data.0.as_ref(), &[0, 1, 2, 3]);
 
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-            DaemonRead {
-                connection_id: 0,
-                bytes: vec![0; 4].into(),
+        .send(DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(
+            v2::OutgoingData {
+                id,
+                data: vec![0; 4].into(),
             },
-        ))))
+        )))
         .await;
-
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
+        .send(DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Close(
+            v2::OutgoingClose { id },
+        )))
         .await;
 
     test_process.wait_assert_success().await;
