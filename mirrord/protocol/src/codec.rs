@@ -333,82 +333,80 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
 
-// FIXME
-// #[cfg(test)]
-// mod tests {
-//     use bytes::BytesMut;
+    use super::*;
+    use crate::{Payload, tcp::TcpData};
 
-//     use super::*;
-//     use crate::{Payload, tcp::TcpData};
+    #[test]
+    fn sanity_client_encode_decode() {
+        let mut client_codec = ClientCodec::default();
+        let mut daemon_codec = DaemonCodec::default();
+        let mut buf = BytesMut::new();
 
-//     #[test]
-//     fn sanity_client_encode_decode() {
-//         let mut client_codec = ClientCodec::default();
-//         let mut daemon_codec = DaemonCodec::default();
-//         let mut buf = BytesMut::new();
+        let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
 
-//         let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
+        client_codec.encode(msg.clone(), &mut buf).unwrap();
 
-//         client_codec.encode(msg.clone(), &mut buf).unwrap();
+        let decoded = daemon_codec.decode(&mut buf).unwrap().unwrap();
 
-//         let decoded = daemon_codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(decoded, msg);
+        assert!(buf.is_empty());
+    }
 
-//         assert_eq!(decoded, msg);
-//         assert!(buf.is_empty());
-//     }
+    #[test]
+    fn sanity_daemon_encode_decode() {
+        let mut client_codec = ClientCodec::default();
+        let mut daemon_codec = DaemonCodec::default();
+        let mut buf = BytesMut::new();
 
-//     #[test]
-//     fn sanity_daemon_encode_decode() {
-//         let mut client_codec = ClientCodec::default();
-//         let mut daemon_codec = DaemonCodec::default();
-//         let mut buf = BytesMut::new();
+        let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+            connection_id: 1,
+            bytes: Payload::from(vec![1, 2, 3]),
+        }));
 
-//         let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
-//             connection_id: 1,
-//             bytes: Payload::from(vec![1, 2, 3]),
-//         }));
+        daemon_codec.encode(msg.clone(), &mut buf).unwrap();
 
-//         daemon_codec.encode(msg.clone(), &mut buf).unwrap();
+        let decoded = client_codec.decode(&mut buf).unwrap().unwrap();
 
-//         let decoded = client_codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(decoded, msg);
+        assert!(buf.is_empty());
+    }
 
-//         assert_eq!(decoded, msg);
-//         assert!(buf.is_empty());
-//     }
+    #[test]
+    fn decode_client_invalid_data() {
+        let mut codec = ClientCodec::default();
+        let mut buf = BytesMut::new();
+        buf.put_u8(254);
 
-//     #[test]
-//     fn decode_client_invalid_data() {
-//         let mut codec = ClientCodec::default();
-//         let mut buf = BytesMut::new();
-//         buf.put_u8(254);
+        let res = codec.decode(&mut buf);
+        match res {
+            Ok(_) => panic!("Should have failed"),
+            Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
+        }
+    }
 
-//         let res = codec.decode(&mut buf);
-//         match res {
-//             Ok(_) => panic!("Should have failed"),
-//             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
-//         }
-//     }
+    #[test]
+    fn decode_client_partial_data() {
+        let mut codec = ClientCodec::default();
+        let mut buf = BytesMut::new();
+        buf.put_u8(1);
 
-//     #[test]
-//     fn decode_client_partial_data() {
-//         let mut codec = ClientCodec::default();
-//         let mut buf = BytesMut::new();
-//         buf.put_u8(1);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+    }
 
-//         assert!(codec.decode(&mut buf).unwrap().is_none());
-//     }
+    #[test]
+    fn decode_daemon_invalid_data() {
+        let mut codec = DaemonCodec::default();
+        let mut buf = BytesMut::new();
+        buf.put_u8(254);
 
-//     #[test]
-//     fn decode_daemon_invalid_data() {
-//         let mut codec = DaemonCodec::default();
-//         let mut buf = BytesMut::new();
-//         buf.put_u8(254);
-
-//         let res = codec.decode(&mut buf);
-//         match res {
-//             Ok(_) => panic!("Should have failed"),
-//             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
-//         }
-//     }
-// }
+        let res = codec.decode(&mut buf);
+        match res {
+            Ok(_) => panic!("Should have failed"),
+            Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
+        }
+    }
+}
