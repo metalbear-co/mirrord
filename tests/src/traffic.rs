@@ -754,5 +754,4 @@ mod traffic_tests {
         assert!(res.success());
         process.assert_no_error_in_stderr().await;
     }
-
 }
