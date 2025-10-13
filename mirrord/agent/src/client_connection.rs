@@ -119,12 +119,14 @@ impl ClientConnection {
     }
 
     /// Sends a [`DaemonMessage`] to the client.
-    #[tracing::instrument(level = "trace", err)]
+    #[tracing::instrument(level = "trace")]
     pub async fn send(&mut self, message: DaemonMessage) -> io::Result<()> {
         self.connection
             .send(message)
-            .await
-            .map_err(io::Error::other)
+            .await;
+
+		// REVIEW Fix up the signatures
+		Ok(())
     }
 
     /// Receives a [`ClientMessage`] from the client.

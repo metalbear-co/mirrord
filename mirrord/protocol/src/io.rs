@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
     hash::Hash,
     io::{self},
     marker::PhantomData,
@@ -52,8 +53,8 @@ pub trait Queueable: Sized {
 }
 
 pub trait ProtocolEndpoint: 'static + Sized {
-    type InMsg: bincode::Decode<()> + Send;
-    type OutMsg: bincode::Encode + Send + Queueable;
+    type InMsg: bincode::Decode<()> + Send + fmt::Debug;
+    type OutMsg: bincode::Encode + Send + Queueable + fmt::Debug;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -152,14 +153,11 @@ async fn io_task<Channel, Type>(
     loop {
         select! {
             to_send = queues.next() => {
-                let Some(to_send) = to_send else {
-                    continue;
-                };
-
                 if let Err(err) = framed.send(to_send).await {
                     tracing::error!(?err, "failed to send message");
                     break;
                 }
+
             }
             received = framed.next() => {
                 match received {
@@ -221,6 +219,16 @@ impl<T> PartialEq for QueueId<T> {
         }
     }
 }
+
+impl<T> fmt::Debug for QueueId<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Normal(arg0) => f.debug_tuple("Normal").field(arg0).finish(),
+            Self::Tcp(arg0) => f.debug_tuple("Tcp").field(arg0).finish(),
+        }
+    }
+}
+
 impl<T> Eq for QueueId<T> {}
 
 #[derive(Default)]
@@ -255,34 +263,48 @@ impl<T> OutQueues<T> {
 
         drop(lock);
 
-        self.nonempty.notify_waiters();
+        self.nonempty.notify_one();
 
         Ok(())
     }
 
-    async fn next(&self) -> Option<Vec<u8>> {
-        self.nonempty.notified().await;
-
+    fn poll_next(&self) -> Option<Vec<u8>> {
         let mut lock = self.queues.lock().unwrap();
-        let mut rng = rand::rng();
 
+        let (key, queue) = lock
+            .iter_mut()
+            .choose(&mut rand::rng())
+            .map(|(k, v)| (k.clone(), v))?;
+
+        let Some(next) = queue.messages.pop_front() else {
+            // Shouldn't really happen
+            lock.remove(&key);
+            return None;
+        };
+
+        let was_full = queue.used_bytes >= Self::MAX_CAPACITY;
+
+        queue.used_bytes -= next.len();
+
+        if was_full && queue.used_bytes < Self::MAX_CAPACITY {
+            queue.free.notify_waiters();
+        }
+
+        if queue.messages.len() == 0 {
+            lock.remove(&key);
+        }
+
+        Some(next)
+    }
+
+    async fn next(&self) -> Vec<u8> {
         loop {
-            let random_key = lock.keys().choose(&mut rng).cloned()?;
-            let queue = lock.get_mut(&random_key).unwrap();
-            let Some(next) = queue.messages.pop_front() else {
-                lock.remove(&random_key);
-                continue;
-            };
-
-            let was_full = queue.used_bytes >= Self::MAX_CAPACITY;
-
-            queue.used_bytes -= next.len();
-
-            if was_full && queue.used_bytes < Self::MAX_CAPACITY {
-                queue.free.notify_waiters();
+            match self.poll_next() {
+                Some(msg) => break msg,
+                None => {
+                    self.nonempty.notified().await;
+                }
             }
-
-            return Some(next);
         }
     }
 }
