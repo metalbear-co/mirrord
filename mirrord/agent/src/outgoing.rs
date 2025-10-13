@@ -310,9 +310,7 @@ impl OutgoingTask {
                 } else {
                     let message = match connection_id {
                         ConnectionId::V1(id, proto) => proto.v1_daemon_close(id),
-                        ConnectionId::V2(id) => DaemonMessage::OutgoingV2(
-                            v2::DaemonOutgoing::Close(v2::OutgoingClose { id }),
-                        ),
+                        ConnectionId::V2(id) => v2::OutgoingClose { id }.into(),
                     };
                     self.send(message).await
                 }
@@ -337,12 +335,11 @@ impl OutgoingTask {
                             self.send(close).await
                         }
                         ConnectionId::V2(id) => {
-                            let error = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(
-                                v2::OutgoingError {
-                                    id,
-                                    error: error.into(),
-                                },
-                            ));
+                            let error = v2::OutgoingError {
+                                id,
+                                error: error.into(),
+                            }
+                            .into();
                             self.send(error).await
                         }
                     }
@@ -365,12 +362,11 @@ impl OutgoingTask {
                         connection_id,
                         bytes: data.into(),
                     }),
-                    ConnectionId::V2(id) => {
-                        DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(v2::OutgoingData {
-                            id,
-                            data: data.into(),
-                        }))
+                    ConnectionId::V2(id) => v2::OutgoingData {
+                        id,
+                        data: data.into(),
                     }
+                    .into(),
                 };
                 self.send(message).await
             }
@@ -391,12 +387,11 @@ impl OutgoingTask {
                         self.send(close).await
                     }
                     ConnectionId::V2(id) => {
-                        let error = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(
-                            v2::OutgoingError {
-                                id,
-                                error: error.into(),
-                            },
-                        ));
+                        let error = v2::OutgoingError {
+                            id,
+                            error: error.into(),
+                        }
+                        .into();
                         self.send(error).await
                     }
                 }
@@ -411,11 +406,11 @@ impl OutgoingTask {
                     self.send(read).await
                 }
                 ConnectionId::V2(id) => {
-                    let read =
-                        DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(v2::OutgoingData {
-                            id,
-                            data: Default::default(),
-                        }));
+                    let read = v2::OutgoingData {
+                        id,
+                        data: Default::default(),
+                    }
+                    .into();
                     self.send(read).await
                 }
             },
@@ -426,10 +421,7 @@ impl OutgoingTask {
                     self.send(close).await
                 }
                 ConnectionId::V2(id) => {
-                    let close =
-                        DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Close(v2::OutgoingClose {
-                            id,
-                        }));
+                    let close = v2::OutgoingClose { id }.into();
                     self.send(close).await
                 }
             },
@@ -489,13 +481,12 @@ impl OutgoingTask {
                 ..
             }) => {
                 self.connects_v2_ids.remove(&id);
-                let message = DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(
-                    v2::OutgoingConnectResponse {
-                        id,
-                        agent_local_address: local_address,
-                        agent_peer_address: peer_address,
-                    },
-                ));
+                let message = v2::OutgoingConnectResponse {
+                    id,
+                    agent_local_address: local_address,
+                    agent_peer_address: peer_address,
+                }
+                .into();
                 self.send(message).await.map_break(Ok)?;
                 self.writers.insert(ConnectionId::V2(id), write);
                 self.readers
@@ -536,11 +527,7 @@ impl OutgoingTask {
                 ..
             }) => {
                 self.connects_v2_ids.remove(&id);
-                let message =
-                    DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Error(v2::OutgoingError {
-                        id,
-                        error,
-                    }));
+                let message = v2::OutgoingError { id, error }.into();
                 self.send(message).await.map_break(Ok)
             }
 

@@ -8,7 +8,7 @@ use mirrord_intproxy_protocol::{
     SocketMetadataResponse,
 };
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, Payload, ResponseError,
+    DaemonMessage, Payload, ResponseError,
     outgoing::{
         DaemonConnect, LayerWrite, OUTGOING_V2_VERSION, SocketAddress, tcp::DaemonTcpOutgoing,
         udp::DaemonUdpOutgoing, v2,
@@ -427,11 +427,12 @@ impl OutgoingProxy {
                     proto: request.protocol,
                 },
             );
-            ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
+            v2::OutgoingConnectRequest {
                 id,
                 address: request.remote_address,
                 protocol: request.protocol,
-            }))
+            }
+            .into()
         } else {
             self.queue(request.protocol).push_back_with_data(
                 message_id,
@@ -564,10 +565,10 @@ impl BackgroundTask for OutgoingProxy {
                                 proto.v1_layer_write(LayerWrite { connection_id: id, bytes: bytes.into() })
                             }
                             ConnectionId::V2(id) => {
-                                ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData {
+                                v2::OutgoingData {
                                     id,
                                     data: bytes.into(),
-                                }))
+                                }.into()
                             }
                         };
                         message_bus.send(ProxyMessage::ToAgent(msg)).await;
@@ -591,9 +592,9 @@ impl BackgroundTask for OutgoingProxy {
                                     proto.v1_layer_close(id)
                                 }
                                 ConnectionId::V2(id) => {
-                                    ClientMessage::OutgoingV2(v2::ClientOutgoing::Close(v2::OutgoingClose {
+                                    v2::OutgoingClose {
                                         id,
-                                    }))
+                                    }.into()
                                 }
                             };
                             message_bus.send(ProxyMessage::ToAgent(msg)).await;
