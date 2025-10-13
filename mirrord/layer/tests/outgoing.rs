@@ -96,9 +96,11 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config
         config_path
     });
 
-    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
-        .start_process_with_layer(dylib_path, vec![], config.as_deref())
-        .await;
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp {
+        non_blocking: false,
+    }
+    .start_process_with_layer(dylib_path, vec![], config.as_deref())
+    .await;
 
     let peers = RUST_OUTGOING_PEERS
         .split(',')
@@ -329,7 +331,7 @@ async fn outgoing_tcp_non_blocking_connect(dylib_path: &Path) {
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
     config_file.as_file_mut().write_all(&config).unwrap();
 
-    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp { non_blocking: true }
         .start_process_with_layer(dylib_path, vec![], Some(config_file.path()))
         .await;
 
