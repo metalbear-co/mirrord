@@ -43,4 +43,7 @@ pub(crate) enum CiError {
 
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     BinaryExecuteFailed(String, Vec<String>),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
 }

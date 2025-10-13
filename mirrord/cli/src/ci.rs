@@ -1,20 +1,21 @@
 use std::{
     collections::HashMap,
     env::temp_dir,
-    io::ErrorKind,
     path::{Path, PathBuf},
     process::Stdio,
 };
 
 use drain::Watch;
+use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
+use serde::{Deserialize, Serialize};
 use tokio::{
-    fs::OpenOptions,
-    io::{AsyncReadExt, AsyncWriteExt},
+    fs::{self},
+    io::AsyncWriteExt,
 };
 use tracing::Level;
 
@@ -96,6 +97,60 @@ MIRRORD_CI_API_KEY environment variable.
     Ok(())
 }
 
+/// Stores the [`MirrordCi`] information we need to execute commands like `mirrord ci start|stop`.
+///
+/// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+struct MirrordCiStore {
+    /// pid of the intproxy, stored when the intproxy starts.
+    intproxy_pid: Option<u32>,
+
+    /// pid of the user process, stored when we spawn the user binary with mirrord.
+    user_pid: Option<u32>,
+}
+
+impl MirrordCiStore {
+    /// File where we store the intproxy pid, user process pid, and whatever else we need for
+    /// [`MirrordCi`].
+    const MIRRORD_FOR_CI_TMP_FILE_PATH: &str = "mirrord/mirrord-for-ci.json";
+
+    /// Saves this [`MirrordCiStore`] to the file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`],
+    /// creating a new file if it needed.
+    async fn write_to_file(&self) -> CiResult<()> {
+        let mut store_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH))
+            .await?;
+
+        if store_file.try_lock_exclusive()? {
+            let contents = serde_json::to_vec(self)?;
+            store_file.write_all(contents.as_slice()).await?;
+            store_file.unlock()?;
+        }
+
+        Ok(())
+    }
+
+    /// Tries to read the [`MirrordCiStore`] from the path [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`],
+    /// if it doesn't exist, then we return a [`Default`].
+    async fn read_from_file_or_default() -> CiResult<Self> {
+        match fs::read(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
+            Ok(contents) => Ok(serde_json::from_slice(contents.as_slice())?),
+            Err(fail) if matches!(fail.kind(), std::io::ErrorKind::NotFound) => {
+                Ok(MirrordCiStore::default())
+            }
+            Err(fail) => Err(fail.into()),
+        }
+    }
+
+    /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
+    async fn remove_file() -> CiResult<()> {
+        Ok(tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await?)
+    }
+}
+
 /// mirrord-for-ci operations require a [`CiApiKey`] to run.
 ///
 /// `mirrord ci start` stores the pids of the user process and our intproxy so that we can
@@ -105,20 +160,14 @@ pub(super) struct MirrordCi {
     /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
     ci_api_key: CiApiKey,
 
-    /// pid of the intproxy, stored when the intproxy starts.
-    intproxy_pid: Option<u32>,
-
-    /// pid of the user process, stored when we spawn the user binary with mirrord.
-    user_pid: Option<u32>,
+    /// [`MirrordCiStore`] holds the intproxy pid, and the user process pid so we can kill them
+    /// later (on `mirrord ci stop`).
+    ///
+    /// The `store` may be initialized with default values, and we fill it as we get the pids.
+    store: MirrordCiStore,
 }
 
 impl MirrordCi {
-    /// File where we store the intproxy pid for [`MirrordCi`].
-    const MIRRORD_FOR_CI_INTPROXY_TMP_FILE: &str = "mirrord/mirrord-for-ci-intproxy-pid";
-
-    /// File where we store the user process pid for [`MirrordCi`].
-    const MIRRORD_FOR_CI_USER_TMP_FILE: &str = "mirrord/mirrord-for-ci-user-pid";
-
     /// Helper to access the [`CiApiKey`] when preparing the kube request headers.
     pub(super) fn api_key(&self) -> &CiApiKey {
         &self.ci_api_key
@@ -128,31 +177,21 @@ impl MirrordCi {
     /// [`Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE`], so we can kill the intproxy later.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn prepare_intproxy() -> CiResult<()> {
-        if MirrordCi::get().await?.intproxy_pid.is_some() {
+        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+
+        if mirrord_ci_store.intproxy_pid.is_some() {
             Err(CiError::IntproxyPidAlreadyPresent)
         } else {
-            let tmp_pid_file = temp_dir().join(Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE);
-
-            let mut tmp_file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(tmp_pid_file)
-                .await?;
-
-            tmp_file
-                .write_all(&std::process::id().to_be_bytes())
-                .await?;
-
-            Ok(())
+            mirrord_ci_store.intproxy_pid = Some(std::process::id());
+            Ok(mirrord_ci_store.write_to_file().await?)
         }
     }
 
     /// Prepares and runs the user binary with mirrord.
     ///
     /// Very similar to to how `mirrord exec` behaves, except that here we `spawn` a child process
-    /// that'll keep running, and we store the pid of this process in
-    /// [`Self::MIRRORD_FOR_CI_USER_TMP_FILE`] so we can kill it later.
+    /// that'll keep running, and we store the pid of this process in [`MirrordCiStore`] so we can
+    /// kill it later.
     #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
     pub(super) async fn prepare_command<P: Progress>(
         self,
@@ -162,7 +201,9 @@ impl MirrordCi {
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
     ) -> CiResult<()> {
-        if MirrordCi::get().await?.user_pid.is_some() {
+        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+
+        if mirrord_ci_store.user_pid.is_some() {
             Err(CiError::UserPidAlreadyPresent)
         } else {
             match tokio::process::Command::new(binary_path)
@@ -175,20 +216,10 @@ impl MirrordCi {
                 .spawn()
             {
                 Ok(child) => {
-                    if let Some(user_pid) = child.id() {
-                        let tmp_pid_file = temp_dir().join(Self::MIRRORD_FOR_CI_USER_TMP_FILE);
-                        let mut tmp_file = OpenOptions::new()
-                            .create(true)
-                            .write(true)
-                            .truncate(true)
-                            .open(tmp_pid_file)
-                            .await?;
+                    mirrord_ci_store.user_pid = child.id();
+                    mirrord_ci_store.write_to_file().await?;
 
-                        tmp_file.write_all(&user_pid.to_be_bytes()).await?;
-
-                        progress.success(Some(&format!("child pid: {user_pid}")));
-                    }
-
+                    progress.success(Some(&format!("child pid: {:?}", mirrord_ci_store.user_pid)));
                     Ok::<_, CiError>(())
                 }
                 Err(fail) => {
@@ -202,42 +233,18 @@ impl MirrordCi {
         }
     }
 
-    /// Reads [`Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE`], [`Self::MIRRORD_FOR_CI_USER_TMP_FILE`],
-    /// and the env var [`MIRRORD_CI_API_KEY`] to return valid [`MirrordCi`].
-    ///
-    /// The pid files might not have been set yet, so this function just fills them with `None`, but
-    /// [`MIRRORD_CI_API_KEY`] is always mandatory.
+    /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
+    /// [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub(super) async fn get() -> CiResult<Self> {
-        let mirrord_ci_intproxy_file = temp_dir().join(Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE);
-        let intproxy_pid = match OpenOptions::new()
-            .read(true)
-            .open(mirrord_ci_intproxy_file)
-            .await
-        {
-            Ok(mut pid_file) => Ok(Some(pid_file.read_u32().await?)),
-            Err(fail) if matches!(fail.kind(), ErrorKind::NotFound) => Ok(None),
-            Err(fail) => Err(fail),
-        }?;
-
-        let mirrord_ci_user_file = temp_dir().join(Self::MIRRORD_FOR_CI_USER_TMP_FILE);
-        let user_pid = match OpenOptions::new()
-            .read(true)
-            .open(mirrord_ci_user_file)
-            .await
-        {
-            Ok(mut pid_file) => Ok(Some(pid_file.read_u32().await?)),
-            Err(fail) if matches!(fail.kind(), ErrorKind::NotFound) => Ok(None),
-            Err(fail) => Err(fail),
-        }?;
+        let store = MirrordCiStore::read_from_file_or_default().await?;
 
         let ci_api_key = std::env::var(MIRRORD_CI_API_KEY)
             .map_err(|fail| CiError::EnvVar(MIRRORD_CI_API_KEY, fail))?;
 
         Ok(Self {
             ci_api_key: CiApiKey::decode(&ci_api_key)?,
-            intproxy_pid,
-            user_pid,
+            store,
         })
     }
 
@@ -248,11 +255,6 @@ impl MirrordCi {
     /// always need to match a `mirrord ci start` with a `mirrord ci stop`.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn clear(self) -> CiResult<()> {
-        let intproxy_removed =
-            tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE)).await;
-        let user_removed =
-            tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_USER_TMP_FILE)).await;
-
-        Ok(intproxy_removed.and(user_removed)?)
+        MirrordCiStore::remove_file().await
     }
 }

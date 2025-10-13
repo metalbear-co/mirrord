@@ -42,10 +42,10 @@ impl<'a> CiStartCommandHandler<'a> {
 
         let mirrord_for_ci = MirrordCi::get().await?;
 
-        if mirrord_for_ci.intproxy_pid.is_some() {
+        if mirrord_for_ci.store.intproxy_pid.is_some() {
             progress.failure(Some("Detected existing intproxy pid file!"));
             Err(CiError::IntproxyPidAlreadyPresent)
-        } else if mirrord_for_ci.user_pid.is_some() {
+        } else if mirrord_for_ci.store.user_pid.is_some() {
             progress.failure(Some("Detected existing user pid file!"));
             Err(CiError::UserPidAlreadyPresent)
         } else {

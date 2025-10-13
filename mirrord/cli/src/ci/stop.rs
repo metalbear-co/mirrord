@@ -30,7 +30,7 @@ impl CiStopCommandHandler {
     pub(super) async fn handle(self) -> CiResult<ExitStatus> {
         let Self { mirrord_ci } = self;
 
-        let intproxy_killed = match mirrord_ci.intproxy_pid {
+        let intproxy_killed = match mirrord_ci.store.intproxy_pid {
             Some(pid) => Command::new("kill")
                 .arg(pid.to_string())
                 .status()
@@ -39,7 +39,7 @@ impl CiStopCommandHandler {
             None => Err(CiError::IntproxyPidMissing),
         };
 
-        let user_killed = match mirrord_ci.user_pid {
+        let user_killed = match mirrord_ci.store.user_pid {
             Some(pid) => Command::new("kill")
                 .arg(pid.to_string())
                 .status()
