@@ -170,8 +170,8 @@ impl MirrordCi {
         &self.ci_api_key
     }
 
-    /// When intproxy starts, we need to retrieve its pid and store it in the
-    /// [`Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE`], so we can kill the intproxy later.
+    /// When intproxy starts, we need to retrieve its pid and store it in the [`Self::store`], so we
+    /// can kill the intproxy later.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn prepare_intproxy() -> CiResult<()> {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
@@ -245,8 +245,7 @@ impl MirrordCi {
         })
     }
 
-    /// Removes the tmp files [`Self::MIRRORD_FOR_CI_INTPROXY_TMP_FILE`], and
-    /// [`Self::MIRRORD_FOR_CI_USER_TMP_FILE`].
+    /// Removes the [`MirrordCiStore`] files.
     ///
     /// If one of these files remains available, `mirrord ci start` may fail to execute, as you
     /// always need to match a `mirrord ci start` with a `mirrord ci stop`.
