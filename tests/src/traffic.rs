@@ -754,4 +754,28 @@ mod traffic_tests {
         assert!(res.success());
         process.assert_no_error_in_stderr().await;
     }
+
+    /// Test that npm-based Node.js applications work with mirrord (tests Windows non-.exe execution)
+    /// This primarily tests outgoing traffic functionality with npm as a non-.exe binary
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn outgoing_traffic_npm_node(#[future] basic_service: KubeService) {
+        let service = basic_service.await;
+        let npm_command = ["npm", "--prefix", "node-e2e", "run", "test-outgoing"]
+            .map(String::from)
+            .to_vec();
+        let mut process = run_exec_with_target(
+            npm_command,
+            &service.pod_container_target(),
+            Some(&service.namespace),
+            None,
+            None,
+        )
+        .await;
+
+        let res = process.wait().await;
+        assert!(res.success());
+    }
 }
