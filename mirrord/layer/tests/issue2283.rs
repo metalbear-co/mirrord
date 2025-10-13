@@ -5,10 +5,7 @@ use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Dur
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
-    outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-    },
+    outgoing::{SocketAddress, v2},
 };
 use rstest::rstest;
 
@@ -61,29 +58,33 @@ async fn test_issue2283(
         .await;
 
     let message = intproxy.recv().await;
-    assert_matches!(
-        message,
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address}))
-        if remote_address == SocketAddress::from(address)
-    );
+    let ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
+        id,
+        protocol: v2::OutgoingProtocol::Stream,
+        address: remote_address,
+    })) = message
+    else {
+        panic!("unexpected client message: {message:?}");
+    };
+    assert_eq!(remote_address, SocketAddress::from(address));
 
     let local_address = "2.3.4.5:9122".parse::<SocketAddr>().unwrap();
     intproxy
-        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: address.into(),
-                local_address: local_address.into(),
+        .send(DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Connect(
+            v2::OutgoingConnectResponse {
+                id,
+                agent_local_address: local_address.into(),
+                agent_peer_address: address.into(),
             },
-        ))))
+        )))
         .await;
     intproxy
-        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
-            DaemonRead {
-                connection_id: 0,
-                bytes: vec![b'A'; 20].into(),
+        .send(DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Data(
+            v2::OutgoingData {
+                id,
+                data: vec![b'A'; 20].into(),
             },
-        ))))
+        )))
         .await;
 
     loop {
@@ -95,7 +96,9 @@ async fn test_issue2283(
     }
 
     intproxy
-        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+        .send(DaemonMessage::OutgoingV2(v2::DaemonOutgoing::Close(
+            v2::OutgoingClose { id },
+        )))
         .await;
 
     test_process.wait_assert_success().await;
