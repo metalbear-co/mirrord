@@ -1262,23 +1262,30 @@ pub(super) fn recv_from(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
-    let interceptor_address =
-        SOCKETS
-            .lock()?
-            .get(&sockfd)
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(Connected {
-                    interceptor_address,
-                    ..
-                }) => Some(interceptor_address.clone()),
-                _ => None,
-            })?;
+    let socket = SOCKETS
+        .lock()?
+        .get(&sockfd)
+        .bypass(Bypass::LocalFdNotFound(sockfd))?
+        .clone();
 
-    let SocketMetadataResponse { peer_address, .. } =
-        make_proxy_request_with_response(SocketMetadataRequest {
-            intproxy_address: interceptor_address,
-        })??;
-    let peer_address = peer_address.try_into()?;
+    let peer_address = match &socket.state {
+        SocketState::Connected(Connected {
+            agent_peer_address: Some(address),
+            ..
+        }) => address.clone().try_into()?,
+        SocketState::Connected(Connected {
+            interceptor_address,
+            agent_peer_address: None,
+            ..
+        }) => {
+            let SocketMetadataResponse { peer_address, .. } =
+                make_proxy_request_with_response(SocketMetadataRequest {
+                    intproxy_address: interceptor_address.clone(),
+                })??;
+            peer_address.try_into()?
+        }
+        _ => return Detour::Bypass(Bypass::InvalidState(sockfd)),
+    };
     fill_address(raw_source, source_length, peer_address)?;
 
     Errno::set_raw(0);
