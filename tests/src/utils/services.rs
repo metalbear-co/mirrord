@@ -165,7 +165,7 @@ async fn create_rollout(
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 /// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn internal_service(
+pub async fn internal_service(
     namespace: &str,
     service_type: &str,
     image: &str,
