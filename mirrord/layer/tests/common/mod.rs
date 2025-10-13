@@ -17,7 +17,7 @@ use std::{
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, LayerFileConfig, MIRRORD_LAYER_INTPROXY_ADDR,
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
@@ -117,7 +117,19 @@ pub struct TestIntProxy {
 }
 
 impl TestIntProxy {
-    pub async fn new(listener: TcpListener) -> Self {
+    pub async fn new(listener: TcpListener, config: Option<&Path>) -> Self {
+        let config = match config {
+            Some(path) => {
+                LayerFileConfig::from_path(path)
+                    .unwrap()
+                    .generate_config(&mut Default::default())
+                    .unwrap()
+                    .experimental
+            }
+            None => ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+        };
         let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
 
@@ -131,9 +143,7 @@ impl TestIntProxy {
                 0,
                 Default::default(),
                 Duration::from_secs(60),
-                &ExperimentalFileConfig::default()
-                    .generate_config(&mut Default::default())
-                    .unwrap(),
+                &config,
             );
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
@@ -180,8 +190,12 @@ impl TestIntProxy {
             .expect("intproxy connection failed");
     }
 
-    pub async fn new_with_app_port(listener: TcpListener, app_port: u16) -> Self {
-        let mut res = Self::new(listener).await;
+    pub async fn new_with_app_port(
+        listener: TcpListener,
+        app_port: u16,
+        config_path: Option<&Path>,
+    ) -> Self {
+        let mut res = Self::new(listener, config_path).await;
 
         let msg = res.recv().await;
         println!("Got first message from library: {:?}", msg);
@@ -1319,7 +1333,10 @@ impl Application {
         let env = get_env(dylib_path, address, extra_env_vars, configuration_file);
         let test_process = self.get_test_process(env).await;
 
-        (test_process, TestIntProxy::new(listener).await)
+        (
+            test_process,
+            TestIntProxy::new(listener, configuration_file).await,
+        )
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
@@ -1336,7 +1353,8 @@ impl Application {
 
         (
             test_process,
-            TestIntProxy::new_with_app_port(listener, self.get_app_port()).await,
+            TestIntProxy::new_with_app_port(listener, self.get_app_port(), configuration_file)
+                .await,
         )
     }
 }
