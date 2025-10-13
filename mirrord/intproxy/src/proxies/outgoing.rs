@@ -1,6 +1,6 @@
 //! Handles the logic of the `outgoing` feature.
 
-use std::{collections::HashMap, fmt, io};
+use std::{collections::HashMap, fmt, io, ops::Not};
 
 use bytes::Bytes;
 use mirrord_intproxy_protocol::{
@@ -82,8 +82,11 @@ impl fmt::Display for ConnectionId {
 
 #[derive(Debug)]
 struct ConnectionInProgress {
-    local_socket: PreparedSocket,
+    message_id: MessageId,
+    layer_id: LayerId,
+    local_socket: Option<PreparedSocket>,
     remote_address: SocketAddress,
+    proto: v2::OutgoingProtocol,
 }
 
 /// Handles logic and state of the `outgoing` feature.
@@ -121,13 +124,19 @@ pub struct OutgoingProxy {
     local_sockets: LocalSockets,
     /// [`mirrord_protocol`] version negotiated with the agent.
     protocol_version: Option<Version>,
+
+    /// Whether the local part of TCP connection should be handled in a way that allows for
+    /// non-blocking connect from the user application.
+    ///
+    /// See struct-level docs for more info.
+    non_blocking_tcp: bool,
 }
 
 impl OutgoingProxy {
     /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
 
-    pub fn new(local_sockets: LocalSockets) -> Self {
+    pub fn new(local_sockets: LocalSockets, non_blocking_tcp: bool) -> Self {
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
@@ -136,6 +145,7 @@ impl OutgoingProxy {
             background_tasks: Default::default(),
             local_sockets,
             protocol_version: None,
+            non_blocking_tcp,
         }
     }
 
@@ -173,18 +183,29 @@ impl OutgoingProxy {
         );
     }
 
-    fn handle_error_v1(
+    async fn handle_error_v1(
         &mut self,
         protocol: v2::OutgoingProtocol,
         error: ResponseError,
+        message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
         match self.queue(protocol).pop_front_with_data() {
-            Some((_, _, in_progress)) => {
+            Some((message_id, layer_id, in_progress)) => {
                 tracing::warn!(
                     %error,
                     remote_address = %in_progress.remote_address,
                     "Received remote error of an outgoing connect attempt.",
                 );
+
+                if self.non_blocking_tcp.not() {
+                    let to_layer = ToLayer {
+                        layer_id,
+                        message_id,
+                        message: ProxyToLayerMessage::OutgoingConnect(Err(error)),
+                    };
+                    message_bus.send(to_layer).await;
+                }
+
                 Ok(())
             }
             None => {
@@ -194,7 +215,11 @@ impl OutgoingProxy {
         }
     }
 
-    fn handle_error_v2(&mut self, error: v2::OutgoingError) {
+    async fn handle_error_v2(
+        &mut self,
+        error: v2::OutgoingError,
+        message_bus: &mut MessageBus<Self>,
+    ) {
         let v2::OutgoingError {
             id: connection_id,
             error,
@@ -206,6 +231,15 @@ impl OutgoingProxy {
                 remote_address = %in_progress.remote_address,
                 "Received remote error of an outgoing connect attempt."
             );
+
+            if self.non_blocking_tcp.not() {
+                let to_layer = ToLayer {
+                    layer_id: in_progress.layer_id,
+                    message_id: in_progress.message_id,
+                    message: ProxyToLayerMessage::OutgoingConnect(Err(error)),
+                };
+                message_bus.send(to_layer).await;
+            }
         } else {
             let connection_known = self.txs.remove(&ConnectionId::V2(connection_id)).is_some();
             tracing::warn!(
@@ -217,13 +251,14 @@ impl OutgoingProxy {
         }
     }
 
-    fn handle_connect_v1(
+    async fn handle_connect_v1(
         &mut self,
         connect: DaemonConnect,
         proto: v2::OutgoingProtocol,
+        message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let in_progress = match self.queue(proto).pop_front_with_data() {
-            Some((_, _, in_progress)) => in_progress,
+        let (message_id, layer_id, in_progress) = match self.queue(proto).pop_front_with_data() {
+            Some(queued) => queued,
             None => {
                 let message = proto.v1_daemon_connect(Ok(connect));
                 return Err(Box::new(UnexpectedAgentMessage(message)).into());
@@ -236,7 +271,14 @@ impl OutgoingProxy {
         } = connect;
         let connection_id = ConnectionId::V1(connection_id, proto);
         let requested_remote_address = in_progress.remote_address;
-        let interceptor_address = in_progress.local_socket.local_address()?;
+        let (local_socket, notify_layer) = match in_progress.local_socket {
+            Some(socket) => (socket, false),
+            None => {
+                let socket = prepare_socket(&requested_remote_address, proto).await?;
+                (socket, true)
+            }
+        };
+        let interceptor_address = local_socket.local_address()?;
 
         tracing::debug!(
             %connection_id,
@@ -247,7 +289,7 @@ impl OutgoingProxy {
             "Received remote connect confirmation for an outgoing connection.",
         );
         let entry_guard = self.local_sockets.insert(
-            interceptor_address,
+            interceptor_address.clone(),
             SocketMetadataResponse {
                 agent_address: agent_local_address,
                 peer_address: agent_peer_address,
@@ -255,18 +297,30 @@ impl OutgoingProxy {
         );
 
         let interceptor = self.background_tasks.register(
-            Interceptor::new(connection_id, in_progress.local_socket, entry_guard),
+            Interceptor::new(connection_id, local_socket, entry_guard),
             connection_id,
             Self::CHANNEL_SIZE,
         );
         self.txs.insert(connection_id, interceptor);
 
+        if notify_layer {
+            let to_layer = ToLayer {
+                message_id,
+                layer_id,
+                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                    interceptor_address,
+                })),
+            };
+            message_bus.send(to_layer).await;
+        }
+
         Ok(())
     }
 
-    fn handle_connect_v2(
+    async fn handle_connect_v2(
         &mut self,
         connect: v2::OutgoingConnectResponse,
+        message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
         let in_progress = match self.reqs.remove(&connect.id) {
             Some(in_progress) => in_progress,
@@ -282,7 +336,14 @@ impl OutgoingProxy {
         } = connect;
         let connection_id = ConnectionId::V2(id);
         let requested_remote_address = in_progress.remote_address;
-        let interceptor_address = in_progress.local_socket.local_address()?;
+        let (local_socket, notify_layer) = match in_progress.local_socket {
+            Some(socket) => (socket, false),
+            None => {
+                let socket = prepare_socket(&requested_remote_address, in_progress.proto).await?;
+                (socket, true)
+            }
+        };
+        let interceptor_address = local_socket.local_address()?;
 
         tracing::debug!(
             %connection_id,
@@ -293,7 +354,7 @@ impl OutgoingProxy {
             "Received remote connect confirmation for an outgoing connection.",
         );
         let entry_guard = self.local_sockets.insert(
-            interceptor_address,
+            interceptor_address.clone(),
             SocketMetadataResponse {
                 agent_address: agent_local_address,
                 peer_address: agent_peer_address,
@@ -301,11 +362,22 @@ impl OutgoingProxy {
         );
 
         let interceptor = self.background_tasks.register(
-            Interceptor::new(connection_id, in_progress.local_socket, entry_guard),
+            Interceptor::new(connection_id, local_socket, entry_guard),
             connection_id,
             Self::CHANNEL_SIZE,
         );
         self.txs.insert(connection_id, interceptor);
+
+        if notify_layer {
+            let to_layer = ToLayer {
+                message_id: in_progress.message_id,
+                layer_id: in_progress.layer_id,
+                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                    interceptor_address,
+                })),
+            };
+            message_bus.send(to_layer).await;
+        }
 
         Ok(())
     }
@@ -319,8 +391,25 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let local_socket = prepare_socket(&request.remote_address, request.protocol).await?;
-        let local_address = local_socket.local_address()?;
+        let local_socket = if self.non_blocking_tcp
+            && matches!(&request.remote_address, SocketAddress::Ip(..))
+            && request.protocol == v2::OutgoingProtocol::Stream
+        {
+            let local_socket = prepare_socket(&request.remote_address, request.protocol).await?;
+            let local_address = local_socket.local_address()?;
+
+            let to_layer = ToLayer {
+                layer_id: session_id,
+                message_id,
+                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                    interceptor_address: local_address,
+                })),
+            };
+            message_bus.send(to_layer).await;
+            Some(local_socket)
+        } else {
+            None
+        };
 
         let to_agent = if self
             .protocol_version
@@ -331,8 +420,11 @@ impl OutgoingProxy {
             self.reqs.insert(
                 id,
                 ConnectionInProgress {
+                    message_id,
+                    layer_id: session_id,
                     local_socket,
                     remote_address: request.remote_address.clone(),
+                    proto: request.protocol,
                 },
             );
             ClientMessage::OutgoingV2(v2::ClientOutgoing::Connect(v2::OutgoingConnectRequest {
@@ -345,21 +437,15 @@ impl OutgoingProxy {
                 message_id,
                 session_id,
                 ConnectionInProgress {
+                    message_id,
+                    layer_id: session_id,
                     local_socket,
                     remote_address: request.remote_address.clone(),
+                    proto: request.protocol,
                 },
             );
             request.protocol.v1_layer_connect(request.remote_address)
         };
-
-        let to_layer = ToLayer {
-            layer_id: session_id,
-            message_id,
-            message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                interceptor_address: local_address,
-            })),
-        };
-        message_bus.send(to_layer).await;
         message_bus.send(to_agent).await;
 
         Ok(())
@@ -415,9 +501,11 @@ impl BackgroundTask for OutgoingProxy {
                             self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Stream)).await;
                         },
                         DaemonTcpOutgoing::Connect(Err(error)) => {
-                            self.handle_error_v1(v2::OutgoingProtocol::Stream, error)?;
+                            self.handle_error_v1(v2::OutgoingProtocol::Stream, error, message_bus).await?;
                         },
-                        DaemonTcpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Stream)?,
+                        DaemonTcpOutgoing::Connect(Ok(connect)) => {
+                            self.handle_connect_v1(connect, v2::OutgoingProtocol::Stream, message_bus).await?;
+                        },
                     },
 
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
@@ -433,14 +521,16 @@ impl BackgroundTask for OutgoingProxy {
                             self.handle_data(data.bytes, ConnectionId::V1(data.connection_id, v2::OutgoingProtocol::Datagrams)).await;
                         },
                         DaemonUdpOutgoing::Connect(Err(error)) => {
-                            self.handle_error_v1(v2::OutgoingProtocol::Datagrams, error)?;
+                            self.handle_error_v1(v2::OutgoingProtocol::Datagrams, error, message_bus).await?;
                         },
-                        DaemonUdpOutgoing::Connect(Ok(connect)) => self.handle_connect_v1(connect, v2::OutgoingProtocol::Datagrams)?,
+                        DaemonUdpOutgoing::Connect(Ok(connect)) => {
+                            self.handle_connect_v1(connect, v2::OutgoingProtocol::Datagrams, message_bus).await?;
+                        },
                     },
 
                     Some(OutgoingProxyMessage::AgentOutgoing(msg)) => match msg {
                         v2::DaemonOutgoing::Connect(msg) => {
-                            self.handle_connect_v2(msg)?;
+                            self.handle_connect_v2(msg, message_bus).await?;
                         }
                         v2::DaemonOutgoing::Data(msg) => {
                             self.handle_data(msg.data, ConnectionId::V2(msg.id)).await;
@@ -449,7 +539,7 @@ impl BackgroundTask for OutgoingProxy {
                             self.handle_close(ConnectionId::V2(msg.id));
                         }
                         v2::DaemonOutgoing::Error(msg) => {
-                            self.handle_error_v2(msg);
+                            self.handle_error_v2(msg, message_bus).await;
                         }
                     },
 
@@ -544,7 +634,8 @@ mod test {
 
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
             BackgroundTasks::default();
-        let outgoing = background_tasks.register(OutgoingProxy::new(Default::default()), (), 8);
+        let outgoing =
+            background_tasks.register(OutgoingProxy::new(Default::default(), true), (), 8);
 
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.

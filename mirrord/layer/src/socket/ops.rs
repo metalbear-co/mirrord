@@ -730,7 +730,7 @@ pub(super) fn getpeername(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> Detour<i32> {
-    let intproxy_socket_address = {
+    let intproxy_address = {
         SOCKETS
             .lock()?
             .get(&sockfd)
@@ -744,9 +744,7 @@ pub(super) fn getpeername(
     };
 
     let SocketMetadataResponse { peer_address, .. } =
-        make_proxy_request_with_response(SocketMetadataRequest {
-            local_address: intproxy_socket_address,
-        })??;
+        make_proxy_request_with_response(SocketMetadataRequest { intproxy_address })??;
 
     trace!("getpeername -> remote_address {}", peer_address);
     fill_address(address, address_len, peer_address.try_into()?)
@@ -774,7 +772,7 @@ pub(super) fn getsockname(
         SocketState::Connected(connected) => {
             let SocketMetadataResponse { agent_address, .. } =
                 make_proxy_request_with_response(SocketMetadataRequest {
-                    local_address: connected.interceptor_address.clone(),
+                    intproxy_address: connected.interceptor_address.clone(),
                 })??;
             agent_address
         }
@@ -828,7 +826,7 @@ pub(super) fn accept(
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
 
     let peer_address = match make_proxy_request_with_response(SocketMetadataRequest {
-        local_address: peer_address.into(),
+        intproxy_address: peer_address.into(),
     })? {
         Some(response) => response.peer_address,
         None => peer_address.into(),
@@ -1250,7 +1248,7 @@ pub(super) fn recv_from(
 
     let SocketMetadataResponse { peer_address, .. } =
         make_proxy_request_with_response(SocketMetadataRequest {
-            local_address: interceptor_address,
+            intproxy_address: interceptor_address,
         })??;
     let peer_address = peer_address.try_into()?;
     fill_address(raw_source, source_length, peer_address)?;

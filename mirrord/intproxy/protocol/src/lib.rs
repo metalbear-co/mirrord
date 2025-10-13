@@ -110,13 +110,11 @@ pub enum IncomingRequest {
     PortUnsubscribe(PortUnsubscribe),
 }
 
-/// A request for additional metadata for accepted connection.
-/// The layer should use this each time it accepts a connection on a socket that is listening for
-/// mirrored connections ([`PortSubscribe`]).
+/// A request for additional metadata of a remote connection proxied by the intproxy.
 #[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
 pub struct SocketMetadataRequest {
-    /// Address of the listener that accepted the connection.
-    pub local_address: SocketAddress,
+    /// Address of the internal proxy socket.
+    pub intproxy_address: SocketAddress,
 }
 
 /// A response to layer's [`SocketMetadataRequest`].

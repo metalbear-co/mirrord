@@ -167,7 +167,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
-            OutgoingProxy::new(local_sockets.clone()),
+            OutgoingProxy::new(local_sockets.clone(), experimental.non_blocking_tcp_connect),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
         );
@@ -633,7 +633,7 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::SocketMetadataRequest(request) => {
-                let response = self.local_sockets.get(&request.local_address);
+                let response = self.local_sockets.get(&request.intproxy_address);
                 if let Some(tx) = self.task_txs.layers.get(&layer_id) {
                     tx.send(LocalMessage {
                         message_id,
