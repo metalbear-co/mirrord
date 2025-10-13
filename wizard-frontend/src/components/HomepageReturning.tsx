@@ -33,8 +33,8 @@ export const HomepageReturning = () => {
           </p>
         </div>
         <div className="grid gap-6 sm:gap-8  md:grid-cols-2 max-w-4xl mx-auto">
-          <Panel title={titleCreateConfig} content={"Use our wizard to create a working mirrord.json configuration file for your project"} buttonText={"Create New Config"} buttonColor={"purple"} steps={[]} isReturning={isReturning}/>
-          <Panel title={titleLearn} content={"Explore how mirrord works and understand the different modes and configurations"} buttonText={"View Overview"} buttonColor={"gray"} steps={[]} isReturning={isReturning}/>
+          <Panel title={titleCreateConfig} content={"Use our wizard to create a working mirrord.json configuration file for your project"} buttonText={"Create New Config"} buttonColor={"purple"} steps={[]}/>
+          <Panel title={titleLearn} content={"Explore how mirrord works and understand the different modes and configurations"} buttonText={"View Overview"} buttonColor={"gray"} steps={[]}/>
         </div>
       </div>
     </div>
