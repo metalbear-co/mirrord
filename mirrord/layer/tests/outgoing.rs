@@ -353,6 +353,8 @@ async fn outgoing_tcp_non_blocking_connect(dylib_path: &Path) {
         if duplicate.is_some() {
             panic!("Duplicate destination address {addr}");
         }
+
+        println!("Received connect request for {addr} with id {id}");
     }
 
     for (addr, id) in &connections {
@@ -376,6 +378,7 @@ async fn outgoing_tcp_non_blocking_connect(dylib_path: &Path) {
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
+        println!("Received data in connection {id}");
 
         let prev_len = connections.len();
         connections.retain(|_, known_id| id != known_id.unwrap());
