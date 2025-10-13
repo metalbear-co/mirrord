@@ -4,6 +4,7 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
+use mirrord_auth::error::ApiKeyError;
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{
@@ -479,6 +480,9 @@ pub(crate) enum CliError {
 
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
+
+    #[error(transparent)]
+    ApiKey(#[from] ApiKeyError),
 }
 
 #[cfg(target_os = "windows")]
@@ -581,9 +585,7 @@ impl From<OperatorApiError> for CliError {
                 operation: operation.to_string(),
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
-            OperatorApiError::ApiKey(fail) => {
-                Self::OperatorApiForbidden(OperatorOperation::SessionManagement, fail.to_string())
-            }
+            OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
         }
     }
 }
