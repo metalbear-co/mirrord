@@ -1236,18 +1236,24 @@ pub(super) fn recv_from(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
-    SOCKETS
-        .lock()?
-        .get(&sockfd)
-        .and_then(|socket| match &socket.state {
-            SocketState::Connected(Connected {
-                interceptor_address,
-                ..
-            }) => Some(interceptor_address.clone()),
-            _ => None,
-        })
-        .map(SocketAddress::try_into)?
-        .map(|address| fill_address(raw_source, source_length, address))??;
+    let interceptor_address =
+        SOCKETS
+            .lock()?
+            .get(&sockfd)
+            .and_then(|socket| match &socket.state {
+                SocketState::Connected(Connected {
+                    interceptor_address,
+                    ..
+                }) => Some(interceptor_address.clone()),
+                _ => None,
+            })?;
+
+    let SocketMetadataResponse { peer_address, .. } =
+        make_proxy_request_with_response(SocketMetadataRequest {
+            local_address: interceptor_address.into(),
+        })??;
+    let peer_address = peer_address.try_into()?;
+    fill_address(raw_source, source_length, peer_address)?;
 
     Errno::set_raw(0);
     Detour::Success(recv_from_result)

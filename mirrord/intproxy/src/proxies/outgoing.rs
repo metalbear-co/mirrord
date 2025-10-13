@@ -384,6 +384,7 @@ pub enum OutgoingProxyMessage {
     LayerConnect(OutgoingConnectRequest, MessageId, LayerId),
     ConnectionRefresh,
     AgentOutgoing(v2::DaemonOutgoing),
+    ProtocolVersion(Version),
 }
 
 impl BackgroundTask for OutgoingProxy {
@@ -458,6 +459,10 @@ impl BackgroundTask for OutgoingProxy {
                         req,
                         message_bus,
                     ).await?,
+
+                    Some(OutgoingProxyMessage::ProtocolVersion(version)) => {
+                        self.protocol_version.replace(version);
+                    }
 
                     Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(),
                 },

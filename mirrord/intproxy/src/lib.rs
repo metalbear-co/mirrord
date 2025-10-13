@@ -543,7 +543,14 @@ impl IntProxy {
 
                 self.task_txs
                     .incoming
-                    .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
+                    .send(IncomingProxyMessage::AgentProtocolVersion(
+                        protocol_version.clone(),
+                    ))
+                    .await;
+
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::ProtocolVersion(protocol_version))
                     .await;
             }
             DaemonMessage::LogMessage(log) => match log.level {
