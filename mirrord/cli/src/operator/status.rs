@@ -59,12 +59,13 @@ impl StatusCommandHandler {
     /// The Kafka information we want to display to the user is in the MirrordKafkaEphemeralTopic
     /// CRDs. This function extracts the topic information and creates display rows.
     ///
-    /// Returns the Kafka topic status rows keyed by topic name.
+    /// Returns the Kafka topic status rows keyed by consumer (the targeted resource, i.e. pod).
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn kafka_rows(
         topics: Iter<MirrordKafkaEphemeralTopic>,
         session_id: String,
         user: &String,
+        consumer: &String,
     ) -> Option<HashMap<String, Vec<Row>>> {
         let mut rows: HashMap<String, Vec<Row>> = HashMap::new();
 
@@ -79,10 +80,10 @@ impl StatusCommandHandler {
                 "Filtered"
             };
 
-            // Group rows by topic name
-            match rows.entry(topic_name.clone()) {
-                Entry::Occupied(mut topic_rows) => {
-                    topic_rows.get_mut().push(row![
+            // Group rows by the consumer (target).
+            match rows.entry(consumer.clone()) {
+                Entry::Occupied(mut consumer_rows) => {
+                    consumer_rows.get_mut().push(row![
                         session_id,
                         topic_name,
                         user,
@@ -90,8 +91,8 @@ impl StatusCommandHandler {
                         topic_type,
                     ]);
                 }
-                Entry::Vacant(topic_rows) => {
-                    topic_rows.insert(vec![row![
+                Entry::Vacant(consumer_rows) => {
+                    consumer_rows.insert(vec![row![
                         session_id,
                         topic_name,
                         user,
@@ -341,14 +342,15 @@ Operator License
                     kafka.iter(),
                     session.id.clone().unwrap_or_default(),
                     &session.user,
+                    &session.target,
                 )
             }) {
-                // Merge each session Kafka topics into our map keyed by topic name.
-                for (topic_name, rows) in kafka_in_status {
-                    match kafka_rows.entry(topic_name) {
-                        Entry::Occupied(mut topic_rows) => topic_rows.get_mut().extend(rows),
-                        Entry::Vacant(topic_rows) => {
-                            topic_rows.insert(rows);
+                // Merge each session Kafka topics into our map keyed by consumer (target).
+                for (consumer, rows) in kafka_in_status {
+                    match kafka_rows.entry(consumer) {
+                        Entry::Occupied(mut consumer_rows) => consumer_rows.get_mut().extend(rows),
+                        Entry::Vacant(consumer_rows) => {
+                            consumer_rows.insert(rows);
                         }
                     }
                 }
@@ -379,8 +381,8 @@ Operator License
             sqs_table.printstd();
         }
 
-        // The Kafka topic statuses are grouped by topic name.
-        for (topic_name, kafka_row) in kafka_rows {
+        // The Kafka topic statuses are grouped by consumer (target).
+        for (kafka_consumer, kafka_row) in kafka_rows {
             let mut kafka_table = Table::new();
             kafka_table.add_row(row![
                 "Session ID",
@@ -390,7 +392,7 @@ Operator License
                 "Type",
             ]);
 
-            println!("Kafka Topics for {topic_name}");
+            println!("Kafka Topics for {kafka_consumer}");
 
             for row in kafka_row {
                 kafka_table.add_row(row);
