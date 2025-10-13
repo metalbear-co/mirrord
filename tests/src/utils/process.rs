@@ -181,8 +181,13 @@ impl TestProcess {
     pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
         let now = std::time::Instant::now();
         while now.elapsed() < timeout {
-            let stderr = self.get_stderr().await;
-            if stderr.contains(line) {
+            let output = if cfg!(windows) {
+                self.get_stdout().await
+            } else {
+                self.get_stderr().await
+            };
+
+            if output.contains(line) {
                 return;
             }
             // avoid busyloop
@@ -358,5 +363,21 @@ impl TestProcess {
             .unwrap();
         println!("Started application.");
         TestProcess::from_child(child, None)
+    }
+}
+
+/// Ensures that the child process is killed when the `TestProcess` is dropped.
+/// This is especially important on Windows, where processes may not be terminated
+/// automatically when the parent process exits.
+#[cfg(target_os = "windows")]
+impl Drop for TestProcess {
+    fn drop(&mut self) {
+        // Ensure clean process termination, especially on Windows
+        if let Some(pid) = self.child.id() {
+            // Use Windows taskkill for more aggressive cleanup of process tree
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .output();
+        }
     }
 }

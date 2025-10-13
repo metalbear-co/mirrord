@@ -19,11 +19,11 @@ use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 use mirrord_intproxy_protocol::LayerId;
-pub use mirrord_layer_lib::setup::windows::layer_setup;
+pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
-    setup::{CONFIG, windows::init_setup},
+    setup::init_setup,
 };
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
@@ -132,10 +132,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 
         // Read and initialize configuration
         let config = LayerConfig::decode(config_base64.as_str()).map_err(LayerError::Config)?;
-        CONFIG.set(config.clone()).map_err(|_| {
-            LayerError::GlobalAlreadyInitialized("Layer config already initialized")
-        })?;
-
+        
         // Initialize layer setup with the configuration
         init_setup(config, address)?;
     } else {
@@ -173,10 +170,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 
         // Read and initialize configuration
         let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-        CONFIG.set(config.clone()).map_err(|_| {
-            LayerError::GlobalAlreadyInitialized("Layer config already initialized")
-        })?;
-
+        
         // Initialize layer setup with the configuration
         init_setup(config, address)?;
     }

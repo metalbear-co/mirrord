@@ -14,6 +14,18 @@ use crate::utils::{
     services::basic_service,
 };
 
+#[cfg_attr(target_os = "windows", ignore)]
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(240))]
+async fn mirror_with_http_header_filter_unix_only(
+    #[future] basic_service: KubeService,
+    #[future] kube_client: Client,
+    #[values(Application::PythonFastApiHTTP)] application: Application,
+) {
+    mirror_with_http_header_filter(basic_service, kube_client, application).await;
+}
+
 /// Test mirror mode with HTTP header filter.
 /// Only requests with matching headers should be mirrored.
 /// All requests (matching and non-matching) should still reach the original server.
@@ -23,12 +35,7 @@ use crate::utils::{
 async fn mirror_with_http_header_filter(
     #[future] basic_service: KubeService,
     #[future] kube_client: Client,
-    #[values(
-        Application::PythonFlaskHTTP,
-        Application::PythonFastApiHTTP,
-        Application::NodeHTTP
-    )]
-    application: Application,
+    #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
 ) {
     let service = basic_service.await;
     let kube_client = kube_client.await;

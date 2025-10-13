@@ -592,7 +592,8 @@ impl From<HookError> for i64 {
                     r"{reason}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
                     You can find the `mirrord-intproxy` logs in {}.",
-                    crate::setup::layer_config()
+                    crate::setup::layer_setup()
+                        .layer_config()
                         .internal_proxy
                         .log_destination
                         .display()

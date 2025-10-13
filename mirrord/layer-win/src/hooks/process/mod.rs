@@ -4,7 +4,7 @@ use std::{ffi::OsString, sync::OnceLock};
 
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::windows::layer_setup};
+use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::layer_setup};
 use str_win::{string_to_u16_buffer, u8_multi_buffer_to_strings, u16_multi_buffer_to_strings};
 use winapi::{
     shared::{
