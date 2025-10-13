@@ -1,11 +1,9 @@
-import React, { useState, ReactNode } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-} from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
+import React, { useState, ReactNode, useContext } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "./ui/badge";
+import { ConfigDataContext } from "./UserDataContext";
 
 export interface WizardStep {
   id: string;
@@ -15,35 +13,50 @@ export interface WizardStep {
 
 export interface WizardProps {
   steps: WizardStep[];
-  onComplete?: (data: any) => void;
+  onComplete?: () => void;
   className?: string;
-  data?: any;
-  onDataChange?: (data: any) => void;
   isOpen?: boolean;
   onClose?: () => void;
 }
 
 // Simplified WizardHeader for generic wizard
-const WizardHeader = ({ title, currentStep, totalSteps }: { title: string; currentStep: number; totalSteps: number }) => (
+const WizardHeader = ({
+  title,
+  currentStep,
+  totalSteps,
+  fetchConfigBadge,
+}: {
+  title: string;
+  currentStep: number;
+  totalSteps: number;
+  fetchConfigBadge: () => string;
+}) => (
   <div className="bg-background p-4 flex-shrink-0">
     <div className="mb-4">
-      <h2 className="text-2xl font-bold">{title}</h2>
-      <p className="text-sm text-muted-foreground">Step {currentStep + 1} of {totalSteps}</p>
+      <DialogTitle className="flex items-center gap-2">
+        {title}
+        {title === "Configuration Setup" && (
+          <Badge variant="secondary">{fetchConfigBadge()}</Badge>
+        )}
+      </DialogTitle>
+      <p className="text-sm text-muted-foreground">
+        Step {currentStep + 1} of {totalSteps}
+      </p>
     </div>
   </div>
 );
 
 // Simplified WizardFooter for generic wizard
-const WizardFooter = ({ 
-  onPrevious, 
-  onNext, 
-  isFirstStep, 
-  isLastStep 
-}: { 
-  onPrevious: () => void; 
-  onNext: () => void; 
-  isFirstStep: boolean; 
-  isLastStep: boolean; 
+const WizardFooter = ({
+  onPrevious,
+  onNext,
+  isFirstStep,
+  isLastStep,
+}: {
+  onPrevious: () => void;
+  onNext: () => void;
+  isFirstStep: boolean;
+  isLastStep: boolean;
 }) => (
   <div className="border-t bg-background p-4">
     <div className="flex items-center justify-between">
@@ -60,11 +73,8 @@ const WizardFooter = ({
       </div>
 
       <div className="flex items-center gap-2">
-        <Button
-          onClick={onNext}
-          className="flex items-center gap-2"
-        >
-          {isLastStep ? 'Complete' : 'Next'}
+        <Button onClick={onNext} className="flex items-center gap-2">
+          {isLastStep ? "Complete" : "Next"}
           {!isLastStep && <ChevronRight className="h-4 w-4" />}
         </Button>
       </div>
@@ -75,28 +85,32 @@ const WizardFooter = ({
 export const Wizard: React.FC<WizardProps> = ({
   steps,
   onComplete,
-  className,
-  data = {},
-  onDataChange,
   isOpen = true,
   onClose,
 }) => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [wizardData, setWizardData] = useState(data);
 
   const currentStepData = steps[currentStep];
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === steps.length - 1;
+  const config = useContext(ConfigDataContext);
 
-  const updateData = (newData: any) => {
-    const updatedData = { ...wizardData, ...newData };
-    setWizardData(updatedData);
-    onDataChange?.(updatedData);
+  const fetchConfigBadge = () => {
+    const mode = config.config.feature.network.incoming.mode; // todo: nullness :(
+    if (mode === "mirror") {
+      return "Mirror mode"
+    }
+    if (config.config.agent.scaledown && config.config.agent.copyTarget) {
+      return "Replace mode";
+    } else if (!config.config.agent.scaledown && !config.config.agent.copyTarget) {
+      return "Filtering mode";
+    }
+    return "Custom mode";
   };
 
   const goToNext = () => {
     if (isLastStep) {
-      onComplete?.(wizardData);
+      onComplete?.();
       onClose?.();
     } else {
       const nextStep = currentStep + 1;
@@ -117,20 +131,19 @@ export const Wizard: React.FC<WizardProps> = ({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] p-0 flex flex-col">
         {/* Fixed Header */}
-        <WizardHeader 
+        <WizardHeader
           title={currentStepData.title}
           currentStep={currentStep}
           totalSteps={steps.length}
+          fetchConfigBadge={fetchConfigBadge}
         />
 
         {/* Scrollable Content */}
         <div className="flex-1 px-4 pt-2 pb-4 overflow-y-auto">
           <div className="min-h-[200px]">
             {React.cloneElement(currentStepData.content as React.ReactElement, {
-              data: wizardData,
-              updateData,
               currentStep,
-              totalSteps: steps.length
+              totalSteps: steps.length,
             })}
           </div>
         </div>

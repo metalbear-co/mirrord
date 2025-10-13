@@ -1,18 +1,18 @@
 import { useState } from "react";
-import { ArrowRight, Zap, BookOpen, ChevronLeft, ChevronRight, Plus, Filter, Copy, Repeat, Server } from "lucide-react";
+import { Zap, BookOpen, ChevronLeft, ChevronRight, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ConfigWizard } from "@/components/ConfigWizard";
-import { BoilerplateCard } from "@/components/BoilerplateCard";
 import { WizardStep } from "@/components/Wizard";
 import { useNavigate } from "react-router-dom";
 import mirroredArchitecture from "@/assets/mirrord-architecture.svg";
 import mirrordLogo from "@/assets/mirrord-logo.png";
 import Panel from "./Panel";
+import BoilerplateStep from "./steps/BoilerplateStep";
+import IntroStep from "./steps/IntroStep";
+import ConfigStep from "./steps/ConfigStep";
 
 const HomepageNewUser = () => {
-  const isReturning = false;
   const titleCreateConfig = (
     <CardTitle className="flex items-center gap-2">
       <Zap className="h-5 w-5" /> Skip to Configuration
@@ -24,180 +24,13 @@ const HomepageNewUser = () => {
     </CardTitle>
   );
 
-  const boilerplateStep: WizardStep = {
-    id: "boilerplate-new-user",
-    title: "mirrord configuration",
-    content: (
-      <div className="space-y-6">
-        <div className="flex flex-col gap-2">
-          <BoilerplateCard
-            id="steal"
-            title="Filtering mode"
-            description="Suitable for scenarios where you want to see how your changes impact remote environment while reducing the impact radius"
-            features={["steal mode", "selective traffic"]}
-            icon={Filter}
-            color="text-purple-500"
-            selected={false}
-            onClick={() => {}}
-          />
-          <BoilerplateCard
-            id="mirror"
-            title="Mirror mode"
-            description="This is useful when you want the remote target to serve requests and you're okay with one request being handled twice"
-            features={["mirror mode"]}
-            icon={Copy}
-            color="text-blue-500"
-            selected={false}
-            onClick={() => {}}
-          />
-          <BoilerplateCard
-            id="replace"
-            title="Replace mode"
-            description="Suitable for scenarios where you have your own namespace/cluster and you're okay with replacing the remote service entirely. Note: Cannot replace pods, only other entities."
-            features={["steal mode", "copy target", "scale down"]}
-            icon={Repeat}
-            color="text-orange-500"
-            selected={false}
-            onClick={() => {}}
-          />
-        </div>
-      </div>
-    )
-  };
+  const boilerplateStep = BoilerplateStep();
 
-  const introStep: WizardStep = {
-    id: "intro-new-user",
-    title: "Welcome to mirrord Configuration",
-    content: (
-      <div className="space-y-6">
-        <div className="text-center space-y-4">
-          <div className="mx-auto w-24 h-24 bg-gradient-to-br from-primary to-primary/60 rounded-full flex items-center justify-center">
-            <Server className="h-12 w-12 text-white" />
-          </div>
+  const introStep = IntroStep();
 
-          <div className="space-y-2">
-            <h3 className="text-lg font-semibold">
-              Get started with mirrord
-            </h3>
-            <p className="text-muted-foreground max-w-md mx-auto">
-              Run local code like it's in your Kubernetes cluster
-              without deploying it first. Get started by creating your
-              first mirrord.json configuration.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  };
-
-  const explanationStep: WizardStep = {
-    id: "explanation-new-user",
-    title: "How mirrord Works",
-    content: (
-      <div className="space-y-6">
-        <div className="text-center space-y-4 pt-4">
-          <p className="text-sm text-muted-foreground">
-            Skip this if you're already familiar with mirrord and just
-            want to create a config file
-          </p>
-        </div>
-      </div>
-    )
-  };
-
-  const configStep: WizardStep = {
-    id: "config-new-user",
-    title: "Configuration Setup",
-    content: (
-      <div className="space-y-6">
-        <div className="text-center space-y-4 pt-4">
-          <p className="text-sm text-muted-foreground">
-            Configure your mirrord settings using the tabs below
-          </p>
-        </div>
-      </div>
-    )
-  };
+  const configStep = ConfigStep();
 
   // Learning steps
-
-  const [currentStep, setCurrentStep] = useState("welcome");
-  const [wizardStep, setWizardStep] = useState(1);
-  const [showWizard, setShowWizard] = useState(false);
-  const navigate = useNavigate();
-  const handleConfigSave = () => {
-    // TODO: ??
-    navigate('/dashboard');
-  };
-  const handleSkipToConfig = () => {
-    setCurrentStep("wizard-7");
-    setShowWizard(true);
-  };
-  const handleLearnFirst = () => {
-    setCurrentStep("wizard-1");
-    setWizardStep(1);
-  };
-  const nextWizardStep = () => {
-    if (wizardStep < 7) {
-      const nextStep = wizardStep + 1;
-      setWizardStep(nextStep);
-      setCurrentStep(`wizard-${nextStep}`);
-      if (nextStep === 7) {
-        setShowWizard(true);
-      }
-    }
-  };
-  const prevWizardStep = () => {
-    if (wizardStep > 1) {
-      const prevStep = wizardStep - 1;
-      setWizardStep(prevStep);
-      setCurrentStep(`wizard-${prevStep}`);
-      setShowWizard(false);
-    } else {
-      setCurrentStep("welcome");
-    }
-  };
-  const WizardHeader = ({
-    step,
-    title,
-    subtitle
-  }: {
-    step: number;
-    title: string;
-    subtitle: string;
-  }) => <div className="text-center mb-3 sm:mb-4">
-      <div className="flex items-center justify-center gap-2 mb-2">
-        <Zap className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-        <span className="text-base sm:text-lg font-bold bg-gradient-primary bg-clip-text text-transparent">
-          mirrord
-        </span>
-      </div>
-      <Badge variant="secondary" className="text-xs mb-2">Step {step} of 7</Badge>
-      <h1 className="text-lg sm:text-xl font-bold mb-2 text-foreground">
-        {title}
-      </h1>
-      <p className="text-muted-foreground text-xs sm:text-sm max-w-lg mx-auto px-4">
-        {subtitle}
-      </p>
-    </div>;
-  const WizardNavigation = ({
-    showNext = true,
-    showPrev = true,
-    nextLabel = "Next"
-  }: {
-    showNext?: boolean;
-    showPrev?: boolean;
-    nextLabel?: string;
-  }) => <div className="flex justify-between items-center mt-3 sm:mt-4 px-4 sm:px-0">
-      {showPrev ? <Button variant="outline" size="sm" onClick={prevWizardStep} className="flex items-center gap-2">
-        <ChevronLeft className="h-4 w-4" />
-        <span className="hidden sm:inline">Back</span>
-      </Button> : <div></div>}
-      {showNext && <Button size="sm" onClick={nextWizardStep} className="bg-gradient-primary flex items-center gap-2">
-        <span>{nextLabel}</span>
-        <ChevronRight className="h-4 w-4" />
-      </Button>}
-    </div>;
 
   const learningStep1: WizardStep = {
     id: "wizard-1-intro",
@@ -379,7 +212,7 @@ const HomepageNewUser = () => {
 
   return (
     <div className="min-h-screen w-full bg-background flex items-center justify-center p-4">
-      
+
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8 sm:mb-12">
           <div className="flex items-center justify-center mb-6">
@@ -395,8 +228,8 @@ const HomepageNewUser = () => {
           </p>
         </div>
         <div className="grid gap-6 sm:gap-8  md:grid-cols-2 max-w-4xl mx-auto">
-          <Panel title={titleLearn} content={"Understand how mirrord works and explore the overview before creating your first configuration"} buttonText={"Show Me How It Works"} buttonColor={"purple"} steps={[]} isReturning={isReturning} />
-          <Panel title={titleCreateConfig} content={"Jump directly to creating your mirrord.json configuration file"} buttonText={"Create Configuration Now"} buttonColor={"gray"} steps={[introStep, learningStep1, learningStep2, learningStep3, learningStep4, learningStep5, learningStep6, explanationStep, boilerplateStep, configStep]} isReturning={isReturning} />
+          <Panel title={titleLearn} content={"Understand how mirrord works and explore the overview before creating your first configuration"} buttonText={"Show Me How It Works"} buttonColor={"purple"} steps={[introStep, learningStep1, learningStep2, learningStep3, learningStep4, learningStep5, learningStep6, boilerplateStep, configStep]} />
+          <Panel title={titleCreateConfig} content={"Jump directly to creating your mirrord.json configuration file"} buttonText={"Create Configuration Now"} buttonColor={"gray"} steps={[boilerplateStep, configStep]} />
         </div>
       </div>
     </div>
