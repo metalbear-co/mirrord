@@ -51,7 +51,7 @@ pub(crate) async fn ci_command(
             .await?
             .handle()
             .await
-            .map(|status| tracing::info!(?status, "Kill all!"))?),
+            .map(|_| ())?),
     }
 }
 
