@@ -2,9 +2,10 @@
 
 use std::{ffi::OsString, sync::OnceLock};
 
+use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::layer_setup};
+use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::layer_setup, socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket}};
 use str_win::{string_to_u16_buffer, u8_multi_buffer_to_strings, u16_multi_buffer_to_strings};
 use winapi::{
     shared::{
@@ -52,6 +53,16 @@ fn environment_from_lpvoid(is_w16_env: bool, environment: LPVOID) -> Vec<String>
             u8_multi_buffer_to_strings(environment)
         }
     }
+}
+
+/// Converts the SOCKETS map into a vector of pairs (SOCKET, UserSocket) for serialization
+fn shared_sockets() -> Result<Vec<(u64, UserSocket)>, Box<dyn std::error::Error>> {
+    Ok(SOCKETS
+        .lock()
+        .map_err(|e| format!("Failed to lock sockets: {}", e))?
+        .iter()
+        .map(|(socket, user_socket)| (*socket as u64, user_socket.as_ref().clone()))
+        .collect())
 }
 
 type CreateProcessInternalWType = unsafe extern "system" fn(
@@ -140,6 +151,33 @@ unsafe extern "system" fn create_process_internal_w_hook(
             .expect("Couldn't encode layer config");
         let env_cfg_entry = format!("{MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64}={cfg_base64}");
 
+        // Prepare shared sockets environment variable
+        let env_shared_sockets = match shared_sockets() {
+            Ok(sockets) if !sockets.is_empty() => {
+                let socket_count = sockets.len();
+                match bincode::encode_to_vec(sockets, bincode::config::standard())
+                    .map(|bytes| BASE64_URL_SAFE.encode(bytes))
+                {
+                    Ok(encoded) => {
+                        tracing::debug!("Sharing {} sockets with child process", socket_count);
+                        Some(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to encode shared sockets: {}", e);
+                        None
+                    }
+                }
+            }
+            Ok(_) => {
+                tracing::trace!("No sockets to share with child process");
+                None
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get shared sockets: {}", e);
+                None
+            }
+        };
+
         // Delete the entries if they already exist first
         let mut rust_environment: Vec<String> = rust_environment
             .into_iter()
@@ -147,7 +185,8 @@ unsafe extern "system" fn create_process_internal_w_hook(
                 !(x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR)
                     || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64)
                     || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID)
-                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID))
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID)
+                    || x.starts_with(SHARED_SOCKETS_ENV_VAR))
             })
             .collect();
 
@@ -156,6 +195,11 @@ unsafe extern "system" fn create_process_internal_w_hook(
         rust_environment.push(env_layer_id);
         rust_environment.push(env_proxy_entry);
         rust_environment.push(env_cfg_entry);
+
+        // Add shared sockets if available
+        if let Some(shared_sockets_env) = env_shared_sockets {
+            rust_environment.push(shared_sockets_env);
+        }
 
         // Finally create the final environment
         let rust_environment: Vec<Vec<u16>> = rust_environment
