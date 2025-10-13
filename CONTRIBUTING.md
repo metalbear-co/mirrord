@@ -112,7 +112,7 @@ scripts/build_fat_mac.sh
 
 And then in order to use that binary in the tests, run the tests like this:
 ```bash
-MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p tests
+MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p mirrord-tests
 ```
 
 If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
