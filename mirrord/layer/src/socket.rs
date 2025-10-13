@@ -98,6 +98,8 @@ pub struct Connected {
     /// The address of the interceptor socket, this is what we're really connected to in the
     /// outgoing feature.
     interceptor_address: SocketAddress,
+    agent_local_address: Option<SocketAddress>,
+    agent_peer_address: Option<SocketAddress>,
 }
 
 /// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.

@@ -496,6 +496,8 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
         let OutgoingConnectResponse {
             interceptor_address,
+            agent_local_address,
+            agent_peer_address,
         } = response;
 
         // Connect to the interceptor socket that is listening.
@@ -520,6 +522,8 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
         let connected = Connected {
             interceptor_address,
+            agent_local_address,
+            agent_peer_address,
         };
 
         trace!("we are connected {connected:#?}");
@@ -730,21 +734,26 @@ pub(super) fn getpeername(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> Detour<i32> {
-    let intproxy_address = {
-        SOCKETS
-            .lock()?
-            .get(&sockfd)
-            .bypass(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => {
-                    Detour::Success(connected.interceptor_address.clone())
-                }
-                _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
-            })?
-    };
+    let socket = SOCKETS
+        .lock()?
+        .get(&sockfd)
+        .bypass(Bypass::LocalFdNotFound(sockfd))?
+        .clone();
 
-    let SocketMetadataResponse { peer_address, .. } =
-        make_proxy_request_with_response(SocketMetadataRequest { intproxy_address })??;
+    let peer_address = match &socket.state {
+        SocketState::Connected(Connected {
+            agent_peer_address: Some(address),
+            ..
+        }) => address.clone(),
+        SocketState::Connected(connected) => {
+            let SocketMetadataResponse { peer_address, .. } =
+                make_proxy_request_with_response(SocketMetadataRequest {
+                    intproxy_address: connected.interceptor_address.clone(),
+                })??;
+            peer_address
+        }
+        _ => Detour::Bypass(Bypass::InvalidState(sockfd))?,
+    };
 
     trace!("getpeername -> remote_address {}", peer_address);
     fill_address(address, address_len, peer_address.try_into()?)
@@ -769,6 +778,10 @@ pub(super) fn getsockname(
         .clone();
 
     let local_address = match &socket_state.state {
+        SocketState::Connected(Connected {
+            agent_local_address: Some(address),
+            ..
+        }) => address.clone(),
         SocketState::Connected(connected) => {
             let SocketMetadataResponse { agent_address, .. } =
                 make_proxy_request_with_response(SocketMetadataRequest {
@@ -819,20 +832,35 @@ pub(super) fn accept(
         peer_address?
     };
 
-    let state = SocketState::Connected(Connected {
-        interceptor_address: peer_address.into(),
-    });
+    let metadata_response = make_proxy_request_with_response(SocketMetadataRequest {
+        intproxy_address: peer_address.into(),
+    })?;
+
+    let connected = match metadata_response {
+        Some(response) => {
+            fill_address(
+                address,
+                address_len,
+                response.peer_address.clone().try_into()?,
+            )?;
+            Connected {
+                interceptor_address: peer_address.into(),
+                agent_local_address: Some(response.agent_address),
+                agent_peer_address: Some(response.peer_address),
+            }
+        }
+        None => {
+            fill_address(address, address_len, peer_address.into())?;
+            Connected {
+                interceptor_address: peer_address.into(),
+                agent_local_address: None,
+                agent_peer_address: None,
+            }
+        }
+    };
+    let state = SocketState::Connected(connected);
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
-
-    let peer_address = match make_proxy_request_with_response(SocketMetadataRequest {
-        intproxy_address: peer_address.into(),
-    })? {
-        Some(response) => response.peer_address,
-        None => peer_address.into(),
-    };
-
-    fill_address(address, address_len, peer_address.try_into()?)?;
 
     Detour::Success(new_fd)
 }

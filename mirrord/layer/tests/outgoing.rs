@@ -375,16 +375,18 @@ async fn outgoing_tcp_non_blocking_connect(dylib_path: &Path) {
 
     while connections.is_empty().not() {
         let msg = intproxy.recv().await;
-        let ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData { id, data })) =
-            msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
+        let (id, data) = match msg {
+            ClientMessage::OutgoingV2(v2::ClientOutgoing::Data(v2::OutgoingData { id, data })) => {
+                (id, data)
+            }
+            ClientMessage::OutgoingV2(v2::ClientOutgoing::Close(..)) => continue,
+            other => panic!("invalid message received from layer {other:?}"),
         };
         println!("Received data in connection {id}");
 
         let prev_len = connections.len();
         connections.retain(|_, known_id| id != known_id.unwrap());
-        if connections.len() != prev_len {
+        if connections.len() == prev_len {
             panic!("Unexpected outgoing connection id {id}");
         }
 

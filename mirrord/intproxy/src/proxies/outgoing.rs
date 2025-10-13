@@ -274,7 +274,8 @@ impl OutgoingProxy {
         let (local_socket, notify_layer) = match in_progress.local_socket {
             Some(socket) => (socket, false),
             None => {
-                let socket = prepare_socket(&requested_remote_address, proto).await?;
+                let socket =
+                    prepare_socket(&requested_remote_address, proto, self.non_blocking_tcp).await?;
                 (socket, true)
             }
         };
@@ -291,8 +292,8 @@ impl OutgoingProxy {
         let entry_guard = self.local_sockets.insert(
             interceptor_address.clone(),
             SocketMetadataResponse {
-                agent_address: agent_local_address,
-                peer_address: agent_peer_address,
+                agent_address: agent_local_address.clone(),
+                peer_address: agent_peer_address.clone(),
             },
         );
 
@@ -309,6 +310,8 @@ impl OutgoingProxy {
                 layer_id,
                 message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
                     interceptor_address,
+                    agent_local_address: Some(agent_local_address),
+                    agent_peer_address: Some(agent_peer_address),
                 })),
             };
             message_bus.send(to_layer).await;
@@ -339,7 +342,12 @@ impl OutgoingProxy {
         let (local_socket, notify_layer) = match in_progress.local_socket {
             Some(socket) => (socket, false),
             None => {
-                let socket = prepare_socket(&requested_remote_address, in_progress.proto).await?;
+                let socket = prepare_socket(
+                    &requested_remote_address,
+                    in_progress.proto,
+                    self.non_blocking_tcp,
+                )
+                .await?;
                 (socket, true)
             }
         };
@@ -356,8 +364,8 @@ impl OutgoingProxy {
         let entry_guard = self.local_sockets.insert(
             interceptor_address.clone(),
             SocketMetadataResponse {
-                agent_address: agent_local_address,
-                peer_address: agent_peer_address,
+                agent_address: agent_local_address.clone(),
+                peer_address: agent_peer_address.clone(),
             },
         );
 
@@ -374,6 +382,8 @@ impl OutgoingProxy {
                 layer_id: in_progress.layer_id,
                 message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
                     interceptor_address,
+                    agent_local_address: Some(agent_local_address),
+                    agent_peer_address: Some(agent_peer_address),
                 })),
             };
             message_bus.send(to_layer).await;
@@ -395,7 +405,12 @@ impl OutgoingProxy {
             && matches!(&request.remote_address, SocketAddress::Ip(..))
             && request.protocol == v2::OutgoingProtocol::Stream
         {
-            let local_socket = prepare_socket(&request.remote_address, request.protocol).await?;
+            let local_socket = prepare_socket(
+                &request.remote_address,
+                request.protocol,
+                self.non_blocking_tcp,
+            )
+            .await?;
             let local_address = local_socket.local_address()?;
 
             let to_layer = ToLayer {
@@ -403,6 +418,8 @@ impl OutgoingProxy {
                 message_id,
                 message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
                     interceptor_address: local_address,
+                    agent_local_address: None,
+                    agent_peer_address: None,
                 })),
             };
             message_bus.send(to_layer).await;

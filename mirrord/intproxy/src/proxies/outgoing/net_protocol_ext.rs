@@ -28,9 +28,11 @@ use tokio::{
 pub async fn prepare_socket(
     remote_address: &SocketAddress,
     proto: v2::OutgoingProtocol,
+    non_blocking_tcp: bool,
 ) -> io::Result<PreparedSocket> {
     match (remote_address, proto) {
-        (SocketAddress::Ip(addr), v2::OutgoingProtocol::Stream) => {
+        #[cfg(not(target_os = "windows"))]
+        (SocketAddress::Ip(addr), v2::OutgoingProtocol::Stream) if non_blocking_tcp => {
             let socket = if addr.is_ipv4() {
                 let socket = TcpSocket::new_v4()?;
                 socket.bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))?;
@@ -40,9 +42,27 @@ pub async fn prepare_socket(
                 socket.bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0))?;
                 socket
             };
-            let listener = socket.listen(0)?;
+            let backlog = if cfg!(target_os = "linux") { 0 } else { 1 };
+            let listener = socket.listen(backlog)?;
             let dummy = TcpStream::connect(listener.local_addr()?).await?;
-            Ok(PreparedSocket::TcpListener { listener, dummy })
+            Ok(PreparedSocket::TcpListener {
+                listener,
+                dummy: Some(dummy),
+            })
+        }
+
+        (SocketAddress::Ip(addr), v2::OutgoingProtocol::Stream) => {
+            let bind_to = if addr.is_ipv4() {
+                Ipv4Addr::LOCALHOST.into()
+            } else {
+                Ipv6Addr::LOCALHOST.into()
+            };
+            let bind_to = SocketAddr::new(bind_to, 0);
+            let listener = TcpListener::bind(bind_to).await?;
+            Ok(PreparedSocket::TcpListener {
+                listener,
+                dummy: None,
+            })
         }
 
         (SocketAddress::Ip(addr), v2::OutgoingProtocol::Datagrams) => {
@@ -90,7 +110,7 @@ pub enum PreparedSocket {
     UdpSocket(UdpSocket),
     TcpListener {
         listener: TcpListener,
-        dummy: TcpStream,
+        dummy: Option<TcpStream>,
     },
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
@@ -132,12 +152,22 @@ impl PreparedSocket {
     /// data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected) = match self {
-            Self::TcpListener { listener, dummy } => {
-                let dummy_addr = dummy.local_addr()?;
+            Self::TcpListener {
+                listener,
+                dummy: None,
+            } => {
+                let (stream, _) = listener.accept().await?;
+                (InnerConnectedSocket::TcpStream(stream), true)
+            }
+            Self::TcpListener {
+                listener,
+                dummy: Some(dummy),
+            } => {
+                let dummy_address = dummy.local_addr()?;
                 std::mem::drop(dummy);
                 loop {
                     let (stream, addr) = listener.accept().await?;
-                    if addr != dummy_addr {
+                    if addr != dummy_address {
                         break (InnerConnectedSocket::TcpStream(stream), true);
                     }
                 }
@@ -240,7 +270,7 @@ impl ConnectedSocket {
 
 #[cfg(test)]
 mod test {
-    use std::{net::SocketAddr, ops::Not, time::Duration};
+    use std::{net::SocketAddr, time::Duration};
 
     use mirrord_protocol::outgoing::{SocketAddress, v2};
     use tokio::net::TcpStream;
@@ -249,11 +279,13 @@ mod test {
 
     /// Verifies making a connection to a TCP [`PreparedSocket`](super::PreparedSocket)
     /// cannot finish before [`PreparedSocket::accept`](super::PreparedSocket::accept) is called.
+    #[cfg_attr(target_os = "windows", ignore)]
     #[tokio::test]
     async fn tcp_connect_blocked() {
         let socket = prepare_socket(
             &SocketAddress::Ip("127.0.0.1:4444".parse().unwrap()),
             v2::OutgoingProtocol::Stream,
+            true,
         )
         .await
         .unwrap();
@@ -262,7 +294,9 @@ mod test {
         let connect_task = tokio::spawn(TcpStream::connect(addr));
 
         tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(connect_task.is_finished().not());
+        if connect_task.is_finished() {
+            panic!("connect task finished early: {:?}", connect_task.await);
+        }
 
         let connected = socket.accept().await.unwrap();
         let InnerConnectedSocket::TcpStream(stream_server) = connected.inner else {

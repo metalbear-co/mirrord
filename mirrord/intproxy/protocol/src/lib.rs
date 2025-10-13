@@ -198,6 +198,10 @@ pub struct OutgoingConnectResponse {
     ///
     /// This is the address of a local socket managed by the internal proxy.
     pub interceptor_address: SocketAddress,
+
+    pub agent_local_address: Option<SocketAddress>,
+
+    pub agent_peer_address: Option<SocketAddress>,
 }
 
 /// A helper trait for `layer -> proxy` requests.
