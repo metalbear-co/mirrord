@@ -504,15 +504,9 @@ async fn execve_process<P>(
 where
     P: Progress,
 {
-    // Add .exe extension if necessary on Windows
-    // From CreateProcessW documentation:
-    // lpApplicationName - This parameter must include the file name extension; no default extension
-    // is assumed.
-    let binary_name = if binary.ends_with(".exe") {
-        binary.clone()
-    } else {
-        format!("{}.exe", binary)
-    };
+    // Let Windows handle executable resolution naturally
+    // Don't force .exe extension - Windows will try .exe, .bat, .cmd, etc. automatically
+    let binary_name = binary.clone();
 
     let binary_path = process_which(&binary_name).map_err(|e| {
         error!("process_which failed: {:?}", e);
