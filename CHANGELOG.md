@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.165.0](https://github.com/metalbear-co/mirrord/tree/3.165.0) - 2025-10-09
+
+### Changed
+
+- intproxy compiles on Windows.
+  [#.531](https://github.com/metalbear-co/mirrord/issues/.531)
+- All configuration snippets for agent are now self-contained.
+  [#3610](https://github.com/metalbear-co/mirrord/issues/3610)
+
+### Fixed
+
+- Fixed the check that disallows operator-only targets when the operator is not
+  in use.
+
+### Internal
+
+- The agent's docker image is now distroless, making it smaller and more
+  secure.
+  [#distroless-agent-runtime](https://github.com/metalbear-co/mirrord/issues/distroless-agent-runtime)
+- Added a GitHub action to build Windows builds.
+- Added more traffic mirroring tests.
+
 ## [3.164.0](https://github.com/metalbear-co/mirrord/tree/3.164.0) - 2025-10-06
 
 
