@@ -1,5 +1,5 @@
 [package]
-name = "tests"
+name = "mirrord-tests"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
@@ -32,7 +32,6 @@ tokio = { workspace = true, features = [
 ] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
-mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
 mirrord-operator = { path = "../mirrord/operator", features = ["setup", "crd"] }
 mirrord-tls-util = { path = "../mirrord/tls-util", optional = true }
 serde.workspace = true
@@ -54,6 +53,9 @@ wsl = "0.1"
 chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
 
 [features]
 default = ["ephemeral", "job", "cli", "targetless"]

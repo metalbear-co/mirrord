@@ -4,7 +4,7 @@ use std::fmt;
 use super::TestProcess;
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
 
-pub(crate) mod env;
+pub mod env;
 pub(crate) mod file_ops;
 
 /// Go versions used with test applications.

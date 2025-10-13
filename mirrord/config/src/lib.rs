@@ -58,6 +58,9 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable to indicate towards layer to wait for debugger.
+pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
+
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
@@ -1227,10 +1230,38 @@ mod tests {
     fn encode_and_decode_advanced_config() {
         let mut cfg_context = ConfigContext::default();
 
+        let advanced_config: String = format!(
+            r#"
+        {{
+            "accept_invalid_certificates": false,
+            "target": {{
+                "path": "pod/test-service-abcdefg-abcd",
+                "namespace": "default"
+            }},
+            "feature": {{
+                "env": true,
+                "fs": "write",
+                "network": {{
+                    "dns": false,
+                    "incoming": {{
+                        "mode": "steal",
+                        "http_filter": {{
+                            "header_filter": "x-intercept: {{ get_env(name=\"{}\") }}"
+                        }}
+                    }},
+                    "outgoing": {{
+                        "tcp": true,
+                        "udp": false
+                    }}
+                }}
+            }}
+        }}"#,
+            USER_ENVVAR
+        );
         // this config includes template variables, so it needs to be rendered first
         let mut template_engine = Tera::default();
         template_engine
-            .add_raw_template("main", ADVANCED_CONFIG)
+            .add_raw_template("main", &advanced_config)
             .unwrap();
         let rendered = template_engine
             .render("main", &tera::Context::new())
@@ -1246,30 +1277,9 @@ mod tests {
         assert_eq!(decoded, resolved_config);
     }
 
-    const ADVANCED_CONFIG: &str = r#"
-    {
-        "accept_invalid_certificates": false,
-        "target": {
-            "path": "pod/test-service-abcdefg-abcd",
-            "namespace": "default"
-        },
-        "feature": {
-            "env": true,
-            "fs": "write",
-            "network": {
-                "dns": false,
-                "incoming": {
-                    "mode": "steal",
-                    "http_filter": {
-                        "header_filter": "x-intercept: {{ get_env(name="USER") }}"
-                    }
-                },
-                "outgoing": {
-                    "tcp": true,
-                    "udp": false
-                }
-            }
-        }
-    }
-"#;
+    #[cfg(not(target_os = "windows"))]
+    const USER_ENVVAR: &str = "USER";
+
+    #[cfg(target_os = "windows")]
+    const USER_ENVVAR: &str = "USERNAME";
 }
