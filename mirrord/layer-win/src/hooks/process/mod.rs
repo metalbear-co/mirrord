@@ -5,18 +5,28 @@ use std::{ffi::OsString, sync::OnceLock};
 use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::layer_setup, socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket}};
-use str_win::{string_to_u16_buffer, u8_multi_buffer_to_strings, u16_multi_buffer_to_strings};
+use mirrord_layer_lib::{
+    process::{environment::environment_from_lpvoid, pipe::{forward_pipe_raw_handle_threaded, PipeConfig}},
+    proxy_connection::PROXY_CONNECTION,
+    setup::layer_setup,
+    socket::{SHARED_SOCKETS_ENV_VAR, shared_sockets},
+};
+use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
         minwindef::{BOOL, DWORD, LPVOID},
-        ntdef::{HANDLE, LPCWSTR, LPWSTR},
+        ntdef::{HANDLE, LPCWSTR, LPWSTR, NULL},
     },
     um::{
+        handleapi::{CloseHandle, SetHandleInformation},
         minwinbase::LPSECURITY_ATTRIBUTES,
-        processenv::GetEnvironmentStringsW,
+        namedpipeapi::CreatePipe,
+        processenv::{GetEnvironmentStringsW, GetStdHandle},
         processthreadsapi::{LPPROCESS_INFORMATION, LPSTARTUPINFOW, ResumeThread},
-        winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT},
+        winbase::{
+            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, HANDLE_FLAG_INHERIT,
+            STARTF_USESTDHANDLES, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        },
         winnt::PHANDLE,
     },
 };
@@ -25,45 +35,6 @@ use crate::{
     MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64, MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID,
     MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID, MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR, apply_hook,
 };
-
-fn environment_from_lpvoid(is_w16_env: bool, environment: LPVOID) -> Vec<String> {
-    unsafe {
-        let terminator_size = if is_w16_env { 4 } else { 2 };
-        let environment: *mut u8 = environment as *mut u8;
-        let mut environment_len = 0;
-
-        // NOTE(gabriela): when going through `CreateProcessA`, there'd be a limit of
-        // 32767 bytes. `CreateProcessW` doesn't have this, because, ridiculously, it is quite
-        // common for the environment to be *way* larger than that. mirrord is a perfect example
-        // which is MUCH more large. So we're gonna loop into infinity willingly. oops?
-        for i in 0.. {
-            let slice = std::slice::from_raw_parts(environment.add(i), terminator_size);
-            if slice.iter().all(|x| *x == 0) {
-                environment_len = i + terminator_size;
-                break;
-            }
-        }
-
-        if is_w16_env {
-            let environment =
-                std::slice::from_raw_parts::<u16>(environment as _, environment_len / 2);
-            u16_multi_buffer_to_strings(environment)
-        } else {
-            let environment = std::slice::from_raw_parts(environment, environment_len);
-            u8_multi_buffer_to_strings(environment)
-        }
-    }
-}
-
-/// Converts the SOCKETS map into a vector of pairs (SOCKET, UserSocket) for serialization
-fn shared_sockets() -> Result<Vec<(u64, UserSocket)>, Box<dyn std::error::Error>> {
-    Ok(SOCKETS
-        .lock()
-        .map_err(|e| format!("Failed to lock sockets: {}", e))?
-        .iter()
-        .map(|(socket, user_socket)| (*socket as u64, user_socket.as_ref().clone()))
-        .collect())
-}
 
 type CreateProcessInternalWType = unsafe extern "system" fn(
     HANDLE,
@@ -221,6 +192,32 @@ unsafe extern "system" fn create_process_internal_w_hook(
 
         creation_flags |= CREATE_SUSPENDED;
 
+        // Create pipes for stdout and stderr redirection
+        let mut stdout_read: HANDLE = NULL;
+        let mut stdout_write: HANDLE = NULL;
+        let mut stderr_read: HANDLE = NULL;
+        let mut stderr_write: HANDLE = NULL;
+
+        let pipes_created = CreatePipe(&mut stdout_read, &mut stdout_write, std::ptr::null_mut(), 0) != 0
+                && CreatePipe(&mut stderr_read, &mut stderr_write, std::ptr::null_mut(), 0) != 0
+                // Make the parent handles non-inheritable
+                && SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) != 0
+                && SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0) != 0;
+
+        // Modify startup info to redirect stdout/stderr if pipes were created successfully
+        let mut modified_startup_info;
+        let startup_info_ptr = if pipes_created {
+            // Clone the original startup info
+            modified_startup_info = *startup_info;
+            modified_startup_info.dwFlags |= STARTF_USESTDHANDLES;
+            modified_startup_info.hStdOutput = stdout_write;
+            modified_startup_info.hStdError = stderr_write;
+            &mut modified_startup_info
+        } else {
+            tracing::warn!("Failed to create pipes for child process stdout/stderr redirection");
+            startup_info
+        };
+
         let original = CREATE_PROCESS_INTERNAL_W_ORIGINAL.get().unwrap();
         let res = original(
             user_token,
@@ -232,7 +229,7 @@ unsafe extern "system" fn create_process_internal_w_hook(
             creation_flags,
             environment,
             current_directory,
-            startup_info,
+            startup_info_ptr,
             process_information,
             restricted_user_token,
         );
@@ -244,6 +241,21 @@ unsafe extern "system" fn create_process_internal_w_hook(
         let syringe = Syringe::for_process(injector_process);
         let payload_path = OsString::from(dll_path.clone());
         let _ = syringe.inject(payload_path).unwrap();
+
+        // Close child-side handles and start pipe forwarding if pipes were created
+        if pipes_created {
+            CloseHandle(stdout_write);
+            CloseHandle(stderr_write);
+
+            // Get parent stdout and stderr handles
+            let parent_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            let parent_stderr = GetStdHandle(STD_ERROR_HANDLE);
+
+            // Start pipe forwarding using default config
+            let config = PipeConfig::default();
+            forward_pipe_raw_handle_threaded(stdout_read as usize, parent_stdout as usize, config.clone());
+            forward_pipe_raw_handle_threaded(stderr_read as usize, parent_stderr as usize, config);
+        }
 
         ResumeThread((*process_information).hThread);
 

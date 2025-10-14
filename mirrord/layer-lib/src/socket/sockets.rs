@@ -67,14 +67,29 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 });
 
                 #[cfg(windows)]
-                let filtered_sockets = fds_and_sockets
-                    .into_iter()
-                    .map(|(socket, user_socket)| (socket as SocketDescriptor, Arc::new(user_socket)));
+                let filtered_sockets = fds_and_sockets.into_iter().map(|(socket, user_socket)| {
+                    (socket as SocketDescriptor, Arc::new(user_socket))
+                });
 
                 Mutex::new(HashMap::from_iter(filtered_sockets))
             })
             .unwrap_or_else(|| Mutex::new(HashMap::new()))
     });
+
+/// Converts the SOCKETS map into a vector of pairs (SOCKET, UserSocket) for serialization.
+/// Used primarily for sharing socket state between parent and child processes.
+///
+/// # Returns
+///
+/// A Result containing a vector of socket pairs, or an error if the lock fails
+pub fn shared_sockets() -> Result<Vec<(u64, UserSocket)>, Box<dyn std::error::Error>> {
+    Ok(SOCKETS
+        .lock()
+        .map_err(|e| format!("Failed to lock sockets: {}", e))?
+        .iter()
+        .map(|(socket, user_socket)| (*socket as u64, user_socket.as_ref().clone()))
+        .collect())
+}
 
 /// Helper function to safely convert socket descriptors to i64 for error handling and logging
 pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
@@ -237,7 +252,7 @@ pub fn is_socket_in_state(
 }
 
 /// Get bound address for a socket if it's in bound state
-/// 
+///
 /// For localhost addresses that were bound to port 0 (let OS choose), returns the actual
 /// bound address so that local clients can connect to it. For other addresses, returns
 /// the requested address to maintain the mirrord illusion.

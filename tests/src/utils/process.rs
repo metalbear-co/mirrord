@@ -3,6 +3,7 @@ use core::ops::Not;
 use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
+    io::Write,
     process::{ExitStatus, Stdio},
     sync::Arc,
     time::Duration,
@@ -310,7 +311,8 @@ impl TestProcess {
                 }
 
                 let string = String::from_utf8_lossy(&buf[..n]);
-                eprintln!("stderr {} {pid}: {}", format_time(), string);
+                eprint!("stderr {} {pid}: {}", format_time(), string);
+                let _ = std::io::Write::flush(&mut std::io::stderr());
                 {
                     stderr_data_reader.write().await.push_str(&string);
                 }
@@ -326,6 +328,7 @@ impl TestProcess {
                 }
                 let string = String::from_utf8_lossy(&buf[..n]);
                 print!("stdout {} {pid}: {}", format_time(), string);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
                 {
                     stdout_data_reader.write().await.push_str(&string);
                 }

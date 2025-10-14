@@ -26,11 +26,11 @@ use str_win::string_to_u16_buffer;
 use crate::{
     error::{ProcessExecError, ProcessExecResult},
     execution::windows::{
-        env_vars::EnvMap,
         injection::WindowsProcessSuspendedExtInject,
         process::{HandleWrapper, WindowsProcess, WindowsProcessExtSuspended},
     },
 };
+use mirrord_layer_lib::process::environment::EnvMap;
 
 #[derive(Debug)]
 pub struct WindowsCommand {

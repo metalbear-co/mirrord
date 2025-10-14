@@ -4430,6 +4430,7 @@ dependencies = [
  "mirrord-intproxy-protocol",
  "mirrord-kube",
  "mirrord-layer",
+ "mirrord-layer-lib",
  "mirrord-layer-win",
  "mirrord-operator",
  "mirrord-progress",
@@ -4780,7 +4781,6 @@ dependencies = [
  "tokio",
  "tracing",
  "winapi",
- "windows",
 ]
 
 [[package]]

@@ -132,7 +132,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 
         // Read and initialize configuration
         let config = LayerConfig::decode(config_base64.as_str()).map_err(LayerError::Config)?;
-        
+
         // Initialize layer setup with the configuration
         init_setup(config, address)?;
     } else {
@@ -170,7 +170,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 
         // Read and initialize configuration
         let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-        
+
         // Initialize layer setup with the configuration
         init_setup(config, address)?;
     }

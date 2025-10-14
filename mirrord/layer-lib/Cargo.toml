@@ -28,6 +28,9 @@ socket2.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
+# Tokio for async pipe operations
+tokio = { workspace = true, features = ["rt", "macros"] }
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
@@ -40,7 +43,6 @@ exec.workspace = true
 [target.'cfg(windows)'.dependencies]
 str-win = { path = "../str-win" }
 winapi.workspace = true
-windows.workspace = true
 anyhow.workspace = true
 
 [dev-dependencies]

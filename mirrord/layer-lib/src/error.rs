@@ -29,8 +29,6 @@ use thiserror::Error;
 use tracing::{error, info};
 
 use crate::graceful_exit;
-#[cfg(windows)]
-use crate::windows::ConsoleError;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -356,10 +354,6 @@ pub enum LayerError {
     #[cfg(target_os = "windows")]
     #[error("Environment variable for config not present")]
     MissingConfigEnv,
-
-    #[cfg(target_os = "windows")]
-    #[error("Console failure")]
-    WindowsConsoleError(#[from] ConsoleError),
 }
 
 impl From<SerializationError> for LayerError {

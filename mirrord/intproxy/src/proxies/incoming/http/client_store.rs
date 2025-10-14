@@ -88,11 +88,12 @@ impl ClientStore {
 
     /// Determines whether connection pooling should be enabled.
     ///
-    /// On Windows, connection pooling is disabled due to "channel closed" errors
+    /// On Windows, connection pooling was previously disabled due to "channel closed" errors
     /// that occur when reusing HTTP connections in rapid succession scenarios.
+    /// However, this was causing issues with HTTP mirroring, so we're re-enabling it.
     #[inline]
     fn should_enable_connection_pooling() -> bool {
-        !cfg!(target_os = "windows")
+        true // Re-enabled for Windows to fix HTTP mirroring issues
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].
