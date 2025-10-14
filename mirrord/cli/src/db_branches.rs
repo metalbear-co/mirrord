@@ -49,7 +49,7 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
                     .metadata
                     .name
                     .as_ref()
-                    .map_or(false, |name| names.contains(name))
+                    .is_some_and(|name| names.contains(name))
             })
             .collect()
     };
