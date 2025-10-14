@@ -942,6 +942,8 @@ the target pod template.
 }
 ```
 
+Different ways to source the connection options.
+
 ### feature.db_branches.id {#feature-db_branches-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
@@ -1184,6 +1186,22 @@ Default option for general file configuration.
 
 The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 
+#### feature.fs.mode.local {#feature-fs-mode-local}
+
+mirrord won't do anything fs-related, all operations will be local.
+
+#### feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}
+
+mirrord will run overrides on some file operations, but most will be local.
+
+#### feature.fs.mode.read {#feature-fs-mode-read}
+
+mirrord will read files from the remote, but won't write to them.
+
+#### feature.fs.mode.write {#feature-fs-mode-write}
+
+mirrord will read/write from the remote.
+
 ### feature.fs.not_found {#feature-fs-not_found}
 
 Specify file path patterns that if matched will be treated as non-existent.
@@ -1321,6 +1339,12 @@ Takes a list of values, such as:
 ```
 
 Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
+
+DNS queries matching what is specified here will go through the local app, everything else
+will go through the remote pod.
+
+DNS queries matching what is specified here will go through the remote pod, everything else
+will go through local.
 
 ### feature.network.incoming {#feature-network-incoming}
 
@@ -1889,6 +1913,12 @@ Takes a list of values, such as:
 
 Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
 
+Traffic that matches what's specified here will go through the local app, everything else
+will go through the remote pod.
+
+Traffic that matches what's specified here will go through the remote pod, everything else
+will go through local.
+
 #### feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}
 
 Defaults to `false`.
@@ -1959,6 +1989,13 @@ will be used, and your local application will not receive any messages from that
 ```
 
 More queue types might be added in the future.
+
+Kafka.
+
+Amazon Simple Queue Service.
+
+When a newer client sends a new filter kind to an older operator, that does not yet know
+about that filter type, this is what that filter will be deserialized to.
 
 ## internal_proxy {#root-internal_proxy}
 
