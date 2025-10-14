@@ -109,3 +109,23 @@ impl Debug for WindowsError {
         ))
     }
 }
+
+// Allow direct comparison between WindowsError and i32 for WinSock errors
+impl PartialEq<i32> for WindowsError {
+    fn eq(&self, other: &i32) -> bool {
+        match self {
+            Self::Windows(_) => false,
+            Self::WinSock(code) => code == other,
+        }
+    }
+}
+
+// Allow direct comparison between WindowsError and u32 for Windows errors
+impl PartialEq<u32> for WindowsError {
+    fn eq(&self, other: &u32) -> bool {
+        match self {
+            Self::Windows(code) => code == other,
+            Self::WinSock(_) => false,
+        }
+    }
+}

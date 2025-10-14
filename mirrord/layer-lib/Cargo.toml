@@ -42,3 +42,11 @@ str-win = { path = "../str-win" }
 winapi.workspace = true
 windows.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+serde_json.workspace = true
+rstest.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tempfile.workspace = true
+rand.workspace = true
