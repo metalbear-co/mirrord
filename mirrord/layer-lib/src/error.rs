@@ -582,6 +582,7 @@ impl From<HookError> for i64 {
                     }
                     err => format!("Proxy error, connectivity issue or a bug: {err}"),
                 };
+                #[cfg(target_os = "windows")]
                 graceful_exit!(
                     r"{reason}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
@@ -591,6 +592,11 @@ impl From<HookError> for i64 {
                         .internal_proxy
                         .log_destination
                         .display()
+                );
+                #[cfg(not(target_os = "windows"))]
+                graceful_exit!(
+                    r"{reason}.
+                    Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"
                 );
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
