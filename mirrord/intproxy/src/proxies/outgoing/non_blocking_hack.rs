@@ -37,6 +37,9 @@ pub async fn working_method() -> Option<HackMethod> {
                 .into_iter()
                 .filter_map(|(method, result)| result.is_ok().then_some(method))
                 .next()
+                .inspect(|method| {
+                    tracing::info!("Selected non blocking hack {method:?}");
+                })
         })
         .await
 }
