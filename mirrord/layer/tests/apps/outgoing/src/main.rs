@@ -149,6 +149,8 @@ fn main() {
 
     match (args.tcp, args.non_blocking) {
         (true, true) => {
+            // The runtime **must** be single-threaded, otherwise this app will not verify what it's
+            // supposed to verify. See the corresponding integration test for reference.
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

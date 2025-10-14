@@ -40,44 +40,48 @@ async fn issue_2744_non_blocking_outgoing_tcp(dylib_path: &Path) {
         .map(|s| s.parse::<SocketAddr>().unwrap())
         .collect::<Vec<_>>();
 
+    // Verify that intproxy sends concurrent connect requests.
+    // The test app uses a single-threaded runtime, so this is enough to check whether the connect
+    // emulation really is non-blocking.
     let mut received_connects: Vec<(SocketAddr, ConnectionId)> = Vec::with_capacity(peers.len());
-    let mut received_data: Vec<ConnectionId> = Vec::with_capacity(peers.len());
-
-    loop {
-        if received_connects.len() == peers.len() && received_data.len() == peers.len() {
-            break;
+    while received_connects.len() < peers.len() {
+        let msg = intproxy.recv().await;
+        match msg {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                if peers.contains(&addr).not() {
+                    panic!("unexpected connect request to {addr}");
+                }
+                if received_connects
+                    .iter()
+                    .any(|(prev_addr, _)| *prev_addr == addr)
+                {
+                    panic!("duplicate connect request to {addr}");
+                }
+                let connection_id = received_connects.len() as ConnectionId;
+                received_connects.push((addr, connection_id));
+            }
+            other => panic!("unexpected client message {other:?}"),
         }
+    }
+    for (addr, id) in &received_connects {
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: *id,
+                    remote_address: (*addr).into(),
+                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                },
+            ))))
+            .await;
+    }
 
+    let mut received_data: Vec<ConnectionId> = Vec::with_capacity(peers.len());
+    while received_data.len() < peers.len() {
         let msg = intproxy.recv().await;
         match msg {
             ClientMessage::TcpOutgoing(message) => match message {
-                LayerTcpOutgoing::Connect(LayerConnect {
-                    remote_address: SocketAddress::Ip(addr),
-                }) => {
-                    if peers.contains(&addr).not() {
-                        panic!("unexpected connect request to {addr}");
-                    }
-                    if received_connects
-                        .iter()
-                        .any(|(prev_addr, _)| *prev_addr == addr)
-                    {
-                        panic!("duplicate connect request to {addr}");
-                    }
-                    let connection_id = received_connects.len() as ConnectionId;
-                    received_connects.push((addr, connection_id));
-                    intproxy
-                        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                            DaemonConnect {
-                                connection_id,
-                                remote_address: addr.into(),
-                                local_address: RUST_OUTGOING_LOCAL
-                                    .parse::<SocketAddr>()
-                                    .unwrap()
-                                    .into(),
-                            },
-                        ))))
-                        .await;
-                }
                 LayerTcpOutgoing::Write(LayerWrite {
                     connection_id,
                     bytes,
