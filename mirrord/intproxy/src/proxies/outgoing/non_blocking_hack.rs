@@ -25,7 +25,7 @@ pub async fn working_method() -> Option<HackMethod> {
     *WORKING_METHOD
         .get_or_init(|| async {
             let futs = HackMethod::iter().map(|method| {
-                tokio::time::timeout(Duration::from_secs(1), method.test())
+                tokio::time::timeout(Duration::from_secs(2), method.test())
                     .unwrap_or_else(|_elapsed| Err(io::Error::other("test timed out")))
                     .map(move |result| (method, result))
             });
@@ -87,7 +87,7 @@ impl HackMethod {
 
         let mut conn_fut = Box::pin(TcpStream::connect(addr));
 
-        match tokio::time::timeout(Duration::from_secs(200), &mut conn_fut).await {
+        match tokio::time::timeout(Duration::from_millis(300), &mut conn_fut).await {
             Err(_elapsed) => {}
             Ok(stream) => {
                 stream?;
