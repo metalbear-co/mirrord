@@ -35,7 +35,7 @@ fn parse_args() -> Option<Args> {
         .map(|s| s.parse::<SocketAddr>())
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    let non_blocking = match args.get(3).map(String::as_str) {
+    let non_blocking = match args.get(4).map(String::as_str) {
         Some("--non-blocking") => true,
         None => false,
         Some(..) => None?,
