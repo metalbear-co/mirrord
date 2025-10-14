@@ -777,6 +777,38 @@ mod traffic_tests {
         .await;
 
         let res = process.wait().await;
-        assert!(res.success());
+        assert!(res.success(), "npm process should exit with success");
+
+        // Get the combined stdout for validation
+        let stdout = process.get_stdout().await;
+        
+        // Verify npm package info is displayed
+        assert!(stdout.contains("mirrord-node-e2e-test@"), "Expected npm package info");
+        assert!(stdout.contains("test-outgoing"), "Expected npm script name");
+        
+        // Verify that npm executed the script (not direct node execution)
+        assert!(stdout.contains("> node test_outgoing_traffic_npm.mjs"), 
+                "Expected npm to execute the script, showing npm's command output");
+        
+        // Verify the test script started properly
+        assert!(stdout.contains(">> npm-based outgoing traffic test"), 
+                "Expected test script startup message");
+        
+        // Verify successful HTTP connection
+        assert!(stdout.contains(">> statusCode: 200"), 
+                "Expected successful HTTP response from rust-lang.org");
+        
+        // Verify data was received from the outgoing request
+        assert!(stdout.contains(">> received data chunk of size"), 
+                "Expected to receive HTTP response data chunks");
+        
+        // Verify successful completion
+        assert!(stdout.contains(">> npm outgoing test completed successfully"), 
+                "Expected successful test completion message");
+        
+        // Verify multiple data chunks were received (indicating a real HTTP response)
+        let chunk_count = stdout.matches(">> received data chunk of size").count();
+        assert!(chunk_count >= 5, 
+                "Expected multiple data chunks (got {}), indicating real HTTP traffic", chunk_count);
     }
 }
