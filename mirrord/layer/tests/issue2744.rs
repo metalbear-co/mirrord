@@ -31,7 +31,7 @@ async fn outgoing_tcp(dylib_path: &Path) {
         .write_all(config.to_string().as_bytes())
         .unwrap();
 
-    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp { non_blocking: true }
         .start_process_with_layer(dylib_path, vec![], Some(config_file.path()))
         .await;
 

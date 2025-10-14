@@ -872,7 +872,9 @@ pub enum Application {
     GoFAccessAt(GoVersion),
     GoSelfOpen(GoVersion),
     RustOutgoingUdp,
-    RustOutgoingTcp,
+    RustOutgoingTcp {
+        non_blocking: bool,
+    },
     RustIssue1123,
     RustIssue1054,
     RustIssue1458,
@@ -997,7 +999,7 @@ impl Application {
             Application::RustIssue1458PortNot53 => {
                 String::from("tests/apps/issue1458portnot53/target/issue1458portnot53")
             }
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
@@ -1213,10 +1215,21 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+            Application::RustOutgoingTcp {
+                non_blocking: false,
+            } => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            Application::RustOutgoingTcp { non_blocking: true } => [
+                "--tcp",
+                RUST_OUTGOING_LOCAL,
+                RUST_OUTGOING_PEERS,
+                "--non-blocking",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
             Application::GoOpen {
                 path, flags, mode, ..
             } => {
@@ -1268,7 +1281,7 @@ impl Application {
             | Application::GoSelfOpen(..)
             | Application::GoDir(..)
             | Application::RustOutgoingUdp
-            | Application::RustOutgoingTcp
+            | Application::RustOutgoingTcp { .. }
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
             | Application::RustIssue1776
