@@ -78,11 +78,6 @@ impl ProtocolEndpoint for Agent {
     type OutMsg = DaemonMessage;
 }
 
-pub struct Connection<Type: ProtocolEndpoint> {
-    pub rx: mpsc::Receiver<Type::InMsg>,
-    tx_handle: TxHandle<Type>,
-}
-
 // Same as protocolCodec but outputs raw Vec<u8>s
 struct Codec<I>(PhantomData<I>);
 
@@ -102,6 +97,11 @@ impl<I> Encoder<Vec<u8>> for Codec<I> {
         dst.put(&encoded[..]);
         Ok(())
     }
+}
+
+pub struct Connection<Type: ProtocolEndpoint> {
+    pub rx: mpsc::Receiver<Type::InMsg>,
+    tx_handle: TxHandle<Type>,
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
