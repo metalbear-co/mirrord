@@ -776,7 +776,7 @@ pub(super) fn getsockname(
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => {
-                    Detour::Success(connected.local_address.clone())
+                    Detour::Success(connected.local_address.clone()?)
                 }
                 SocketState::Bound(Bound {
                     requested_address,
@@ -846,7 +846,7 @@ pub(super) fn accept(
 
     let state = SocketState::Connected(Connected {
         remote_address: remote_source.into(),
-        local_address: SocketAddr::new(local_address, port).into(),
+        local_address: Some(SocketAddr::new(local_address, port).into()),
         layer_address: None,
     });
 

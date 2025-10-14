@@ -160,7 +160,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
-            OutgoingProxy::default(),
+            OutgoingProxy::new(experimental.non_blocking_tcp_connect),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
         );

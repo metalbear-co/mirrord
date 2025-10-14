@@ -144,6 +144,12 @@ pub struct ExperimentalConfig {
     /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
     #[config(default = false)]
     pub force_hook_connect: bool,
+
+    /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+    ///
+    /// Enables better support for outgoing connections using non-blocking TCP sockets.
+    #[config(default = false)]
+    pub non_blocking_tcp_connect: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -164,5 +170,6 @@ impl CollectAnalytics for &ExperimentalConfig {
             analytics.add("dns_permission_error_fatal", dns_permission_error_fatal);
         }
         analytics.add("force_hook_connect", self.force_hook_connect);
+        analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
     }
 }

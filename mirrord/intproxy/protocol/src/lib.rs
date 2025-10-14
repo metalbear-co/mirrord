@@ -244,7 +244,9 @@ pub struct OutgoingConnectResponse {
     /// The address the layer should connect to instead of the address requested by the user.
     pub layer_address: SocketAddress,
     /// In-cluster address of the pod.
-    pub in_cluster_address: SocketAddress,
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
+    pub in_cluster_address: Option<SocketAddress>,
 }
 
 /// A helper trait for `layer -> proxy` requests.
