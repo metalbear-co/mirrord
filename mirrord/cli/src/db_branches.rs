@@ -3,7 +3,7 @@ use kube::{
     api::{DeleteParams, ListParams},
 };
 use mirrord_operator::crd::mysql_branching::MysqlBranchDatabase;
-use prettytable::{Row, Table, row};
+use prettytable::{Table, row};
 
 use crate::{
     CliResult,
