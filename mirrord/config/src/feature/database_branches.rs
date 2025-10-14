@@ -83,20 +83,20 @@ pub struct MysqlBranchConfig {
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchBaseFileConfig")]
 pub struct DatabaseBranchBaseConfig {
-    /// ### feature.db_branches.base.id {#feature-db_branches-id}
+    /// ### feature.db_branches.base.id {#feature-db_branches-base-id}
     ///
     /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
     /// the same database branch among Kubernetes users.
     pub id: Option<String>,
 
-    /// ### feature.db_branches.base.name {#feature-db_branches-name}
+    /// ### feature.db_branches.base.name {#feature-db_branches-base-name}
     ///
     /// When source database connection detail is not accessible to mirrord operator, users
     /// can specify the database `name` so it is included in the connection options mirrord
     /// uses as the override.
     pub name: Option<String>,
 
-    /// ### feature.db_branches.base.ttl_secs {#feature-db_branches-ttl_secs}
+    /// ### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
     ///
     /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
     /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -106,12 +106,12 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
 
-    /// ### feature.db_branches.base.version {#feature-db_branches-version}
+    /// ### feature.db_branches.base.version {#feature-db_branches-base-version}
     ///
     /// Mirrord operator uses a default version of the database image unless `version` is given.
     pub version: Option<String>,
 
-    /// ### feature.db_branches.base.connection {#feature-db_branches-connection}
+    /// ### feature.db_branches.base.connection {#feature-db_branches-base-connection}
     ///
     /// `connection` describes how to get the connection information to the source database.
     /// When the branch database is ready for use, Mirrord operator will replace the connection

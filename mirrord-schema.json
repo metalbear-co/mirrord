@@ -777,7 +777,7 @@
           ],
           "properties": {
             "connection": {
-              "title": "feature.db_branches.base.connection {#feature-db_branches-connection}",
+              "title": "feature.db_branches.base.connection {#feature-db_branches-base-connection}",
               "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
               "allOf": [
                 {
@@ -786,7 +786,7 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches.base.id {#feature-db_branches-id}",
+              "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
               "type": [
                 "string",
@@ -794,7 +794,7 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches.base.name {#feature-db_branches-name}",
+              "title": "feature.db_branches.base.name {#feature-db_branches-base-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
               "type": [
                 "string",
@@ -802,7 +802,7 @@
               ]
             },
             "ttl_secs": {
-              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-ttl_secs}",
+              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}",
               "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
               "default": 300,
               "type": "integer",
@@ -816,7 +816,7 @@
               ]
             },
             "version": {
-              "title": "feature.db_branches.base.version {#feature-db_branches-version}",
+              "title": "feature.db_branches.base.version {#feature-db_branches-base-version}",
               "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
               "type": [
                 "string",
