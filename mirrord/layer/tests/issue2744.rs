@@ -19,7 +19,7 @@ use tempfile::NamedTempFile;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(15))]
-async fn outgoing_tcp(dylib_path: &Path) {
+async fn issue_2744_non_blocking_outgoing_tcp(dylib_path: &Path) {
     let config = serde_json::json!({
         "experimental": {
             "non_blocking_tcp_connect": true
