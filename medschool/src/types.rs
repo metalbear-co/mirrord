@@ -28,7 +28,7 @@ pub struct PartialType<'a> {
     /// Fields of [`syn::ItemStruct`].
     pub fields: BTreeSet<PartialField<'a>>,
 
-    /// Variants of [`syna:ItemEnum`].
+    /// Variants of [`syn::ItemEnum`].
     pub variants: BTreeSet<PartialVariant<'a>>,
 }
 
