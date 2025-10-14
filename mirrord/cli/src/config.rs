@@ -156,6 +156,9 @@ pub(super) enum Commands {
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
 
+    /// Manage database branching.
+    #[command(name = "db-branches")]
+    DbBranches(Box<DbBranchesArgs>),
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.
@@ -1090,6 +1093,39 @@ pub(super) enum CiCommand {
         /// Specify config file to use
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
+    },
+}
+
+#[derive(Args, Debug)]
+pub(super) struct DbBranchesArgs {
+    /// Specify the namespace to operate on
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Operate on all namespaces
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+
+    #[command(subcommand)]
+    pub command: DbBranchesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum DbBranchesCommand {
+    /// Show the status of database branches
+    Status {
+        /// Names of specific branches to show status for (all branches if none specified)
+        #[arg()]
+        names: Vec<String>,
+    },
+    /// Destroy database branches
+    Destroy {
+        /// Destroy all branches
+        #[arg(long, conflicts_with = "names")]
+        all: bool,
+        /// Names of specific branches to destroy
+        #[arg(required_unless_present = "all")]
+        names: Vec<String>,
     },
 }
 
