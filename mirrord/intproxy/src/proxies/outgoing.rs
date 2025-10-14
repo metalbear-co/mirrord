@@ -1,11 +1,11 @@
 //! Handles the logic of the `outgoing` feature.
 
-use std::{collections::HashMap, fmt, io, time::Instant};
+use std::{collections::HashMap, fmt, io, net::SocketAddr, time::Instant};
 
 use bytes::Bytes;
 use mirrord_intproxy_protocol::{
-    LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-    ProxyToLayerMessage,
+    LayerId, MessageId, NetProtocol, OutgoingConnMetadataResponse, OutgoingConnectRequest,
+    OutgoingConnectResponse, OutgoingRequest, OutgoingResponse, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
@@ -23,11 +23,12 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     error::{UnexpectedAgentMessage, agent_lost_io_error},
-    main_tasks::ToLayer,
+    main_tasks::{LayerClosed, LayerForked, ToLayer},
     proxies::outgoing::{
         net_protocol_ext::{NetProtocolExt, PreparedSocket},
         non_blocking_hack::PreparedTcpSocket,
     },
+    remote_resources::RemoteResources,
     request_queue::RequestQueue,
 };
 
@@ -84,7 +85,7 @@ impl From<AgentLostOutgoingResponse> for ToLayer {
         ToLayer {
             layer_id,
             message_id,
-            message: ProxyToLayerMessage::OutgoingConnect(Err(error)),
+            message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(error))),
         }
     }
 }
@@ -94,6 +95,7 @@ struct ConnectInProgress {
     prepared_socket: Option<PreparedTcpSocket>,
     remote_address: SocketAddress,
     requested_at: Instant,
+    id: u128,
 }
 
 /// Handles logic and state of the `outgoing` feature.
@@ -141,6 +143,8 @@ pub struct OutgoingProxy {
     ///
     /// See struct level docs for more info.
     non_blocking_tcp_connect: bool,
+    connections_in_layers: RemoteResources<u128>,
+    agent_local_addresses: HashMap<u128, SocketAddr>,
 }
 
 impl OutgoingProxy {
@@ -165,6 +169,8 @@ impl OutgoingProxy {
             txs: Default::default(),
             background_tasks: Default::default(),
             non_blocking_tcp_connect,
+            connections_in_layers: Default::default(),
+            agent_local_addresses: Default::default(),
         }
     }
 
@@ -254,7 +260,9 @@ impl OutgoingProxy {
                 if in_progress.prepared_socket.is_none() {
                     message_bus
                         .send(ToLayer {
-                            message: ProxyToLayerMessage::OutgoingConnect(Err(error)),
+                            message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
+                                error,
+                            ))),
                             message_id,
                             layer_id,
                         })
@@ -265,6 +273,10 @@ impl OutgoingProxy {
             }
         };
 
+        if let SocketAddress::Ip(addr) = &local_address {
+            self.agent_local_addresses.insert(in_progress.id, *addr);
+        }
+
         let prepared_socket = match in_progress.prepared_socket {
             Some(socket) => PreparedSocket::TcpNonBlocking(socket),
             None => {
@@ -273,12 +285,13 @@ impl OutgoingProxy {
 
                 message_bus
                     .send(ToLayer {
-                        message: ProxyToLayerMessage::OutgoingConnect(Ok(
+                        message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(
                             OutgoingConnectResponse {
+                                connection_id: in_progress.id,
                                 layer_address,
                                 in_cluster_address: Some(local_address),
                             },
-                        )),
+                        ))),
                         message_id,
                         layer_id,
                     })
@@ -335,15 +348,21 @@ impl OutgoingProxy {
             None
         };
 
+        let connection_id = rand::random::<u128>();
+        self.connections_in_layers.add(session_id, connection_id);
+
         if let Some(socket) = &prepared_socket {
             let addr = socket.local_addr()?;
             let to_layer = ToLayer {
                 message_id,
                 layer_id: session_id,
-                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                    layer_address: addr.into(),
-                    in_cluster_address: None,
-                })),
+                message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(
+                    OutgoingConnectResponse {
+                        connection_id,
+                        layer_address: addr.into(),
+                        in_cluster_address: None,
+                    },
+                ))),
             };
             message_bus.send(to_layer).await;
         }
@@ -352,6 +371,7 @@ impl OutgoingProxy {
             message_id,
             session_id,
             ConnectInProgress {
+                id: connection_id,
                 prepared_socket,
                 remote_address: request.remote_address.clone(),
                 requested_at: Instant::now(),
@@ -400,8 +420,10 @@ impl OutgoingProxy {
 pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
-    LayerConnect(OutgoingConnectRequest, MessageId, LayerId),
+    Layer(OutgoingRequest, MessageId, LayerId),
     ConnectionRefresh,
+    LayerForked(LayerForked),
+    LayerClosed(LayerClosed),
 }
 
 impl BackgroundTask for OutgoingProxy {
@@ -434,12 +456,36 @@ impl BackgroundTask for OutgoingProxy {
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                         DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, message_bus).await?,
                     }
-                    Some(OutgoingProxyMessage::LayerConnect(req, message_id, session_id)) => self.handle_connect_request(
+                    Some(OutgoingProxyMessage::Layer(OutgoingRequest::Connect(req), message_id, session_id)) => self.handle_connect_request(
                         message_id,
                         session_id,
                         req,
                         message_bus
                     ).await?,
+                    Some(OutgoingProxyMessage::Layer(OutgoingRequest::ConnMetadata(req), message_id, layer_id)) => {
+                        let response = self.agent_local_addresses.get(&req.conn_id).copied().map(|in_cluster_address| OutgoingConnMetadataResponse {
+                            in_cluster_address,
+                        });
+                        let to_layer = ToLayer {
+                            message_id,
+                            layer_id,
+                            message: ProxyToLayerMessage::Outgoing(OutgoingResponse::ConnMetadata(response)),
+                        };
+                        message_bus.send(to_layer).await;
+                    }
+                    Some(OutgoingProxyMessage::Layer(OutgoingRequest::Close(req), _, layer_id)) => {
+                        if self.connections_in_layers.remove(layer_id, req.conn_id) {
+                            self.agent_local_addresses.remove(&req.conn_id);
+                        }
+                    }
+                    Some(OutgoingProxyMessage::LayerForked(forked)) => {
+                        self.connections_in_layers.clone_all(forked.parent, forked.child);
+                    }
+                    Some(OutgoingProxyMessage::LayerClosed(closed)) => {
+                        for id in self.connections_in_layers.remove_all(closed.id) {
+                            self.agent_local_addresses.remove(&id);
+                        }
+                    }
                     Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
                 },
 
@@ -477,7 +523,8 @@ mod test {
     use std::net::SocketAddr;
 
     use mirrord_intproxy_protocol::{
-        LayerId, NetProtocol, OutgoingConnectRequest, ProxyToLayerMessage,
+        LayerId, NetProtocol, OutgoingConnectRequest, OutgoingRequest, OutgoingResponse,
+        ProxyToLayerMessage,
     };
     use mirrord_protocol::{
         ClientMessage,
@@ -506,11 +553,11 @@ mod test {
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.
             outgoing
-                .send(OutgoingProxyMessage::LayerConnect(
-                    OutgoingConnectRequest {
+                .send(OutgoingProxyMessage::Layer(
+                    OutgoingRequest::Connect(OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
                         protocol: NetProtocol::Stream,
-                    },
+                    }),
                     i,
                     LayerId(0),
                 ))
@@ -540,7 +587,7 @@ mod test {
                 ProxyMessage::ToLayer(ToLayer {
                     message_id,
                     layer_id: LayerId(0),
-                    message: ProxyToLayerMessage::OutgoingConnect(Ok(..)),
+                    message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(..))),
                 }) => {
                     assert_eq!(message_id, i);
                 }

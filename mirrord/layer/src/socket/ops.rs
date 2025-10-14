@@ -17,8 +17,8 @@ use std::{
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
-    OutgoingConnectResponse, PortSubscribe,
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnMetadataRequest,
+    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
@@ -37,6 +37,7 @@ use tracing::{error, trace};
 use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
 use crate::{
+    common::make_proxy_request_with_response,
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
@@ -494,6 +495,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let response = common::make_proxy_request_with_response(request)??;
 
         let OutgoingConnectResponse {
+            connection_id,
             layer_address,
             in_cluster_address,
         } = response;
@@ -519,6 +521,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         }
 
         let connected = Connected {
+            connection_id: Some(connection_id),
             remote_address,
             local_address: in_cluster_address,
             layer_address: Some(layer_address),
@@ -769,35 +772,43 @@ pub(super) fn getsockname(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> Detour<i32> {
-    let local_address = {
-        SOCKETS
-            .lock()?
-            .get(&sockfd)
-            .bypass(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => {
-                    Detour::Success(connected.local_address.clone()?)
-                }
-                SocketState::Bound(Bound {
-                    requested_address,
-                    address,
-                }) => {
-                    if requested_address.port() == 0 {
-                        Detour::Success(
-                            SocketAddr::new(requested_address.ip(), address.port()).into(),
-                        )
-                    } else {
-                        Detour::Success((*requested_address).into())
-                    }
-                }
-                SocketState::Listening(bound) => Detour::Success(bound.requested_address.into()),
-                _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
-            })?
+    let socket = SOCKETS
+        .lock()?
+        .get(&sockfd)
+        .bypass(Bypass::LocalFdNotFound(sockfd))?
+        .clone();
+    let local_address: SockAddr = match &socket.state {
+        SocketState::Connected(Connected {
+            local_address: Some(addr),
+            ..
+        }) => addr.clone().try_into()?,
+        SocketState::Connected(Connected {
+            connection_id: Some(id),
+            ..
+        }) => {
+            let response =
+                make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })??;
+            response.in_cluster_address.into()
+        }
+        SocketState::Bound(Bound {
+            requested_address,
+            address,
+        }) => {
+            if requested_address.port() == 0 {
+                SocketAddr::new(requested_address.ip(), address.port()).into()
+            } else {
+                (*requested_address).into()
+            }
+        }
+        SocketState::Listening(Bound {
+            requested_address, ..
+        }) => (*requested_address).into(),
+        _ => return Detour::Bypass(Bypass::InvalidState(sockfd)),
     };
 
     trace!("getsockname -> local_address {:#?}", local_address);
 
-    fill_address(address, address_len, local_address.try_into()?)
+    fill_address(address, address_len, local_address)
 }
 
 /// When the fd is "ours", we accept and use [`ConnMetadataRequest`] to retrieve peer address from
@@ -845,6 +856,7 @@ pub(super) fn accept(
     })?;
 
     let state = SocketState::Connected(Connected {
+        connection_id: None,
         remote_address: remote_source.into(),
         local_address: Some(SocketAddr::new(local_address, port).into()),
         layer_address: None,
