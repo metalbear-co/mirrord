@@ -221,7 +221,7 @@ mod test {
 "#,
     ];
 
-    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n";
+    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField - c -> NestedEnum\n\n# Nested Enum\n\nNestedEnumVariantA\n\nUnorderedStructD\n\nNestedEnumVariantB\n\nUnorderedStructD\n\n";
     const UNORDERED_FILES: [&str; 2] = [
         r#"
     /// # UnorderedStructA
@@ -256,7 +256,23 @@ mod test {
 
         /// ## UnorderedField -> UnorderedStructA
         a_field: UnorderedStructA,
+
+        /// ## UnorderedField - c -> NestedEnum
+        c_field: NestedEnum,
     }
+
+    /// # Nested Enum
+    enum NestedEnum {
+        /// NestedEnumVariantA
+        A {
+            x: UnorderedStructD,
+        },
+        /// NestedEnumVariantB
+        B(UnorderedStructD)
+    }
+
+    /// UnorderedStructD
+    struct UnorderedStructD;
     "#,
     ];
 
