@@ -770,7 +770,6 @@
       "description": "Configuration for a database branch.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
       "oneOf": [
         {
-          "description": "Base configuration for a database branch.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
           "type": "object",
           "required": [
             "connection",

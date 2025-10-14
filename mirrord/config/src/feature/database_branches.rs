@@ -76,29 +76,10 @@ pub enum DatabaseBranchConfig {
 
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct MysqlBranchConfig {
-    /// The basic configuration that is database type agnostic.
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
 }
 
-/// Base configuration for a database branch.
-///
-/// Example:
-///
-/// ```json
-/// {
-///   "id": "my-branch-db",
-///   "name": "my-database-name",
-///   "ttl_secs": 120,
-///   "version": "8.0",
-///   "connection": {
-///     "url": {
-///       "type": "env",
-///       "variable": "DB_CONNECTION_URL"
-///     }
-///   }
-/// }
-/// ```
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchBaseFileConfig")]
 pub struct DatabaseBranchBaseConfig {
