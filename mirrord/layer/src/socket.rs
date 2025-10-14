@@ -104,7 +104,11 @@ pub struct Connected {
     /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
     remote_address: SocketAddress,
 
-    /// Local address (pod-wise)
+    /// Local address of the agent's socket.
+    ///
+    /// Whenever the user calls [`libc::getsockname`], this is the address we return to them.
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
     ///
     /// ## Example
     ///

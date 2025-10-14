@@ -135,6 +135,7 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
+    /// TCP socket with a non-blocking hack, see [`super::non_blocking_hack`].
     TcpNonBlocking(PreparedTcpSocket),
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),

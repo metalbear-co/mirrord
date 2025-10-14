@@ -1,3 +1,6 @@
+//! Implementation of a hack that allows for handling user app's outgoing TCP connects with
+//! non-blocking sockets.
+
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -14,6 +17,10 @@ use tokio::{
 
 static WORKING_METHOD: OnceCell<Option<HackMethod>> = OnceCell::const_new();
 
+/// Returns a [`HackMethod`] that works on this system (if any).
+///
+/// On the first call, this function might take some time to complete.
+/// Subsequent calls should return instantly.
 pub async fn working_method() -> Option<HackMethod> {
     *WORKING_METHOD
         .get_or_init(|| async {
@@ -34,14 +41,43 @@ pub async fn working_method() -> Option<HackMethod> {
         .await
 }
 
+/// Method of preventing the user app's TCP socket from completing a connection to intproxy's
+/// socket.
+///
+/// Expected flow:
+/// 1. Create a socket with [`HackMethod::prepare_socket`]
+/// 2. Send sockket's local address to the layer
+/// 3. User app initiates connection to the socket, and is blocked on EINPROGRESS
+/// 4. Accept the connection with [`PreparedTcpSocket::accept`]
+/// 5. User app's socket becomes writable, which notifies the app's async runtime
 #[derive(Clone, Copy, Debug, EnumIter)]
 pub enum HackMethod {
+    /// ## Prepare
+    ///
+    /// Create a TCP socket.
+    ///
+    /// ## Accept
+    ///
+    /// Start listening.
     NoListen,
+    /// ## Prepare
+    ///
+    /// Create a TCP socket and listen with backlog size 0.
+    /// Make a dummy TCP connection to the socket, but do not accept it.
+    /// The connection should succeed immediately, and fill the backlog queue.
+    ///
+    /// ## Accept
+    ///
+    /// Abort the dummy connection.
+    /// Accept the first connection made from an address different than the one used for the dummy
+    /// connection.
     Backlog0,
+    /// Same as [`HackMethod::Backlog0`], but with backlog size 1.
     Backlog1,
 }
 
 impl HackMethod {
+    /// Verifies if this hack method works.
     async fn test(self) -> io::Result<()> {
         let prepared = self.prepare_socket(false).await?;
         let addr = prepared.local_addr()?;
@@ -61,6 +97,10 @@ impl HackMethod {
         Ok(())
     }
 
+    /// Prepares a TCP socket to accept the user app's connection.
+    ///
+    /// User app's socket should be stuck in the connecting phase until
+    /// [`PreparedTcpSocket::accept`] is called.
     pub async fn prepare_socket(self, ipv4: bool) -> io::Result<PreparedTcpSocket> {
         let bind_to = if ipv4 {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
