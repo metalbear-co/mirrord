@@ -143,7 +143,13 @@ pub struct OutgoingProxy {
     ///
     /// See struct level docs for more info.
     non_blocking_tcp_connect: bool,
+    /// Outgoing connection local IDs, by layer instance.
+    ///
+    /// Local IDs are random and generated in this proxy.
+    /// We can't use [`ConnectionId`] returned from the agent,
+    /// because we need some ID as soon as we receive the connect request from the layer.
     connections_in_layers: RemoteResources<u128>,
+    /// Maps outgoing connection local IDs to local addresses of corresponding agent sockets.
     agent_local_addresses: HashMap<u128, SocketAddr>,
 }
 
