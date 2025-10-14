@@ -1,1 +1,1 @@
-Updated Rust types for DB branchign configs in order to support more types of DBs.
+Updated Rust types for DB branching configs in order to support more types of DBs.
