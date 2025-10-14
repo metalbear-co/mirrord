@@ -21,6 +21,7 @@ use ::windows::{
     },
     core::{self as windows_core, PCWSTR, PWSTR},
 };
+use mirrord_layer_lib::process::environment::EnvMap;
 use str_win::string_to_u16_buffer;
 
 use crate::{
@@ -30,7 +31,6 @@ use crate::{
         process::{HandleWrapper, WindowsProcess, WindowsProcessExtSuspended},
     },
 };
-use mirrord_layer_lib::process::environment::EnvMap;
 
 #[derive(Debug)]
 pub struct WindowsCommand {

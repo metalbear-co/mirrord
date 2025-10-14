@@ -6,7 +6,10 @@ use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
-    process::{environment::environment_from_lpvoid, pipe::{forward_pipe_raw_handle_threaded, PipeConfig}},
+    process::{
+        environment::environment_from_lpvoid,
+        pipe::{PipeConfig, forward_pipe_raw_handle_threaded},
+    },
     proxy_connection::PROXY_CONNECTION,
     setup::layer_setup,
     socket::{SHARED_SOCKETS_ENV_VAR, shared_sockets},
@@ -253,7 +256,11 @@ unsafe extern "system" fn create_process_internal_w_hook(
 
             // Start pipe forwarding using default config
             let config = PipeConfig::default();
-            forward_pipe_raw_handle_threaded(stdout_read as usize, parent_stdout as usize, config.clone());
+            forward_pipe_raw_handle_threaded(
+                stdout_read as usize,
+                parent_stdout as usize,
+                config.clone(),
+            );
             forward_pipe_raw_handle_threaded(stderr_read as usize, parent_stderr as usize, config);
         }
 

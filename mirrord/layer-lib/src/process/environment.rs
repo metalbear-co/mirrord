@@ -39,13 +39,14 @@ impl EnvMap {
     }
 
     /// Converts the environment map to a Windows environment block.
-    /// 
+    ///
     /// The Windows environment block is a null-terminated list of null-terminated strings,
     /// sorted case-insensitively, encoded as UTF-16 for use with CreateProcessW.
-    /// 
+    ///
     /// # Returns
-    /// 
-    /// A Vec<u16> containing the UTF-16 encoded environment block suitable for Windows CreateProcess APIs.
+    ///
+    /// A Vec<u16> containing the UTF-16 encoded environment block suitable for Windows
+    /// CreateProcess APIs.
     #[cfg(windows)]
     pub fn to_windows_env_block(&self) -> Vec<u16> {
         let mut entries: Vec<(String, String, String)> = self
@@ -148,7 +149,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("TEST_VAR".to_string(), "test_value".to_string());
         map.insert("PATH".to_string(), "/usr/bin:/bin".to_string());
-        
+
         let env_map = EnvMap::from(map);
         assert_eq!(env_map.0.len(), 2);
     }
@@ -157,7 +158,7 @@ mod tests {
     fn test_envmap_default() {
         let env_map = EnvMap::default();
         assert!(env_map.0.is_empty());
-        
+
         let env_map2 = EnvMap::new();
         assert!(env_map2.0.is_empty());
     }
@@ -168,22 +169,22 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("B_VAR".to_string(), "value_b".to_string());
         map.insert("A_VAR".to_string(), "value_a".to_string());
-        
+
         let env_map = EnvMap::from(map);
         let block = env_map.to_windows_env_block();
-        
+
         // Should not be empty
         assert!(!block.is_empty());
-        
+
         // Should end with double null terminator (two zeros)
         assert_eq!(block[block.len() - 1], 0);
         assert_eq!(block[block.len() - 2], 0);
-        
+
         // Convert back to string to verify sorting (A_VAR should come before B_VAR)
         let block_string = String::from_utf16_lossy(&block[..block.len() - 2]);
         assert!(block_string.contains("A_VAR=value_a"));
         assert!(block_string.contains("B_VAR=value_b"));
-        
+
         // A_VAR should appear before B_VAR (case-insensitive sorting)
         let a_pos = block_string.find("A_VAR").unwrap();
         let b_pos = block_string.find("B_VAR").unwrap();
@@ -195,7 +196,7 @@ mod tests {
     fn test_empty_env_block() {
         let env_map = EnvMap::new();
         let block = env_map.to_windows_env_block();
-        
+
         // Empty block should just be two null terminators
         assert_eq!(block, vec![0, 0]);
     }
@@ -205,7 +206,7 @@ mod tests {
     fn test_non_windows_env_block() {
         let env_map = EnvMap::new();
         let block = env_map.to_windows_env_block();
-        
+
         // Non-Windows should return empty vec
         assert!(block.is_empty());
     }
