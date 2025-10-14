@@ -2,7 +2,6 @@
 //!
 //! This module provides common components for platform specific LayerSetup
 //! In the future, this will hold LayerSetup when it's fully cross-platform
-#[cfg(target_os = "windows")]
 pub mod windows;
 
 use std::sync::OnceLock;

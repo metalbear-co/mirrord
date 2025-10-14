@@ -8,9 +8,10 @@ use tracing::trace;
 use crate::{
     error::HostnameResolveError,
     proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
-    setup::layer_config,
     socket::dns::update_dns_reverse_mapping,
 };
+#[cfg(target_os = "windows")]
+use crate::setup::layer_config;
 
 // HostnameResult states:
 //  - Ok(Some(hostname)) - Hostname was successfully resolved
@@ -92,14 +93,19 @@ pub trait HostnameResolver {
     /// Fetch hostname from the remote agent
     fn fetch_remote_hostname(check_enabled: bool) -> HostnameResult;
 
-    fn is_enabled(check_enabled: bool) -> bool {
-        // Check if hostname feature is enabled
-        let hostname_enabled = layer_config().feature.hostname;
-        if check_enabled && !hostname_enabled {
-            tracing::debug!("Hostname feature disabled");
-            return false;
-        }
+    // Unix-specific implementation always returns true as lyaer doesnt use layer-lib yet
+    #[cfg(not(target_os = "windows"))]
+    fn is_enabled(_check_enabled: bool) -> bool {
+        true
+    }
 
+    #[cfg(target_os = "windows")]
+    fn is_enabled(check_enabled: bool) -> bool {
+            let hostname_enabled = layer_config().feature.hostname;
+            if check_enabled && !hostname_enabled {
+                tracing::debug!("Hostname feature disabled");
+                return false;
+            }
         true
     }
 }

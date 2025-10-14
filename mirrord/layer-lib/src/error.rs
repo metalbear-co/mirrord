@@ -568,7 +568,8 @@ impl From<HookError> for i64 {
             HookError::ResponseError(ResponseError::NotImplemented) => {
                 // this means we bypass, so we can just return to avoid setting libc.
                 return -1;
-            }
+            }       
+            #[cfg(target_os = "windows")]
             HookError::ProxyError(ref err) => {
                 let reason = match err {
                     ProxyError::ProxyFailure(err) => {

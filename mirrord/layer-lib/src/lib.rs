@@ -3,6 +3,7 @@
 pub mod error;
 pub mod macros;
 pub mod proxy_connection;
+#[cfg(target_os = "windows")]
 pub mod setup;
 pub mod socket;
 
