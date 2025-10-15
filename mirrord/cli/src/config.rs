@@ -1105,11 +1105,13 @@ pub(super) enum CiCommand {
     /// Starts mirrord for ci. Takes the same arguments as `mirrord exec`.
     ///
     /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    #[cfg(not(target_os = "windows"))]
     Start(Box<ExecArgs>),
 
     /// Stops mirrord for ci.
     ///
     /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    #[cfg(not(target_os = "windows"))]
     Stop,
 }
 
