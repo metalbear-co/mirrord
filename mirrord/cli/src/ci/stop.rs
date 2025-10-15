@@ -1,4 +1,3 @@
-use nix::unistd::Pid;
 use tracing::Level;
 
 use super::CiResult;
@@ -27,7 +26,10 @@ impl CiStopCommandHandler {
     #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<()> {
-        use nix::sys::signal::{Signal, kill};
+        use nix::{
+            sys::signal::{Signal, kill},
+            unistd::Pid,
+        };
 
         let Self { mirrord_ci } = self;
 
