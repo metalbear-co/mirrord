@@ -29,6 +29,13 @@ fn multi_string() {
     assert!(!strings.is_empty());
 
     assert_eq!(strings, ["String1", "String2", "String3", "LastString"]);
+
+    let example_ansi: &[u8] = b"String1\0String2\0String3\0LastString\0\0";
+
+    let strings = u8_multi_buffer_to_strings(example_ansi);
+    assert!(!strings.is_empty());
+
+    assert_eq!(strings, ["String1", "String2", "String3", "LastString"]);
 }
 
 #[test]

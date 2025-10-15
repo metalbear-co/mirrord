@@ -49,6 +49,7 @@ minhook-detours-rs.workspace = true
 windows-strings.workspace = true
 anyhow.workspace = true 
 
+dll-syringe.workspace = true
 
 [lints]
 workspace = true

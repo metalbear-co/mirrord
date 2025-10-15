@@ -1,181 +1,225 @@
-//! Module responsible for registering hooks targetting process creation syscalls.
+//! Module responsible for registering hooks targetting process creation.
 
-use std::{ffi::c_void, sync::OnceLock};
+use std::{ffi::OsString, sync::OnceLock};
 
+use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use minhook_detours_rs::guard::DetourGuard;
+use mirrord_layer_lib::{proxy_connection::PROXY_CONNECTION, setup::windows::layer_setup};
+use str_win::{string_to_u16_buffer, u8_multi_buffer_to_strings, u16_multi_buffer_to_strings};
 use winapi::{
-    shared::ntdef::{BOOLEAN, NTSTATUS, PCOBJECT_ATTRIBUTES, PHANDLE, ULONG},
-    um::winnt::{ACCESS_MASK, HANDLE},
+    shared::{
+        minwindef::{BOOL, DWORD, LPVOID},
+        ntdef::{HANDLE, LPCWSTR, LPWSTR},
+    },
+    um::{
+        minwinbase::LPSECURITY_ATTRIBUTES,
+        processenv::GetEnvironmentStringsW,
+        processthreadsapi::{LPPROCESS_INFORMATION, LPSTARTUPINFOW, ResumeThread},
+        winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT},
+        winnt::PHANDLE,
+    },
 };
 
-use crate::{apply_hook, layer_setup};
+use crate::{
+    MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64, MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID,
+    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID, MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR, apply_hook,
+};
 
-// https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1890
-type NtCreateProcessType = unsafe extern "system" fn(
-    PHANDLE,
-    ACCESS_MASK,
-    PCOBJECT_ATTRIBUTES,
-    HANDLE,
-    BOOLEAN,
-    HANDLE,
-    HANDLE,
-    HANDLE,
-) -> NTSTATUS;
-static NT_CREATE_PROCESS_ORIGINAL: OnceLock<&NtCreateProcessType> = OnceLock::new();
-
-unsafe extern "system" fn nt_create_process_hook(
-    process_handle_ptr: PHANDLE,
-    desired_access: ACCESS_MASK,
-    object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_process: HANDLE,
-    inherit_object_table: BOOLEAN,
-    section_handle: HANDLE,
-    debug_port: HANDLE,
-    token_handle: HANDLE,
-) -> NTSTATUS {
+fn environment_from_lpvoid(is_w16_env: bool, environment: LPVOID) -> Vec<String> {
     unsafe {
-        let original = NT_CREATE_PROCESS_ORIGINAL.get().unwrap();
-        original(
-            process_handle_ptr,
-            desired_access,
-            object_attributes_ptr,
-            parent_process,
-            inherit_object_table,
-            section_handle,
-            debug_port,
-            token_handle,
-        )
+        let terminator_size = if is_w16_env { 4 } else { 2 };
+        let environment: *mut u8 = environment as *mut u8;
+        let mut environment_len = 0;
+
+        // NOTE(gabriela): when going through `CreateProcessA`, there'd be a limit of
+        // 32767 bytes. `CreateProcessW` doesn't have this, because, ridiculously, it is quite
+        // common for the environment to be *way* larger than that. mirrord is a perfect example
+        // which is MUCH more large. So we're gonna loop into infinity willingly. oops?
+        for i in 0.. {
+            let slice = std::slice::from_raw_parts(environment.add(i), terminator_size);
+            if slice.iter().all(|x| *x == 0) {
+                environment_len = i + terminator_size;
+                break;
+            }
+        }
+
+        if is_w16_env {
+            let environment =
+                std::slice::from_raw_parts::<u16>(environment as _, environment_len / 2);
+            u16_multi_buffer_to_strings(environment)
+        } else {
+            let environment = std::slice::from_raw_parts(environment, environment_len);
+            u8_multi_buffer_to_strings(environment)
+        }
     }
 }
 
-// https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1928
-type NtCreateProcessExType = unsafe extern "system" fn(
+type CreateProcessInternalWType = unsafe extern "system" fn(
+    HANDLE,
+    LPCWSTR,
+    LPWSTR,
+    LPSECURITY_ATTRIBUTES,
+    LPSECURITY_ATTRIBUTES,
+    BOOL,
+    DWORD,
+    LPVOID,
+    LPCWSTR,
+    LPSTARTUPINFOW,
+    LPPROCESS_INFORMATION,
     PHANDLE,
-    ACCESS_MASK,
-    PCOBJECT_ATTRIBUTES,
-    HANDLE,
-    ULONG,
-    HANDLE,
-    HANDLE,
-    HANDLE,
-    ULONG,
-) -> NTSTATUS;
-static NT_CREATE_PROCESS_EX_ORIGINAL: OnceLock<&NtCreateProcessExType> = OnceLock::new();
+) -> BOOL;
 
-unsafe extern "system" fn nt_create_process_ex_hook(
-    process_handle_ptr: PHANDLE,
-    desired_access: ACCESS_MASK,
-    object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_process: HANDLE,
-    flags: ULONG,
-    section_handle: HANDLE,
-    debug_port: HANDLE,
-    token_handle: HANDLE,
-    reserved: ULONG,
-) -> NTSTATUS {
-    // Configuration check for future use
-    let _env_enabled = &layer_setup().layer_config().feature.env;
-    let _fs_enabled = &layer_setup().layer_config().feature.fs;
-    let _network_enabled = &layer_setup().layer_config().feature.network;
+static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
 
-    // TODO: Implement process creation interception based on configuration
-    // For now, call the original function
-    let original = NT_CREATE_PROCESS_EX_ORIGINAL.get().unwrap();
+/// NOTE(gabriela): IDA resolves this as a `fastcall` over a `stdcall`
+/// but that should be irrelevant on x64?
+///
+/// # Pseudo-code for call (no type fix-ups)
+///
+/// ```cpp
+/// return CreateProcessInternalW(
+///           0i64, // NOTE(gabriela): user token
+///           lpApplicationName,
+///           lpCommandLine,
+///           (__int64)lpProcessAttributes,
+///           (__int64)lpThreadAttributes,
+///           bInheritHandles,
+///           dwCreationFlags,
+///           (PWSTR)lpEnvironment,
+///           (WCHAR *)lpCurrentDirectory,
+///           (__int64)lpStartupInfo,
+///           (ULONG_PTR)lpProcessInformation);
+/// ```
+unsafe extern "system" fn create_process_internal_w_hook(
+    user_token: HANDLE,
+    application_name: LPCWSTR,
+    command_line: LPWSTR,
+    process_attributes: LPSECURITY_ATTRIBUTES,
+    thread_attributres: LPSECURITY_ATTRIBUTES,
+    inherit_handles: BOOL,
+    mut creation_flags: DWORD,
+    mut environment: LPVOID,
+    current_directory: LPCWSTR,
+    startup_info: LPSTARTUPINFOW,
+    process_information: LPPROCESS_INFORMATION,
+    restricted_user_token: PHANDLE,
+) -> BOOL {
     unsafe {
-        original(
-            process_handle_ptr,
-            desired_access,
-            object_attributes_ptr,
-            parent_process,
-            flags,
-            section_handle,
-            debug_port,
-            token_handle,
-            reserved,
-        )
-    }
-}
+        if environment.is_null() {
+            // Provide pointer to current environment strings, in wide.
+            environment = GetEnvironmentStringsW() as _;
 
-// https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L3284
-type NtCreateUserProcessType = unsafe extern "system" fn(
-    PHANDLE,
-    PHANDLE,
-    ACCESS_MASK,
-    ACCESS_MASK,
-    PCOBJECT_ATTRIBUTES,
-    PCOBJECT_ATTRIBUTES,
-    ULONG,
-    ULONG,
-    *mut c_void,
-    *mut c_void,
-    *mut c_void,
-) -> NTSTATUS;
-static NT_CREATE_USER_PROCESS_ORIGINAL: OnceLock<&NtCreateUserProcessType> = OnceLock::new();
+            // Notify later steps that the environment is wide
+            creation_flags |= CREATE_UNICODE_ENVIRONMENT;
+        }
 
-unsafe extern "system" fn nt_create_user_process_hook(
-    process_handle_ptr: PHANDLE,
-    thread_handle_ptr: PHANDLE,
-    process_desired_access: ACCESS_MASK,
-    thread_desired_access: ACCESS_MASK,
-    process_object_attributes: PCOBJECT_ATTRIBUTES,
-    thread_object_attributes: PCOBJECT_ATTRIBUTES,
-    process_flags: ULONG,
-    thread_flags: ULONG,
-    unk1: *mut c_void,
-    unk2: *mut c_void,
-    unk3: *mut c_void,
-) -> NTSTATUS {
-    unsafe {
-        // TODO:
-        // - get current DLL handle
-        // - get full path to handle
-        // - make process start suspended
-        // - inject dll into process
-        // - resume process
+        let is_w16_env = (creation_flags & CREATE_UNICODE_ENVIRONMENT) != 0;
+        let rust_environment = environment_from_lpvoid(is_w16_env, environment);
 
-        let original = NT_CREATE_USER_PROCESS_ORIGINAL.get().unwrap();
-        original(
-            process_handle_ptr,
-            thread_handle_ptr,
-            process_desired_access,
-            thread_desired_access,
-            process_object_attributes,
-            thread_object_attributes,
-            process_flags,
-            thread_flags,
-            unk1,
-            unk2,
-            unk3,
-        )
+        let parent_process_id = std::process::id();
+        let env_parent_process_id =
+            format!("{MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID}={parent_process_id}");
+
+        let proxy_addr = PROXY_CONNECTION
+            .get()
+            .expect("Couldn't get proxy connection")
+            .proxy_addr()
+            .to_string();
+        let env_proxy_entry = format!("{MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR}={proxy_addr}");
+
+        let layer_id = PROXY_CONNECTION
+            .get()
+            .expect("Couldn't get proxy connection")
+            .layer_id()
+            .0;
+        let env_layer_id = format!("{MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID}={layer_id}");
+
+        let cfg_base64 = layer_setup()
+            .layer_config()
+            .encode()
+            .expect("Couldn't encode layer config");
+        let env_cfg_entry = format!("{MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64}={cfg_base64}");
+
+        // Delete the entries if they already exist first
+        let mut rust_environment: Vec<String> = rust_environment
+            .into_iter()
+            .filter(|x| {
+                !(x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR)
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64)
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID)
+                    || x.starts_with(MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID))
+            })
+            .collect();
+
+        // Add the environment entries
+        rust_environment.push(env_parent_process_id);
+        rust_environment.push(env_layer_id);
+        rust_environment.push(env_proxy_entry);
+        rust_environment.push(env_cfg_entry);
+
+        // Finally create the final environment
+        let rust_environment: Vec<Vec<u16>> = rust_environment
+            .into_iter()
+            .map(string_to_u16_buffer)
+            .collect();
+
+        // Create contiguous vector of environment
+        let mut windows_environment: Vec<u16> = Vec::new();
+        for entry in rust_environment {
+            // `entry` is already a null-terminated vector
+            windows_environment.extend(entry);
+        }
+        // Final null terminator
+        windows_environment.push(0);
+
+        // Set environment variable
+        environment = windows_environment.as_mut_ptr() as _;
+
+        creation_flags |= CREATE_SUSPENDED;
+
+        let original = CREATE_PROCESS_INTERNAL_W_ORIGINAL.get().unwrap();
+        let res = original(
+            user_token,
+            application_name,
+            command_line,
+            process_attributes,
+            thread_attributres,
+            inherit_handles,
+            creation_flags,
+            environment,
+            current_directory,
+            startup_info,
+            process_information,
+            restricted_user_token,
+        );
+
+        let dll_path = std::env::var("MIRRORD_LAYER_FILE").unwrap();
+
+        let injector_process =
+            InjectorOwnedProcess::from_pid((*process_information).dwProcessId).unwrap();
+        let syringe = Syringe::for_process(injector_process);
+        let payload_path = OsString::from(dll_path.clone());
+        let _ = syringe.inject(payload_path).unwrap();
+
+        ResumeThread((*process_information).hThread);
+
+        res
     }
 }
 
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
+    // NOTE(gabriela): handling this at syscall level is super cumbersome
+    // and undocumented, so I'd have to reverse engineer CreateProcessInternalW
+    // which is like, 3000-ish lines without type fixups, and we shipped this before
+    // and in like, 5 years, we had no issues (previous job).
+    // so it should work here too.
     apply_hook!(
         guard,
-        "ntdll",
-        "NtCreateProcess",
-        nt_create_process_hook,
-        NtCreateProcessType,
-        NT_CREATE_PROCESS_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
-        "NtCreateProcessEx",
-        nt_create_process_ex_hook,
-        NtCreateProcessExType,
-        NT_CREATE_PROCESS_EX_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
-        "NtCreateUserProcess",
-        nt_create_user_process_hook,
-        NtCreateUserProcessType,
-        NT_CREATE_USER_PROCESS_ORIGINAL
+        "kernelbase",
+        "CreateProcessInternalW",
+        create_process_internal_w_hook,
+        CreateProcessInternalWType,
+        CREATE_PROCESS_INTERNAL_W_ORIGINAL
     )?;
 
     Ok(())

@@ -4763,6 +4763,7 @@ version = "3.165.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "dll-syringe",
  "libc",
  "minhook-detours-rs",
  "mirrord-config",
