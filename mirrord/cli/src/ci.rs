@@ -23,7 +23,7 @@ pub(super) mod start;
 pub(crate) mod stop;
 
 /// Env var that the user has to set in order to execute `mirrord ci start` and `mirrord ci stop`
-/// commands.
+/// commands when the operator is available.
 ///
 /// Should be set in their CI to the value they got from [`generate_ci_api_key`].
 const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
