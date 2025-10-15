@@ -161,6 +161,7 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "network_interface": "eth0",
     "flush_connections": false,
     "exclude_from_mesh": false
+    "inject_headers": false,
   }
 }
 ```
@@ -173,7 +174,7 @@ Allows setting up custom annotations for the agent Job and Pod.
 {
   "agent": {
     "annotations": {
-      "cats.io/inject": "enabled",
+      "cats.io/inject": "enabled"
       "prometheus.io/scrape": "true",
       "prometheus.io/port": "9000"
     }
@@ -300,6 +301,18 @@ Read more [here](https://kubernetes.io/docs/concepts/containers/images/#referrin
   }
 }
 ```
+
+### agent.inject_headers {#agent-inject_headers}
+
+Sets whether `Mirrord-Agent` headers are injected into HTTP
+responses that went through the agent.
+
+Possible values for the header:
+
+- `passed-through`: set when the request was not sent to the local app (perhaps because it
+  didn't match the filters)
+
+- `forwarded-to-client`: set when the request was sent to the local app
 
 ### agent.json_log {#agent-json_log}
 
@@ -448,7 +461,7 @@ Default is
       "limits":
       {
         "cpu": "100m",
-          "memory": "100Mi"
+        "memory": "100Mi"
       }
     }
   }
@@ -485,9 +498,9 @@ Defaults to `operator: Exists`.
 {
   "agent": {
     "tolerations": [
-      {
-        "key": "meow", "operator": "Exists", "effect": "NoSchedule"
-      }
+        {
+          "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+        }
     ]
   }
 }
@@ -652,6 +665,10 @@ Defaults to 3000ms.
 ### _experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}
 
 Disables any system wide proxy configuration for affecting the running application.
+
+### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+
+Enables better support for outgoing connections using non-blocking TCP sockets.
 
 ### _experimental_ readlink {#experimental-readlink}
 

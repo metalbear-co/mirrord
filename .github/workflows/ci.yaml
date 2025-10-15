@@ -445,8 +445,10 @@ jobs:
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: clippy aarch64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - name: mirrord SIP UT
+      - name: mirrord-sip UT
         run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
+      - name: mirrord-intproxy UT
+        run: cargo test --target=x86_64-apple-darwin -p mirrord-intproxy
       # prepare stuff needed for integration tests
       - run: |
           cd mirrord/layer/tests/apps/issue1123

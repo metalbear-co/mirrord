@@ -1,10 +1,7 @@
 use std::{path::Path, time::Duration};
 
 use mirrord_analytics::NullReporter;
-use mirrord_config::{
-    LayerFileConfig,
-    config::{ConfigContext, MirrordConfig},
-};
+use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{sync::mpsc, time::Instant};
@@ -54,12 +51,8 @@ async fn ping(
 async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
-    let mut cfg_context = ConfigContext::default();
-    let mut config = if let Some(path) = config {
-        LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
-    } else {
-        LayerFileConfig::default().generate_config(&mut cfg_context)
-    }?;
+    let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
+    let mut config = LayerConfig::resolve(&mut context)?;
 
     if !config.use_proxy {
         remove_proxy_env();
