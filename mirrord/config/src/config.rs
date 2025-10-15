@@ -106,15 +106,15 @@ impl fmt::Display for FromFileError {
             Self::InvalidExtension(None) => {
                 return f.write_str(
                     "the file has no extension, must have one of: \
-                    .json, .toml, .yml, .yaml",
+                    json, toml, yml, yaml",
                 );
             }
             Self::InvalidExtension(Some(ext)) => {
                 return write!(
                     f,
-                    "the file has an invalid extension `.{ext}`, \
+                    "the file has an invalid extension `{ext}`, \
                     must have one of: \
-                    .json, .toml, .yml, .yaml",
+                    json, toml, yml, yaml",
                 );
             }
             Self::TeraRender(error) => {
