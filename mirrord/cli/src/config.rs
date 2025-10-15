@@ -1110,7 +1110,6 @@ pub(super) enum CiCommand {
     /// Stops mirrord for ci.
     ///
     /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
-    #[cfg(not(target_os = "windows"))]
     Stop,
 }
 
