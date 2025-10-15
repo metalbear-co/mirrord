@@ -71,7 +71,7 @@ hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-nix = { workspace = true, features = ["process", "resource"] }
+nix = { workspace = true, features = ["process", "resource", "signal"] }
 base64.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

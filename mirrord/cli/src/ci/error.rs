@@ -1,5 +1,6 @@
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
+use nix::errno::Errno;
 use thiserror::Error;
 
 #[derive(Error, Debug, Diagnostic)]
@@ -54,4 +55,10 @@ pub(crate) enum CiError {
         Please add this env var with the value received from `mirrord ci api-key`."
     ))]
     MissingCiApiKey,
+
+    #[error("`mirrord ci` failed to execute command with `{0}`!")]
+    #[diagnostic(help(
+        "`mirrord ci` failed to execute an internal command for this operation, please report it to us."
+    ))]
+    NixErrno(#[from] Errno),
 }

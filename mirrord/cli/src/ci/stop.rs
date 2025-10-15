@@ -1,6 +1,4 @@
-use std::process::ExitStatus;
-
-use tokio::process::Command;
+use nix::unistd::Pid;
 use tracing::Level;
 
 use super::CiResult;
@@ -27,24 +25,18 @@ impl CiStopCommandHandler {
 
     /// `kill`s the intproxy and the user's process with the pids stored in [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(super) async fn handle(self) -> CiResult<ExitStatus> {
+    pub(super) async fn handle(self) -> CiResult<()> {
+        use nix::sys::signal::{Signal, kill};
+
         let Self { mirrord_ci } = self;
 
         let intproxy_killed = match mirrord_ci.store.intproxy_pid {
-            Some(pid) => Command::new("kill")
-                .arg(pid.to_string())
-                .status()
-                .await
-                .map_err(From::from),
+            Some(pid) => kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)).map_err(From::from),
             None => Err(CiError::IntproxyPidMissing),
         };
 
         let user_killed = match mirrord_ci.store.user_pid {
-            Some(pid) => Command::new("kill")
-                .arg(pid.to_string())
-                .status()
-                .await
-                .map_err(From::from),
+            Some(pid) => kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)).map_err(From::from),
             None => Err(CiError::UserPidMissing),
         };
 
