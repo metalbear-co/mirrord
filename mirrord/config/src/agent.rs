@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    self, ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
+    self, ConfigContext, FromFileError, FromMirrordConfig, MirrordConfig, from_env::FromEnv,
     source::MirrordConfigSource,
 };
 
@@ -575,7 +575,7 @@ impl AgentConfig {
 }
 
 impl AgentFileConfig {
-    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    pub fn from_path<P>(path: P) -> Result<Self, FromFileError>
     where
         P: AsRef<Path>,
     {
@@ -585,7 +585,7 @@ impl AgentFileConfig {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
-            _ => Err(ConfigError::UnsupportedFormat),
+            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
 }

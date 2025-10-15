@@ -4,7 +4,7 @@ pub mod from_env;
 pub mod source;
 pub mod unstable;
 
-use std::error::Error;
+use std::{error::Error, fmt, io};
 
 pub use context::ConfigContext;
 use thiserror::Error;
@@ -31,20 +31,8 @@ pub enum ConfigError {
         error: Box<dyn Error + Send + Sync>,
     },
 
-    #[error("mirrord-config: IO operation failed with `{0}`")]
-    Io(#[from] std::io::Error),
-
-    #[error("mirrord-config: `{0}`!")]
-    SerdeJson(#[from] serde_json::Error),
-
-    #[error("mirrord-config: `{0}`!")]
-    Toml(#[from] toml::de::Error),
-
-    #[error("mirrord-config: `{0}`!")]
-    SerdeYaml(#[from] serde_yaml::Error),
-
-    #[error("mirrord-config: Unsupported configuration file format!")]
-    UnsupportedFormat,
+    #[error("failed to read config from file: {0}")]
+    FromFileError(#[from] FromFileError),
 
     #[error("Invalid FS mode `{0}`!")]
     InvalidFsMode(String),
@@ -69,9 +57,6 @@ pub enum ConfigError {
         "
     )]
     TargetJobWithoutCopyTarget,
-
-    #[error("Template rendering failed with: `{0}`! Please check your config file!")]
-    TemplateRenderingFailed(String),
 
     #[error(
         "Target type requires the mirrord-operator, but operator usage was explicitly disabled. Consider enabling mirrord-operator in your mirrord config."
@@ -98,17 +83,69 @@ pub enum ConfigError {
     EncodeError(String),
 }
 
-impl From<tera::Error> for ConfigError {
-    fn from(fail: tera::Error) -> Self {
-        let mut fail_message = fail.to_string();
-        let mut source = fail.source();
+/// Errors that can occur when parsing configuration from a file.
+#[derive(Error, Debug)]
+pub enum FromFileError {
+    Read(#[from] io::Error),
+    InvalidExtension(Option<String>),
+    TeraRender(#[source] Box<dyn std::error::Error + Send + Sync>),
+    ParseToml(#[from] toml::de::Error),
+    ParseJson(#[from] serde_json::Error),
+    ParseYaml(#[from] serde_yaml::Error),
+}
 
-        while let Some(fail_source) = source {
-            fail_message.push_str(&format!(" -> {fail_source}"));
-            source = fail_source.source();
+impl From<tera::Error> for FromFileError {
+    fn from(error: tera::Error) -> Self {
+        Self::TeraRender(error.into())
+    }
+}
+
+impl fmt::Display for FromFileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let error: &dyn std::error::Error = match self {
+            Self::InvalidExtension(None) => {
+                return f.write_str(
+                    "the file has no extension, must have one of: \
+                    .json, .toml, .yml, .yaml",
+                );
+            }
+            Self::InvalidExtension(Some(ext)) => {
+                return write!(
+                    f,
+                    "the file has an invalid extension `.{ext}`, \
+                    must have one of: \
+                    .json, .toml, .yml, .yaml",
+                );
+            }
+            Self::TeraRender(error) => {
+                f.write_str("failed to render Tera")?;
+                error.as_ref()
+            }
+            Self::ParseToml(error) => {
+                f.write_str("failed to parse Toml")?;
+                error
+            }
+            Self::ParseJson(error) => {
+                f.write_str("failed to parse Json")?;
+                error
+            }
+            Self::ParseYaml(error) => {
+                f.write_str("failed to parse Yaml")?;
+                error
+            }
+            Self::Read(error) => {
+                f.write_str("failed to read the file")?;
+                error
+            }
+        };
+
+        let mut source = error.source();
+        while let Some(error) = source {
+            write!(f, " -> {error}")?;
+            source = error.source();
         }
 
-        Self::TemplateRenderingFailed(fail_message)
+        Ok(())
     }
 }
 
