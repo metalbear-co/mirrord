@@ -191,6 +191,12 @@ static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
+    // we don't care about value, just that this env exists
+    let dont_start = std::env::var(FAILSAFE_ENV).is_ok();
+    if dont_start {
+        panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
+    }
+
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
@@ -389,11 +395,7 @@ fn layer_start(mut config: LayerConfig) {
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
 
-    // we don't care about value, just that this env exists
-    let dont_start = std::env::var(FAILSAFE_ENV).is_ok();
-    if dont_start {
-        panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
-    }
+
     let debugger_ports = DebuggerPorts::from_env();
     let local_hostname = trace_only || !config.feature.hostname;
     let process_info = EXECUTABLE_ARGS
