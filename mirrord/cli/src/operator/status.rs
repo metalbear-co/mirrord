@@ -11,8 +11,8 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
-        MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate,
-        kafka::MirrordKafkaEphemeralTopic,
+        MirrordKafkaEphemeralTopic, MirrordOperatorSpec, MirrordSqsSession, QueueConsumer,
+        QueueNameUpdate,
     },
     types::LicenseInfoOwned,
 };
@@ -345,15 +345,7 @@ Operator License
                     &session.target,
                 )
             }) {
-                // Merge each session Kafka topics into our map keyed by consumer (target).
-                for (consumer, rows) in kafka_in_status {
-                    match kafka_rows.entry(consumer) {
-                        Entry::Occupied(mut consumer_rows) => consumer_rows.get_mut().extend(rows),
-                        Entry::Vacant(consumer_rows) => {
-                            consumer_rows.insert(rows);
-                        }
-                    }
-                }
+                kafka_rows.extend(kafka_in_status);
             }
         }
 
