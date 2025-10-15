@@ -41,8 +41,11 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
-    pub fn mysql(&self) -> impl '_ + Iterator<Item = &DatabaseBranchConfig> {
-        self.0.iter().filter(|db| db._type == DatabaseType::MySql)
+    pub fn count_mysql(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mysql { .. }))
+            .count()
     }
 }
 
@@ -65,23 +68,35 @@ impl DatabaseBranchesConfig {
 ///   }
 /// }
 /// ```
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum DatabaseBranchConfig {
+    Mysql(MysqlBranchConfig),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+pub struct MysqlBranchConfig {
+    #[serde(flatten)]
+    pub base: DatabaseBranchBaseConfig,
+}
+
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[config(map_to = "DatabaseBranchFileConfig")]
-pub struct DatabaseBranchConfig {
-    /// ### feature.db_branches.id {#feature-db_branches-id}
+#[config(map_to = "DatabaseBranchBaseFileConfig")]
+pub struct DatabaseBranchBaseConfig {
+    /// ### feature.db_branches.base.id {#feature-db_branches-base-id}
     ///
     /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
     /// the same database branch among Kubernetes users.
     pub id: Option<String>,
 
-    /// ### feature.db_branches.name {#feature-db_branches-name}
+    /// ### feature.db_branches.base.name {#feature-db_branches-base-name}
     ///
     /// When source database connection detail is not accessible to mirrord operator, users
     /// can specify the database `name` so it is included in the connection options mirrord
     /// uses as the override.
     pub name: Option<String>,
 
-    /// ### feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}
+    /// ### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
     ///
     /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
     /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -91,29 +106,17 @@ pub struct DatabaseBranchConfig {
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
 
-    /// ### feature.db_branches.type {#feature-db_branches-type}
-    #[serde(rename = "type")]
-    pub _type: DatabaseType,
-
-    /// ### feature.db_branches.version {#feature-db_branches-version}
+    /// ### feature.db_branches.base.version {#feature-db_branches-base-version}
     ///
     /// Mirrord operator uses a default version of the database image unless `version` is given.
     pub version: Option<String>,
 
-    /// ### feature.db_branches.connection {#feature-db_branches-connection}
+    /// ### feature.db_branches.base.connection {#feature-db_branches-base-connection}
     ///
     /// `connection` describes how to get the connection information to the source database.
     /// When the branch database is ready for use, Mirrord operator will replace the connection
     /// information with the branch database's.
     pub connection: ConnectionSource,
-}
-
-/// Currently MySQL is the only supported database type.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[schemars(rename = "DbBranchingDatabaseType")]
-pub enum DatabaseType {
-    #[serde(rename = "mysql")]
-    MySql,
 }
 
 /// Different ways of connecting to the source database.
@@ -166,7 +169,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("mysql_branch_count", self.mysql().count());
+        analytics.add("mysql_branch_count", self.count_mysql());
     }
 }
 
