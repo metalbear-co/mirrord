@@ -916,11 +916,11 @@ Example:
 }
 ```
 
-### feature.db_branches.type {#feature-db_branches-type}
+When configuring a branch for MySQL, set `type` to `mysql`.
 
-Currently MySQL is the only supported database type.
+Despite the database type, all database branch config objects share the following fields.
 
-### feature.db_branches.connection {#feature-db_branches-connection}
+### feature.db_branches.base.connection {#feature-db_branches-base-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -944,18 +944,18 @@ the target pod template.
 
 Different ways to source the connection options.
 
-### feature.db_branches.id {#feature-db_branches-id}
+### feature.db_branches.base.id {#feature-db_branches-base-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-### feature.db_branches.name {#feature-db_branches-name}
+### feature.db_branches.base.name {#feature-db_branches-base-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-### feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}
+### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -963,7 +963,7 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-### feature.db_branches.version {#feature-db_branches-version}
+### feature.db_branches.base.version {#feature-db_branches-base-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1340,11 +1340,11 @@ Takes a list of values, such as:
 
 Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
 
-DNS queries matching what is specified here will go through the local app, everything else
-will go through the remote pod.
+When filters are specified under `local`, matching DNS queries will go through the local
+app , everything else will go through the remote pod.
 
-DNS queries matching what is specified here will go through the remote pod, everything else
-will go through local.
+When filters are specified under `remote`, matching DNS queries will go through the remote
+pod, everything else will go through local.
 
 ### feature.network.incoming {#feature-network-incoming}
 
@@ -1913,11 +1913,11 @@ Takes a list of values, such as:
 
 Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
 
-Traffic that matches what's specified here will go through the local app, everything else
-will go through the remote pod.
+When filters are specified under `local`, matching traffic will go through the local app,
+everything else will go through the remote pod.
 
-Traffic that matches what's specified here will go through the remote pod, everything else
-will go through local.
+When filters are specified under `remote`, matching traffic will go through the remote pod,
+everything else will go through local.
 
 #### feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}
 
@@ -1988,14 +1988,12 @@ will be used, and your local application will not receive any messages from that
 }
 ```
 
+Amazon Simple Queue Service and Kafka are supported.
+
 More queue types might be added in the future.
 
-Kafka.
-
-Amazon Simple Queue Service.
-
 When a newer client sends a new filter kind to an older operator, that does not yet know
-about that filter type, this is what that filter will be deserialized to.
+about that filter type, the filter will be deserialized to unknown.
 
 ## internal_proxy {#root-internal_proxy}
 

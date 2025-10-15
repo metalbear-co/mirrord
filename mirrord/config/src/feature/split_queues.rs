@@ -117,11 +117,12 @@ impl FromMirrordConfig for SplitQueuesConfig {
 
 pub type QueueMessageFilter = BTreeMap<String, String>;
 
+/// Amazon Simple Queue Service and Kafka are supported.
+///
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
 pub enum QueueFilter {
-    /// Amazon Simple Queue Service.
     #[serde(rename = "SQS")]
     Sqs {
         /// A filter is a mapping between message attribute names and regexes they should match.
@@ -131,7 +132,6 @@ pub enum QueueFilter {
         message_filter: QueueMessageFilter,
     },
 
-    /// Kafka.
     #[serde(rename = "Kafka")]
     Kafka {
         /// A filter is a mapping between message header names and regexes they should match.
@@ -142,7 +142,7 @@ pub enum QueueFilter {
     },
 
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
-    /// about that filter type, this is what that filter will be deserialized to.
+    /// about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
     #[serde(other, skip_serializing)]
     Unknown,

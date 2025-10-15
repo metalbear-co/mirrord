@@ -770,6 +770,7 @@
       "description": "Configuration for a database branch.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
       "oneOf": [
         {
+          "description": "When configuring a branch for MySQL, set `type` to `mysql`.",
           "type": "object",
           "required": [
             "connection",
@@ -929,7 +930,7 @@
       "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which is the default behavior when you enable remote DNS), or from the local app (default when you have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json { \"remote\": [\"my-service-in-cluster\"] } ```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through the remote pod.\n\n```json { \"remote\": [\"1.1.1.0/24:1337\"] } ```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the remote pod.\n\n```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json { \"local\": [\"localhost:1337\"] } ```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.",
       "oneOf": [
         {
-          "description": "DNS queries matching what is specified here will go through the remote pod, everything else will go through local.",
+          "description": "When filters are specified under `remote`, matching DNS queries will go through the remote pod, everything else will go through local.",
           "type": "object",
           "required": [
             "remote"
@@ -942,7 +943,7 @@
           "additionalProperties": false
         },
         {
-          "description": "DNS queries matching what is specified here will go through the local app, everything else will go through the remote pod.",
+          "description": "When filters are specified under `local`, matching DNS queries will go through the local app , everything else will go through the remote pod.",
           "type": "object",
           "required": [
             "local"
@@ -1972,7 +1973,7 @@
       "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which is the default behavior when you enable outgoing traffic), or from the local app (default when you have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json { \"remote\": [\"udp://1.1.1.0/24:1337\"] } ```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go through the remote pod. ```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be emmited remotely in the cluster.\n\n```json { \"local\": [\"tcp://localhost:1337\"] } ```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app. ```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
       "oneOf": [
         {
-          "description": "Traffic that matches what's specified here will go through the remote pod, everything else will go through local.",
+          "description": "When filters are specified under `remote`, matching traffic will go through the remote pod, everything else will go through local.",
           "type": "object",
           "required": [
             "remote"
@@ -1985,7 +1986,7 @@
           "additionalProperties": false
         },
         {
-          "description": "Traffic that matches what's specified here will go through the local app, everything else will go through the remote pod.",
+          "description": "When filters are specified under `local`, matching traffic will go through the local app, everything else will go through the remote pod.",
           "type": "object",
           "required": [
             "local"
@@ -2028,10 +2029,9 @@
       ]
     },
     "QueueFilter": {
-      "description": "More queue types might be added in the future.",
+      "description": "Amazon Simple Queue Service and Kafka are supported.\n\nMore queue types might be added in the future.",
       "oneOf": [
         {
-          "description": "Amazon Simple Queue Service.",
           "type": "object",
           "required": [
             "message_filter",
@@ -2054,7 +2054,6 @@
           }
         },
         {
-          "description": "Kafka.",
           "type": "object",
           "required": [
             "message_filter",

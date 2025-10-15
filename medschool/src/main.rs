@@ -221,7 +221,7 @@ mod test {
 "#,
     ];
 
-    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField - c -> NestedEnum\n\n# Nested Enum\n\nNestedEnumVariantA\n\nUnorderedStructD\n\nNestedEnumVariantB\n\nUnorderedStructD\n\n";
+    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField - c -> NestedEnum\n\n# Nested Enum\n\nNestedEnumVariantA\n\nUnorderedStructD\n\nUnorderedField - a -> UnorderedStructD\n\nNestedEnumVariantB\n\nUnorderedStructD\n\nUnorderedField - a -> UnorderedStructD\n\n";
     const UNORDERED_FILES: [&str; 2] = [
         r#"
     /// # UnorderedStructA
@@ -268,11 +268,14 @@ mod test {
             x: UnorderedStructD,
         },
         /// NestedEnumVariantB
-        B(UnorderedStructD)
+        B(UnorderedStructD),
     }
 
     /// UnorderedStructD
-    struct UnorderedStructD;
+    struct UnorderedStructD {
+        /// UnorderedField - a -> UnorderedStructD
+        a_field: usize,
+    }
     "#,
     ];
 
