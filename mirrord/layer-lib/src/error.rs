@@ -346,6 +346,18 @@ pub enum LayerError {
     GlobalAlreadyInitialized(&'static str),
 
     #[cfg(target_os = "windows")]
+    #[error("Environment variable for layer id not present")]
+    MissingLayerIdEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Environment variable for layer id not valid u64")]
+    MalformedLayerIdEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Environment variable for config not present")]
+    MissingConfigEnv,
+
+    #[cfg(target_os = "windows")]
     #[error("Console failure")]
     WindowsConsoleError(#[from] ConsoleError),
 }
@@ -568,7 +580,7 @@ impl From<HookError> for i64 {
             HookError::ResponseError(ResponseError::NotImplemented) => {
                 // this means we bypass, so we can just return to avoid setting libc.
                 return -1;
-            }       
+            }
             #[cfg(target_os = "windows")]
             HookError::ProxyError(ref err) => {
                 let reason = match err {
