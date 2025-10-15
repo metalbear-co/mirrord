@@ -24,6 +24,7 @@ impl CiStopCommandHandler {
     }
 
     /// `kill`s the intproxy and the user's process with the pids stored in [`MirrordCi`].
+    #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<()> {
         use nix::sys::signal::{Signal, kill};
@@ -43,5 +44,10 @@ impl CiStopCommandHandler {
         mirrord_ci.clear().await?;
 
         intproxy_killed.and(user_killed)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) async fn handle(self) -> CiResult<()> {
+        unimplemented!("Command not supported on windows.");
     }
 }
