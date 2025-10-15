@@ -15,12 +15,12 @@ use crate::{
 
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
-        DbBranchesCommand::Status { names } => status_command(&args, names).await,
+        DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
         DbBranchesCommand::Destroy { all, names } => destroy_command(&args, *all, names).await,
     }
 }
 
-async fn status_command(args: &DbBranchesArgs, names: &Vec<String>) -> CliResult<()> {
+async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()> {
     let names: HashSet<_> = names.iter().collect();
 
     let mut progress = ProgressTracker::from_env("DB Branches Status");
