@@ -122,14 +122,35 @@ struct ConnectInProgress {
 /// 1. Proxy receives an [`OutgoingConnectRequest`] from the layer.
 /// 2. Proxy sends a corresponding [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect) to the
 ///    agent.
-/// 3. Proxy creates a new socket with [`non_blocking_hack`], and sends confirmation to the layer.
-/// 4. The layer starts connecting to the socket.
+/// 3. Proxy creates a new [`BusyTcpListener`], and sends confirmation to the layer.
+/// 4. The layer starts connecting to the socket. Because we prepare the socket in a special way
+///    (see [`BusyTcpListener`] doc), this connect attempt will hang.
 /// 5. Proxy receives a confirmation from the agent.
 /// 6. Proxy starts a new outgoing [`Interceptor`] background task to manage the connection.
-/// 7. The layer connects to the socket managed by the [`Interceptor`] task.
+/// 7. The [`Interceptor`] calls [`BusyTcpListener::accept`], and the layer socket finally connects
+///    to our socket.
 /// 8. The proxy passes the data between the agent and the [`Interceptor`] task.
 /// 9. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
 ///    agent. If the agent closes the connection, the proxy shuts down the [`Interceptor`].
+///
+/// ## Why?
+///
+/// In the regular flow, the user app's thread is unconditionally **blocked** during intproxy's
+/// exchange with the agent (this includes making the actual remote connection on the agent
+/// side). If the user app's socket is blocking, this is perfectly fine.
+///
+/// However, if the user app's socket is non-blocking, this is not what is expected.
+/// The user app expects the `connect` call to return instantly with `EINPROGRESS`,
+/// so that the socket can later be polled for write readiness, and the thread can do other work.
+/// The most extreme case here is NodeJS, which is single threaded by design.
+///
+/// Consider the following scenario:
+/// 1. mirrord steals an HTTP request for the user app (NodeJS) to handle.
+/// 2. To handle the request, the app makes multiple HTTP requests to downstream services.
+/// 3. For each request, a new outgoing connection is made.
+/// 4. If the [`OutgoingProxy`] does not use the non-blocking flow, each outgoing connect attempt
+///    will effectively *freeze* the NodeJS reactor for some time (observed in real life to be over
+///    200ms). Latency goes through the roof. Also, it affects all other async tasks/promises.
 pub struct OutgoingProxy {
     /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Datagrams`].
     datagrams_reqs: RequestQueue<ConnectInProgress>,
