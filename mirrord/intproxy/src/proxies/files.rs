@@ -253,13 +253,15 @@ impl fmt::Debug for RouterFileOps {
 impl RouterFileOps {
     /// Return a request to be sent to the agent ([`Ok`] variant) or
     /// a response to be sent to the user ([`Err`] variant).
+    ///
+    /// [`Err`] variant is boxed due to large size difference.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE, Debug))]
     pub fn map_request(
         &mut self,
         layer_id: LayerId,
         message_id: MessageId,
         mut request: FileRequest,
-    ) -> Result<Option<FileRequest>, ToLayer> {
+    ) -> Result<Option<FileRequest>, Box<ToLayer>> {
         match &mut request {
             // These requests do not refer to any open remote fd.
             // It's safe to pass them as they are.
@@ -319,7 +321,7 @@ impl RouterFileOps {
                         .agent_lost_response(layer_id, message_id)
                         .expect("these requests require responses")
                         .into();
-                    return Err(error_response);
+                    return Err(Box::new(error_response));
                 }
 
                 *remote_fd -= self.current_fd_offset;
@@ -1164,7 +1166,7 @@ impl BackgroundTask for FilesProxy {
                     {
                         Ok(None) => {}
                         Err(response) => {
-                            message_bus.send(response).await;
+                            message_bus.send(*response).await;
                         }
                         Ok(Some(request)) => {
                             self.file_request(request, layer_id, message_id, message_bus)

@@ -27,7 +27,7 @@ async fn java_temurin_sip(dylib_path: &Path) {
     let env = get_env(dylib_path, addr, vec![("MIRRORD_FILE_MODE", "local")], None);
 
     let mut test_process = application.get_test_process(env).await;
-    let _intproxy = TestIntProxy::new(listener).await;
+    let _intproxy = TestIntProxy::new(listener, None).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
