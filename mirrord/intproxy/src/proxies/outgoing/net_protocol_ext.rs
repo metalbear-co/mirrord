@@ -135,8 +135,7 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
-    /// TCP socket with a non-blocking hack, see [`super::non_blocking_hack`].
-    TcpNonBlocking(BusyTcpListener),
+    BusyTcpListener(BusyTcpListener),
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
@@ -161,7 +160,7 @@ impl PreparedSocket {
     pub fn local_address(&self) -> io::Result<SocketAddress> {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
-            Self::TcpNonBlocking(socket) => socket.local_addr()?.into(),
+            Self::BusyTcpListener(socket) => socket.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
             #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
@@ -182,7 +181,7 @@ impl PreparedSocket {
                 let (stream, _) = listener.accept().await?;
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
-            Self::TcpNonBlocking(socket) => {
+            Self::BusyTcpListener(socket) => {
                 let stream = socket.accept().await?;
                 (InnerConnectedSocket::TcpStream(stream), true)
             }

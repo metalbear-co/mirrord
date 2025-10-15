@@ -284,7 +284,7 @@ impl OutgoingProxy {
         }
 
         let prepared_socket = match in_progress.prepared_socket {
-            Some(socket) => PreparedSocket::TcpNonBlocking(socket),
+            Some(socket) => PreparedSocket::BusyTcpListener(socket),
             None => {
                 let prepared_socket = protocol.prepare_socket(remote_address).await?;
                 let layer_address = prepared_socket.local_address()?;
