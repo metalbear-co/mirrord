@@ -354,6 +354,7 @@ impl OutgoingProxy {
             None
         };
 
+        // The chance for collision here is negligible.
         let connection_id = rand::random::<u128>();
         self.connections_in_layers.add(session_id, connection_id);
 
