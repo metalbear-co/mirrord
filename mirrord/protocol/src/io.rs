@@ -125,6 +125,28 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
+    pub fn dummy() -> (
+        Self,
+        mpsc::Sender<Type::InMsg>,
+        ConnectionOutput<Type::OutMsg>,
+    ) {
+        let (in_tx, in_rx) = mpsc::channel(32);
+
+        let out_queues = Arc::new(OutQueues {
+            queues: Mutex::new(HashMap::new()),
+            nonempty: Arc::new(Notify::new()),
+        });
+
+        let tx_handle = TxHandle(out_queues.clone());
+
+        let connection = Connection {
+            rx: in_rx,
+            tx_handle,
+        };
+
+        (connection, in_tx, ConnectionOutput(out_queues))
+    }
+
     #[inline]
     pub async fn recv(&mut self) -> Option<Type::InMsg> {
         self.rx.recv().await
@@ -138,6 +160,17 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     #[inline]
     pub fn tx_handle(&self) -> TxHandle<Type> {
         self.tx_handle.clone()
+    }
+}
+
+// For tests mostly
+pub struct ConnectionOutput<T>(Arc<OutQueues<T>>);
+
+impl<T: bincode::Decode<()>> ConnectionOutput<T> {
+    pub async fn next_decoded(&self) -> Option<T> {
+        bincode::decode_from_slice(&self.0.next().await, bincode::config::standard())
+            .ok()
+            .map(|e| e.0)
     }
 }
 
@@ -157,7 +190,6 @@ async fn io_task<Channel, Type>(
                     tracing::error!(?err, "failed to send message");
                     break;
                 }
-
             }
             received = framed.next() => {
                 match received {
