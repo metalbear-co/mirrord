@@ -21,7 +21,7 @@ pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
 }
 
 async fn status_command(args: &DbBranchesArgs, names: &Vec<String>) -> CliResult<()> {
-    let names: HashSet<_> = names.into_iter().collect();
+    let names: HashSet<_> = names.iter().collect();
 
     let mut progress = ProgressTracker::from_env("DB Branches Status");
     let mut status_progress = progress.subtask("fetching branches");
@@ -165,8 +165,8 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
 
         for name in names {
             let mut branch_progress = destroy_progress.subtask(&format!("destroying {name}"));
-            match api.get(&name).await {
-                Ok(_) => match api.delete(&name, &delete_params).await {
+            match api.get(name).await {
+                Ok(_) => match api.delete(name, &delete_params).await {
                     Ok(_) => branch_progress.success(Some(&format!("destroyed branch: {name}"))),
                     Err(e) => branch_progress
                         .failure(Some(&format!("failed to destroy branch {name}: {e}"))),
