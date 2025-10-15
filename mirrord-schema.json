@@ -2263,6 +2263,9 @@
                 },
                 {
                   "type": "null"
+                },
+                {
+                  "type": "string"
                 }
               ]
             }
