@@ -11,8 +11,8 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
-        MirrordKafkaEphemeralTopic, MirrordOperatorSpec, MirrordSqsSession, QueueConsumer,
-        QueueNameUpdate, kafka::MirrordKafkaEphemeralTopicSpec,
+        MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate,
+        kafka::MirrordKafkaEphemeralTopicSpec,
     },
     types::LicenseInfoOwned,
 };
