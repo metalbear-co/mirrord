@@ -328,7 +328,6 @@ impl OutgoingProxy {
     }
 
     /// Saves the layer's request id and sends the connection request to the agent.
-    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
@@ -421,6 +420,43 @@ impl OutgoingProxy {
                 .await;
         }
     }
+
+    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err(level = Level::DEBUG))]
+    async fn handle_layer_request(
+        &mut self,
+        request: OutgoingRequest,
+        layer_id: LayerId,
+        message_id: MessageId,
+        message_bus: &mut MessageBus<Self>,
+    ) -> Result<(), OutgoingProxyError> {
+        match request {
+            OutgoingRequest::Connect(req) => {
+                self.handle_connect_request(message_id, layer_id, req, message_bus)
+                    .await
+            }
+            OutgoingRequest::ConnMetadata(req) => {
+                let response =
+                    self.agent_local_addresses.get(&req.conn_id).copied().map(
+                        |in_cluster_address| OutgoingConnMetadataResponse { in_cluster_address },
+                    );
+                let to_layer = ToLayer {
+                    message_id,
+                    layer_id,
+                    message: ProxyToLayerMessage::Outgoing(OutgoingResponse::ConnMetadata(
+                        response,
+                    )),
+                };
+                message_bus.send(to_layer).await;
+                Ok(())
+            }
+            OutgoingRequest::Close(req) => {
+                if self.connections_in_layers.remove(layer_id, req.conn_id) {
+                    self.agent_local_addresses.remove(&req.conn_id);
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Messages consumed by the [`OutgoingProxy`] running as a [`BackgroundTask`].
@@ -463,27 +499,8 @@ impl BackgroundTask for OutgoingProxy {
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                         DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, message_bus).await?,
                     }
-                    Some(OutgoingProxyMessage::Layer(OutgoingRequest::Connect(req), message_id, session_id)) => self.handle_connect_request(
-                        message_id,
-                        session_id,
-                        req,
-                        message_bus
-                    ).await?,
-                    Some(OutgoingProxyMessage::Layer(OutgoingRequest::ConnMetadata(req), message_id, layer_id)) => {
-                        let response = self.agent_local_addresses.get(&req.conn_id).copied().map(|in_cluster_address| OutgoingConnMetadataResponse {
-                            in_cluster_address,
-                        });
-                        let to_layer = ToLayer {
-                            message_id,
-                            layer_id,
-                            message: ProxyToLayerMessage::Outgoing(OutgoingResponse::ConnMetadata(response)),
-                        };
-                        message_bus.send(to_layer).await;
-                    }
-                    Some(OutgoingProxyMessage::Layer(OutgoingRequest::Close(req), _, layer_id)) => {
-                        if self.connections_in_layers.remove(layer_id, req.conn_id) {
-                            self.agent_local_addresses.remove(&req.conn_id);
-                        }
+                    Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
+                        self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
                     }
                     Some(OutgoingProxyMessage::LayerForked(forked)) => {
                         self.connections_in_layers.clone_all(forked.parent, forked.child);
