@@ -712,7 +712,7 @@ struct LocalConnectionTask {
     /// read half of the TcpStream connected to the local port, wrapped in a stream
     read_stream: ReaderStream<OwnedReadHalf>,
     /// write half of the TcpStream connected to the local port
-    write: OwnedWriteHalf,
+    write: Option<OwnedWriteHalf>,
     /// the mapping local_port:remote_ip:remote_port
     port_mapping: AddrPortMapping,
     /// tx for sending internal messages to the main loop
@@ -739,7 +739,7 @@ impl LocalConnectionTask {
         Self {
             peer_socket,
             read_stream,
-            write,
+            write: Some(write),
             port_mapping,
             task_internal_tx,
             data_rx: response_rx,
@@ -877,18 +877,31 @@ impl LocalConnectionTask {
                 },
 
                 message = self.data_rx.recv() => match message {
-                    Some(message) => {
-                        match self.write.write_all(message.as_ref()).await {
-                            Ok(_) => continue,
-                            Err(error) => {
-                                tracing::error!(
-                                    %error,
-                                    port_mapping = ?self.port_mapping,
-                                    "local connection failed",
-                                );
-                                break Ok(());
-                            },
+                    Some(message) if message.is_empty() => {
+                        // ignore repeat empty messages
+                        if let Some(write) = self.write.take() {
+                            drop(write);
+                            tracing::info!(
+                                port_mapping = ?self.port_mapping,
+                                "remote half closed the connection",
+                            );
                         }
+                    }
+                    Some(message) => {
+                       // ignore messages after write half closed
+                        if let Some(write) = self.write.as_mut() {
+                            match write.write_all(message.as_ref()).await {
+                                Ok(_) => continue,
+                                Err(error) => {
+                                    tracing::error!(
+                                        %error,
+                                        port_mapping = ?self.port_mapping,
+                                        "local connection failed",
+                                    );
+                                    break Ok(());
+                                },
+                            }
+                        };
                     },
                     None => break Ok(()),
                 }
