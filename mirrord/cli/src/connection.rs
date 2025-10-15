@@ -20,7 +20,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use crate::{CliError, CliResult, MirrordCi};
+use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -80,8 +80,15 @@ where
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
     let api = match mirrord_for_ci {
         Some(mirrord_for_ci) => {
-            api.with_ci_api_key(analytics, progress, layer_config, mirrord_for_ci.api_key())
-                .await
+            api.with_ci_api_key(
+                analytics,
+                progress,
+                layer_config,
+                mirrord_for_ci
+                    .api_key()
+                    .ok_or_else(|| CiError::MissingCiApiKey)?,
+            )
+            .await
         }
         None => {
             api.with_client_certificate(analytics, progress, layer_config)

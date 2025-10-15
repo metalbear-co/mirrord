@@ -46,4 +46,12 @@ pub(crate) enum CiError {
 
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
+
+    #[error("`MIRRORD_CI_API_KEY` env var is missing!")]
+    #[diagnostic(help(
+        "`mirrord ci start` requires this env var when running with the mirrord operator to avoid \
+        creating invalid credentials. \
+        Please add this env var with the value received from `mirrord ci api-key`."
+    ))]
+    MissingCiApiKey,
 }

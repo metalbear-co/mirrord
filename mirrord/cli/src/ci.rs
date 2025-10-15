@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    env::temp_dir,
+    env::{self, temp_dir},
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -155,7 +155,7 @@ impl MirrordCiStore {
 #[derive(Debug)]
 pub(super) struct MirrordCi {
     /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
-    ci_api_key: CiApiKey,
+    ci_api_key: Option<CiApiKey>,
 
     /// [`MirrordCiStore`] holds the intproxy pid, and the user process pid so we can kill them
     /// later (on `mirrord ci stop`).
@@ -166,8 +166,8 @@ pub(super) struct MirrordCi {
 
 impl MirrordCi {
     /// Helper to access the [`CiApiKey`] when preparing the kube request headers.
-    pub(super) fn api_key(&self) -> &CiApiKey {
-        &self.ci_api_key
+    pub(super) fn api_key(&self) -> Option<&CiApiKey> {
+        self.ci_api_key.as_ref()
     }
 
     /// When intproxy starts, we need to retrieve its pid and store it in the [`Self::store`], so we
@@ -236,13 +236,15 @@ impl MirrordCi {
     pub(super) async fn get() -> CiResult<Self> {
         let store = MirrordCiStore::read_from_file_or_default().await?;
 
-        let ci_api_key = std::env::var(MIRRORD_CI_API_KEY)
-            .map_err(|fail| CiError::EnvVar(MIRRORD_CI_API_KEY, fail))?;
+        let ci_api_key = match std::env::var(MIRRORD_CI_API_KEY) {
+            Ok(api_key) => Some(CiApiKey::decode(&api_key)?),
+            Err(env::VarError::NotPresent) => None,
+            Err(fail @ env::VarError::NotUnicode(..)) => {
+                return Err(CiError::EnvVar(MIRRORD_CI_API_KEY, fail));
+            }
+        };
 
-        Ok(Self {
-            ci_api_key: CiApiKey::decode(&ci_api_key)?,
-            store,
-        })
+        Ok(Self { ci_api_key, store })
     }
 
     /// Removes the [`MirrordCiStore`] files.
