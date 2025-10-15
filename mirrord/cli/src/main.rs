@@ -1036,35 +1036,60 @@ fn ensure_not_nested() -> CliResult<()> {
     }
 }
 
+/// Sends a request to the `analytics-server` at `/get-latest-version` to check if the mirrord
+/// version being used is outdated.
+///
+/// We send some extra information in the query params of this request, to help us identify the
+/// `source` (cli, or some IDE), `platform` (linux, macos, windows), and if we're running in ci.
 async fn prompt_outdated_version(progress: &ProgressTracker) {
     let mut progress = progress.subtask("version check");
     let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
 
-    if check_version
-        && let Ok(client) = reqwest::Client::builder()
-            .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
-            .build()
-            && let Ok(result) = client
+    if check_version {
+        let result: Result<(), Box<dyn std::error::Error>> = try {
+            let client = reqwest::Client::builder()
+                .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
+                .build()?;
+
+            let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
-                    CURRENT_VERSION,
-                    std::env::consts::OS
+                    "https://version.mirrord.dev/get-latest-version?source=&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    version = CURRENT_VERSION,
+                    platform = std::env::consts::OS,
+                    is_ci = is_ci::cached(),
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await
-                && let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
-                    if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
-                        let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
-                        let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
-                        progress.print(&format!("New mirrord version available: {}. To update, run: `{:?}`.", latest_version, command));
-                        progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.");
-                        progress.success(Some(&format!("update to {latest_version} available")));
-                    } else {
-                        progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
-                    }
-                }
+                .send().await?;
+
+            let latest_version = Version::parse(&sent.text().await.unwrap())?;
+
+            if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
+                let is_homebrew = which("mirrord")
+                    .ok()
+                    .map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew"))
+                    .unwrap_or_default();
+                let command = if is_homebrew {
+                    "brew upgrade metalbear-co/mirrord/mirrord"
+                } else {
+                    "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash"
+                };
+                progress.print(&format!(
+                    "New mirrord version available: {}. To update, run: `{:?}`.",
+                    latest_version, command
+                ));
+                progress.print(
+                    "To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.",
+                );
+                progress.success(Some(&format!("update to {latest_version} available")));
+            } else {
+                progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
+            }
+        };
+
+        result.ok();
+    }
 }
 
 #[cfg(test)]
