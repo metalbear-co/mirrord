@@ -16,6 +16,8 @@ use mirrord_protocol::{
 use rstest::rstest;
 use tempfile::NamedTempFile;
 
+/// Verifies that `experimental.non_blocking_tcp_connect` works - a single threaded async
+/// application can concurrently start multiple outgoing connections.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(15))]
