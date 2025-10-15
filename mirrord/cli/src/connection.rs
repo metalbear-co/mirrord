@@ -84,9 +84,7 @@ where
                 analytics,
                 progress,
                 layer_config,
-                mirrord_for_ci
-                    .api_key()
-                    .ok_or_else(|| CiError::MissingCiApiKey)?,
+                mirrord_for_ci.api_key().ok_or(CiError::MissingCiApiKey)?,
             )
             .await
         }
