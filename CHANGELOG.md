@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.166.0](https://github.com/metalbear-co/mirrord/tree/3.166.0) - 2025-10-15
+
+
+### Added
+
+- Added new config option `experimental.non_blocking_tcp_connect`. The setting
+  enables a new way of handling outgoing TCP connections,
+  which should improve performance of asynchronous applications.
+  [#2744](https://github.com/metalbear-co/mirrord/issues/2744)
+- Added 2 new commands: `mirrord ci start` which runs mirrord in a ci runner,
+  and `mirrord ci stop` which stops the mirrord-for-ci.
+- add MIRRORD_DONT_LOAD to crash mirrord if exists when mirrord loads to enable
+  users running destructive actions with mirrord
+
+
+### Changed
+
+- Moving operator tests from mirrord to operator.
+  [#842](https://github.com/metalbear-co/mirrord/issues/842)
+
+
+### Fixed
+
+- Improved error messages originating from parsing configuration files.
+  [#3371](https://github.com/metalbear-co/mirrord/issues/3371)
+- Fix JSONSchema to reflect that target.path can be string
+
+
+### Internal
+
+- Added a github action to build windows builds, now supporting windows
+  [#windows-build](https://github.com/metalbear-co/mirrord/issues/windows-build)
+- Added a `ci` query param to the version check, so we can identify mirrord
+  being used in a ci context in our analytics.
+- Updated Rust types for DB branching configs in order to support more types of
+  DBs.
+
 ## [3.165.0](https://github.com/metalbear-co/mirrord/tree/3.165.0) - 2025-10-09
 
 ### Changed
