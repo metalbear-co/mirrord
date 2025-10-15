@@ -204,7 +204,7 @@ where
             connect_fn,
             sockfd,
             remote_addr,
-            Some(in_cluster_address),
+            in_cluster_address,
             Some(layer_address),
         )
     };

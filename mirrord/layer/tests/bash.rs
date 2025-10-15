@@ -42,7 +42,7 @@ async fn bash_script(dylib_path: &Path, config_dir: &Path) {
         .unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
 
-    let mut intproxy = TestIntProxy::new(listener).await;
+    let mut intproxy = TestIntProxy::new(listener, Some(&config_path)).await;
 
     let fd: u64 = 1;
 

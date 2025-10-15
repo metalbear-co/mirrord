@@ -14,7 +14,7 @@ use ::tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UdpSocket},
 };
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use mirrord_intproxy_protocol::NetProtocol;
 #[cfg(not(target_os = "windows"))]
 use mirrord_protocol::outgoing::UnixAddr;
@@ -30,12 +30,14 @@ use rand::distr::{Alphanumeric, SampleString};
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
 
+use crate::proxies::outgoing::busy_tcp_listener::BusyTcpListener;
+
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
 pub trait NetProtocolExt: Sized {
     /// Creates a [`LayerWrite`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage;
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage;
 
     /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
@@ -50,7 +52,7 @@ pub trait NetProtocolExt: Sized {
 }
 
 impl NetProtocolExt for NetProtocol {
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Bytes) -> ClientMessage {
         match self {
             Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
                 connection_id,
@@ -128,10 +130,12 @@ impl NetProtocolExt for NetProtocol {
 }
 
 /// A socket prepared to accept an intercepted connection.
+#[derive(Debug)]
 pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
+    BusyTcpListener(BusyTcpListener),
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }
@@ -156,6 +160,7 @@ impl PreparedSocket {
     pub fn local_address(&self) -> io::Result<SocketAddress> {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
+            Self::BusyTcpListener(socket) => socket.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
             #[cfg(not(target_os = "windows"))]
             Self::UnixListener(listener) => {
@@ -174,6 +179,10 @@ impl PreparedSocket {
         let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
                 let (stream, _) = listener.accept().await?;
+                (InnerConnectedSocket::TcpStream(stream), true)
+            }
+            Self::BusyTcpListener(socket) => {
+                let stream = socket.accept().await?;
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
