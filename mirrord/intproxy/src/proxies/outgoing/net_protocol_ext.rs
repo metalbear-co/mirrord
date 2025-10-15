@@ -30,7 +30,7 @@ use rand::distr::{Alphanumeric, SampleString};
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::proxies::outgoing::non_blocking_hack::PreparedTcpSocket;
+use crate::proxies::outgoing::busy_tcp_listener::BusyTcpListener;
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
@@ -136,7 +136,7 @@ pub enum PreparedSocket {
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
     /// TCP socket with a non-blocking hack, see [`super::non_blocking_hack`].
-    TcpNonBlocking(PreparedTcpSocket),
+    TcpNonBlocking(BusyTcpListener),
     #[cfg(not(target_os = "windows"))]
     UnixListener(UnixListener),
 }

@@ -25,16 +25,16 @@ use crate::{
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     proxies::outgoing::{
+        busy_tcp_listener::{BusyListenerMethod, BusyTcpListener},
         net_protocol_ext::{NetProtocolExt, PreparedSocket},
-        non_blocking_hack::PreparedTcpSocket,
     },
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
 };
 
+mod busy_tcp_listener;
 mod interceptor;
 mod net_protocol_ext;
-mod non_blocking_hack;
 
 /// Errors that can occur when handling the `outgoing` feature.
 #[derive(Error, Debug)]
@@ -92,7 +92,7 @@ impl From<AgentLostOutgoingResponse> for ToLayer {
 
 #[derive(Debug)]
 struct ConnectInProgress {
-    prepared_socket: Option<PreparedTcpSocket>,
+    prepared_socket: Option<BusyTcpListener>,
     remote_address: SocketAddress,
     requested_at: Instant,
     id: u128,
@@ -164,9 +164,9 @@ impl OutgoingProxy {
     /// * `non_blocking_tcp_connect` - see struct level docs
     pub fn new(non_blocking_tcp_connect: bool) -> Self {
         if non_blocking_tcp_connect {
-            // First call to `working_method` might take a while.
+            // First call to `get_working_method` might take a while.
             // Initialize the function's state so that we won't block the layer later.
-            tokio::spawn(non_blocking_hack::working_method());
+            tokio::spawn(BusyListenerMethod::recommended());
         }
 
         Self {
@@ -340,7 +340,7 @@ impl OutgoingProxy {
             && matches!(&request.remote_address, SocketAddress::Ip(..))
             && request.protocol == NetProtocol::Stream
         {
-            if let Some(method) = non_blocking_hack::working_method().await {
+            if let Some(method) = BusyListenerMethod::recommended().await {
                 let ipv4 = matches!(&request.remote_address, SocketAddress::Ip(ip) if ip.is_ipv4());
                 Some(method.prepare_socket(ipv4).await?)
             } else {
