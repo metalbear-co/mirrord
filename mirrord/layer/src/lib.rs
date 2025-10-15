@@ -395,7 +395,6 @@ fn layer_start(mut config: LayerConfig) {
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
         .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
 
-
     let debugger_ports = DebuggerPorts::from_env();
     let local_hostname = trace_only || !config.feature.hostname;
     let process_info = EXECUTABLE_ARGS
