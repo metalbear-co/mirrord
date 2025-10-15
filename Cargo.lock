@@ -4425,6 +4425,7 @@ dependencies = [
  "mid",
  "miette",
  "mirrord-analytics",
+ "mirrord-auth",
  "mirrord-config",
  "mirrord-console",
  "mirrord-intproxy",

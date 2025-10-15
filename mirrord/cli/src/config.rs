@@ -141,6 +141,14 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+
+        /// Set this when starting the internal proxy from `mirrord ci start`.
+        ///
+        /// Enables mirrord-for-ci intproxy pid saving, and checking for the `MIRRORD_CI_API_KEY`
+        /// env var.
+        #[arg(long, default_value_t = false)]
+        mirrord_for_ci: bool,
+
         /// Debug arguments.
         ///
         /// These are passed only for visibility in `ps` output,
@@ -260,8 +268,8 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub no_telemetry: bool,
 
-    #[arg(long)]
     /// Disable version check on startup.
+    #[arg(long)]
     pub disable_version_check: bool,
 
     /// Load config from config file
@@ -1084,13 +1092,26 @@ pub(super) struct CiArgs {
     pub command: CiCommand,
 }
 
+/// `mirrord ci` commands.
 #[derive(Subcommand, Debug)]
 pub(super) enum CiCommand {
+    /// Generates a `CiApiKey` that should be set in the ci's environment variable as
+    /// `MIRRORD_CI_API_KEY`.
     ApiKey {
         /// Specify config file to use
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
+    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec`.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    Start(Box<ExecArgs>),
+
+    /// Stops mirrord for ci.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    #[cfg(not(target_os = "windows"))]
+    Stop,
 }
 
 #[cfg(test)]
