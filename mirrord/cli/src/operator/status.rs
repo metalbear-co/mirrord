@@ -12,7 +12,7 @@ use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
         MirrordKafkaEphemeralTopic, MirrordOperatorSpec, MirrordSqsSession, QueueConsumer,
-        QueueNameUpdate,
+        QueueNameUpdate, kafka::MirrordKafkaEphemeralTopicSpec,
     },
     types::LicenseInfoOwned,
 };
@@ -62,7 +62,7 @@ impl StatusCommandHandler {
     /// Returns the Kafka topic status rows keyed by consumer (the targeted resource, i.e. pod).
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn kafka_rows(
-        topics: Iter<MirrordKafkaEphemeralTopic>,
+        topics: Iter<MirrordKafkaEphemeralTopicSpec>,
         session_id: String,
         user: &String,
         consumer: &String,
@@ -70,9 +70,9 @@ impl StatusCommandHandler {
         let mut rows: HashMap<String, Vec<Row>> = HashMap::new();
 
         // Loop over the `MirrordKafkaEphemeralTopic` crds to build the list of rows.
-        for topic in topics {
-            let topic_name = &topic.spec.name;
-            let client_config = &topic.spec.client_config;
+        for topic_spec in topics {
+            let topic_name = &topic_spec.name;
+            let client_config = &topic_spec.client_config;
 
             let topic_type = if topic_name.contains("-fallback-") {
                 "Fallback"

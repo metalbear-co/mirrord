@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
-use crate::{crd::copy_target::CopyTargetCrd, types::LicenseInfoOwned};
+use crate::{
+    crd::{copy_target::CopyTargetCrd, kafka::MirrordKafkaEphemeralTopicSpec},
+    types::LicenseInfoOwned,
+};
 
 pub mod copy_target;
 pub mod kafka;
@@ -336,7 +339,7 @@ pub struct Session {
     pub locked_ports: Option<Vec<LockedPortCompat>>,
     pub user_id: Option<String>,
     pub sqs: Option<Vec<MirrordSqsSession>>,
-    pub kafka: Option<Vec<MirrordKafkaEphemeralTopic>>,
+    pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
 }
 
 /// Resource used to access the operator's session management routes.
