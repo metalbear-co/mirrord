@@ -51,10 +51,9 @@ where
         return Ok(None);
     }
 
-    let is_mirrord_for_ci = mirrord_for_ci.is_some();
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
-        None if layer_config.operator == Some(true) || is_mirrord_for_ci => {
+        None if layer_config.operator == Some(true) => {
             return Err(CliError::OperatorNotInstalled);
         }
         None => {
@@ -69,7 +68,7 @@ where
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
 
-            if layer_config.operator == Some(true) || is_mirrord_for_ci {
+            if layer_config.operator == Some(true) {
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));

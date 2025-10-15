@@ -745,12 +745,6 @@ impl LayerConfig {
             });
         }
 
-        if context.is_mandatory_operator() && self.operator == Some(false) {
-            return Err(ConfigError::Conflict(
-                "The feature requires a mirrord operator!".into(),
-            ));
-        }
-
         Ok(())
     }
 }

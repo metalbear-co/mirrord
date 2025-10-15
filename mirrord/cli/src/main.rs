@@ -772,9 +772,7 @@ async fn exec(
         )
     }
 
-    let mut cfg_context = ConfigContext::default()
-        .override_envs(args.params.as_env_vars())
-        .set_mandatory_operator(mirrord_for_ci.is_some());
+    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
