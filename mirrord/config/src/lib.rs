@@ -42,7 +42,7 @@ use tracing::warn;
 
 use crate::{
     agent::AgentConfig,
-    config::source::MirrordConfigSource,
+    config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
     external_proxy::ExternalProxyConfig,
     feature::{
@@ -765,7 +765,7 @@ impl CollectAnalytics for &LayerConfig {
 }
 
 impl LayerFileConfig {
-    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    pub fn from_path<P>(path: P) -> Result<Self, FromFileError>
     where
         P: AsRef<Path>,
     {
@@ -778,7 +778,7 @@ impl LayerFileConfig {
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
-            _ => Err(ConfigError::UnsupportedFormat),
+            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
 }
