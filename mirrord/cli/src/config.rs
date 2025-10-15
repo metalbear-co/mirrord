@@ -159,6 +159,7 @@ pub(super) enum Commands {
     /// Manage database branching.
     #[command(name = "db-branches")]
     DbBranches(Box<DbBranchesArgs>),
+
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.

@@ -1,8 +1,11 @@
+use std::collections::HashSet;
+
 use kube::{
     Api, Client,
     api::{DeleteParams, ListParams},
 };
 use mirrord_operator::crd::mysql_branching::MysqlBranchDatabase;
+use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
 
 use crate::{
@@ -12,14 +15,17 @@ use crate::{
 
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
-        DbBranchesCommand::Status { names } => status_command(&args, names.clone()).await,
-        DbBranchesCommand::Destroy { all, names } => {
-            destroy_command(&args, *all, names.clone()).await
-        }
+        DbBranchesCommand::Status { names } => status_command(&args, names).await,
+        DbBranchesCommand::Destroy { all, names } => destroy_command(&args, *all, names).await,
     }
 }
 
-async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<()> {
+async fn status_command(args: &DbBranchesArgs, names: &Vec<String>) -> CliResult<()> {
+    let names: HashSet<_> = names.into_iter().collect();
+
+    let mut progress = ProgressTracker::from_env("DB Branches Status");
+    let mut status_progress = progress.subtask("fetching branches");
+
     let client = Client::try_default().await.map_err(|e| {
         crate::CliError::CreateKubeApiFailed(mirrord_kube::error::KubeApiError::KubeError(e))
     })?;
@@ -35,6 +41,7 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
     let list_params = ListParams::default();
 
     let branches = api.list(&list_params).await.map_err(|e| {
+        status_progress.failure(Some("failed to list branches"));
         crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
     })?;
 
@@ -55,9 +62,12 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
     };
 
     if filtered_branches.is_empty() {
-        println!("No active DB branch found");
+        progress.success(Some("No active DB branch found"));
         return Ok(());
     }
+
+    status_progress.success(Some("fetched status"));
+    progress.success(None);
 
     let mut table = Table::new();
     table.add_row(row![
@@ -66,7 +76,8 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
         "Phase",
         "TTL (sec)",
         "Database",
-        "Users"
+        "Users",
+        "Expires At"
     ]);
 
     for branch in filtered_branches {
@@ -77,6 +88,11 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
             .as_ref()
             .map(|s| s.phase.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
+        let expire_time = branch
+            .status
+            .as_ref()
+            .map(|s| s.expire_time.0.to_rfc3339())
+            .unwrap_or_else(|| "Unknown".to_string());
         let ttl = branch.spec.ttl_secs.to_string();
         let db_name = branch.spec.database_name.as_deref().unwrap_or("<none>");
         let users = branch
@@ -86,18 +102,21 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
                 if s.session_info.is_empty() {
                     "none".to_string()
                 } else {
-                    s.session_info
+                    let mut user_list: Vec<_> = s
+                        .session_info
                         .values()
                         .map(|session| {
                             format!("{}@{}", session.owner.username, session.owner.hostname)
                         })
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                        .collect();
+
+                    user_list.sort();
+                    user_list.join("\n")
                 }
             })
             .unwrap_or_else(|| "none".to_string());
 
-        table.add_row(row![name, db_type, phase, ttl, db_name, users]);
+        table.add_row(row![name, db_type, phase, ttl, db_name, users, expire_time]);
     }
 
     table.printstd();
@@ -105,7 +124,10 @@ async fn status_command(args: &DbBranchesArgs, names: Vec<String>) -> CliResult<
     Ok(())
 }
 
-async fn destroy_command(args: &DbBranchesArgs, all: bool, names: Vec<String>) -> CliResult<()> {
+async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) -> CliResult<()> {
+    let mut progress = ProgressTracker::from_env("DB Branches Destroy");
+    let mut destroy_progress = progress.subtask("deleting branches");
+
     let client = Client::try_default().await.map_err(|e| {
         crate::CliError::CreateKubeApiFailed(mirrord_kube::error::KubeApiError::KubeError(e))
     })?;
@@ -125,37 +147,34 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: Vec<String>) -
         })?;
 
         if branches.items.is_empty() {
-            return Err(crate::CliError::DbBranchNotFound(
-                "No active DB branch found".to_string(),
-            ));
+            destroy_progress.success(Some("No active DB branch found."));
         }
 
         // Delete all branches
         let delete_params = DeleteParams::default();
         for branch in branches {
             if let Some(name) = branch.metadata.name {
+                let mut branch_progress = destroy_progress.subtask(&format!("destroying {name}"));
                 match api.delete(&name, &delete_params).await {
-                    Ok(_) => println!("Destroyed branch: {}", name),
-                    Err(e) => eprintln!("Failed to destroy branch {}: {}", name, e),
+                    Ok(_) => branch_progress.success(Some(&format!("destroyed {name}"))),
+                    Err(e) => branch_progress.failure(Some(&format!("failed: {e}"))),
                 }
             }
         }
+        destroy_progress.success(None);
     } else {
-        // Check if the specified branches exist
-        let mut found_any = false;
         let delete_params = DeleteParams::default();
 
         for name in names {
+            let mut branch_progress = destroy_progress.subtask(&format!("destroying {name}"));
             match api.get(&name).await {
-                Ok(_) => {
-                    found_any = true;
-                    match api.delete(&name, &delete_params).await {
-                        Ok(_) => println!("Destroyed branch: {}", name),
-                        Err(e) => eprintln!("Failed to destroy branch {}: {}", name, e),
-                    }
-                }
+                Ok(_) => match api.delete(&name, &delete_params).await {
+                    Ok(_) => branch_progress.success(Some(&format!("destroyed branch: {name}"))),
+                    Err(e) => branch_progress
+                        .failure(Some(&format!("failed to destroy branch {name}: {e}"))),
+                },
                 Err(kube::Error::Api(api_err)) if api_err.code == 404 => {
-                    eprintln!("Branch not found: {}", name);
+                    destroy_progress.failure(Some(&format!("branch not found: {name}")))
                 }
                 Err(e) => {
                     return Err(crate::CliError::ListTargetsFailed(
@@ -164,13 +183,10 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: Vec<String>) -
                 }
             }
         }
-
-        if !found_any {
-            return Err(crate::CliError::DbBranchNotFound(
-                "No active DB branch found".to_string(),
-            ));
-        }
+        destroy_progress.success(None);
     }
+
+    progress.success(None);
 
     Ok(())
 }

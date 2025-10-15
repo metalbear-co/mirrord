@@ -472,12 +472,6 @@ pub(crate) enum CliError {
     ))]
     NestedExec,
 
-    #[error("Database branch error: {0}")]
-    #[diagnostic(help(
-        "Make sure the database branch exists and the operator is running correctly."
-    ))]
-    DbBranchNotFound(String),
-
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
 }
