@@ -105,9 +105,7 @@ async fn status_command(args: &DbBranchesArgs, names: &Vec<String>) -> CliResult
                     let mut user_list: Vec<_> = s
                         .session_info
                         .values()
-                        .map(|session| {
-                            format!("{}@{}", session.owner.username, session.owner.hostname)
-                        })
+                        .map(|session| session.owner.k8s_username.clone())
                         .collect();
 
                     user_list.sort();
