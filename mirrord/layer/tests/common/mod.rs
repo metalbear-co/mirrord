@@ -32,8 +32,8 @@ use mirrord_protocol::{
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
+pub use mirrord_tests::utils::process::TestProcess;
 use rstest::fixture;
-pub use tests::utils::process::TestProcess;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
