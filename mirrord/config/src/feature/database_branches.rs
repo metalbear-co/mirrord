@@ -131,11 +131,11 @@ impl Default for MysqlBranchCopyConfig {
 /// ```json
 /// {
 ///   "users": {
-///     "filter": "WHERE my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
+///     "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
 ///   },
 ///   "orders": {
-///     "filter": "WHERE my_db.orders.created_at > 1759948761"
-///   }
+///     "filter": "my_db.orders.created_at > 1759948761"
+///   },
 /// }
 /// ```
 ///
@@ -143,7 +143,7 @@ impl Default for MysqlBranchCopyConfig {
 /// created after the given timestamp will be copied.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct MysqlBranchTableCopyConfig {
-    pub filter: String,
+    pub filter: Option<String>,
 }
 
 /// Despite the database type, all database branch config objects share the following fields.
