@@ -24,7 +24,7 @@ pub enum LayerTcpOutgoing {
     /// closing outgoing tcp connections.
     Close(LayerClose),
 
-    /// Same as [`LayerTcpOutgoing::Connect`], but contains a [`Uid`](crate::uid::Uid).
+    /// Same as [`LayerTcpOutgoing::Connect`], but contains a [`Uid`].
     ConnectV2(LayerConnectV2),
 }
 
@@ -47,6 +47,6 @@ pub enum DaemonTcpOutgoing {
     Close(ConnectionId),
 
     /// Same as [`DaemonTcpOutgoing::Connect`], but can be tracked back to the request with a
-    /// [`Uid`](crate::uid::Uid).
+    /// [`Uid`].
     ConnectV2(DaemonConnectV2),
 }

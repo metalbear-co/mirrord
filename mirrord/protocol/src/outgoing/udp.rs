@@ -28,7 +28,7 @@ pub enum LayerUdpOutgoing {
     /// closing outgoing udp connections.
     Close(LayerClose),
 
-    /// Same as [`LayerUdpOutgoing::Connect`], but contains a [`Uid`](crate::uid::Uid).
+    /// Same as [`LayerUdpOutgoing::Connect`], but contains a [`Uid`].
     ConnectV2(LayerConnectV2),
 }
 
@@ -54,6 +54,6 @@ pub enum DaemonUdpOutgoing {
     Close(ConnectionId),
 
     /// Same as [`DaemonUdpOutgoing::Connect`], but can be tracked back to the request with a
-    /// [`Uid`](crate::uid::Uid).
+    /// [`Uid`].
     ConnectV2(DaemonConnectV2),
 }
