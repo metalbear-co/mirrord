@@ -203,10 +203,7 @@ impl UdpOutgoingTask {
 
         let framed = UdpFramed::new(socket, BytesCodec::new());
 
-        let (sink, stream): (
-            SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
-            SplitStream<UdpFramed<BytesCodec>>,
-        ) = framed.split();
+        let (sink, stream) = framed.split();
 
         self.writers.insert(connection_id, (sink, peer_address));
         self.readers.insert(connection_id, stream);
@@ -220,7 +217,6 @@ impl UdpOutgoingTask {
     }
 
     /// Returns [`Err`] only when the client has disconnected.
-    #[allow(clippy::type_complexity)]
     #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_layer_msg(
         &mut self,
