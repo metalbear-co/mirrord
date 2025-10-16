@@ -66,12 +66,12 @@ use crate::{
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum DnsFilterConfig {
-    /// DNS queries matching what is specified here will go through the remote pod, everything else
-    /// will go through local.
+    /// When filters are specified under `remote`, matching DNS queries will go through the remote
+    /// pod, everything else will go through local.
     Remote(VecOrSingle<String>),
 
-    /// DNS queries matching what is specified here will go through the local app, everything else
-    /// will go through the remote pod.
+    /// When filters are specified under `local`, matching DNS queries will go through the local
+    /// app , everything else will go through the remote pod.
     Local(VecOrSingle<String>),
 }
 

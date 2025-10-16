@@ -1,0 +1,1 @@
+Fixed a bug in the `mirrord port-forward` command where half closed streams were not properly handled, causing "missing" traffic.

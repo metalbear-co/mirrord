@@ -13,10 +13,10 @@
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
-    ops::Not,
-    os::unix::ffi::OsStrExt,
     time::Duration,
 };
+#[cfg(not(target_os = "windows"))]
+use std::{ops::Not, os::unix::ffi::OsStrExt};
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
@@ -25,16 +25,21 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
+#[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
-use tracing::{Level, warn};
+use tracing::Level;
+#[cfg(not(target_os = "windows"))]
+use tracing::warn;
 
+#[cfg(not(target_os = "windows"))]
+use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     user_data::UserData,
-    util::{create_listen_socket, detach_io},
+    util::create_listen_socket,
 };
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
@@ -53,7 +58,7 @@ pub(crate) async fn proxy(
     listen_port: u16,
     watch: drain::Watch,
     user_data: &UserData,
-) -> CliResult<(), InternalProxyError> {
+) -> Result<(), InternalProxyError> {
     tracing::info!(
         ?config,
         listen_port,
@@ -63,6 +68,7 @@ pub(crate) async fn proxy(
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
+    #[cfg(not(target_os = "windows"))]
     if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
         warn!(%error, "Failed to set the file descriptor limit");
     }
@@ -70,6 +76,8 @@ pub(crate) async fn proxy(
     let agent_connect_info = env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
         .ok_or(InternalProxyError::MissingConnectInfo)
         .and_then(|var| {
+            #[cfg(target_os = "windows")]
+            let var = var.to_string_lossy();
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 InternalProxyError::DeseralizeConnectInfo(
                     String::from_utf8_lossy(var.as_bytes()).into_owned(),
@@ -114,6 +122,7 @@ pub(crate) async fn proxy(
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
+    #[cfg(not(target_os = "windows"))]
     if container_mode.not() {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }

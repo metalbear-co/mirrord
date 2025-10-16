@@ -300,7 +300,7 @@
       "properties": {
         "annotations": {
           "title": "agent.annotations {#agent-annotations}",
-          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"annotations\": { \"cats.io/inject\": \"enabled\" \"prometheus.io/scrape\": \"true\", \"prometheus.io/port\": \"9000\" } } ```",
+          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"agent\": { \"annotations\": { \"cats.io/inject\": \"enabled\" \"prometheus.io/scrape\": \"true\", \"prometheus.io/port\": \"9000\" } } } ```",
           "type": [
             "object",
             "null"
@@ -375,7 +375,7 @@
         },
         "image": {
           "title": "agent.image {#agent-image}",
-          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"image\": \"internal.repo/images/mirrord:latest\" } ```\n\nComplete setup:\n\n```json { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } ```",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```",
           "anyOf": [
             {
               "$ref": "#/definitions/AgentImageFileConfig"
@@ -422,7 +422,7 @@
         },
         "labels": {
           "title": "agent.labels {#agent-labels}",
-          "description": "Allows setting up custom labels for the agent Job and Pod.\n\n```json { \"labels\": { \"user\": \"meow\", \"state\": \"asleep\" } } ```",
+          "description": "Allows setting up custom labels for the agent Job and Pod.\n\n```json { \"agent\": { \"labels\": { \"user\": \"meow\", \"state\": \"asleep\" } } } ```",
           "type": [
             "object",
             "null"
@@ -441,7 +441,7 @@
         },
         "metrics": {
           "title": "agent.metrics {#agent-metrics}",
-          "description": "Enables prometheus metrics for the agent pod.\n\nYou might need to add annotations to the agent pod depending on how prometheus is configured to scrape for metrics.\n\n```json { \"metrics\": \"0.0.0.0:9000\" } ```",
+          "description": "Enables prometheus metrics for the agent pod.\n\nYou might need to add annotations to the agent pod depending on how prometheus is configured to scrape for metrics.\n\n```json { \"agent\": { \"metrics\": \"0.0.0.0:9000\" } } ```",
           "type": [
             "string",
             "null"
@@ -473,7 +473,7 @@
         },
         "node_selector": {
           "title": "agent.node_selector {#agent-node_selector}",
-          "description": "Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.\n\n```json { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } ```",
+          "description": "Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.\n\n```json { \"agent\": { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } } ```",
           "type": [
             "object",
             "null"
@@ -492,7 +492,7 @@
         },
         "priority_class": {
           "title": "agent.priority_class {#agent-priority_class}",
-          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"priority_class\": \"my-priority-class-name\" } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "description": "Specifies the priority class to assign to the agent pod.\n\nThis option is only applicable when running in the targetless mode.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
           "type": [
             "string",
             "null"
@@ -508,7 +508,7 @@
         },
         "resources": {
           "title": "agent.resources {#agent-resources}",
-          "description": "Set pod resource reqirements. (not with ephemeral agents) Default is ```json { \"requests\": { \"cpu\": \"1m\", \"memory\": \"1Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } ```",
+          "description": "Set pod resource requirements. (not with ephemeral agents) Default is ```json { \"agent\": { \"resources\": { \"requests\": { \"cpu\": \"1m\", \"memory\": \"1Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } } } ```",
           "anyOf": [
             {
               "$ref": "#/definitions/io.k8s.api.core.v1.ResourceRequirements"
@@ -520,7 +520,7 @@
         },
         "service_account": {
           "title": "agent.service_account {#agent-service_account}",
-          "description": "Allows setting up custom Service Account for the agent Job and Pod.\n\n```json { \"service_account\": \"my-service-account\" } ```",
+          "description": "Allows setting up custom Service Account for the agent Job and Pod.\n\n```json { \"agent\": { \"service_account\": \"my-service-account\" } } ```",
           "type": [
             "string",
             "null"
@@ -538,7 +538,7 @@
         },
         "tolerations": {
           "title": "agent.tolerations {#agent-tolerations}",
-          "description": "Set pod tolerations. (not with ephemeral agents).\n\nDefaults to `operator: Exists`.\n\n```json [ { \"key\": \"meow\", \"operator\": \"Exists\", \"effect\": \"NoSchedule\" } ] ```\n\nSet to an empty array to have no tolerations at all",
+          "description": "Set pod tolerations. (not with ephemeral agents).\n\nDefaults to `operator: Exists`.\n\n```json { \"agent\": { \"tolerations\": [ { \"key\": \"meow\", \"operator\": \"Exists\", \"effect\": \"NoSchedule\" } ] } } ```\n\nSet to an empty array to have no tolerations at all",
           "type": [
             "array",
             "null"
@@ -768,62 +768,65 @@
     },
     "DatabaseBranchConfig": {
       "description": "Configuration for a database branch.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
-      "type": "object",
-      "required": [
-        "connection",
-        "type"
-      ],
-      "properties": {
-        "connection": {
-          "title": "feature.db_branches.connection {#feature-db_branches-connection}",
-          "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/DbBranchingConnectionSource"
+      "oneOf": [
+        {
+          "description": "When configuring a branch for MySQL, set `type` to `mysql`.",
+          "type": "object",
+          "required": [
+            "connection",
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches.base.connection {#feature-db_branches-base-connection}",
+              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "id": {
+              "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches.base.name {#feature-db_branches-base-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
+              "default": 300,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "mysql"
+              ]
+            },
+            "version": {
+              "title": "feature.db_branches.base.version {#feature-db_branches-base-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
-          ]
-        },
-        "id": {
-          "title": "feature.db_branches.id {#feature-db_branches-id}",
-          "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "name": {
-          "title": "feature.db_branches.name {#feature-db_branches-name}",
-          "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ttl_secs": {
-          "title": "feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}",
-          "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
-          "default": 300,
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "title": "feature.db_branches.type {#feature-db_branches-type}",
-          "allOf": [
-            {
-              "$ref": "#/definitions/DbBranchingDatabaseType"
-            }
-          ]
-        },
-        "version": {
-          "title": "feature.db_branches.version {#feature-db_branches-version}",
-          "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
-          "type": [
-            "string",
-            "null"
-          ]
+          }
         }
-      }
+      ]
     },
     "DatabaseBranchesConfig": {
       "description": "A list of configurations for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
@@ -878,13 +881,6 @@
         }
       ]
     },
-    "DbBranchingDatabaseType": {
-      "description": "Currently MySQL is the only supported database type.",
-      "type": "string",
-      "enum": [
-        "mysql"
-      ]
-    },
     "DeploymentTarget": {
       "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
@@ -934,7 +930,7 @@
       "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which is the default behavior when you enable remote DNS), or from the local app (default when you have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json { \"remote\": [\"my-service-in-cluster\"] } ```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through the remote pod.\n\n```json { \"remote\": [\"1.1.1.0/24:1337\"] } ```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the remote pod.\n\n```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json { \"local\": [\"localhost:1337\"] } ```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.",
       "oneOf": [
         {
-          "description": "DNS queries matching what is specified here will go through the remote pod, everything else will go through local.",
+          "description": "When filters are specified under `remote`, matching DNS queries will go through the remote pod, everything else will go through local.",
           "type": "object",
           "required": [
             "remote"
@@ -947,7 +943,7 @@
           "additionalProperties": false
         },
         {
-          "description": "DNS queries matching what is specified here will go through the local app, everything else will go through the remote pod.",
+          "description": "When filters are specified under `local`, matching DNS queries will go through the local app , everything else will go through the remote pod.",
           "type": "object",
           "required": [
             "local"
@@ -1115,6 +1111,14 @@
         "ignore_system_proxy_config": {
           "title": "_experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}",
           "description": "Disables any system wide proxy configuration for affecting the running application.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "non_blocking_tcp_connect": {
+          "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
+          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.",
           "type": [
             "boolean",
             "null"
@@ -1969,7 +1973,7 @@
       "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which is the default behavior when you enable outgoing traffic), or from the local app (default when you have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json { \"remote\": [\"udp://1.1.1.0/24:1337\"] } ```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go through the remote pod. ```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be emmited remotely in the cluster.\n\n```json { \"local\": [\"tcp://localhost:1337\"] } ```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app. ```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
       "oneOf": [
         {
-          "description": "Traffic that matches what's specified here will go through the remote pod, everything else will go through local.",
+          "description": "When filters are specified under `remote`, matching traffic will go through the remote pod, everything else will go through local.",
           "type": "object",
           "required": [
             "remote"
@@ -1982,7 +1986,7 @@
           "additionalProperties": false
         },
         {
-          "description": "Traffic that matches what's specified here will go through the local app, everything else will go through the remote pod.",
+          "description": "When filters are specified under `local`, matching traffic will go through the local app, everything else will go through the remote pod.",
           "type": "object",
           "required": [
             "local"
@@ -2025,10 +2029,9 @@
       ]
     },
     "QueueFilter": {
-      "description": "More queue types might be added in the future.",
+      "description": "Amazon Simple Queue Service and Kafka are supported.\n\nMore queue types might be added in the future.",
       "oneOf": [
         {
-          "description": "Amazon Simple Queue Service.",
           "type": "object",
           "required": [
             "message_filter",
@@ -2051,7 +2054,6 @@
           }
         },
         {
-          "description": "Kafka.",
           "type": "object",
           "required": [
             "message_filter",
@@ -2260,6 +2262,9 @@
                 },
                 {
                   "type": "null"
+                },
+                {
+                  "type": "string"
                 }
               ]
             }

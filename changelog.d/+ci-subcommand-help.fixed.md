@@ -1,0 +1,1 @@
+`mirrord ci` subcommand is now visible in the `--help` output.

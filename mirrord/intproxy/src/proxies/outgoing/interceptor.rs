@@ -3,6 +3,7 @@
 
 use std::io;
 
+use bytes::Bytes;
 use tracing::Level;
 
 use super::InterceptorId;
@@ -32,8 +33,8 @@ impl Interceptor {
 
 impl BackgroundTask for Interceptor {
     type Error = io::Error;
-    type MessageIn = Vec<u8>;
-    type MessageOut = Vec<u8>;
+    type MessageIn = Bytes;
+    type MessageOut = Bytes;
 
     /// Accepts one connection the owned [`PreparedSocket`] and transparently proxies bytes between
     /// the [`MessageBus`] and the new
