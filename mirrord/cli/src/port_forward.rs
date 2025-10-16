@@ -881,7 +881,7 @@ impl LocalConnectionTask {
                         // ignore repeat empty messages
                         if let Some(write) = self.write.take() {
                             drop(write);
-                            tracing::info!(
+                            tracing::debug!(
                                 port_mapping = ?self.port_mapping,
                                 "remote half closed the connection",
                             );
@@ -1115,6 +1115,7 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 mod test {
     use std::{
         collections::HashMap,
+        io::ErrorKind::WouldBlock,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
@@ -1256,7 +1257,7 @@ mod test {
         }));
         assert_eq!(test_connection.recv().await, expected,);
 
-        // reply with successful on daemon_msg_tx
+        // Reply with successful on daemon_msg_tx
         test_connection
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
                 DaemonConnect {
@@ -1273,7 +1274,7 @@ mod test {
         }));
         assert_eq!(test_connection.recv().await, expected);
 
-        // send response data from agent on daemon_msg_tx
+        // Send response data from agent on daemon_msg_tx
         test_connection
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
@@ -1283,10 +1284,35 @@ mod test {
             ))))
             .await;
 
-        // check data arrives at local
+        // Check data arrives at local
         let mut buf = [0; 16];
         stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-my-beloved".as_ref());
+
+        // Half closure: check that the (local port) read half of the stream is still open
+        assert_eq!(
+            stream
+                .try_read(&mut buf)
+                .expect_err("reading should give `WouldBlock` error (no data to read)")
+                .kind(),
+            WouldBlock
+        );
+
+        // Half close the connection (emulate sending FIN from remote)
+        test_connection
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 1,
+                    bytes: "".to_payload(),
+                },
+            ))))
+            .await;
+
+        // Wait for the socket to be readable
+        stream.readable().await.unwrap();
+
+        // Check that the (local port) read half of the stream has closed
+        assert_eq!(stream.try_read(&mut buf).unwrap(), 0);
     }
 
     #[tokio::test]
