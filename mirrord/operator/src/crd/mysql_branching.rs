@@ -147,8 +147,8 @@ impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TableCopyConfig {
     /// Data that matches the filter will be copied.
-    /// For MySQL, this filter is a `where` clause that lookes like `WHERE username = 'alice'`.
-    pub filter: String,
+    /// For MySQL, this filter is a `where` clause that looks like `username = 'alice'`.
+    pub filter: Option<String>,
 }
 
 impl From<MysqlBranchTableCopyConfig> for TableCopyConfig {
