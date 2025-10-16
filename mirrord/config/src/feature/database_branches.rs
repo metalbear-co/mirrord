@@ -74,12 +74,14 @@ pub enum DatabaseBranchConfig {
     Mysql(MysqlBranchConfig),
 }
 
+/// When configuring a branch for MySQL, set `type` to `mysql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct MysqlBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
 }
 
+/// Despite the database type, all database branch config objects share the following fields.
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchBaseFileConfig")]
 pub struct DatabaseBranchBaseConfig {
