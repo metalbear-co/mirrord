@@ -157,10 +157,22 @@ struct ConnectInProgress {
 ///    will effectively *freeze* the NodeJS reactor for some time (observed in real life to be over
 ///    200ms). Latency goes through the roof. Also, it affects all other async tasks/promises.
 pub struct OutgoingProxy {
-    /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Datagrams`].
+    /// In progress [`OutgoingConnectRequest`]s originating from
+    /// [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect), related to
+    /// [`NetProtocol::Datagrams`].
+    ///
+    /// These are processed sequentially by the agent.
     datagrams_reqs: RequestQueue<ConnectInProgress>,
-    /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Stream`].
+    /// In progress [`OutgoingConnectRequest`]s originating from
+    /// [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect), related to
+    /// [`NetProtocol::Stream`].
+    ///
+    /// These are processed sequentially by the agent.
     stream_reqs: RequestQueue<ConnectInProgress>,
+    /// In progress [`OutgoingConnectRequest`]s originating from
+    /// [`LayerConnectV2`](mirrord_protocol::outgoing::LayerConnectV2).
+    ///
+    /// These are processed in parallel by the agent.
     v2_reqs: HashMap<(Uid, NetProtocol), ConnectInProgress>,
 
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
