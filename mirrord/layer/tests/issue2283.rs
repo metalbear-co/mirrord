@@ -5,10 +5,7 @@ use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Dur
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
-    outgoing::{
-        DaemonConnect, DaemonRead, SocketAddress,
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-    },
+    outgoing::{DaemonConnect, DaemonRead, tcp::DaemonTcpOutgoing},
 };
 use rstest::rstest;
 
@@ -62,11 +59,8 @@ async fn test_issue2283(
         ))))
         .await;
 
-    let message = intproxy.recv().await;
-    let ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(connect)) = message else {
-        panic!("unexpected message: {message:?}");
-    };
-    assert_eq!(connect.remote_address, SocketAddress::from(address));
+    let (uid, addr) = intproxy.recv_tcp_connect().await;
+    assert_eq!(addr, address);
 
     let local_address = "2.3.4.5:9122".parse::<SocketAddr>().unwrap();
     intproxy
@@ -77,7 +71,7 @@ async fn test_issue2283(
                     remote_address: address.into(),
                     local_address: local_address.into(),
                 }),
-                uid: connect.uid,
+                uid,
             },
         )))
         .await;

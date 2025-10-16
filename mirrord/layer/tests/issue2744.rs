@@ -9,8 +9,7 @@ pub use common::*;
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonConnectV2, DaemonRead, LayerClose, LayerConnectV2, LayerWrite,
-        SocketAddress,
+        DaemonConnect, DaemonConnectV2, DaemonRead, LayerClose, LayerWrite,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     uid::Uid,
@@ -50,26 +49,18 @@ async fn issue_2744_non_blocking_outgoing_tcp(dylib_path: &Path) {
     let mut received_connects: Vec<(SocketAddr, ConnectionId, Uid)> =
         Vec::with_capacity(peers.len());
     while received_connects.len() < peers.len() {
-        let msg = intproxy.recv().await;
-        match msg {
-            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
-                remote_address: SocketAddress::Ip(addr),
-                uid,
-            })) => {
-                if peers.contains(&addr).not() {
-                    panic!("unexpected connect request to {addr}");
-                }
-                if received_connects
-                    .iter()
-                    .any(|(prev_addr, _, _)| *prev_addr == addr)
-                {
-                    panic!("duplicate connect request to {addr}");
-                }
-                let connection_id = received_connects.len() as ConnectionId;
-                received_connects.push((addr, connection_id, uid));
-            }
-            other => panic!("unexpected client message {other:?}"),
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
+        if peers.contains(&addr).not() {
+            panic!("unexpected connect request to {addr}");
         }
+        if received_connects
+            .iter()
+            .any(|(prev_addr, _, _)| *prev_addr == addr)
+        {
+            panic!("duplicate connect request to {addr}");
+        }
+        let connection_id = received_connects.len() as ConnectionId;
+        received_connects.push((addr, connection_id, uid));
     }
     for (addr, id, uid) in &received_connects {
         intproxy

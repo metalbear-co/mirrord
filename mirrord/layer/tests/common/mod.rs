@@ -28,7 +28,9 @@ use mirrord_protocol::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
+    outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing},
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+    uid::Uid,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
@@ -163,6 +165,32 @@ impl TestIntProxy {
 
     pub async fn recv(&mut self) -> ClientMessage {
         self.try_recv().await.expect("intproxy connection closed")
+    }
+
+    pub async fn recv_tcp_connect(&mut self) -> (Uid, SocketAddr) {
+        match self.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                println!("Received TCP connect request for address {addr} with uid {uid}");
+                (uid, addr)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn recv_udp_connect(&mut self) -> (Uid, SocketAddr) {
+        match self.recv().await {
+            ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                println!("Received UDP connect request for address {addr} with uid {uid}");
+                (uid, addr)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
     }
 
     pub async fn try_recv(&mut self) -> Option<ClientMessage> {

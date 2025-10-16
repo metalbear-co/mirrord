@@ -45,14 +45,7 @@ async fn outgoing_udp(dylib_path: &Path) {
         .collect::<Vec<_>>();
 
     for peer in peers {
-        let msg = intproxy.recv().await;
-        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
-            remote_address: SocketAddress::Ip(addr),
-            uid,
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+        let (uid, addr) = intproxy.recv_udp_connect().await;
         assert_eq!(addr, peer);
         intproxy
             .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
@@ -116,14 +109,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config
         .collect::<Vec<_>>();
 
     for peer in peers {
-        let msg = intproxy.recv().await;
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
-            remote_address: SocketAddress::Ip(addr),
-            uid,
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, peer);
         intproxy
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
@@ -211,14 +197,7 @@ async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
 
     // Test apps runs logic twice for 2 bind addresses.
     for _ in 0..2 {
-        let msg = intproxy.recv().await;
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
-            remote_address: SocketAddress::Ip(addr),
-            uid,
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, expected_peer_address);
 
         intproxy

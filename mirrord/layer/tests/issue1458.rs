@@ -5,7 +5,7 @@ use std::{net::SocketAddr, path::Path, time::Duration};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
+        DaemonConnect, DaemonRead, LayerWrite,
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
 };
@@ -38,17 +38,7 @@ async fn test_issue1458(
 
     println!("Application started, preparing to resolve DNS.");
 
-    let client_msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
-        remote_address: SocketAddress::Ip(addr),
-        uid,
-    })) = client_msg
-    else {
-        panic!("Invalid message received from layer: {client_msg:?}");
-    };
-
-    println!("connecting to address {addr:#?}");
-
+    let (uid, addr) = intproxy.recv_udp_connect().await;
     intproxy
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
             DaemonConnectV2 {
