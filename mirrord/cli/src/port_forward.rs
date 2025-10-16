@@ -233,6 +233,12 @@ impl PortForwarder {
                         let _ = self.id_oneshots.pop_front();
                     }
                 },
+                DaemonTcpOutgoing::ConnectV2(..) => {
+                    // Port forwarder does not use connect v2 variants.
+                    return Err(PortForwardError::AgentError(format!(
+                        "unexpected message from agent: {message:?}"
+                    )));
+                }
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
                         let Some(ConnectionPortMapping {

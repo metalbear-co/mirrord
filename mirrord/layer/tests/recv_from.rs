@@ -1,12 +1,12 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{net::SocketAddr, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+        DaemonRead, LayerWrite,
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
 };
@@ -27,21 +27,9 @@ async fn recv_from(
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
-    let msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-        remote_address: SocketAddress::Ip(addr),
-    })) = msg
-    else {
-        panic!("Invalid message received from layer: {msg:?}");
-    };
+    let (uid, addr) = intproxy.recv_udp_connect().await;
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: addr.into(),
-                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-            },
-        ))))
+        .send_udp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
         .await;
 
     let msg = intproxy.recv().await;

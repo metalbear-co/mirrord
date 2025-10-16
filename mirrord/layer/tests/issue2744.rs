@@ -9,9 +9,10 @@ pub use common::*;
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
+        DaemonRead, LayerClose, LayerWrite,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
+    uid::Uid,
 };
 use rstest::rstest;
 use tempfile::NamedTempFile;
@@ -45,37 +46,25 @@ async fn issue_2744_non_blocking_outgoing_tcp(dylib_path: &Path) {
     // Verify that intproxy sends concurrent connect requests.
     // The test app uses a single-threaded runtime, so this is enough to check whether the connect
     // emulation really is non-blocking.
-    let mut received_connects: Vec<(SocketAddr, ConnectionId)> = Vec::with_capacity(peers.len());
+    let mut received_connects: Vec<(SocketAddr, ConnectionId, Uid)> =
+        Vec::with_capacity(peers.len());
     while received_connects.len() < peers.len() {
-        let msg = intproxy.recv().await;
-        match msg {
-            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-                remote_address: SocketAddress::Ip(addr),
-            })) => {
-                if peers.contains(&addr).not() {
-                    panic!("unexpected connect request to {addr}");
-                }
-                if received_connects
-                    .iter()
-                    .any(|(prev_addr, _)| *prev_addr == addr)
-                {
-                    panic!("duplicate connect request to {addr}");
-                }
-                let connection_id = received_connects.len() as ConnectionId;
-                received_connects.push((addr, connection_id));
-            }
-            other => panic!("unexpected client message {other:?}"),
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
+        if peers.contains(&addr).not() {
+            panic!("unexpected connect request to {addr}");
         }
+        if received_connects
+            .iter()
+            .any(|(prev_addr, _, _)| *prev_addr == addr)
+        {
+            panic!("duplicate connect request to {addr}");
+        }
+        let connection_id = received_connects.len() as ConnectionId;
+        received_connects.push((addr, connection_id, uid));
     }
-    for (addr, id) in &received_connects {
+    for (addr, id, uid) in &received_connects {
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: *id,
-                    remote_address: (*addr).into(),
-                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                },
-            ))))
+            .send_tcp_connect_ok(*uid, *id, *addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
     }
 
@@ -90,7 +79,7 @@ async fn issue_2744_non_blocking_outgoing_tcp(dylib_path: &Path) {
                 }) => {
                     if received_connects
                         .iter()
-                        .any(|(_, id)| *id == connection_id)
+                        .any(|(_, id, _)| *id == connection_id)
                         .not()
                     {
                         panic!("unexpected write to {connection_id}");
