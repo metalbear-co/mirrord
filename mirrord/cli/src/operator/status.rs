@@ -384,8 +384,6 @@ Operator License
                 "Type",
             ]);
 
-            println!("Kafka Topics for {kafka_consumer}");
-
             for row in kafka_row {
                 kafka_table.add_row(row);
             }
