@@ -10,9 +10,12 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
-        DaemonConnect, DaemonRead, SocketAddress, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
+        DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, SocketAddress,
+        tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
     },
+    uid::Uid,
 };
+use semver::Version;
 use thiserror::Error;
 use tracing::Level;
 
@@ -95,6 +98,8 @@ struct ConnectInProgress {
     prepared_socket: Option<BusyTcpListener>,
     remote_address: SocketAddress,
     requested_at: Instant,
+    layer_id: LayerId,
+    message_id: MessageId,
     id: u128,
 }
 
@@ -156,14 +161,20 @@ pub struct OutgoingProxy {
     datagrams_reqs: RequestQueue<ConnectInProgress>,
     /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Stream`].
     stream_reqs: RequestQueue<ConnectInProgress>,
+    v2_reqs: HashMap<(Uid, NetProtocol), ConnectInProgress>,
+
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Bytes, io::Error>,
+
     /// Whether TCP connect requests should be handled in a non-blocking way.
     ///
     /// See struct level docs for more info.
     non_blocking_tcp_connect: bool,
+    /// Established version of the [`mirrord_protocol`].
+    protocol_version: Option<Version>,
+
     /// Outgoing connection local IDs, by layer instance.
     ///
     /// Local IDs are random and generated in this proxy.
@@ -193,9 +204,11 @@ impl OutgoingProxy {
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
+            v2_reqs: Default::default(),
             txs: Default::default(),
             background_tasks: Default::default(),
             non_blocking_tcp_connect,
+            protocol_version: Default::default(),
             connections_in_layers: Default::default(),
             agent_local_addresses: Default::default(),
         }
@@ -248,20 +261,39 @@ impl OutgoingProxy {
         &mut self,
         connect: RemoteResult<DaemonConnect>,
         protocol: NetProtocol,
+        uid: Option<Uid>,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let (message_id, layer_id, in_progress) =
-            self.queue(protocol).pop_front_with_data().ok_or_else(|| {
-                let message = match protocol {
-                    NetProtocol::Datagrams => {
-                        DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect.clone()))
-                    }
-                    NetProtocol::Stream => {
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect.clone()))
-                    }
-                };
-                UnexpectedAgentMessage(message)
-            })?;
+        let in_progress = match uid {
+            Some(uid) => self.v2_reqs.remove(&(uid, protocol)),
+            None => self
+                .queue(protocol)
+                .pop_front_with_data()
+                .map(|(_, _, in_progress)| in_progress),
+        };
+        let Some(in_progress) = in_progress else {
+            let message = match (uid, protocol) {
+                (Some(uid), NetProtocol::Datagrams) => {
+                    DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(DaemonConnectV2 {
+                        uid,
+                        connect,
+                    }))
+                }
+                (None, NetProtocol::Datagrams) => {
+                    DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect))
+                }
+                (Some(uid), NetProtocol::Stream) => {
+                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(DaemonConnectV2 {
+                        uid,
+                        connect,
+                    }))
+                }
+                (None, NetProtocol::Stream) => {
+                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect))
+                }
+            };
+            return Err(UnexpectedAgentMessage(message).into());
+        };
 
         let DaemonConnect {
             connection_id,
@@ -290,8 +322,8 @@ impl OutgoingProxy {
                             message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
                                 error,
                             ))),
-                            message_id,
-                            layer_id,
+                            message_id: in_progress.message_id,
+                            layer_id: in_progress.layer_id,
                         })
                         .await;
                 }
@@ -319,8 +351,8 @@ impl OutgoingProxy {
                                 in_cluster_address: Some(local_address),
                             },
                         ))),
-                        message_id,
-                        layer_id,
+                        message_id: in_progress.message_id,
+                        layer_id: in_progress.layer_id,
                     })
                     .await;
 
@@ -394,19 +426,44 @@ impl OutgoingProxy {
             message_bus.send(to_layer).await;
         }
 
-        self.queue(request.protocol).push_back_with_data(
-            message_id,
-            session_id,
-            ConnectInProgress {
-                id: connection_id,
-                prepared_socket,
-                remote_address: request.remote_address.clone(),
-                requested_at: Instant::now(),
-            },
-        );
+        let uid = if self
+            .protocol_version
+            .as_ref()
+            .is_some_and(|version| OUTGOING_CONNECT_V2.matches(version))
+        {
+            let request_uid = Uid::new_v4();
+            self.v2_reqs.insert(
+                (request_uid, request.protocol),
+                ConnectInProgress {
+                    prepared_socket,
+                    remote_address: request.remote_address.clone(),
+                    requested_at: Instant::now(),
+                    layer_id: session_id,
+                    message_id,
+                    id: connection_id,
+                },
+            );
+            Some(request_uid)
+        } else {
+            self.queue(request.protocol).push_back_with_data(
+                message_id,
+                session_id,
+                ConnectInProgress {
+                    id: connection_id,
+                    prepared_socket,
+                    remote_address: request.remote_address.clone(),
+                    requested_at: Instant::now(),
+                    layer_id: session_id,
+                    message_id,
+                },
+            );
+            None
+        };
 
-        let msg = request.protocol.wrap_agent_connect(request.remote_address);
-        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+        let msg = request
+            .protocol
+            .wrap_agent_connect(request.remote_address, uid);
+        message_bus.send(msg).await;
 
         Ok(())
     }
@@ -437,6 +494,19 @@ impl OutgoingProxy {
             message_bus
                 .send(ToLayer::from(AgentLostOutgoingResponse(
                     layer_id, message_id,
+                )))
+                .await;
+        }
+
+        tracing::debug!(
+            responses = self.v2_reqs.len(),
+            "Flushing error responses to V2 connect requests"
+        );
+        for in_progress in std::mem::take(&mut self.v2_reqs).into_values() {
+            message_bus
+                .send(ToLayer::from(AgentLostOutgoingResponse(
+                    in_progress.layer_id,
+                    in_progress.message_id,
                 )))
                 .await;
         }
@@ -510,7 +580,13 @@ impl BackgroundTask for OutgoingProxy {
                             self.txs.remove(&id);
                         },
                         DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
-                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, message_bus).await?,
+                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
+                        DaemonTcpOutgoing::ConnectV2(connect) => self.handle_connect_response(
+                            connect.connect,
+                            NetProtocol::Stream,
+                            Some(connect.uid),
+                            message_bus,
+                        ).await?,
                     }
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
@@ -518,7 +594,13 @@ impl BackgroundTask for OutgoingProxy {
                             self.txs.remove(&id);
                         }
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
-                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, message_bus).await?,
+                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
+                        DaemonUdpOutgoing::ConnectV2(connect) => self.handle_connect_response(
+                            connect.connect,
+                            NetProtocol::Datagrams,
+                            Some(connect.uid),
+                            message_bus,
+                        ).await?,
                     }
                     Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
                         self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
