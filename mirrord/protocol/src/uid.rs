@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 /// Generic unique ID.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Display, From)]
+#[display("{_0}")]
 pub struct Uid(pub Uuid);
 
 impl Uid {
