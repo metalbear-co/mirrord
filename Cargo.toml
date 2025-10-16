@@ -194,7 +194,7 @@ pem = "3"
 # Used by `cli`, `auth`
 home = "0.5"
 
-# Used by `cli`, `analytics`
+# Used by `cli`, `analytics`, `protocol`
 uuid = { version = "1.18", features = ["v4", "serde"] }
 
 # Used by `cli`, `auth`
