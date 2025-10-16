@@ -195,7 +195,7 @@ pem = "3"
 home = "0.5"
 
 # Used by `cli`, `analytics`
-uuid = { version = "1.17", features = ["v4", "serde"] }
+uuid = { version = "1.18", features = ["v4", "serde"] }
 
 # Used by `cli`, `auth`
 fs4 = { version = "0.13", features = ["tokio"], default-features = false }

@@ -4833,7 +4833,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.21.2"
+version = "1.22.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4854,6 +4854,7 @@ dependencies = [
  "strum_macros 0.27.2",
  "thiserror 2.0.17",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

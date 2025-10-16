@@ -4,17 +4,23 @@ use std::{
     io,
     net::SocketAddr as StdIpSocketAddr,
     path::PathBuf,
+    sync::LazyLock,
 };
 
 use bincode::{Decode, Encode};
+use semver::VersionReq;
 use socket2::SockAddr as OsSockAddr;
 
 #[cfg(not(target_os = "windows"))]
 use crate::outgoing::UnixAddr::{Abstract, Pathname, Unnamed};
-use crate::{ConnectionId, Payload, SerializationError};
+use crate::{ConnectionId, Payload, RemoteResult, SerializationError, uid::Uid};
 
 pub mod tcp;
 pub mod udp;
+
+/// Minimal mirrord-protocol version that allows for [`LayerConnectV2`] and [`DaemonConnectV2`].
+pub static OUTGOING_CONNECT_V2: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.22.0".parse().expect("Bad Identifier"));
 
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -189,4 +195,20 @@ impl fmt::Debug for DaemonRead {
             .field("bytes (length)", &self.bytes.len())
             .finish()
     }
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct LayerConnectV2 {
+    /// Unique ID of this request.
+    pub uid: Uid,
+    /// Remote address to connect to.
+    pub remote_address: SocketAddress,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DaemonConnectV2 {
+    /// Copied from the original [`LayerConnectV2`] request.
+    pub uid: Uid,
+    /// Result of the connection attempt.
+    pub connect: RemoteResult<DaemonConnect>,
 }
