@@ -10,8 +10,7 @@ use std::{
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnect, LayerConnectV2, LayerWrite,
-        SocketAddress,
+        DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
@@ -47,21 +46,25 @@ async fn outgoing_udp(dylib_path: &Path) {
 
     for peer in peers {
         let msg = intproxy.recv().await;
-        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
             remote_address: SocketAddress::Ip(addr),
+            uid,
         })) = msg
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 0,
-                    remote_address: addr.into(),
-                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
+                DaemonConnectV2 {
+                    connect: Ok(DaemonConnect {
+                        connection_id: 0,
+                        remote_address: addr.into(),
+                        local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                    }),
+                    uid,
                 },
-            ))))
+            )))
             .await;
 
         let msg = intproxy.recv().await;

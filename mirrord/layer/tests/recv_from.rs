@@ -6,7 +6,7 @@ use std::{net::SocketAddr, path::Path, time::Duration};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+        DaemonConnect, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
 };
@@ -23,25 +23,31 @@ async fn recv_from(
     #[values(Application::RustRecvFrom)] application: Application,
     dylib_path: &Path,
 ) {
+    use mirrord_protocol::outgoing::DaemonConnectV2;
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
     let msg = intproxy.recv().await;
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
         remote_address: SocketAddress::Ip(addr),
+        uid,
     })) = msg
     else {
         panic!("Invalid message received from layer: {msg:?}");
     };
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: addr.into(),
-                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                connect: Ok(DaemonConnect {
+                    connection_id: 0,
+                    remote_address: addr.into(),
+                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                }),
+                uid,
             },
-        ))))
+        )))
         .await;
 
     let msg = intproxy.recv().await;
