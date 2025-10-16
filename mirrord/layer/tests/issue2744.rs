@@ -9,7 +9,7 @@ pub use common::*;
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonConnectV2, DaemonRead, LayerClose, LayerWrite,
+        DaemonRead, LayerClose, LayerWrite,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     uid::Uid,
@@ -64,16 +64,7 @@ async fn issue_2744_non_blocking_outgoing_tcp(dylib_path: &Path) {
     }
     for (addr, id, uid) in &received_connects {
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
-                DaemonConnectV2 {
-                    uid: *uid,
-                    connect: Ok(DaemonConnect {
-                        connection_id: *id,
-                        remote_address: (*addr).into(),
-                        local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                    }),
-                },
-            )))
+            .send_tcp_connect_ok(*uid, *id, *addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
     }
 

@@ -23,12 +23,16 @@ use mirrord_config::{
 };
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
-    outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing},
+    outgoing::{
+        DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     uid::Uid,
 };
@@ -180,6 +184,26 @@ impl TestIntProxy {
         }
     }
 
+    pub async fn send_tcp_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_addr: SocketAddr,
+        local_addr: SocketAddr,
+    ) {
+        self.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: remote_addr.into(),
+                    local_address: local_addr.into(),
+                }),
+            },
+        )))
+        .await
+    }
+
     pub async fn recv_udp_connect(&mut self) -> (Uid, SocketAddr) {
         match self.recv().await {
             ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
@@ -191,6 +215,26 @@ impl TestIntProxy {
             }
             other => panic!("unexpected message received from the intproxy: {other:?}"),
         }
+    }
+
+    pub async fn send_udp_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_addr: SocketAddr,
+        local_addr: SocketAddr,
+    ) {
+        self.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: remote_addr.into(),
+                    local_address: local_addr.into(),
+                }),
+            },
+        )))
+        .await
     }
 
     pub async fn try_recv(&mut self) -> Option<ClientMessage> {

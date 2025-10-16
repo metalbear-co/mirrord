@@ -5,7 +5,7 @@ use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Dur
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
-    outgoing::{DaemonConnect, DaemonRead, tcp::DaemonTcpOutgoing},
+    outgoing::{DaemonRead, tcp::DaemonTcpOutgoing},
 };
 use rstest::rstest;
 
@@ -22,8 +22,6 @@ async fn test_issue2283(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    use mirrord_protocol::outgoing::DaemonConnectV2;
-
     let config_path = config_dir.join("outgoing_filter_local_not_existing_host.json");
 
     let (mut test_process, mut intproxy) = application
@@ -62,18 +60,9 @@ async fn test_issue2283(
     let (uid, addr) = intproxy.recv_tcp_connect().await;
     assert_eq!(addr, address);
 
-    let local_address = "2.3.4.5:9122".parse::<SocketAddr>().unwrap();
+    let local_address = "2.3.4.5:9122".parse().unwrap();
     intproxy
-        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
-            DaemonConnectV2 {
-                connect: Ok(DaemonConnect {
-                    connection_id: 0,
-                    remote_address: address.into(),
-                    local_address: local_address.into(),
-                }),
-                uid,
-            },
-        )))
+        .send_tcp_connect_ok(uid, 0, addr, local_address)
         .await;
     intproxy
         .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(

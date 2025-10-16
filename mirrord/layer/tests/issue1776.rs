@@ -1,11 +1,11 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{net::SocketAddr, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonRead, LayerWrite,
+        DaemonRead, LayerWrite,
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
 };
@@ -27,8 +27,6 @@ async fn test_issue1776(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    use mirrord_protocol::outgoing::DaemonConnectV2;
-
     let config_path = config_dir.join("issue1776.json");
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(&config_path))
@@ -38,16 +36,7 @@ async fn test_issue1776(
 
     let (uid, addr) = intproxy.recv_udp_connect().await;
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
-            DaemonConnectV2 {
-                connect: Ok(DaemonConnect {
-                    connection_id: 0,
-                    remote_address: addr.into(),
-                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                }),
-                uid,
-            },
-        )))
+        .send_udp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
         .await;
 
     let client_msg = intproxy.recv().await;

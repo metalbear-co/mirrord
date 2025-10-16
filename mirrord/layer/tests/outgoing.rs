@@ -10,7 +10,7 @@ use std::{
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
+        DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
@@ -48,16 +48,7 @@ async fn outgoing_udp(dylib_path: &Path) {
         let (uid, addr) = intproxy.recv_udp_connect().await;
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
-                DaemonConnectV2 {
-                    connect: Ok(DaemonConnect {
-                        connection_id: 0,
-                        remote_address: addr.into(),
-                        local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                    }),
-                    uid,
-                },
-            )))
+            .send_udp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
@@ -112,16 +103,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config
         let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
-                DaemonConnectV2 {
-                    connect: Ok(DaemonConnect {
-                        connection_id: 0,
-                        remote_address: addr.into(),
-                        local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                    }),
-                    uid,
-                },
-            )))
+            .send_tcp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
@@ -199,18 +181,8 @@ async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
     for _ in 0..2 {
         let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, expected_peer_address);
-
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
-                DaemonConnectV2 {
-                    connect: Ok(DaemonConnect {
-                        connection_id: 0,
-                        remote_address: addr.into(),
-                        local_address: "1.2.3.4:6000".parse::<SocketAddr>().unwrap().into(),
-                    }),
-                    uid,
-                },
-            )))
+            .send_tcp_connect_ok(uid, 0, addr, "1.2.3.4:6000".parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
@@ -302,19 +274,12 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
         got_connect_requests += 1;
 
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
-                DaemonConnectV2 {
-                    connect: Ok(DaemonConnect {
-                        connection_id: got_connect_requests,
-                        remote_address: SocketAddress::Ip(addr),
-                        local_address: SocketAddress::Ip(SocketAddr::new(
-                            Ipv4Addr::LOCALHOST.into(),
-                            0,
-                        )),
-                    }),
-                    uid,
-                },
-            )))
+            .send_tcp_connect_ok(
+                uid,
+                got_connect_requests,
+                addr,
+                "127.0.0.1:0".parse().unwrap(),
+            )
             .await;
     }
 
