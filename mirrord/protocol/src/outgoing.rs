@@ -219,7 +219,7 @@ mod test {
         assert!(addr.is_unnamed());
 
         let protocol_addr = SocketAddress::try_from(addr).unwrap();
-        assert_eq!(protocol_addr, SocketAddress::Unix(UnixAddr::Unnamed),);
+        assert_eq!(protocol_addr, SocketAddress::Unix(UnixAddr::Unnamed));
 
         let converted = SockAddr::try_from(protocol_addr).unwrap();
         assert!(converted.is_unnamed());
