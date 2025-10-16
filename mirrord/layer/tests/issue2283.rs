@@ -6,7 +6,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
+        DaemonConnect, DaemonRead, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
 };
@@ -25,6 +25,8 @@ async fn test_issue2283(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
+    use mirrord_protocol::outgoing::DaemonConnectV2;
+
     let config_path = config_dir.join("outgoing_filter_local_not_existing_host.json");
 
     let (mut test_process, mut intproxy) = application
@@ -61,21 +63,23 @@ async fn test_issue2283(
         .await;
 
     let message = intproxy.recv().await;
-    assert_matches!(
-        message,
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address}))
-        if remote_address == SocketAddress::from(address)
-    );
+    let ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(connect)) = message else {
+        panic!("unexpected message: {message:?}");
+    };
+    assert_eq!(connect.remote_address, SocketAddress::from(address));
 
     let local_address = "2.3.4.5:9122".parse::<SocketAddr>().unwrap();
     intproxy
-        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: address.into(),
-                local_address: local_address.into(),
+        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                connect: Ok(DaemonConnect {
+                    connection_id: 0,
+                    remote_address: address.into(),
+                    local_address: local_address.into(),
+                }),
+                uid: connect.uid,
             },
-        ))))
+        )))
         .await;
     intproxy
         .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
