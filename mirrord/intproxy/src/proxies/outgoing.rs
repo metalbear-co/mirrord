@@ -473,6 +473,7 @@ impl OutgoingProxy {
         tracing::debug!("Closing all local connections");
         self.txs.clear();
         self.background_tasks.clear();
+        self.protocol_version = None;
 
         tracing::debug!(
             responses = self.datagrams_reqs.len(),
@@ -554,6 +555,7 @@ impl OutgoingProxy {
 pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
+    AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
     ConnectionRefresh,
     LayerForked(LayerForked),
@@ -614,6 +616,9 @@ impl BackgroundTask for OutgoingProxy {
                         }
                     }
                     Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
+                    Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
+                        self.protocol_version.replace(version);
+                    }
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {
