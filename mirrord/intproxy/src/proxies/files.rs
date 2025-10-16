@@ -1282,7 +1282,7 @@ mod tests {
         proxy
             .send(FilesProxyMessage::FileReq(0xbad, LayerId(0xa55), request))
             .await;
-        let message = out.next_decoded().await;
+        let message = out.next().await;
 
         assert!(
             matches!(
@@ -1326,7 +1326,7 @@ mod tests {
                 readdir_request,
             ))
             .await;
-        let update = out.next_decoded().await;
+        let update = out.next().await;
 
         assert!(
             matches!(
@@ -1375,7 +1375,7 @@ mod tests {
         proxy
             .send(FilesProxyMessage::FileReq(0xbad, LayerId(0xa55), request))
             .await;
-        let update = out.next_decoded().await;
+        let update = out.next().await;
 
         assert!(
             matches!(
@@ -1444,7 +1444,7 @@ mod tests {
             ))
             .await;
 
-        let update = out.next_decoded().await.unwrap();
+        let update = out.next().await.unwrap();
         assert_eq!(update, ClientMessage::FileRequest(request),);
 
         let response = FileResponse::Open(Ok(OpenFileResponse { fd }));
@@ -1491,7 +1491,7 @@ mod tests {
             .await;
 
         select! {
-            a = out.next_decoded() => Either::Left(a.unwrap()),
+            a = out.next() => Either::Left(a.unwrap()),
             b = tasks.next() => Either::Right(b.unwrap().1.unwrap_message()),
         }
     }
@@ -1697,7 +1697,7 @@ mod tests {
             ))
             .await;
 
-        let update = out.next_decoded().await;
+        let update = out.next().await;
         assert_eq!(update, Some(ClientMessage::FileRequest(seek_request)));
         let seek_response = FileResponse::Seek(Ok(SeekFileResponse { result_offset: 444 }));
         proxy
@@ -1799,7 +1799,7 @@ mod tests {
             ))
             .await;
 
-        let update = out.next_decoded().await;
+        let update = out.next().await;
 
         assert_eq!(
             update,

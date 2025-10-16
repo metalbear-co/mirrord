@@ -167,7 +167,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 pub struct ConnectionOutput<T>(Arc<OutQueues<T>>);
 
 impl<T: bincode::Decode<()>> ConnectionOutput<T> {
-    pub async fn next_decoded(&self) -> Option<T> {
+    pub async fn next(&self) -> Option<T> {
         bincode::decode_from_slice(&self.0.next().await, bincode::config::standard())
             .ok()
             .map(|e| e.0)

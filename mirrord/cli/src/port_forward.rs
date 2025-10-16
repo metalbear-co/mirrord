@@ -1162,7 +1162,7 @@ mod test {
             tx_to_port_forwarder: mpsc::Sender<DaemonMessage>,
         ) {
             loop {
-                let Some(message) = rx.next_decoded().await else {
+                let Some(message) = rx.next().await else {
                     break;
                 };
 

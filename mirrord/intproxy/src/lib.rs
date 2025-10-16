@@ -743,7 +743,7 @@ mod test {
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
-        match proxy_rx.next_decoded().await.unwrap() {
+        match proxy_rx.next().await.unwrap() {
             ClientMessage::SwitchProtocolVersion(version) => {
                 assert_eq!(version, *mirrord_protocol::VERSION)
             }
@@ -798,7 +798,7 @@ mod test {
         // it would surely respond to our previous request here.
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                match proxy_rx.next_decoded().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::Ping => {
                         proxy_tx.send(DaemonMessage::Pong).await.unwrap();
                     }
@@ -817,7 +817,7 @@ mod test {
             .unwrap();
 
         loop {
-            match proxy_rx.next_decoded().await.unwrap() {
+            match proxy_rx.next().await.unwrap() {
                 ClientMessage::Ping => {
                     proxy_tx.send(DaemonMessage::Pong).await.unwrap();
                 }

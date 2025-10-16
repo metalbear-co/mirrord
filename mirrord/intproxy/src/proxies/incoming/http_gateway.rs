@@ -681,7 +681,7 @@ mod test {
         };
 
         if is_steal {
-            let message = proxy_rx.next_decoded().await.expect("no task result");
+            let message = proxy_rx.next().await.expect("no task result");
             match message {
                 ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)) => {
                     assert_eq!(
@@ -736,7 +736,7 @@ mod test {
         proxy.send(b"test test test".to_vec()).await;
 
         if is_steal {
-            let message = proxy_rx.next_decoded().await.expect("no task result");
+            let message = proxy_rx.next().await.expect("no task result");
             match message {
                 ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData { bytes, .. })) => {
                     assert_eq!(&*bytes, INITIAL_MESSAGE);
@@ -744,7 +744,7 @@ mod test {
                 _ => panic!("unexpected task update: {update:?}"),
             }
 
-            let message = proxy_rx.next_decoded().await.expect("no task result");
+            let message = proxy_rx.next().await.expect("no task result");
             match message {
                 ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData { bytes, .. })) => {
                     assert_eq!(&*bytes, b"test test test".as_slice());
@@ -846,7 +846,7 @@ mod test {
         match response_mode {
             Some(ResponseMode::Basic) => {
                 semaphore.add_permits(2);
-                match proxy_rx.next_decoded().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
                         assert_eq!(response.internal_response.body.as_ref(), b"hello\nhello\n");
                     }
@@ -856,7 +856,7 @@ mod test {
 
             Some(ResponseMode::Framed) => {
                 semaphore.add_permits(2);
-                match proxy_rx.next_decoded().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(response)) => {
                         let mut collected = vec![];
                         for frame in response.internal_response.body.0 {
@@ -877,7 +877,7 @@ mod test {
             }
 
             Some(ResponseMode::Chunked) => {
-                match proxy_rx.next_decoded().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                         ChunkedResponse::Start(response),
                     )) => {
@@ -887,7 +887,7 @@ mod test {
                 }
 
                 semaphore.add_permits(1);
-                match proxy_rx.next_decoded().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                         ChunkedResponse::Body(body),
                     )) => {
@@ -901,7 +901,7 @@ mod test {
                 }
 
                 semaphore.add_permits(1);
-                match proxy_rx.next_decoded().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                         ChunkedResponse::Body(body),
                     )) => {
@@ -1013,7 +1013,7 @@ mod test {
         }
         std::mem::drop(frame_tx);
 
-        match proxy_rx.next_decoded().await.unwrap() {
+        match proxy_rx.next().await.unwrap() {
             ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
                 assert_eq!(response.internal_response.status, StatusCode::OK);
             }
@@ -1107,7 +1107,7 @@ mod test {
                     }
                     other => panic!("unexpected task update: {other:?}"),
                 },
-                message = proxy_rx.next_decoded() => match message.unwrap() {
+                message = proxy_rx.next() => match message.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
                         assert_eq!(response.internal_response.status, StatusCode::OK);
                         responses += 1;
