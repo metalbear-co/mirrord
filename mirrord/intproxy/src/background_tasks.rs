@@ -8,10 +8,8 @@
 
 use std::{collections::HashMap, fmt, future::Future, hash::Hash, ops::ControlFlow};
 
-use mirrord_protocol::{
-    ClientMessage,
-    io::{Client, TxHandle},
-};
+use mirrord_protocol::ClientMessage;
+use mirrord_protocol_io::{Client, TxHandle};
 use thiserror::Error;
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},

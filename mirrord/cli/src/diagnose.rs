@@ -6,10 +6,8 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
-    io::{Client, Connection},
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol_io::{Client, Connection};
 use tokio::time::Instant;
 use tracing::Level;
 

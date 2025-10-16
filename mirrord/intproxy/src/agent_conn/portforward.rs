@@ -1,7 +1,7 @@
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI, UnpinStream};
 use mirrord_progress::NullProgress;
-use mirrord_protocol::io::{AsyncIO, Client, Connection};
+use mirrord_protocol_io::{AsyncIO, Client, Connection};
 
 use crate::agent_conn::AgentConnectionError;
 

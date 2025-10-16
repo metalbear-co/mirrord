@@ -33,6 +33,7 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
+mirrord-protocol-io = { path = "../protocol-io" }
 
 actix-codec.workspace = true
 base64.workspace = true

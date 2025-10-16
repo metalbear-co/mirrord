@@ -4,10 +4,8 @@ use std::{
     sync::Arc,
 };
 
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
-    io::{Agent, Connection},
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol_io::{Agent, Connection};
 use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
@@ -121,12 +119,10 @@ impl ClientConnection {
     /// Sends a [`DaemonMessage`] to the client.
     #[tracing::instrument(level = "trace")]
     pub async fn send(&mut self, message: DaemonMessage) -> io::Result<()> {
-        self.connection
-            .send(message)
-            .await;
+        self.connection.send(message).await;
 
-		// REVIEW Fix up the signatures
-		Ok(())
+        // REVIEW Fix up the signatures
+        Ok(())
     }
 
     /// Receives a [`ClientMessage`] from the client.

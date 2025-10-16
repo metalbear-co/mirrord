@@ -9,7 +9,7 @@ use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError};
 use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
-use mirrord_protocol::io::{Client, Connection, ProtocolError};
+use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use serde::{Deserialize, Serialize};
 use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;

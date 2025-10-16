@@ -7,9 +7,9 @@ use std::{
 use futures::{Stream, StreamExt};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, LogLevel,
-    io::{Client, Connection},
     vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
 };
+use mirrord_protocol_io::{Client, Connection};
 use semver::VersionReq;
 use tokio::sync::oneshot;
 

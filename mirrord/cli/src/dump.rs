@@ -10,13 +10,13 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, LogMessage, RequestId, ResponseError,
-    io::{Client, Connection},
     tcp::{
         ChunkedRequest, DaemonTcp, HttpRequestMetadata, IncomingTrafficTransportType,
         InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, NewTcpConnectionV1,
         NewTcpConnectionV2, TcpData,
     },
 };
+use mirrord_protocol_io::{Client, Connection};
 use thiserror::Error;
 use tokio::{
     sync::mpsc,

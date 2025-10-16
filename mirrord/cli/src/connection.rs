@@ -13,7 +13,7 @@ use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
 };
-use mirrord_protocol::io::{Client, Connection};
+use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
 use crate::{CliError, CliResult};

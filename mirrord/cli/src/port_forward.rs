@@ -23,7 +23,6 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, ConnectionId, DaemonMessage, LogLevel, Payload, Port,
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
-    io::{Client, Connection},
     outgoing::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -32,6 +31,7 @@ use mirrord_protocol::{
         Filter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
     },
 };
+use mirrord_protocol_io::{Client, Connection};
 use semver::Version;
 use thiserror::Error;
 use tokio::{

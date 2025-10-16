@@ -23,8 +23,8 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
-    io::{Client, TxHandle},
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},

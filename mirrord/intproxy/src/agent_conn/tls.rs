@@ -1,7 +1,7 @@
 use std::{io, path::Path};
 
 use mirrord_config::external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME;
-use mirrord_protocol::io::{Client, Connection, ProtocolError};
+use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_tls_util::{SecureChannelError, SecureChannelSetup};
 use rustls::pki_types::ServerName;
 use thiserror::Error;

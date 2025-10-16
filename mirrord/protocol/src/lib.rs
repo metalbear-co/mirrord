@@ -70,6 +70,7 @@ pub mod pause;
 pub mod payload;
 pub mod tcp;
 pub mod vpn;
+pub mod queueing;
 
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
