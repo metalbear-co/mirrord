@@ -1,16 +1,12 @@
 use core::fmt;
 use std::{
     fmt::{Display, Formatter},
-    io,
-    net::SocketAddr as StdIpSocketAddr,
+    io, net,
     path::PathBuf,
 };
 
 use bincode::{Decode, Encode};
-use socket2::SockAddr as OsSockAddr;
 
-#[cfg(not(target_os = "windows"))]
-use crate::outgoing::UnixAddr::{Abstract, Pathname, Unnamed};
 use crate::{ConnectionId, Payload, SerializationError};
 
 pub mod tcp;
@@ -19,7 +15,7 @@ pub mod udp;
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum SocketAddress {
-    Ip(StdIpSocketAddr),
+    Ip(net::SocketAddr),
     Unix(UnixAddr),
 }
 
@@ -40,35 +36,35 @@ pub enum UnixAddr {
     Unnamed,
 }
 
-impl From<StdIpSocketAddr> for SocketAddress {
-    fn from(addr: StdIpSocketAddr) -> Self {
-        SocketAddress::Ip(addr)
+impl From<net::SocketAddr> for SocketAddress {
+    fn from(addr: net::SocketAddr) -> Self {
+        Self::Ip(addr)
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-impl TryFrom<UnixAddr> for OsSockAddr {
+impl TryFrom<UnixAddr> for socket2::SockAddr {
     type Error = io::Error;
 
     fn try_from(addr: UnixAddr) -> Result<Self, Self::Error> {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
         match addr {
-            Pathname(path) => OsSockAddr::unix(path),
-            // We could use a `socket2::SockAddr::from_abstract_name` but it does not have it yet.
-            Abstract(bytes) => {
-                OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
-                    io::Error::other("Unprintable abstract addresses not supported.")
-                })?)
+            UnixAddr::Pathname(path) => socket2::SockAddr::unix(path),
+            UnixAddr::Abstract(mut bytes) => {
+                // Abstract names are "paths" that start with a NUL byte.
+                bytes.insert(0, 0);
+                socket2::SockAddr::unix(OsStr::from_bytes(&bytes))
             }
-            UnixAddr::Unnamed => OsSockAddr::unix(""),
+            UnixAddr::Unnamed => socket2::SockAddr::unix(""),
         }
     }
 }
 
-impl TryFrom<SocketAddress> for StdIpSocketAddr {
+impl TryFrom<SocketAddress> for net::SocketAddr {
     type Error = io::Error;
 
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
-        #[allow(irrefutable_let_patterns)]
         if let SocketAddress::Ip(socket_addr) = addr {
             Ok(socket_addr)
         } else {
@@ -77,34 +73,34 @@ impl TryFrom<SocketAddress> for StdIpSocketAddr {
     }
 }
 
-impl TryFrom<OsSockAddr> for SocketAddress {
+impl TryFrom<socket2::SockAddr> for SocketAddress {
     type Error = SerializationError;
 
     #[cfg(target_os = "windows")]
-    fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
-        let res = addr.as_socket().map(SocketAddress::Ip);
-        res.ok_or(SerializationError::SocketAddress)
+    fn try_from(addr: socket2::SockAddr) -> Result<Self, Self::Error> {
+        addr.as_socket()
+            .map(Self::Ip)
+            .ok_or(SerializationError::SocketAddress)
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
-        let res = addr
-            .as_socket()
-            .map(SocketAddress::Ip)
+    fn try_from(addr: socket2::SockAddr) -> Result<Self, Self::Error> {
+        addr.as_socket()
+            .map(Self::Ip)
             .or_else(|| {
                 addr.as_pathname()
-                    .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
+                    .map(|path| Self::Unix(UnixAddr::Pathname(path.to_owned())))
             })
             .or_else(|| {
                 addr.as_abstract_namespace()
-                    .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
+                    .map(|slice| Self::Unix(UnixAddr::Abstract(slice.to_vec())))
             })
-            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)));
-        res.ok_or(SerializationError::SocketAddress)
+            .or_else(|| addr.is_unnamed().then_some(Self::Unix(UnixAddr::Unnamed)))
+            .ok_or(SerializationError::SocketAddress)
     }
 }
 
-impl TryFrom<SocketAddress> for OsSockAddr {
+impl TryFrom<SocketAddress> for socket2::SockAddr {
     type Error = io::Error;
 
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
@@ -124,20 +120,21 @@ impl TryFrom<SocketAddress> for OsSockAddr {
 /// For error messages, e.g. `RemoteError::ConnectTimeOut`.
 impl Display for SocketAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let addr = match self {
-            SocketAddress::Ip(ip_address) => ip_address.to_string(),
+        match self {
+            SocketAddress::Ip(ip_address) => ip_address.fmt(f),
             #[cfg(not(target_os = "windows"))]
-            SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
-            #[cfg(not(target_os = "windows"))]
-            SocketAddress::Unix(Abstract(name)) => {
-                String::from_utf8_lossy(name.as_ref()).to_string()
+            SocketAddress::Unix(UnixAddr::Pathname(path)) => {
+                write!(f, "<UNIX-PATH> {}", path.display())
             }
             #[cfg(not(target_os = "windows"))]
-            SocketAddress::Unix(Unnamed) => "<UNNAMED-UNIX-ADDRESS>".to_string(),
+            SocketAddress::Unix(UnixAddr::Abstract(name)) => {
+                write!(f, "<UNIX-ABSTRACT> {}", String::from_utf8_lossy(name))
+            }
+            #[cfg(not(target_os = "windows"))]
+            SocketAddress::Unix(UnixAddr::Unnamed) => f.write_str("<UNIX-UNNAMED>"),
             #[cfg(target_os = "windows")]
-            _ => "<UNSUPPORTED-UNIX-ADDRESS>".to_string(),
-        };
-        write!(f, "{addr}")
+            _ => f.write_str("<UNSUPPORTED-UNIX-ADDRESS>"),
+        }
     }
 }
 
@@ -188,5 +185,43 @@ impl fmt::Debug for DaemonRead {
             .field("connection_id", &self.connection_id)
             .field("bytes (length)", &self.bytes.len())
             .finish()
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod test {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    use socket2::SockAddr;
+
+    use crate::outgoing::{SocketAddress, UnixAddr};
+
+    #[test]
+    fn abstract_unix_conversion() {
+        let name = b"\0very-very-abstract-name";
+
+        let addr = SockAddr::unix(OsStr::from_bytes(name)).unwrap();
+        assert_eq!(addr.as_abstract_namespace().unwrap(), &name[1..]);
+
+        let protocol_addr = SocketAddress::try_from(addr).unwrap();
+        assert_eq!(
+            protocol_addr,
+            SocketAddress::Unix(UnixAddr::Abstract(name.get(1..).unwrap().to_vec())),
+        );
+
+        let converted = SockAddr::try_from(protocol_addr).unwrap();
+        assert_eq!(converted.as_abstract_namespace().unwrap(), &name[1..]);
+    }
+
+    #[test]
+    fn unnamed_unix_conversion() {
+        let addr = SockAddr::unix("").unwrap();
+        assert!(addr.is_unnamed());
+
+        let protocol_addr = SocketAddress::try_from(addr).unwrap();
+        assert_eq!(protocol_addr, SocketAddress::Unix(UnixAddr::Unnamed),);
+
+        let converted = SockAddr::try_from(protocol_addr).unwrap();
+        assert!(converted.is_unnamed());
     }
 }
