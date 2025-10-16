@@ -97,7 +97,7 @@ pub struct MysqlBranchConfig {
 ///
 /// Create an empty database and copy schema of all tables.
 ///
-/// - All
+/// - Data
 ///
 /// Copy both schema and data of all tables. This option shall only be used
 /// when the data volume of the source database is minimal.
@@ -112,7 +112,7 @@ pub enum MysqlBranchCopyConfig {
         tables: Option<HashMap<String, MysqlBranchTableCopyConfig>>,
     },
 
-    All,
+    Data,
 }
 
 impl Default for MysqlBranchCopyConfig {
