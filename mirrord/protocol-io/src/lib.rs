@@ -115,29 +115,28 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     where
         C: Transport<Vec<u8>, Vec<u8>>,
     {
-        let framed = channel.filter_map(|msg| async {
-            let f = msg.and_then(|e| {
+        let framed = channel.map(|msg| {
+            msg.and_then(|e| {
                 bincode::decode_from_slice::<Type::InMsg, _>(&e, bincode::config::standard())
-                    .map(|(msg, len)| msg)
-            });
-
-            Ok(f)
+                    .map(|(msg, _)| msg)
+                    .map_err(io::Error::other)
+            })
         });
-        // let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        // let out_queues = Arc::new(OutQueues {
-        //     queues: Mutex::new(HashMap::new()),
-        //     nonempty: Arc::new(Notify::new()),
-        // });
+        let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        // let tx_handle = TxHandle(out_queues.clone());
+        let out_queues = Arc::new(OutQueues {
+            queues: Mutex::new(HashMap::new()),
+            nonempty: Arc::new(Notify::new()),
+        });
 
-        // tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
+        let tx_handle = TxHandle::<Type>(out_queues.clone());
+        tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
 
-        // Ok(Self {
-        //     rx: inbound_rx,
-        //     tx_handle,
-        // })
+        Ok(Self {
+            rx: inbound_rx,
+            tx_handle,
+        })
     }
 
     pub fn dummy() -> (
