@@ -58,6 +58,10 @@ impl LogSource for Extproxy {
 ///
 /// During generation ([`MirrordConfig::generate_config`]), the provided value is always resolved to
 /// the final file.
+///
+/// Defaults to a path in the temporary directory.
+///
+/// **Important:** when using this as a field, always annotate it with `#[config(nested)]`.
 #[derive(Eq, Hash)]
 pub struct LogDestinationConfig<S> {
     pub path: PathBuf,
