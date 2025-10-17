@@ -98,10 +98,10 @@ pub struct InternalProxyConfig {
     ///
     /// Set the log destination for the internal proxy.
     ///
-    /// If the provided path ends with a separator (`/` on UNIX, `\` on Windows),
-    /// it will be treated as a path to directory where the log file should be created.
-    /// Otherwise, if the path exists, mirrord will check if it's a directory or not.
-    /// Otherwise, it will be treated as a path to the log file.
+    /// 1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be
+    ///    treated as a path to directory where the log file should be created.
+    /// 2. Otherwise, if the path exists, mirrord will check if it's a directory or not.
+    /// 3. Otherwise, it will be treated as a path to the log file.
     ///
     /// mirrord will auto create all parent directories.
     ///
