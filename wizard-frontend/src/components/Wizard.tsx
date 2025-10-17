@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "./ui/badge";
 import { ConfigDataContext } from "./UserDataContext";
+import { readBoilerplateType } from "./JsonUtils";
 
 export interface WizardStep {
   id: string;
@@ -96,16 +97,16 @@ export const Wizard: React.FC<WizardProps> = ({
   const config = useContext(ConfigDataContext);
 
   const fetchConfigBadge = () => {
-    const mode = config.config.feature.network.incoming.mode; // todo: nullness :(
-    if (mode === "mirror") {
-      return "Mirror mode"
+    switch (readBoilerplateType(config.config)) {
+      case "mirror":
+        return "Mirror mode";
+      case "replace":
+        return "Replace mode";
+      case "steal":
+        return "Filtering mode";
+      case "custom":
+        return "Custom mode";
     }
-    if (config.config.agent.scaledown && config.config.agent.copyTarget) {
-      return "Replace mode";
-    } else if (!config.config.agent.scaledown && !config.config.agent.copyTarget) {
-      return "Filtering mode";
-    }
-    return "Custom mode";
   };
 
   const goToNext = () => {
