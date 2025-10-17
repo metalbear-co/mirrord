@@ -1,3 +1,4 @@
+import { LayerFileConfig } from "@/mirrord-schema";
 import React, { useState } from "react";
 
 export const UserDataContext = React.createContext<boolean | undefined>(
@@ -5,11 +6,11 @@ export const UserDataContext = React.createContext<boolean | undefined>(
 );
 
 interface ConfigData {
-  config: any;
-  setConfig: (config: any) => void;
+  config: LayerFileConfig;
+  setConfig: (config: LayerFileConfig) => void;
 }
 
-export const DefaultConfig = {
+export const DefaultConfig: LayerFileConfig = {
   feature: {
     network: {
       incoming: {
@@ -28,8 +29,8 @@ export const ConfigDataContextProvider = ({
 }: {
   children: React.ReactNode;
 }) => {
-  const [config, setConfig] = useState<any>(DefaultConfig);
-  const setConfigWithLog = (config: any) => {
+  const [config, setConfig] = useState<LayerFileConfig>(DefaultConfig);
+  const setConfigWithLog = (config: LayerFileConfig) => {
     console.log("Setting config:", config);
     setConfig(config);
   };

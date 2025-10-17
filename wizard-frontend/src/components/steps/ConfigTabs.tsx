@@ -41,21 +41,17 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import DownloadButton from "../DownloadButton";
-import { validateJson } from "../JsonUtils";
+import { readBoilerplateType, validateJson } from "../JsonUtils";
 import { ConfigDataContext } from "../UserDataContext";
 
 const ConfigTabs = () => {
   const config = useContext(ConfigDataContext);
   const [currentTab, setCurrentTab] = useState<string>("target");
 
-  // TODO: write a util function to determine selectedBoilerplate from config
-  const selectedBoilerplate: "steal" | "mirror" | "replace" = "steal";
-
-  // TODO: remove all this editable json stuff, replace with using config directly
   // For copying to clipboard
   const { toast } = useToast();
   const copyToClipboard = async () => {
-    const jsonToCopy = editableJson || config.config;
+    const jsonToCopy = editableJson || config.config as string;
     await navigator.clipboard.writeText(jsonToCopy);
     toast({
       title: "Copied to clipboard",
@@ -65,13 +61,9 @@ const ConfigTabs = () => {
   const [editableJson, setEditableJson] = useState<string>("");
   const [jsonError, setJsonError] = useState<string>("");
 
-  // todo: use the actual change config from config.whatever
-  const setConfig = (newConfig: any) => {
-    config.setConfig(newConfig)
-    return;
-  };
+  const setConfig = config.setConfig;
 
-  // todo: pull targets from backend
+  // todo: pull targets and namespaces from backend
   const mockTargets = [
     {
       name: "api-service",
@@ -99,7 +91,6 @@ const ConfigTabs = () => {
       kind: "cronjob",
     },
   ];
-
   const mockNamespaces = [
     "default",
     "production",
@@ -247,7 +238,7 @@ const ConfigTabs = () => {
                               onClick={() => {
                                 const targetValue = `${target.namespace}/${target.kind}/${target.name}`;
                                 const configType =
-                                  selectedBoilerplate || "config";
+                                  readBoilerplateType(config.config) || "config";
                                 setConfig({
                                   ...config,
                                   target: targetValue,
