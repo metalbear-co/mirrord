@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Formatter};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Formatter,
+};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
@@ -99,14 +102,14 @@ pub enum BranchCopyConfig {
     Empty {
         /// An optional list of tables whose schema and data will be copied based on their
         /// table level copy config.
-        tables: HashMap<String, TableCopyConfig>,
+        tables: BTreeMap<String, TableCopyConfig>,
     },
 
     /// Create a database with all tables' schema copied from the source database.
     Schema {
         /// An optional list of tables whose schema and data will be copied based on their
         /// table level copy config.
-        tables: HashMap<String, TableCopyConfig>,
+        tables: BTreeMap<String, TableCopyConfig>,
     },
 
     /// Create a database and copy all tables' schema and data fro mthe source database.
