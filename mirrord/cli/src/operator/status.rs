@@ -374,7 +374,7 @@ Operator License
         }
 
         // The Kafka topic statuses are grouped by consumer (target).
-        for (kafka_consumer, kafka_row) in kafka_rows {
+        for (_, kafka_row) in kafka_rows {
             let mut kafka_table = Table::new();
             kafka_table.add_row(row![
                 "Session ID",
