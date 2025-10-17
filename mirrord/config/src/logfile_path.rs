@@ -1,6 +1,8 @@
 use std::{
     borrow::Cow,
-    fmt, io,
+    fmt,
+    hash::{Hash, Hasher},
+    io,
     marker::PhantomData,
     ops::Deref,
     path::{Path, PathBuf},
@@ -62,7 +64,7 @@ impl LogSource for Extproxy {
 /// Defaults to a path in the temporary directory.
 ///
 /// **Important:** when using this as a field, always annotate it with `#[config(nested)]`.
-#[derive(Eq, Hash)]
+#[derive(Eq)]
 pub struct LogDestinationConfig<S> {
     pub path: PathBuf,
     _phantom: PhantomData<fn() -> S>,
@@ -98,6 +100,12 @@ impl<S> fmt::Debug for LogDestinationConfig<S> {
 impl<S> PartialEq for LogDestinationConfig<S> {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
+    }
+}
+
+impl<S> Hash for LogDestinationConfig<S> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
     }
 }
 
