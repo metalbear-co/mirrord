@@ -206,7 +206,7 @@ impl<S> AsRef<Path> for LogDestinationConfig<S> {
     }
 }
 
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod test {
     use mirrord_config_derive::MirrordConfig;
     use rstest::rstest;
