@@ -4569,6 +4569,7 @@ dependencies = [
  "serde_yaml",
  "strum 0.27.2",
  "strum_macros 0.27.2",
+ "tempfile",
  "tera",
  "thiserror 2.0.17",
  "toml 0.8.23",

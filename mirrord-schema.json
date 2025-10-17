@@ -1218,7 +1218,7 @@
         },
         "log_destination": {
           "title": "external_proxy.log_destination {#external_proxy-log_destination}",
-          "description": "Set the log file destination for the external proxy.\n\nDefaults to a randomized path inside the temporary directory.",
+          "description": "Set the log destination for the external proxy.\n\n1. If the provided path ends with a separator (`/` on UNIX, `\\` on Windows), it will be treated as a path to directory where the log file should be created. 2. Otherwise, if the path exists, mirrord will check if it's a directory or not. 3. Otherwise, it will be treated as a path to the log file.\n\nmirrord will auto create all parent directories.\n\nDefaults to a randomized path inside the temporary directory.",
           "type": [
             "string",
             "null"
@@ -1749,7 +1749,7 @@
         },
         "log_destination": {
           "title": "internal_proxy.log_destination {#internal_proxy-log_destination}",
-          "description": "Set the log file destination for the internal proxy.\n\nDefaults to a randomized path inside the temporary directory.",
+          "description": "Set the log destination for the internal proxy.\n\n1. If the provided path ends with a separator (`/` on UNIX, `\\` on Windows), it will be treated as a path to directory where the log file should be created. 2. Otherwise, if the path exists, mirrord will check if it's a directory or not. 3. Otherwise, it will be treated as a path to the log file.\n\nmirrord will auto create all parent directories.\n\nDefaults to a randomized path inside the temporary directory.",
           "type": [
             "string",
             "null"
