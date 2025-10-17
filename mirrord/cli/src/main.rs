@@ -1016,7 +1016,7 @@ fn main() -> miette::Result<()> {
                     MirrordCi::prepare_intproxy().await?;
                 }
 
-                logging::init_intproxy_tracing_registry(&config)?;
+                logging::init_intproxy_tracing_registry(&config).await?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
@@ -1044,7 +1044,7 @@ fn main() -> miette::Result<()> {
             Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;
 
-                logging::init_extproxy_tracing_registry(&config)?;
+                logging::init_extproxy_tracing_registry(&config).await?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
             }),
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
