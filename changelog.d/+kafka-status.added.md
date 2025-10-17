@@ -1,1 +1,0 @@
-Add Kafka splitting info to the operator status

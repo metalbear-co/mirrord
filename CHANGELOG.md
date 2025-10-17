@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.167.0](https://github.com/metalbear-co/mirrord/tree/3.167.0) - 2025-10-17
+
+### Added
+
+- Add Kafka splitting info to the operator status.
+- mirrord now makes outgoing connect attempts concurrently.
+
+### Fixed
+
+- Fixed a bug in the `mirrord port-forward` command where half closed streams
+  were not properly handled, causing "missing" traffic.
+- Fixed issues with outgoing connections to abstract UNIX sockets.
+- `mirrord ci` subcommand is now visible in the `--help` output.
+
+### Internal
+
+- Added enum variant support for medschool.
+
 ## [3.166.0](https://github.com/metalbear-co/mirrord/tree/3.166.0) - 2025-10-15
 
 
