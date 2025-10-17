@@ -7,6 +7,7 @@ import { Copy, Filter, Repeat } from "lucide-react";
 import { WizardStep } from "../Wizard";
 import { useContext, useState } from "react";
 import { ConfigDataContext } from "../UserDataContext";
+import { updateConfigCopyTarget, updateConfigMode } from "../JsonUtils";
 
 export interface BoilerplateCardProps {
   id: string;
@@ -66,7 +67,7 @@ export const BoilerplateCard: React.FC<BoilerplateCardProps> = ({
   );
 };
 
-const BoilerplateStep = () => {
+const BoilerplateStep: () => WizardStep = () => {
   const boilerplateConfigs: BoilerplateCardProps[] = [
     {
       id: "steal",
@@ -110,50 +111,16 @@ const BoilerplateStep = () => {
     setSelectedBoilerplate(boilerplateId);
     switch (boilerplateId) {
       case "replace":
-        // TODO: specific util functions to add to config
-        config.setConfig({
-          feature: {
-            network: {
-              incoming: {
-                mode: "steal",
-              },
-            },
-          },
-          agent: {
-            scaledown: true,
-            copyTarget: true,
-          },
-        });
+        updateConfigCopyTarget(true, true, config.config, config.setConfig);
+        updateConfigMode("steal", config.config, config.setConfig);
         break;
       case "mirror":
-        config.setConfig({
-          feature: {
-            network: {
-              incoming: {
-                mode: "mirror",
-              },
-            },
-          },
-          agent: {
-            scaledown: false,
-            copyTarget: false,
-          },
-        });
+        updateConfigCopyTarget(false, false, config.config, config.setConfig);
+        updateConfigMode("mirror", config.config, config.setConfig);
         break;
       case "steal":
-        config.setConfig({
-          feature: {
-            network: {
-              incoming: {
-                mode: "steal",
-              },
-            },
-          },
-          agent: {
-            scaledown: false,
-            copyTarget: false,
-          },
-        });
+        updateConfigCopyTarget(false, false, config.config, config.setConfig);
+        updateConfigMode("steal", config.config, config.setConfig);
         break;
     }
   };
