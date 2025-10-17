@@ -7,7 +7,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, ProtocolCodec,
@@ -109,6 +109,35 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
             rx: inbound_rx,
             tx_handle,
         })
+    }
+
+    pub async fn from_channel<C>(channel: C) -> Result<Self, ProtocolError>
+    where
+        C: Transport<Vec<u8>, Vec<u8>>,
+    {
+        let framed = channel.filter_map(|msg| async {
+            let f = msg.and_then(|e| {
+                bincode::decode_from_slice::<Type::InMsg, _>(&e, bincode::config::standard())
+                    .map(|(msg, len)| msg)
+            });
+
+            Ok(f)
+        });
+        // let (inbound_tx, inbound_rx) = mpsc::channel(64);
+
+        // let out_queues = Arc::new(OutQueues {
+        //     queues: Mutex::new(HashMap::new()),
+        //     nonempty: Arc::new(Notify::new()),
+        // });
+
+        // let tx_handle = TxHandle(out_queues.clone());
+
+        // tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
+
+        // Ok(Self {
+        //     rx: inbound_rx,
+        //     tx_handle,
+        // })
     }
 
     pub fn dummy() -> (
