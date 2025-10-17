@@ -1,1 +1,0 @@
-mirrord now makes outgoing connect attempts concurrently.
