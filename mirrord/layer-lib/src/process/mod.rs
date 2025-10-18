@@ -1,4 +1,4 @@
 //! Process-related utilities for mirrord layer
 
-pub mod environment;
-pub mod pipe;
+#[cfg(target_os = "windows")]
+pub mod windows;

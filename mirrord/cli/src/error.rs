@@ -1,7 +1,5 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-#[cfg(target_os = "windows")]
-use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
@@ -475,21 +473,6 @@ pub(crate) enum CliError {
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),
 }
-
-#[cfg(target_os = "windows")]
-#[derive(Debug, Error, Diagnostic)]
-pub(crate) enum ProcessExecError {
-    #[error("Executed process pid was not found: {0}")]
-    ProcessNotFound(u32, String),
-
-    #[error("Failed to inject DLL \"{0}\" into pid {1}: {2}")]
-    InjectionFailed(String, u32, String),
-
-    #[error("Pipe Error: {0}")]
-    PipeError(#[from] windows_core::Error),
-}
-#[cfg(target_os = "windows")]
-pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
 
 impl CliError {
     /// Here we give more meaning to some errors, instead of just letting them pass as

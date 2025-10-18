@@ -45,9 +45,6 @@ use crate::{
     util::{get_user_git_branch, remove_proxy_env},
 };
 
-#[cfg(target_os = "windows")]
-pub mod windows;
-
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 

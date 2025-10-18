@@ -2393,7 +2393,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
 
     if enabled_remote_dns {
         // Add DNS resolution hooks to handle our modified hostnames
-        tracing::warn!("Installing gethostbyname hook");
         apply_hook!(
             guard,
             "ws2_32",

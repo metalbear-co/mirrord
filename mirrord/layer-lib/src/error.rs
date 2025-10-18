@@ -354,6 +354,26 @@ pub enum LayerError {
     #[cfg(target_os = "windows")]
     #[error("Environment variable for config not present")]
     MissingConfigEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Windows process creation failed: {0}")]
+    WindowsProcessCreation(#[from] crate::error::windows::WindowsError),
+
+    #[cfg(target_os = "windows")]
+    #[error("DLL injection failed: {0}")]
+    DllInjection(String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Process synchronization failed: {0}")]
+    ProcessSynchronization(String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Process with PID {0} not found")]
+    ProcessNotFound(u32),
+
+    #[cfg(target_os = "windows")]
+    #[error("Internal error: missing required function pointer for {0}")]
+    MissingFunctionPointer(String),
 }
 
 impl From<SerializationError> for LayerError {

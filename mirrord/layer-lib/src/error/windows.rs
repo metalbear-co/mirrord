@@ -23,6 +23,7 @@ pub enum ConsoleError {
 }
 pub type ConsoleResult<T> = Result<T, ConsoleError>;
 
+#[derive(Error)]
 pub enum WindowsError {
     /// Usually returned by [`winapi::umm::errhandlingapi::GetLastError`].
     Windows(u32),

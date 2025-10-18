@@ -17,11 +17,13 @@ use std::{io::Write, net::SocketAddr, thread};
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::{LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
-use mirrord_intproxy_protocol::LayerId;
+use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
 pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
+    process::windows::sync::{
+        MIRRORD_LAYER_INIT_EVENT_NAME, create_init_event, signal_init_complete,
+    },
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::init_setup,
 };
@@ -36,12 +38,6 @@ use winapi::{
 
 use crate::hooks::initialize_hooks;
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
-
-pub const MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID: &str = "MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID";
-pub const MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID: &str = "MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID";
-pub const MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR: &str = "MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR";
-pub const MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64: &str =
-    "MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64";
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
     unsafe {
@@ -87,93 +83,44 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     init_tracing();
 
     let current_pid = std::process::id();
-    if let Ok(Ok(parent_pid)) =
-        std::env::var(MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID).map(|x| x.parse::<u32>())
-    {
-        // Create Windows-specific process info
-        let process_info = mirrord_intproxy_protocol::ProcessInfo {
-            pid: current_pid as _,
-            parent_pid: parent_pid as _,
-            name: std::env::current_exe()
-                .ok()
-                .and_then(|path| path.file_name()?.to_str().map(String::from))
-                .unwrap_or_else(|| "unknown".to_string()),
-            cmdline: std::env::args().collect(),
-            loaded: true,
-        };
+    
+    // Create Windows-specific process info
+    let process_info = mirrord_intproxy_protocol::ProcessInfo {
+        pid: current_pid as _,
+        // We don't need parent PID for parent process
+        parent_pid: 0,
+        name: std::env::current_exe()
+            .ok()
+            .and_then(|path| path.file_name()?.to_str().map(String::from))
+            .unwrap_or_else(|| "unknown".to_string()),
+        cmdline: std::env::args().collect(),
+        loaded: true,
+    };
 
-        // Try to parse `SocketAddr` from [`MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR`] environment
-        // variable.
-        let address = std::env::var(MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR)
-            .map_err(LayerError::MissingEnvIntProxyAddr)?
-            .parse::<SocketAddr>()
-            .map_err(LayerError::MalformedIntProxyAddr)?;
+    // Use the same environment variable as Unix layer
+    let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
+        .map_err(LayerError::MissingEnvIntProxyAddr)?
+        .parse::<SocketAddr>()
+        .map_err(LayerError::MalformedIntProxyAddr)?;
 
-        let parent_layer = std::env::var(MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID)
-            .map(|x| x.parse::<u64>())
-            .map_err(|_| LayerError::MissingLayerIdEnv)?
-            .map_err(|_| LayerError::MalformedLayerIdEnv)?;
+    // Set up session request - no parent layer for unified approach
+    let session = mirrord_intproxy_protocol::NewSessionRequest {
+        parent_layer: None,
+        process_info,
+    };
 
-        // Set up session request.
-        let session = mirrord_intproxy_protocol::NewSessionRequest {
-            parent_layer: Some(LayerId(parent_layer)),
-            process_info,
-        };
+    // Use a default timeout of 30 seconds
+    let timeout = std::time::Duration::from_secs(30);
+    let new_connection = ProxyConnection::new(address, session, timeout)?;
+    PROXY_CONNECTION.set(new_connection).map_err(|_| {
+        LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
+    })?;
 
-        // Use a default timeout of 30 seconds
-        let timeout = std::time::Duration::from_secs(30);
-        let new_connection = ProxyConnection::new(address, session, timeout)?;
-        PROXY_CONNECTION.set(new_connection).map_err(|_| {
-            LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
-        })?;
+    // Read and initialize configuration using the standard method
+    let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
 
-        let config_base64 = std::env::var(MIRRORD_LAYER_CHILD_PROCESS_CONFIG_BASE64)
-            .map_err(|_| LayerError::MissingConfigEnv)?;
-
-        // Read and initialize configuration
-        let config = LayerConfig::decode(config_base64.as_str()).map_err(LayerError::Config)?;
-
-        // Initialize layer setup with the configuration
-        init_setup(config, address)?;
-    } else {
-        // Create Windows-specific process info
-        let process_info = mirrord_intproxy_protocol::ProcessInfo {
-            pid: current_pid as _,
-            // We don't need parent PID for parent process
-            parent_pid: 0,
-            name: std::env::current_exe()
-                .ok()
-                .and_then(|path| path.file_name()?.to_str().map(String::from))
-                .unwrap_or_else(|| "unknown".to_string()),
-            cmdline: std::env::args().collect(),
-            loaded: true,
-        };
-
-        // Try to parse `SocketAddr` from [`MIRRORD_LAYER_INTPROXY_ADDR`] environment variable.
-        let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-            .map_err(LayerError::MissingEnvIntProxyAddr)?
-            .parse::<SocketAddr>()
-            .map_err(LayerError::MalformedIntProxyAddr)?;
-
-        // Set up session request.
-        let session = mirrord_intproxy_protocol::NewSessionRequest {
-            parent_layer: None,
-            process_info,
-        };
-
-        // Use a default timeout of 30 seconds
-        let timeout = std::time::Duration::from_secs(30);
-        let new_connection = ProxyConnection::new(address, session, timeout)?;
-        PROXY_CONNECTION.set(new_connection).map_err(|_| {
-            LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
-        })?;
-
-        // Read and initialize configuration
-        let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-
-        // Initialize layer setup with the configuration
-        init_setup(config, address)?;
-    }
+    // Initialize layer setup with the configuration
+    init_setup(config, address)?;
 
     Ok(())
 }
@@ -192,8 +139,23 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     }
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
-    let _ = thread::spawn(|| {
-        use process::{threads, threads::ThreadState};
+    let _ = thread::spawn(move || {
+        // Create initialization event within the thread
+        let _init_event_name = match create_init_event() {
+            Ok(name) => {
+                // Set the event name in environment for child processes to find
+                unsafe {
+                    std::env::set_var(MIRRORD_LAYER_INIT_EVENT_NAME, &name);
+                }
+                name
+            }
+            Err(e) => {
+                tracing::error!("Failed to create initialization event: {e}");
+                let _ = std::io::stdout().flush();
+                let _ = std::io::stderr().flush();
+                std::process::exit(EXIT_FAILURE);
+            }
+        };
 
         // NOTE(gabriela): workaround for proxy connection thread freeze once we freeze all threads.
         //
@@ -220,7 +182,6 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
         // 2. There should be no other code intercepting execution in the same matter as mirrord
         //    does, creating threads within the process at this time. It may work, but it has not
         //    been tested.
-        threads::change_all_state(ThreadState::Frozen);
 
         if let Err(e) = mirrord_start() {
             tracing::error!("Failed call to mirrord_start: {e}");
@@ -229,10 +190,9 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
             std::process::exit(EXIT_FAILURE);
         }
 
-        // Unsuspend other threads
-        threads::change_all_state(ThreadState::Unfrozen);
-
-        tracing::info!("mirrord-layer-win fully initialized, threads resumed!");
+        // Signal that initialization is complete
+        signal_init_complete();
+        tracing::info!("mirrord-layer-win fully initialized");
     });
 
     TRUE

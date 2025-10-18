@@ -111,3 +111,59 @@ pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
         .chain(Some(0))
         .collect()
 }
+
+/// Convert a null-terminated wide string pointer (LPCWSTR) to a Rust String.
+///
+/// This function safely handles Windows API wide string pointers by:
+/// 1. Checking for null pointers
+/// 2. Finding the null terminator
+/// 3. Using proper UTF-16 decoding
+///
+/// # Safety
+///
+/// The caller must ensure that `ptr` is a valid pointer to a null-terminated
+/// wide string, or a null pointer.
+///
+/// # Arguments
+///
+/// * `ptr` - A pointer to a null-terminated wide string (LPCWSTR) or null
+///
+/// # Returns
+///
+/// * `Some(String)` - If the pointer is valid and can be converted
+/// * `None` - If the pointer is null
+pub unsafe fn lpcwstr_to_string(ptr: *const u16) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+
+    // Find the length by counting until null terminator
+    let len = (0..)
+        .take_while(|&i| unsafe { *ptr.offset(i) != 0 })
+        .count();
+
+    // Create slice and convert using proper UTF-16 decoding
+    let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+    Some(String::from_utf16_lossy(slice))
+}
+
+/// Convert a null-terminated wide string pointer (LPCWSTR) to a Rust String,
+/// returning an empty string for null pointers.
+///
+/// This is a convenience wrapper around `lpcwstr_to_string` that never returns None.
+///
+/// # Safety
+///
+/// The caller must ensure that `ptr` is a valid pointer to a null-terminated
+/// wide string, or a null pointer.
+///
+/// # Arguments
+///
+/// * `ptr` - A pointer to a null-terminated wide string (LPCWSTR) or null
+///
+/// # Returns
+///
+/// * `String` - The converted string, or empty string if pointer is null
+pub unsafe fn lpcwstr_to_string_or_empty(ptr: *const u16) -> String {
+    unsafe { lpcwstr_to_string(ptr) }.unwrap_or_default()
+}

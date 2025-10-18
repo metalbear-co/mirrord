@@ -16,6 +16,13 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["cli-execution", "layer-hook-execution"]
+# CLI-specific process execution (for mirrord CLI spawning processes)
+cli-execution = []
+# Layer hook-specific process execution (for intercepted process creation)
+layer-hook-execution = []
+
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
@@ -43,7 +50,9 @@ exec.workspace = true
 [target.'cfg(windows)'.dependencies]
 str-win = { path = "../str-win" }
 winapi.workspace = true
+dll-syringe.workspace = true
 anyhow.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }

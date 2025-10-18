@@ -258,9 +258,7 @@ use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
-use extract::extract_library;
-#[cfg(target_os = "windows")]
-use libc::EXIT_FAILURE;
+// use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -316,12 +314,12 @@ mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
-
-#[cfg(target_os = "windows")]
-use crate::execution::windows::command::WindowsCommand;
 use crate::{
     newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
 };
+
+#[cfg(target_os = "windows")]
+use mirrord_layer_lib::process::windows::execution::ProcessExecutor;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -520,30 +518,23 @@ where
         e
     })?;
 
-    let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
-        .and_then(|os_str| os_str.into_string().ok())
-        .ok_or_else(|| {
-            CliError::LayerFilePathMissing(
-                binary.clone(),
-                binary_args.clone(),
-                std::env::vars().collect(),
-            )
-        })?;
+    // Create CLI executor and configure it
+    let windows_args = if binary_args.len() > 1 {
+        &binary_args[1..] // Skip the program name (first element)
+    } else {
+        &[] // No arguments if only program name present
+    };
+    
+    let executor = ProcessExecutor::new_cli(&binary_path).map_err(|e| {
+        error!("Failed to create ProcessExecutor: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+    })?
+    .args(windows_args)
+    .envs(&env_vars);
 
-    let mut env_vars = env_vars.clone();
-    env_vars
-        .entry("MIRRORD_LAYER_FILE".to_string())
-        .or_insert(layer_path.clone());
-
-    let cmd = WindowsCommand::new(&binary_path)
-        .args(&binary_args)
-        .envs(env_vars)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    // On Windows, we need to manually handle process replacement
-    let mut process = cmd.inject_and_spawn(layer_path).map_err(|e| {
+    // spawn the process (including mirrord layer injection and wait for initialization)
+    let process_result = executor.spawn().map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
@@ -551,13 +542,9 @@ where
 
     progress.success(Some("Ready!"));
 
-    // Wait for process and handle I/O
-    let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
-        error!("Process failed: {:?}", e);
-        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        EXIT_FAILURE
-    });
-    std::process::exit(exit_code);
+    // Exit with the same code as the child process
+    let exit_code = process_result.exit_code.unwrap_or(0);
+    std::process::exit(exit_code as i32);
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -952,11 +939,11 @@ fn main() -> miette::Result<()> {
                 dump_command(&args, watch, &user_data).await?
             }),
             Commands::Extract { path } => {
-                extract_library(
-                    Some(path),
-                    &ProgressTracker::from_env("mirrord extract library..."),
-                    false,
-                )?;
+                // extract_library(
+                //     Some(path),
+                //     &ProgressTracker::from_env("mirrord extract library..."),
+                //     false,
+                // )?;
             }
             Commands::ListTargets(args) => {
                 let rich_output = std::env::var(ListTargetArgs::RICH_OUTPUT_ENV)
