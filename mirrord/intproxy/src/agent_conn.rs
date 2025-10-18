@@ -141,22 +141,20 @@ impl AgentConnection {
 
         let (connection, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
-                let _connection =
+                let connection =
                     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
                         .await?;
-                todo!()
-                // (
-                //     connection.tx,
-                //     connection.rx,
-                //     if session.allow_reconnect {
-                //         ReconnectFlow::ConnectInfo {
-                //             config: config.clone(),
-                //             connect_info: AgentConnectInfo::Operator(session),
-                //         }
-                //     } else {
-                //         ReconnectFlow::Break(kind)
-                //     },
-                // )
+                (
+                    connection.conn,
+                    if session.allow_reconnect {
+                        ReconnectFlow::ConnectInfo {
+                            config: config.clone(),
+                            connect_info: AgentConnectInfo::Operator(session),
+                        }
+                    } else {
+                        ReconnectFlow::Break(kind)
+                    },
+                )
             }
 
             AgentConnectInfo::ExternalProxy {

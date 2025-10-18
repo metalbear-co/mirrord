@@ -115,20 +115,17 @@ where
 pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut P,
-    _analytics: &mut R,
-    _branch_name: Option<String>,
+    analytics: &mut R,
+    branch_name: Option<String>,
 ) -> CliResult<(AgentConnectInfo, Connection<Client>)> {
-    // if let Some(connection) =
-    //     try_connect_using_operator(config, progress, analytics, branch_name).await?
-    // {   todo!()
-    //     return Ok((
-    //         AgentConnectInfo::Operator(connection.session),
-    //         AgentConnection {
-    //             sender: connection.tx,
-    //             receiver: connection.rx,
-    //         },
-    //     ));
-    // }
+    if let Some(connection) =
+        try_connect_using_operator(config, progress, analytics, branch_name).await?
+    {
+        return Ok((
+            AgentConnectInfo::Operator(connection.session),
+            connection.conn,
+        ));
+    }
 
     process_config_oss(config, progress)?;
 

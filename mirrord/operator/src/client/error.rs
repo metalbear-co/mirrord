@@ -2,6 +2,7 @@ use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
 use mirrord_kube::error::KubeApiError;
+use mirrord_protocol_io::ProtocolError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
 
@@ -86,6 +87,9 @@ pub enum OperatorApiError {
 
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
+
+	#[error("protocol error: {0}")]
+	ProtocolError(#[from]ProtocolError)
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
