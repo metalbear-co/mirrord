@@ -3,7 +3,7 @@ use std::{
     fmt,
     io::{self},
     marker::PhantomData,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, task::{Context, Poll},
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
@@ -90,7 +90,7 @@ impl<I> Encoder<Vec<u8>> for Codec<I> {
 }
 
 pub struct Connection<Type: ProtocolEndpoint> {
-    pub rx: mpsc::Receiver<Type::InMsg>,
+    rx: mpsc::Receiver<Type::InMsg>,
     tx_handle: TxHandle<Type>,
 }
 
@@ -179,6 +179,11 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     #[inline]
     pub async fn recv(&mut self) -> Option<Type::InMsg> {
         self.rx.recv().await
+    }
+
+    #[inline]
+    pub fn poll_recv(&mut self, cx: &mut Context) -> Poll<Option<Type::InMsg>> {
+        self.rx.poll_recv(cx)
     }
 
     #[inline]

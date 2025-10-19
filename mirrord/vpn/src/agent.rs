@@ -116,7 +116,7 @@ impl Stream for VpnAgent {
     type Item = DaemonMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let result = ready!(self.connection.rx.poll_recv(cx));
+        let result = ready!(self.connection.poll_recv(cx));
 
         match result {
             Some(DaemonMessage::LogMessage(message)) => {
