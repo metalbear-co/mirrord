@@ -155,16 +155,9 @@ pub struct OperatorSessionConnection {
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // REVIEW
-        // let tx_queued_messages = self.tx.max_capacity() - self.tx.capacity();
-        // let rx_queued_messages = self.rx.len();
-
         f.debug_struct("OperatorSessionConnection")
             .field("session", &self.session)
-            // .field("tx_closed", &self.tx.is_closed())
-            // .field("tx_queued_messages", &tx_queued_messages)
-            // .field("rx_closed", &self.rx.is_closed())
-            // .field("rx_queued_messages", &rx_queued_messages)
+            .field("closed", &self.conn.is_closed())
             .finish()
     }
 }

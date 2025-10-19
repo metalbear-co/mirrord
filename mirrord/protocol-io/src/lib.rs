@@ -3,7 +3,8 @@ use std::{
     fmt,
     io::{self},
     marker::PhantomData,
-    sync::{Arc, Mutex}, task::{Context, Poll},
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
@@ -194,6 +195,11 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     #[inline]
     pub fn tx_handle(&self) -> TxHandle<Type> {
         self.tx_handle.clone()
+    }
+
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        self.rx.is_closed()
     }
 }
 
