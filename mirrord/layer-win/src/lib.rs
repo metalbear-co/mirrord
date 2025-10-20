@@ -17,23 +17,18 @@ use std::{io::Write, net::SocketAddr, thread};
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
+use mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR;
 pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
-    process::windows::sync::{
-        MIRRORD_LAYER_INIT_EVENT_NAME, create_init_event, signal_init_complete,
-    },
+    process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::init_setup,
 };
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
-    um::{
-        libloaderapi::LoadLibraryA,
-        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
-    },
+    um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
 };
 
 use crate::hooks::initialize_hooks;
@@ -83,7 +78,7 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     init_tracing();
 
     let current_pid = std::process::id();
-    
+
     // Create Windows-specific process info
     let process_info = mirrord_intproxy_protocol::ProcessInfo {
         pid: current_pid as _,
@@ -134,65 +129,18 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
+    if should_wait_for_debugger() {
         wait_for_debug!();
     }
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(move || {
-        // Create initialization event within the thread
-        let _init_event_name = match create_init_event() {
-            Ok(name) => {
-                // Set the event name in environment for child processes to find
-                unsafe {
-                    std::env::set_var(MIRRORD_LAYER_INIT_EVENT_NAME, &name);
-                }
-                name
-            }
-            Err(e) => {
-                tracing::error!("Failed to create initialization event: {e}");
-                let _ = std::io::stdout().flush();
-                let _ = std::io::stderr().flush();
-                std::process::exit(EXIT_FAILURE);
-            }
-        };
-
-        // NOTE(gabriela): workaround for proxy connection thread freeze once we freeze all threads.
-        //
-        // ```cpp
-        // Provider = DCATALOG::LoadProvider((DCATALOG *)v15, (struct PROTO_CATALOG_ITEM *)v20);
-        // ```
-        unsafe {
-            LoadLibraryA(c"mswsock.dll".as_ptr());
-        }
-
-        // Before doing anything, suspend all other threads.
-        // NOTE(gabriela): otherwise, other logic might run before
-        // our hooks are applied.
-        //
-        // NOTE(gabriela): assumptions:
-        // 1. This process will be initiated early enough in the process lifetime, that there will
-        //    be 0 threads that *should* and *must* stay frozen.
-        //
-        // 1.1. Likewise, the [`mirrord_start`] operation, although it may create
-        //      threads at will, it should not allow for any threads that are meant to be frozen
-        //      to continue for long enough that it might come to be problematic with the freeze
-        //      logic.
-        //
-        // 2. There should be no other code intercepting execution in the same matter as mirrord
-        //    does, creating threads within the process at this time. It may work, but it has not
-        //    been tested.
-
         if let Err(e) = mirrord_start() {
             tracing::error!("Failed call to mirrord_start: {e}");
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
             std::process::exit(EXIT_FAILURE);
         }
-
-        // Signal that initialization is complete
-        signal_init_complete();
-        tracing::info!("mirrord-layer-win fully initialized");
     });
 
     TRUE
@@ -237,6 +185,10 @@ fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 }
 
 fn mirrord_start() -> anyhow::Result<()> {
+    // Create layer initialization event first
+    let init_event = LayerInitEvent::for_child()
+        .map_err(|e| anyhow::anyhow!("Failed to create layer initialization event: {}", e))?;
+
     initialize_windows_proxy_connection()?;
     tracing::info!("ProxyConnection initialized");
 
@@ -246,6 +198,13 @@ fn mirrord_start() -> anyhow::Result<()> {
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
     initialize_hooks(guard)?;
     tracing::info!("Hooks initialized");
+
+    // Signal that initialization is complete
+    init_event
+        .signal_complete()
+        .map_err(|e| anyhow::anyhow!("Failed to signal initialization complete: {}", e))?;
+
+    tracing::info!("mirrord-layer-win fully initialized");
 
     Ok(())
 }

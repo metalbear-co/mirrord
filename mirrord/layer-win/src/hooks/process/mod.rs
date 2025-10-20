@@ -3,7 +3,8 @@
 //! This module provides hooks for intercepting Windows process creation
 //! and injecting the mirrord layer DLL into child processes for transparent
 //! system call interception.
-pub mod ops;
+
+use std::sync::OnceLock;
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::process::windows::execution::CreateProcessInternalWType;
@@ -20,7 +21,9 @@ use winapi::{
 };
 
 use crate::apply_hook;
-use ops::{create_process_with_layer_injection, CREATE_PROCESS_INTERNAL_W_ORIGINAL};
+
+/// Static storage for the original CreateProcessInternalW function pointer.
+static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
 
 /// Windows API hook for CreateProcessInternalW function.
 ///
@@ -43,16 +46,56 @@ unsafe extern "system" fn create_process_internal_w_hook(
 ) -> BOOL {
     tracing::debug!("🎯 CreateProcessInternalW hook intercepted process creation");
 
-    // Attempt unified mirrord process creation with layer injection
+    // // winapi loop until IsDebuggerPresent is false
+    // use winapi::um::debugapi::{IsDebuggerPresent, DebugBreak};
+    // while IsDebuggerPresent() == 0 {
+    //     std::thread::sleep(std::time::Duration::from_millis(10));
+    // }
+
+    // Convert Windows API parameters to Rust types
+    let app_name = unsafe { str_win::lpcwstr_to_string(application_name) };
+    let cmd_line = unsafe { str_win::lpcwstr_to_string_or_empty(command_line) };
+    let current_dir = unsafe { str_win::lpcwstr_to_string(current_directory) };
+
+    // Get the original function pointer
+    let original = match CREATE_PROCESS_INTERNAL_W_ORIGINAL.get() {
+        Some(original_fn) => original_fn,
+        None => {
+            tracing::error!(
+                "❌ Original CreateProcessInternalW function not available - hook not properly installed"
+            );
+            return winapi::shared::minwindef::FALSE;
+        }
+    };
+
+    tracing::debug!(
+        "Windows CreateProcess parameters: app_name={:?}, cmd_line={:?}, current_dir={:?}, parent_pid={}",
+        app_name,
+        cmd_line,
+        current_dir,
+        std::process::id()
+    );
+
+
+    // // Attempt unified mirrord process creation with layer injection
     match create_process_with_layer_injection(
-        application_name,
-        command_line,
-        current_directory,
-        startup_info,
-        creation_flags,
-        inherit_handles,
-    ) {
+    //     }
+        
+    // };
+
+    // Execute process with stdio redirection for hooks using simplified API
+    // Environment is automatically inherited from current process
+    // DLL path is automatically read from MIRRORD_LAYER_FILE environment variable
+    match mirrord_layer_lib::process::windows::execution::LayerManagedProcess::execute_with_stdio_redirection(
+        app_name,
+        cmd_line,
+            current_dir,
+            std::collections::HashMap::new(), // Environment is inherited automatically
+            original,
+        )
+        .map(|result| result.info) {
         Ok(proc_info) => {
+            // DebugBreak();
             // Success: populate output parameter and return TRUE
             unsafe {
                 *process_information = proc_info;
@@ -65,16 +108,6 @@ unsafe extern "system" fn create_process_internal_w_hook(
             tracing::error!("❌ Unified process creation failed: {}", e);
             // Fallback to original Windows API implementation
             tracing::warn!("🔄 Falling back to original CreateProcessInternalW");
-
-            let original = match CREATE_PROCESS_INTERNAL_W_ORIGINAL.get() {
-                Some(original_fn) => original_fn,
-                None => {
-                    tracing::error!(
-                        "❌ Original CreateProcessInternalW function not available - hook not properly installed"
-                    );
-                    return winapi::shared::minwindef::FALSE;
-                }
-            };
 
             let result = unsafe {
                 original(

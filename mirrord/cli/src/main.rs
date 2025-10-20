@@ -313,13 +313,13 @@ mod vpn;
 mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
+#[cfg(target_os = "windows")]
+use mirrord_layer_lib::process::windows::execution::LayerManagedProcess;
 use verify_config::verify_config;
+
 use crate::{
     newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
 };
-
-#[cfg(target_os = "windows")]
-use mirrord_layer_lib::process::windows::execution::ProcessExecutor;
 
 async fn exec_process<P>(
     mut config: LayerConfig,
@@ -517,24 +517,24 @@ where
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         e
     })?;
+    let binary_path_str = binary_path.to_string_lossy().to_string();
 
     // Create CLI executor and configure it
-    let windows_args = if binary_args.len() > 1 {
+    let command_line = if binary_args.len() > 1 {
         &binary_args[1..] // Skip the program name (first element)
     } else {
         &[] // No arguments if only program name present
-    };
-    
-    let executor = ProcessExecutor::new_cli(&binary_path).map_err(|e| {
-        error!("Failed to create ProcessExecutor: {:?}", e);
-        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
-    })?
-    .args(windows_args)
-    .envs(&env_vars);
+    }
+    .join(" ");
 
     // spawn the process (including mirrord layer injection and wait for initialization)
-    let process_result = executor.spawn().map_err(|e| {
+    let process_result = LayerManagedProcess::execute_from_cli(
+        Some(binary_path_str),
+        command_line,
+        None, // current_directory
+        env_vars,
+    )
+    .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
