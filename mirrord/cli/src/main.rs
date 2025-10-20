@@ -534,8 +534,6 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
-        // original_fn (Use CreateProcessW)
-        None,
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
     .map_err(|e| {

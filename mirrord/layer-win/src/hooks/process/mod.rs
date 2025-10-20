@@ -15,7 +15,6 @@ use winapi::{
     shared::{
         minwindef::{BOOL, DWORD, LPVOID, TRUE},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
-        winerror::ERROR_SUCCESS,
     },
     um::{
         minwinbase::LPSECURITY_ATTRIBUTES,
@@ -26,7 +25,7 @@ use winapi::{
     },
 };
 
-use crate::{apply_hook, process::parse_environment_block};
+use crate::{apply_hook, process::parse_environment_block, hooks::socket::utils::ERROR_SUCCESS_I32};
 
 /// Static storage for the original CreateProcessInternalW function pointer.
 static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
@@ -111,7 +110,7 @@ unsafe extern "system" fn create_process_internal_w_hook(
             )
         };
 
-        if success != ERROR_SUCCESS {
+        if success != ERROR_SUCCESS_I32 {
             Ok(process_info)
         } else {
             Err(LayerError::WindowsProcessCreation(
