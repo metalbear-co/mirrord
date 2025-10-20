@@ -56,12 +56,12 @@ use crate::{
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum OutgoingFilterConfig {
-    /// Traffic that matches what's specified here will go through the remote pod, everything else
-    /// will go through local.
+    /// When filters are specified under `remote`, matching traffic will go through the remote pod,
+    /// everything else will go through local.
     Remote(VecOrSingle<String>),
 
-    /// Traffic that matches what's specified here will go through the local app, everything else
-    /// will go through the remote pod.
+    /// When filters are specified under `local`, matching traffic will go through the local app,
+    /// everything else will go through the remote pod.
     Local(VecOrSingle<String>),
 }
 

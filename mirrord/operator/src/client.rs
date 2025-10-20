@@ -279,36 +279,51 @@ impl OperatorApi<NoClientCert> {
         })
     }
 
-    /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
-    /// In case of failure, state of this API instance does not change.
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
-    pub async fn prepare_client_cert<P, R>(
+    pub async fn with_ci_api_key<P, R>(
         self,
         reporter: &mut R,
         progress: &P,
         layer_config: &LayerConfig,
+        ci_api_key: &CiApiKey,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
         P: Progress,
     {
+        let certificate = match ci_api_key {
+            CiApiKey::V1(credentials) => credentials.as_ref(),
+        };
+
+        reporter.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+            license_hash: self
+                .operator
+                .spec
+                .license
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        });
+
+        self.prepare_with_certificate(progress, layer_config, certificate)
+            .await
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(progress))]
+    async fn prepare_with_certificate<P>(
+        self,
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+    ) -> OperatorApi<MaybeClientCert>
+    where
+        P: Progress,
+    {
         let previous_client = self.client.clone();
 
         let result = try {
-            let certificate = self.get_client_certificate().await?;
-
-            reporter.set_operator_properties(AnalyticsOperatorProperties {
-                client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
-                license_hash: self
-                    .operator
-                    .spec
-                    .license
-                    .fingerprint
-                    .as_deref()
-                    .map(AnalyticsHash::from_base64),
-            });
-
-            let header = Self::make_client_cert_header(&certificate)?;
+            let header = Self::make_client_cert_header(certificate)?;
 
             let mut config = self.client_cert.base_config;
             config
@@ -332,7 +347,7 @@ impl OperatorApi<NoClientCert> {
             Ok((new_client, cert)) => OperatorApi {
                 client: new_client,
                 client_cert: MaybeClientCert {
-                    cert_result: Ok(cert),
+                    cert_result: Ok(cert.clone()),
                 },
                 operator: self.operator,
             },
@@ -343,6 +358,52 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: self.operator,
+            },
+        }
+    }
+
+    /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
+    /// In case of failure, state of this API instance does not change.
+    #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
+    pub async fn with_client_certificate<P, R>(
+        self,
+        reporter: &mut R,
+        progress: &P,
+        layer_config: &LayerConfig,
+    ) -> OperatorApi<MaybeClientCert>
+    where
+        R: Reporter,
+        P: Progress,
+    {
+        let previous_client = self.client.clone();
+        let operator_crd = self.operator.clone();
+
+        let result = try {
+            let certificate = self.get_client_certificate().await?;
+
+            reporter.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+                license_hash: self
+                    .operator
+                    .spec
+                    .license
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
+
+            self.prepare_with_certificate(progress, layer_config, &certificate)
+                .await
+        };
+
+        match result {
+            Ok(api) => api,
+            Err(error) => OperatorApi {
+                client: previous_client,
+                client_cert: MaybeClientCert {
+                    cert_result: Err(error),
+                },
+                operator: operator_crd,
             },
         }
     }

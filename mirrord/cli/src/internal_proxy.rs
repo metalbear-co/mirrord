@@ -58,7 +58,7 @@ pub(crate) async fn proxy(
     listen_port: u16,
     watch: drain::Watch,
     user_data: &UserData,
-) -> CliResult<(), InternalProxyError> {
+) -> Result<(), InternalProxyError> {
     tracing::info!(
         ?config,
         listen_port,
