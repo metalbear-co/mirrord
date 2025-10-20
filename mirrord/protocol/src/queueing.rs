@@ -32,8 +32,8 @@ pub enum QueueId<T> {
 impl<T> Clone for QueueId<T> {
     fn clone(&self) -> Self {
         match self {
-            Self::Normal(arg0) => Self::Normal(arg0.clone()),
-            Self::Tcp(arg0) => Self::Tcp(arg0.clone()),
+            Self::Normal(disc) => Self::Normal(*disc),
+            Self::Tcp(id) => Self::Tcp(*id),
         }
     }
 }

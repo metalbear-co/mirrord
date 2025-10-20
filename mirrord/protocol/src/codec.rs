@@ -275,11 +275,7 @@ pub struct ProtocolCodec<I, O> {
 impl<I, O> Copy for ProtocolCodec<I, O> {}
 impl<I, O> Clone for ProtocolCodec<I, O> {
     fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            _phantom_incoming_message: self._phantom_incoming_message.clone(),
-            _phantom_outgoing_message: self._phantom_outgoing_message.clone(),
-        }
+        *self
     }
 }
 

@@ -275,6 +275,8 @@ struct OutQueue {
     free: Arc<Notify>,
 }
 
+type FilterFn<I, O> = dyn Fn(O) -> Either<O, I> + Send + Sync;
+
 struct OutQueues<Type: ProtocolEndpoint> {
     queues: Mutex<HashMap<QueueId<Type::OutMsg>, OutQueue>>,
     nonempty: Arc<Notify>,
@@ -287,8 +289,7 @@ struct OutQueues<Type: ProtocolEndpoint> {
     /// (return value).0 is actually enqueued for sending and (return
     /// value).1 is injected into the incoming stream. Used by the
     /// operator client.
-    out_filter:
-        Option<Box<dyn Fn(Type::OutMsg) -> Either<Type::OutMsg, Type::InMsg> + Send + Sync>>,
+    out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
 }
 
 impl<Type: ProtocolEndpoint> OutQueues<Type> {
@@ -337,7 +338,7 @@ impl<Type: ProtocolEndpoint> OutQueues<Type> {
             queue.free.notify_waiters();
         }
 
-        if queue.messages.len() == 0 {
+        if queue.messages.is_empty() {
             lock.remove(&key);
         }
 
