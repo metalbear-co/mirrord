@@ -10,28 +10,32 @@
 mod tests;
 
 mod hooks;
+// mod logging;
 mod macros;
 pub mod process;
+mod subprocess;
 
-use std::{io::Write, net::SocketAddr, thread};
+use std::{io::Write, thread};
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::MIRRORD_LAYER_INTPROXY_ADDR;
 pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
     process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
-    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
+    proxy_connection::PROXY_CONNECTION,
     setup::init_setup,
 };
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
     um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
 };
 
-use crate::hooks::initialize_hooks;
+use crate::{
+    hooks::initialize_hooks,
+    // logging::init_tracing,
+    subprocess::{detect_process_context, create_proxy_connection, get_setup_address},
+};
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
 fn initialize_detour_guard() -> anyhow::Result<()> {
@@ -53,69 +57,29 @@ fn release_detour_guard() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
-/// mirrord-console or to stderr.
-fn init_tracing() {
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-    } else {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .with_thread_ids(true)
-                    .with_writer(std::io::stderr)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .pretty(),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-    }
-}
-
 fn initialize_windows_proxy_connection() -> LayerResult<()> {
-    init_tracing();
+    // init_tracing();
 
-    let current_pid = std::process::id();
-
-    // Create Windows-specific process info
-    let process_info = mirrord_intproxy_protocol::ProcessInfo {
-        pid: current_pid as _,
-        // We don't need parent PID for parent process
-        parent_pid: 0,
-        name: std::env::current_exe()
-            .ok()
-            .and_then(|path| path.file_name()?.to_str().map(String::from))
-            .unwrap_or_else(|| "unknown".to_string()),
-        cmdline: std::env::args().collect(),
-        loaded: true,
-    };
-
-    // Use the same environment variable as Unix layer
-    let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-        .map_err(LayerError::MissingEnvIntProxyAddr)?
-        .parse::<SocketAddr>()
-        .map_err(LayerError::MalformedIntProxyAddr)?;
-
-    // Set up session request - no parent layer for unified approach
-    let session = mirrord_intproxy_protocol::NewSessionRequest {
-        parent_layer: None,
-        process_info,
-    };
-
-    // Use a default timeout of 30 seconds
-    let timeout = std::time::Duration::from_secs(30);
-    let new_connection = ProxyConnection::new(address, session, timeout)?;
-    PROXY_CONNECTION.set(new_connection).map_err(|_| {
+    let process_context = detect_process_context()?;
+    let connection = create_proxy_connection(&process_context)?;
+    
+    PROXY_CONNECTION.set(connection).map_err(|_| {
         LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
     })?;
 
+    setup_layer_config(&process_context)?;
+    Ok(())
+}
+
+fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
     // Read and initialize configuration using the standard method
     let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
 
+    // Get the proxy address for layer setup - either from inheritance or environment
+    let setup_address = get_setup_address(context)?;
+
     // Initialize layer setup with the configuration
-    init_setup(config, address)?;
+    init_setup(config, setup_address)?;
 
     Ok(())
 }
