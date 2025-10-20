@@ -21,9 +21,10 @@ use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
     outgoing::{
-        LayerClose, LayerConnect, LayerWrite, SocketAddress, tcp::LayerTcpOutgoing,
+        LayerClose, LayerConnect, LayerConnectV2, LayerWrite, SocketAddress, tcp::LayerTcpOutgoing,
         udp::LayerUdpOutgoing,
     },
+    uid::Uid,
 };
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
@@ -45,7 +46,7 @@ pub trait NetProtocolExt: Sized {
 
     /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage;
+    fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage;
 
     /// Opens a new socket for intercepting a connection to the given remote address.
     async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket>;
@@ -76,16 +77,30 @@ impl NetProtocolExt for NetProtocol {
         }
     }
 
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
-        match self {
-            Self::Datagrams => {
+    fn wrap_agent_connect(self, remote_address: SocketAddress, uid: Option<Uid>) -> ClientMessage {
+        match (self, uid) {
+            (Self::Datagrams, None) => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
                     remote_address,
                 }))
             }
-            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-                remote_address,
-            })),
+            (Self::Datagrams, Some(uid)) => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
+                    uid,
+                    remote_address,
+                }))
+            }
+            (Self::Stream, None) => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                    remote_address,
+                }))
+            }
+            (Self::Stream, Some(uid)) => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                    uid,
+                    remote_address,
+                }))
+            }
         }
     }
 

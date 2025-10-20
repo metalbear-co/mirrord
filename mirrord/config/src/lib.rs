@@ -16,16 +16,12 @@ pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
+pub mod logfile_path;
 pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{
-    collections::HashMap,
-    ops::Not,
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::{collections::HashMap, ops::Not, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
@@ -33,7 +29,6 @@ use experimental::ExperimentalConfig;
 use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
-use rand::distr::{Alphanumeric, SampleString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use target::Target;
@@ -781,21 +776,6 @@ impl LayerFileConfig {
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
-}
-
-/// Returns a default randomized path for proxy logs.
-///
-/// `prefix` can be passed to distinguish between intproxy and extproxy logs.
-fn default_proxy_logfile_path(prefix: &str) -> PathBuf {
-    let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
-    let timestamp = SystemTime::UNIX_EPOCH
-        .elapsed()
-        .expect("system time should not be earlier than UNIX EPOCH")
-        .as_secs();
-
-    let mut path = std::env::temp_dir();
-    path.push(format!("{prefix}-{timestamp}-{random_name}.log"));
-    path
 }
 
 #[cfg(test)]

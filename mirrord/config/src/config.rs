@@ -4,7 +4,7 @@ pub mod from_env;
 pub mod source;
 pub mod unstable;
 
-use std::{error::Error, fmt, io};
+use std::{error::Error, fmt, io, path::PathBuf};
 
 pub use context::ConfigContext;
 use thiserror::Error;
@@ -81,6 +81,9 @@ pub enum ConfigError {
 
     #[error("Encoding resolved config failed: {0}")]
     EncodeError(String),
+
+    #[error("Failed to access file {}: {}", path.display(), error)]
+    FileAccessFailed { path: PathBuf, error: io::Error },
 }
 
 /// Errors that can occur when parsing configuration from a file.

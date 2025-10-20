@@ -10,7 +10,7 @@ use std::{
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+        DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
@@ -45,22 +45,10 @@ async fn outgoing_udp(dylib_path: &Path) {
         .collect::<Vec<_>>();
 
     for peer in peers {
-        let msg = intproxy.recv().await;
-        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-            remote_address: SocketAddress::Ip(addr),
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+        let (uid, addr) = intproxy.recv_udp_connect().await;
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 0,
-                    remote_address: addr.into(),
-                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                },
-            ))))
+            .send_udp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
@@ -112,22 +100,10 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config
         .collect::<Vec<_>>();
 
     for peer in peers {
-        let msg = intproxy.recv().await;
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-            remote_address: SocketAddress::Ip(addr),
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 0,
-                    remote_address: addr.into(),
-                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                },
-            ))))
+            .send_tcp_connect_ok(uid, 0, addr, RUST_OUTGOING_LOCAL.parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
@@ -203,23 +179,10 @@ async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
 
     // Test apps runs logic twice for 2 bind addresses.
     for _ in 0..2 {
-        let msg = intproxy.recv().await;
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-            remote_address: SocketAddress::Ip(addr),
-        })) = msg
-        else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+        let (uid, addr) = intproxy.recv_tcp_connect().await;
         assert_eq!(addr, expected_peer_address);
-
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: 0,
-                    remote_address: addr.into(),
-                    local_address: "1.2.3.4:6000".parse::<SocketAddr>().unwrap().into(),
-                },
-            ))))
+            .send_tcp_connect_ok(uid, 0, addr, "1.2.3.4:6000".parse().unwrap())
             .await;
 
         let msg = intproxy.recv().await;
@@ -292,12 +255,14 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
     let mut got_connect_requests = 0;
 
     while got_connect_requests < 3 {
-        let addr = match intproxy.recv().await {
-            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+        let (addr, uid) = match intproxy.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
                 remote_address: SocketAddress::Ip(addr),
-            })) => addr,
+                uid,
+            })) => (addr, uid),
             ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(..)) => continue,
             ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(..)) => continue,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(..)) => continue,
             other => panic!("Received an unexpected message from the test app: {other:?}"),
         };
 
@@ -309,16 +274,12 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
         got_connect_requests += 1;
 
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
-                    connection_id: got_connect_requests,
-                    remote_address: SocketAddress::Ip(addr),
-                    local_address: SocketAddress::Ip(SocketAddr::new(
-                        Ipv4Addr::LOCALHOST.into(),
-                        0,
-                    )),
-                },
-            ))))
+            .send_tcp_connect_ok(
+                uid,
+                got_connect_requests,
+                addr,
+                "127.0.0.1:0".parse().unwrap(),
+            )
             .await;
     }
 

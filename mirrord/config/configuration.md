@@ -757,7 +757,14 @@ Defaults to true.
 
 ### external_proxy.log_destination {#external_proxy-log_destination}
 
-Set the log file destination for the external proxy.
+Set the log destination for the external proxy.
+
+1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be
+   treated as a path to directory where the log file should be created.
+2. Otherwise, if the path exists, mirrord will check if it's a directory or not.
+3. Otherwise, it will be treated as a path to the log file.
+
+mirrord will auto create all parent directories.
 
 Defaults to a randomized path inside the temporary directory.
 
@@ -2036,7 +2043,14 @@ Defaults to true.
 
 ### internal_proxy.log_destination {#internal_proxy-log_destination}
 
-Set the log file destination for the internal proxy.
+Set the log destination for the internal proxy.
+
+1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be
+   treated as a path to directory where the log file should be created.
+2. Otherwise, if the path exists, mirrord will check if it's a directory or not.
+3. Otherwise, it will be treated as a path to the log file.
+
+mirrord will auto create all parent directories.
 
 Defaults to a randomized path inside the temporary directory.
 
