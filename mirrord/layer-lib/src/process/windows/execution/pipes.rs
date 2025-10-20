@@ -130,15 +130,16 @@ impl PipeForwarder {
         }
     }
 
-    /// Detach forwarding thread to continue running after drop
+    /// Detach forwarding thread to continue running independently
+    /// This allows the forwarding to continue even after this object is dropped
     pub fn detach_forwarding(&mut self) {
-        if let Some(_handle) = self.forwarding_thread.take() {
-            unsafe {
-                if self.write_handle != NULL {
-                    CloseHandle(self.write_handle);
-                    self.write_handle = NULL;
-                }
-            }
+        if let Some(handle) = self.forwarding_thread.take() {
+            // Don't join the thread, let it continue running independently
+            // The thread will naturally exit when the child process closes its end of the pipe
+            std::mem::forget(handle);
+            
+            // Don't close handles here - let the child process continue using them
+            // The handles will be cleaned up when the child process exits
         }
     }
 }

@@ -102,7 +102,7 @@ impl LayerInitEvent {
 
             tracing::debug!(
                 event_name = %name,
-                role = "parent",
+                role = ?EventRole::Parent,
                 "created layer initialization event"
             );
 

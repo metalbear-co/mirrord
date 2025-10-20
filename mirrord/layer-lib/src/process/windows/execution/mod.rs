@@ -3,6 +3,7 @@
 use std::{collections::HashMap, ffi::OsString, ops::Deref, ptr};
 
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
+use mirrord_config::LayerConfig;
 use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
@@ -30,6 +31,8 @@ use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     process::windows::execution::pipes::StdioRedirection,
+    proxy_connection::PROXY_CONNECTION,
+    setup::layer_setup,
 };
 
 pub mod debug;
@@ -43,6 +46,11 @@ pub use debug::{
 pub const MIRRORD_AGENT_ADDR_ENV: &str = "MIRRORD_AGENT_ADDR";
 pub const MIRRORD_LAYER_ID_ENV: &str = "MIRRORD_LAYER_ID";
 pub const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
+
+// Windows-specific child process inheritance environment variables
+pub const MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID: &str = "MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID";
+pub const MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID: &str = "MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID";
+pub const MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR: &str = "MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR";
 
 const LAYER_INIT_TIMEOUT_MS: u32 = 30_000;
 
@@ -110,6 +118,48 @@ impl LayerManagedProcess {
         }
         if let Ok(layer_file) = std::env::var(MIRRORD_LAYER_FILE_ENV) {
             env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), layer_file);
+        }
+        
+        // Add resolved config for child process inheritance
+        // First try to get from environment variable, then fallback to encoding current config
+        if let Ok(resolved_config) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
+            env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), resolved_config);
+        } else {
+            // Fallback: try to encode current config if layer setup is available
+            // Use a safe approach that doesn't panic if setup isn't initialized
+            match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
+                Ok(Ok(encoded_config)) => {
+                    env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
+                    tracing::debug!("Fallback: encoded current config for child process inheritance");
+                }
+                Ok(Err(encode_error)) => {
+                    tracing::warn!("Could not encode current config for child process: {}", encode_error);
+                }
+                Err(_) => {
+                    tracing::error!("Layer setup not available yet, cannot provide fallback config to child process");
+                }
+            }
+        }
+
+        // Add Windows-specific child process inheritance variables if proxy connection exists
+        if let Some(proxy_conn) = PROXY_CONNECTION.get() {
+            // Pass current process ID as parent PID for child
+            env_vars.insert(
+                MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_string(),
+                std::process::id().to_string(),
+            );
+
+            // Pass current layer ID for child inheritance
+            env_vars.insert(
+                MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_string(),
+                proxy_conn.layer_id().0.to_string(),
+            );
+
+            // Pass proxy address for child connection
+            env_vars.insert(
+                MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_string(),
+                proxy_conn.proxy_addr().to_string(),
+            );
         }
     }
 
@@ -215,14 +265,14 @@ impl LayerManagedProcess {
 
         let parent_event = LayerInitEvent::for_parent()?;
 
-        // Determine the final environment: either caller's custom environment or parent environment
-        // + mirrord vars Always create environment block since we need mirrord variables in
-        // both cases
+        // Determine the final environment: either caller's custom environment or parent environment + mirrord vars
+        // Always create environment block since we need mirrord variables in both cases
         let environment = {
-            let mut env = if !caller_env_vars.is_empty() {
+            let mut env = if caller_env_vars.is_empty() {
                 // Caller wants to inherit parent environment - get current environment
                 std::env::vars().collect()
             } else {
+                // Caller provided custom environment variables
                 caller_env_vars
             };
             Self::add_mirrord_env_vars(&mut env, &parent_event);
@@ -285,15 +335,21 @@ impl LayerManagedProcess {
             }
         }
 
+        // Setup stdio forwarding BEFORE resuming the thread to avoid race conditions
+        self.setup_stdio_forwarding()?;
+
+        // Resume the main thread - ResumeThread returns the previous suspend count
+        // A return value of u32::MAX (0xFFFFFFFF) indicates an error
         unsafe {
-            if ResumeThread(self.process_info.hThread) == u32::MAX {
+            let previous_suspend_count = ResumeThread(self.process_info.hThread);
+            if previous_suspend_count == u32::MAX {
                 let error = WindowsError::last_error();
                 return Err(LayerError::WindowsProcessCreation(error));
             }
+            tracing::debug!("✅ Thread resumed, previous suspend count: {}", previous_suspend_count);
         }
 
-        self.setup_stdio_forwarding()?;
-
+        // Detach stdio forwarding to let it run independently
         if let Some(ref mut redirection) = self.stdio_redirection {
             redirection.detach_forwarding();
         }
