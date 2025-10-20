@@ -87,7 +87,7 @@ impl From<mpsc::error::SendError<ClientMessage>> for DumpSessionError {
     }
 }
 
-/// Implements `mirrord dump` logic on an established [`AgentConnection`].
+/// Implements `mirrord dump` logic on an established [`Connection`].
 struct DumpSession {
     connection: Connection<Client>,
     ports: Vec<u16>,
