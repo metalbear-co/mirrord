@@ -14,10 +14,16 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
-    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse}, file::*, outgoing::{
+    ResponseError,
+    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
+    file::*,
+    outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    }, queueing::{QueueId, Queueable}, tcp::{ChunkedRequest, ChunkedResponse, DaemonTcp, LayerTcp, LayerTcpSteal}, vpn::{ClientVpn, ServerVpn}, ResponseError
+    },
+    queueing::{QueueId, Queueable},
+    tcp::{ChunkedRequest, ChunkedResponse, DaemonTcp, LayerTcp, LayerTcpSteal},
+    vpn::{ClientVpn, ServerVpn},
 };
 
 /// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].

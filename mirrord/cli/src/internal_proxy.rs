@@ -157,7 +157,10 @@ pub(crate) async fn connect_and_ping(
         match agent_conn.connection.recv().await {
             Some(DaemonMessage::Pong) => break Ok(agent_conn),
             Some(DaemonMessage::OperatorPing(id)) => {
-                agent_conn.connection.send(ClientMessage::OperatorPong(id)).await;
+                agent_conn
+                    .connection
+                    .send(ClientMessage::OperatorPong(id))
+                    .await;
             }
             Some(DaemonMessage::LogMessage(LogMessage {
                 level: LogLevel::Error,

@@ -298,7 +298,7 @@ impl RestartableBackgroundTask for AgentConnection {
                             config,
                             connect_info.clone(),
                             &mut NullReporter::default(),
-							Some(self.connection.tx_handle())
+                            Some(self.connection.tx_handle()),
                         ))
                         .await
                         .transpose()

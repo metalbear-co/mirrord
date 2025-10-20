@@ -788,7 +788,7 @@ async fn port_forward(
             AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
 
-	let connection_2 = agent_conn.connection;
+    let connection_2 = agent_conn.connection;
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(

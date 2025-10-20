@@ -1,5 +1,7 @@
 use std::{
-    fmt, hash::Hash, mem::{discriminant, Discriminant}
+    fmt,
+    hash::Hash,
+    mem::{Discriminant, discriminant},
 };
 
 use crate::ConnectionId;

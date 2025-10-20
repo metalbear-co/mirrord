@@ -261,7 +261,6 @@ async fn handle_connection(
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,
 ) {
-
     let mut stream = actix_codec::Framed::new(stream, DaemonCodec::default());
 
     loop {

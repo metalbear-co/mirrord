@@ -88,8 +88,8 @@ pub enum OperatorApiError {
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 
-	#[error("protocol error: {0}")]
-	ProtocolError(#[from]ProtocolError)
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] ProtocolError),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
