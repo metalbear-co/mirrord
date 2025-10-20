@@ -19,6 +19,7 @@ COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
 COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
+COPY mirrord/protocol-io /app/mirrord/protocol-io
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
@@ -39,6 +40,7 @@ COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
 COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
+COPY mirrord/protocol-io /app/mirrord/protocol-io
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
