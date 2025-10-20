@@ -775,7 +775,7 @@ async fn port_forward(
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
-    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
+    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics, None)
         .await
         .map_err(|agent_con_error| match agent_con_error {
             AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),

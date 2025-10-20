@@ -9,7 +9,7 @@ use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError};
 use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
-use mirrord_protocol_io::{Client, Connection, ProtocolError};
+use mirrord_protocol_io::{Client, Connection, ProtocolError, TxHandle};
 use serde::{Deserialize, Serialize};
 use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;
@@ -131,15 +131,16 @@ pub struct AgentConnection {
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
-    #[tracing::instrument(level = Level::INFO, skip(config, analytics), ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip(config, analytics, old_queue), ret, err)]
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: AgentConnectInfo,
         analytics: &mut R,
+        old_queue: Option<TxHandle<Client>>,
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
 
-        let (connection, reconnect) = match connect_info {
+        let (mut connection, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
                 let connection =
                     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
@@ -180,6 +181,10 @@ impl AgentConnection {
                 (conn, ReconnectFlow::Break(kind))
             }
         };
+
+        if let Some(old_queue) = old_queue {
+            connection.replace_queue(old_queue);
+        }
 
         Ok(Self {
             connection,
@@ -293,6 +298,7 @@ impl RestartableBackgroundTask for AgentConnection {
                             config,
                             connect_info.clone(),
                             &mut NullReporter::default(),
+							Some(self.connection.tx_handle())
                         ))
                         .await
                         .transpose()

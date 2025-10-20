@@ -177,6 +177,13 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         (connection, inbound_tx, ConnectionOutput::<Type>(out_queues))
     }
 
+    /// Replaces the internal send queue of this connection with the
+    /// one provided. Used to preserve and carry over queued messages
+    /// between reconnections.
+    pub fn replace_queue(&mut self, tx_handle: TxHandle<Type>) {
+        self.tx_handle = tx_handle;
+    }
+
     #[inline]
     pub async fn recv(&mut self) -> Option<Type::InMsg> {
         self.rx.recv().await
