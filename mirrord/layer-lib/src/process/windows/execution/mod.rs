@@ -6,7 +6,7 @@ use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
-        minwindef::{LPVOID},
+        minwindef::{DWORD, LPVOID},
         ntdef::HANDLE,
     },
     um::{
@@ -14,11 +14,13 @@ use winapi::{
         minwinbase::LPSECURITY_ATTRIBUTES,
         processenv::GetStdHandle,
         processthreadsapi::{
-            CreateProcessW, LPPROCESS_INFORMATION, PROCESS_INFORMATION, ResumeThread,
-            TerminateProcess, STARTUPINFOW,
+            LPPROCESS_INFORMATION, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
+            TerminateProcess,
         },
+        synchapi::WaitForSingleObject,
         winbase::{
-            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, STD_ERROR_HANDLE,
+            STD_OUTPUT_HANDLE, WAIT_OBJECT_0,
         },
         winnt::PHANDLE,
     },
@@ -27,13 +29,11 @@ use winapi::{
 use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
-    process::windows::execution::pipes::{
-        StdioRedirection,
-    },
+    process::windows::execution::pipes::StdioRedirection,
 };
 
-pub mod pipes;
 pub mod debug;
+pub mod pipes;
 
 pub use debug::{
     format_debugger_config, get_current_process_name, is_debugger_wait_enabled,
@@ -69,21 +69,8 @@ pub struct LayerManagedProcess {
     terminate_on_drop: bool,
 }
 
-pub struct ProcessResult {
-    pub info: PROCESS_INFORMATION,
-    pub exit_code: Option<u32>,
-}
-
-impl Deref for ProcessResult {
-    type Target = PROCESS_INFORMATION;
-
-    fn deref(&self) -> &Self::Target {
-        &self.info
-    }
-}
-
 impl LayerManagedProcess {
-    /// Create stdio redirection for redirecting child process output to parent.
+    /// Create stdio redirection for child process output to parent
     fn create_stdio_redirection() -> LayerResult<Option<StdioRedirection>> {
         match StdioRedirection::create_for_child() {
             Ok(redirection) => Ok(Some(redirection)),
@@ -91,208 +78,193 @@ impl LayerManagedProcess {
         }
     }
 
-    /// Setup pipe forwarding to redirect child stdio to parent stdio.
+    /// Build Windows environment block from HashMap (UTF-16 format)
+    fn build_windows_env_block(environment: &HashMap<String, String>) -> Vec<u16> {
+        let mut windows_environment: Vec<u16> = Vec::new();
+        for (key, value) in environment {
+            let entry = format!("{}={}", key, value);
+            let entry_wide = string_to_u16_buffer(&entry);
+            windows_environment.extend(entry_wide);
+        }
+        // Unicode environment block is terminated by four zero bytes:
+        // two for the last string, two more to terminate the block
+        windows_environment.push(0); // Terminate the last string
+        windows_environment.push(0); // Terminate the block
+        windows_environment
+    }
+
+    /// Add mirrord-specific environment variables to caller's environment
+    fn add_mirrord_env_vars(env_vars: &mut HashMap<String, String>, parent_event: &LayerInitEvent) {
+        // Add mirrord layer initialization event
+        env_vars.insert(
+            MIRRORD_LAYER_INIT_EVENT_NAME.to_string(),
+            parent_event.name().to_string(),
+        );
+
+        // Add other mirrord environment variables if they exist in current process
+        if let Ok(agent_addr) = std::env::var(MIRRORD_AGENT_ADDR_ENV) {
+            env_vars.insert(MIRRORD_AGENT_ADDR_ENV.to_string(), agent_addr);
+        }
+        if let Ok(layer_id) = std::env::var(MIRRORD_LAYER_ID_ENV) {
+            env_vars.insert(MIRRORD_LAYER_ID_ENV.to_string(), layer_id);
+        }
+        if let Ok(layer_file) = std::env::var(MIRRORD_LAYER_FILE_ENV) {
+            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), layer_file);
+        }
+    }
+
+    /// Setup stdio forwarding from child to parent handles
     fn setup_stdio_forwarding(&mut self) -> LayerResult<()> {
         if let Some(ref mut redirection) = self.stdio_redirection {
             unsafe {
                 let parent_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
                 let parent_stderr = GetStdHandle(STD_ERROR_HANDLE);
-                
+
                 redirection.start_forwarding(parent_stdout, parent_stderr)?;
-                redirection.close_child_handles();
             }
         }
         Ok(())
     }
 
-    fn create_suspended(
-        application_name: &Option<String>,
-        command_line: &str,
-        current_directory: &Option<String>,
-        environment: &HashMap<String, String>,
-        original_fn: Option<&'static CreateProcessInternalWType>,
-        stdio_redirection: Option<StdioRedirection>,
+    /// Execute process with layer injection for CLI context, returning managed process
+    pub fn execute(
+        application_name: Option<String>,
+        command_line: String,
+        current_directory: Option<String>,
+        env_vars: HashMap<String, String>,
     ) -> LayerResult<Self> {
-        unsafe {
-            let creation_flags = CREATE_SUSPENDED;
-            
-            // Convert environment variables to Windows format for process creation
-            let mut actual_creation_flags = creation_flags;
-            let mut windows_environment: Vec<u16> = Vec::new();
-            let environment_ptr = if !environment.is_empty() {
-                actual_creation_flags |= CREATE_UNICODE_ENVIRONMENT;
+        // For CLI context, create default parameters and use execute_with_closure
+        let default_creation_flags = 0;
+        let mut default_startup_info = STARTUPINFOW {
+            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+            ..unsafe { std::mem::zeroed() }
+        };
 
-                for (key, value) in environment {
-                    let env_entry = format!("{}={}", key, value);
-                    let entry_wide = string_to_u16_buffer(&env_entry);
-                    windows_environment.extend(entry_wide);
-                }
-                windows_environment.push(0);
-                windows_environment.as_mut_ptr() as LPVOID
+        let create_process_fn = |creation_flags, environment, startup_info: &mut STARTUPINFOW| unsafe {
+            // Convert strings to wide character format for Windows API
+            let app_name_wide = if let Some(ref name) = application_name {
+                string_to_u16_buffer(name)
             } else {
-                ptr::null_mut()
+                vec![0]
             };
-
-            let (_app_name_wide, app_name_ptr) = if let Some(name) = application_name {
-                let wide = string_to_u16_buffer(name);
-                let ptr = wide.as_ptr();
-                (Some(wide), ptr)
+            let mut command_line_wide = string_to_u16_buffer(&command_line);
+            let current_dir_wide = if let Some(ref dir) = current_directory {
+                string_to_u16_buffer(dir)
             } else {
-                (None, std::ptr::null())
+                vec![0]
             };
-
-            let mut command_line_wide = string_to_u16_buffer(command_line);
-
-            let (_current_dir_wide, current_dir_ptr) = if let Some(dir) = current_directory {
-                let wide = string_to_u16_buffer(dir);
-                let ptr = wide.as_ptr();
-                (Some(wide), ptr)
-            } else {
-                (None, std::ptr::null())
-            };
-
-            let mut startup_info = STARTUPINFOW {
-                cb: std::mem::size_of::<STARTUPINFOW>() as u32,
-                ..std::mem::zeroed()
-            };
-
-            if let Some(ref redirection) = stdio_redirection {
-                redirection.setup_startup_info(&mut startup_info);
-            }
 
             let mut process_info: PROCESS_INFORMATION = std::mem::zeroed();
 
-            let success = if let Some(original) = original_fn {
-                // call original CreateProcessInternalW function
-                original(
-                    ptr::null_mut(),
-                    app_name_ptr,
-                    command_line_wide.as_mut_ptr(),
-                    ptr::null_mut(),
-                    ptr::null_mut(),
-                    false.into(),
-                    actual_creation_flags,
-                    environment_ptr,
-                    current_dir_ptr,
-                    &mut startup_info,
-                    &mut process_info,
-                    ptr::null_mut(),
-                ) != 0
+            let success = winapi::um::processthreadsapi::CreateProcessW(
+                if application_name.is_some() {
+                    app_name_wide.as_ptr()
+                } else {
+                    ptr::null()
+                },
+                command_line_wide.as_mut_ptr(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                false.into(),
+                creation_flags,
+                environment,
+                if current_directory.is_some() {
+                    current_dir_wide.as_ptr()
+                } else {
+                    ptr::null()
+                },
+                startup_info,
+                &mut process_info,
+            );
+
+            if success != 0 {
+                Ok(process_info)
             } else {
-                CreateProcessW(
-                    app_name_ptr,
-                    command_line_wide.as_mut_ptr(),
-                    ptr::null_mut(),
-                    ptr::null_mut(),
-                    false.into(),
-                    actual_creation_flags,
-                    environment_ptr,
-                    current_dir_ptr,
-                    &mut startup_info,
-                    &mut process_info,
-                ) != 0
-            };
-
-            if !success {
-                let error = WindowsError::last_error();
-                return Err(LayerError::WindowsProcessCreation(error));
+                Err(LayerError::WindowsProcessCreation(
+                    WindowsError::last_error(),
+                ))
             }
+        };
 
-            Ok(Self {
-                process_info,
-                stdio_redirection,
-                released: false,
-                terminate_on_drop: true,
-            })
-        }
+        Self::execute_with_closure(
+            env_vars,
+            default_creation_flags,
+            &mut default_startup_info,
+            create_process_fn,
+        )
     }
 
-    /// Implementation for execute methods that handles layer injection
-    fn execute_with_layer(
-        application_name: Option<String>,
-        command_line: String,
-        current_directory: Option<String>,
-        env_vars: HashMap<String, String>,
-        original_fn: Option<&'static CreateProcessInternalWType>,
-        enable_stdio_redirection: bool,
-    ) -> LayerResult<ProcessResult> {
-        // Prepare child environment with DLL path validation and mirrord variables
+    /// Execute process with layer injection using a closure for the original function call.
+    /// This method is optimized for hook contexts where all original parameters are available.
+    pub fn execute_with_closure<F>(
+        caller_env_vars: HashMap<String, String>,
+        caller_creation_flags: DWORD,
+        caller_startup_info: &mut STARTUPINFOW,
+        create_process_fn: F,
+    ) -> LayerResult<Self>
+    where
+        F: FnOnce(DWORD, LPVOID, &mut STARTUPINFOW) -> LayerResult<PROCESS_INFORMATION>,
+    {
         let dll_path = std::env::var("MIRRORD_LAYER_FILE").map_err(LayerError::VarError)?;
         if !std::path::Path::new(&dll_path).exists() {
-            return Err(LayerError::DllInjection(format!("DLL file not found: {}", dll_path)));
+            return Err(LayerError::DllInjection(format!(
+                "DLL file not found: {}",
+                dll_path
+            )));
         }
 
         let parent_event = LayerInitEvent::for_parent()?;
-        
-        let mut child_environment = std::env::vars().collect::<HashMap<String, String>>();
-        child_environment.extend(env_vars);
-        child_environment.insert(MIRRORD_LAYER_INIT_EVENT_NAME.to_string(), parent_event.name().to_string());
 
-        // Create stdio redirection if needed
-        let stdio_redirection = if enable_stdio_redirection {
-            Self::create_stdio_redirection()?
-        } else {
-            None
+        // Determine the final environment: either caller's custom environment or parent environment
+        // + mirrord vars Always create environment block since we need mirrord variables in
+        // both cases
+        let environment = {
+            let mut env = if !caller_env_vars.is_empty() {
+                // Caller wants to inherit parent environment - get current environment
+                std::env::vars().collect()
+            } else {
+                caller_env_vars
+            };
+            Self::add_mirrord_env_vars(&mut env, &parent_event);
+            env
+        };
+        let mut env_storage = Self::build_windows_env_block(&environment);
+        let environment_ptr = env_storage.as_mut_ptr() as LPVOID;
+        // Create stdio redirection and setup original startup info
+        let stdio_redirection = Self::create_stdio_redirection()?;
+        if let Some(ref redirection) = stdio_redirection {
+            redirection.setup_startup_info(caller_startup_info);
+        }
+
+        // Calculate final creation flags (original + environment + suspended)
+        let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
+
+        // Call the original function with processed parameters
+        let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
+
+        let mut managed_process = Self {
+            process_info,
+            stdio_redirection,
+            released: false,
+            terminate_on_drop: false,
         };
 
-        let process = Self::create_suspended(
-            &application_name,
-            &command_line,
-            &current_directory,
-            &child_environment,
-            original_fn,
-            stdio_redirection,
-        )?;
+        // Close child handles after process creation
+        if let Some(ref mut redirection) = managed_process.stdio_redirection {
+            redirection.close_child_handles();
+        }
 
-        let managed_process = process
-            .setup_with_layer(&dll_path, &parent_event)?;
-
-        let process_info = *managed_process;
-
-        Ok(ProcessResult {
-            info: process_info,
-            exit_code: None,
-        })
+        // The process is already created and suspended by the original call
+        // Now we just need to inject the DLL and resume
+        managed_process.inject_and_resume(&dll_path, &parent_event)
     }
 
-    /// Execute process with mirrord layer injection
-    pub fn execute_from_cli(
-        application_name: Option<String>,
-        command_line: String,
-        current_directory: Option<String>,
-        env_vars: HashMap<String, String>,
-    ) -> LayerResult<ProcessResult> {
-        Self::execute_with_layer(
-            application_name,
-            command_line,
-            current_directory,
-            env_vars,
-            None,
-            false,
-        )
-    }
-
-    /// Execute process from within a hook context using the original function pointer.
-    /// This is specifically designed for Windows API hooks that intercept process creation
-    /// and need to call the original CreateProcessInternalW function while enabling stdio redirection.
-    pub fn execute_from_hook(
-        application_name: Option<String>,
-        command_line: String,
-        current_directory: Option<String>,
-        env_vars: HashMap<String, String>,
-        original_fn: &'static CreateProcessInternalWType,
-    ) -> LayerResult<ProcessResult> {
-        Self::execute_with_layer(
-            application_name,
-            command_line,
-            current_directory,
-            env_vars,
-            Some(original_fn),
-            true,
-        )
-    }
-
-    fn inject_layer(self, dll_path: &str) -> LayerResult<Self> {
+    /// Inject DLL into existing suspended process and resume execution
+    fn inject_and_resume(
+        mut self,
+        dll_path: &str,
+        parent_event: &LayerInitEvent,
+    ) -> LayerResult<Self> {
         let injector_process = InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)
             .map_err(|_| LayerError::ProcessNotFound(self.process_info.dwProcessId))?;
 
@@ -303,20 +275,16 @@ impl LayerManagedProcess {
             .inject(payload_path)
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
 
-        Ok(self)
-    }
-
-    fn wait_for_initialization(self, parent_event: &LayerInitEvent) -> LayerResult<Self> {
         match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
-            true => Ok(self),
-            false => Err(LayerError::ProcessSynchronization(format!(
-                "Layer initialization timed out after {}ms for process {}",
-                LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
-            ))),
+            true => {}
+            false => {
+                return Err(LayerError::ProcessSynchronization(format!(
+                    "Layer initialization timed out after {}ms for process {}",
+                    LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
+                )));
+            }
         }
-    }
 
-    fn resume(self) -> LayerResult<Self> {
         unsafe {
             if ResumeThread(self.process_info.hThread) == u32::MAX {
                 let error = WindowsError::last_error();
@@ -324,24 +292,45 @@ impl LayerManagedProcess {
             }
         }
 
-        Ok(self)
-    }
-
-    fn setup_with_layer(
-        self,
-        dll_path: &str,
-        parent_event: &LayerInitEvent,
-    ) -> LayerResult<Self> {
-        self.inject_layer(dll_path)?
-            .wait_for_initialization(parent_event)?
-            .resume()?
-            .start_stdio_forwarding()
-    }
-
-    /// Start stdio forwarding if pipes are configured.
-    fn start_stdio_forwarding(mut self) -> LayerResult<Self> {
         self.setup_stdio_forwarding()?;
+
+        if let Some(ref mut redirection) = self.stdio_redirection {
+            redirection.detach_forwarding();
+        }
+
         Ok(self)
+    }
+
+    /// Release process from management (won't be terminated on drop)
+    pub fn release(mut self) -> PROCESS_INFORMATION {
+        self.released = true;
+        self.process_info
+    }
+
+    /// Wait for process to exit and return exit code
+    pub fn wait_until_exit(self) -> LayerResult<u32> {
+        let exit_code = unsafe {
+            let wait_result = WaitForSingleObject(self.process_info.hProcess, INFINITE);
+            if wait_result != WAIT_OBJECT_0 {
+                return Err(LayerError::WindowsProcessCreation(
+                    WindowsError::last_error(),
+                ));
+            }
+
+            let mut exit_code = 0u32;
+            if winapi::um::processthreadsapi::GetExitCodeProcess(
+                self.process_info.hProcess,
+                &mut exit_code,
+            ) == 0
+            {
+                return Err(LayerError::WindowsProcessCreation(
+                    WindowsError::last_error(),
+                ));
+            }
+            exit_code
+        };
+
+        Ok(exit_code)
     }
 }
 
@@ -355,9 +344,8 @@ impl Deref for LayerManagedProcess {
 
 impl Drop for LayerManagedProcess {
     fn drop(&mut self) {
-        // Stop stdio forwarding first
         if let Some(ref mut redirection) = self.stdio_redirection {
-            let _ = redirection.stop_forwarding(); // Best effort
+            redirection.stop_forwarding();
         }
 
         if !self.released {

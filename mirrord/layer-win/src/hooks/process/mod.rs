@@ -7,20 +7,26 @@
 use std::sync::OnceLock;
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::process::windows::execution::CreateProcessInternalWType;
+use mirrord_layer_lib::{
+    error::{LayerError, windows::WindowsError},
+    process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
+};
 use winapi::{
     shared::{
         minwindef::{BOOL, DWORD, LPVOID, TRUE},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
+        winerror::ERROR_SUCCESS,
     },
     um::{
         minwinbase::LPSECURITY_ATTRIBUTES,
-        processthreadsapi::{LPPROCESS_INFORMATION, LPSTARTUPINFOW},
+        processthreadsapi::{
+            LPPROCESS_INFORMATION, LPSTARTUPINFOW, PROCESS_INFORMATION, STARTUPINFOW,
+        },
         winnt::PHANDLE,
     },
 };
 
-use crate::apply_hook;
+use crate::{apply_hook, process::parse_environment_block};
 
 /// Static storage for the original CreateProcessInternalW function pointer.
 static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
@@ -68,34 +74,61 @@ unsafe extern "system" fn create_process_internal_w_hook(
         }
     };
 
+    // Parse environment from Windows API call
+    let env_vars = unsafe { parse_environment_block(environment as *mut std::ffi::c_void) };
+
     tracing::debug!(
-        "Windows CreateProcess parameters: app_name={:?}, cmd_line={:?}, current_dir={:?}, parent_pid={}",
+        "Windows CreateProcess parameters: app_name={:?}, cmd_line={:?}, current_dir={:?}, parent_pid={}, env_count={}",
         app_name,
         cmd_line,
         current_dir,
-        std::process::id()
+        std::process::id(),
+        env_vars.len()
     );
 
+    // Execute process using closure to preserve all original parameters
+    // This ensures perfect fidelity to the original CreateProcessInternalW call
+    let create_process_fn = |adjusted_creation_flags,
+                             adjusted_environment,
+                             adjusted_startup_info: &mut STARTUPINFOW| {
+        // Create the process suspended with all original and processed parameters
+        let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
 
-    // // Attempt unified mirrord process creation with layer injection
-    match create_process_with_layer_injection(
-    //     }
-        
-    // };
+        let success = unsafe {
+            original(
+                user_token,
+                application_name,
+                command_line,
+                process_attributes,
+                thread_attributes,
+                inherit_handles,
+                adjusted_creation_flags,
+                adjusted_environment,
+                current_directory,
+                adjusted_startup_info,
+                &mut process_info,
+                restricted_user_token,
+            )
+        };
 
-    // Execute process with stdio redirection for hooks using simplified API
-    // Environment is automatically inherited from current process
-    // DLL path is automatically read from MIRRORD_LAYER_FILE environment variable
-    match mirrord_layer_lib::process::windows::execution::LayerManagedProcess::execute_with_stdio_redirection(
-        app_name,
-        cmd_line,
-            current_dir,
-            std::collections::HashMap::new(), // Environment is inherited automatically
-            original,
-        )
-        .map(|result| result.info) {
+        if success != ERROR_SUCCESS {
+            Ok(process_info)
+        } else {
+            Err(LayerError::WindowsProcessCreation(
+                WindowsError::last_error(),
+            ))
+        }
+    };
+
+    match LayerManagedProcess::execute_with_closure(
+        env_vars,
+        creation_flags,
+        unsafe { &mut *startup_info },
+        create_process_fn,
+    )
+    .map(|managed_process| managed_process.release())
+    {
         Ok(proc_info) => {
-            // DebugBreak();
             // Success: populate output parameter and return TRUE
             unsafe {
                 *process_information = proc_info;

@@ -8,43 +8,25 @@ use std::{ptr, thread};
 use winapi::{
     shared::ntdef::{HANDLE, NULL},
     um::{
-        handleapi::{SetHandleInformation, CloseHandle}, 
-        namedpipeapi::CreatePipe, 
-        winbase::HANDLE_FLAG_INHERIT,
         fileapi::{ReadFile, WriteFile},
+        handleapi::{CloseHandle, SetHandleInformation},
+        namedpipeapi::CreatePipe,
         processthreadsapi::STARTUPINFOW,
-        winbase::STARTF_USESTDHANDLES,
+        winbase::{HANDLE_FLAG_INHERIT, STARTF_USESTDHANDLES},
     },
 };
 
 use crate::error::{LayerError, LayerResult};
-
-/// Configuration for pipe forwarding operations
-#[derive(Debug, Clone)]
-pub struct PipeConfig {
-    pub buffer_size: usize,
-    pub timeout_ms: u32,
-}
-
-impl Default for PipeConfig {
-    fn default() -> Self {
-        Self {
-            buffer_size: 8192,
-            timeout_ms: 1000,
-        }
-    }
-}
 
 /// A managed pipe that handles creation, inheritance, forwarding and cleanup
 pub struct PipeForwarder {
     read_handle: HANDLE,
     write_handle: HANDLE,
     forwarding_thread: Option<thread::JoinHandle<()>>,
-    name: String,
 }
 
 impl PipeForwarder {
-    /// Create new anonymous pipe pair with proper inheritance setup
+    /// Create anonymous pipe pair with proper inheritance setup
     pub fn new_anonymous(name: &str) -> LayerResult<Self> {
         unsafe {
             let mut read_handle: HANDLE = NULL;
@@ -72,27 +54,26 @@ impl PipeForwarder {
                 read_handle,
                 write_handle,
                 forwarding_thread: None,
-                name: name.to_string(),
             })
         }
     }
 
-    /// Get the write handle for child process
+    /// Get write handle for child process
     pub fn write_handle(&self) -> HANDLE {
         self.write_handle
     }
 
-    /// Get the read handle for parent process  
+    /// Get read handle for parent process  
     pub fn read_handle(&self) -> HANDLE {
         self.read_handle
     }
 
-    /// Start forwarding from read handle to destination in background thread
-    pub fn start_forwarding(&mut self, destination: HANDLE, config: PipeConfig) -> LayerResult<()> {
+    /// Start background forwarding from read handle to destination
+    pub fn start_forwarding(&mut self, destination: HANDLE) -> LayerResult<()> {
         if self.forwarding_thread.is_some() {
             return Err(LayerError::IO(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
-                format!("Forwarding already started for {}", self.name),
+                "Forwarding already started".to_string(),
             )));
         }
 
@@ -100,7 +81,7 @@ impl PipeForwarder {
         let dst_handle = destination as usize;
 
         let handle = thread::spawn(move || {
-            let mut buffer = vec![0u8; config.buffer_size];
+            let mut buffer = vec![0u8; 8192];
             let mut bytes_read = 0u32;
             let mut bytes_written = 0u32;
 
@@ -138,32 +119,34 @@ impl PipeForwarder {
     }
 
     /// Stop forwarding and wait for thread completion
-    pub fn stop_forwarding(&mut self) -> LayerResult<()> {
+    pub fn stop_forwarding(&mut self) {
         if let Some(handle) = self.forwarding_thread.take() {
-            // Close read handle to signal thread to stop
             unsafe {
                 CloseHandle(self.read_handle);
                 self.read_handle = NULL;
             }
-            
-            // Wait for thread to finish (with timeout)
-            let _ = handle.join(); // Best effort - ignore errors
+
+            let _ = handle.join();
         }
-        Ok(())
     }
 
-    /// Check if forwarding is active
-    pub fn is_forwarding(&self) -> bool {
-        self.forwarding_thread.is_some()
+    /// Detach forwarding thread to continue running after drop
+    pub fn detach_forwarding(&mut self) {
+        if let Some(_handle) = self.forwarding_thread.take() {
+            unsafe {
+                if self.write_handle != NULL {
+                    CloseHandle(self.write_handle);
+                    self.write_handle = NULL;
+                }
+            }
+        }
     }
 }
 
 impl Drop for PipeForwarder {
     fn drop(&mut self) {
-        // Stop forwarding thread gracefully
-        let _ = self.stop_forwarding();
-        
-        // Close remaining handles
+        self.stop_forwarding();
+
         unsafe {
             if self.read_handle != NULL {
                 CloseHandle(self.read_handle);
@@ -179,23 +162,36 @@ impl Drop for PipeForwarder {
 pub struct StdioRedirection {
     pub stdout: Option<PipeForwarder>,
     pub stderr: Option<PipeForwarder>,
-    pub stdin: Option<PipeForwarder>,  // Future expansion
+    pub stdin: Option<PipeForwarder>, // Future expansion
 }
 
 impl StdioRedirection {
-    /// Create stdio redirection with stdout/stderr forwarders
+    /// Create stdio redirection with stdout/stderr pipes
     pub fn create_for_child() -> LayerResult<Self> {
         Ok(Self {
             stdout: Some(PipeForwarder::new_anonymous("stdout")?),
             stderr: Some(PipeForwarder::new_anonymous("stderr")?),
-            stdin: None, // Not needed currently
+            stdin: None, // Future expansion
         })
     }
-    
+
+    /// Apply operation to both stdout and stderr pipes
+    fn apply_to_pipes_void<F>(&mut self, mut operation: F)
+    where
+        F: FnMut(&mut PipeForwarder),
+    {
+        if let Some(ref mut stdout) = self.stdout {
+            operation(stdout);
+        }
+        if let Some(ref mut stderr) = self.stderr {
+            operation(stderr);
+        }
+    }
+
     /// Setup startup info with pipe handles for child process
     pub fn setup_startup_info(&self, startup_info: &mut STARTUPINFOW) {
         startup_info.dwFlags |= STARTF_USESTDHANDLES;
-        
+
         if let Some(ref stdout) = self.stdout {
             startup_info.hStdOutput = stdout.write_handle();
         }
@@ -203,44 +199,44 @@ impl StdioRedirection {
             startup_info.hStdError = stderr.write_handle();
         }
     }
-    
+
     /// Start forwarding stdout/stderr to parent handles
-    pub fn start_forwarding(&mut self, parent_stdout: HANDLE, parent_stderr: HANDLE) -> LayerResult<()> {
+    pub fn start_forwarding(
+        &mut self,
+        parent_stdout: HANDLE,
+        parent_stderr: HANDLE,
+    ) -> LayerResult<()> {
         if let Some(ref mut stdout) = self.stdout {
-            stdout.start_forwarding(parent_stdout, PipeConfig::default())?;
+            stdout.start_forwarding(parent_stdout)?;
         }
         if let Some(ref mut stderr) = self.stderr {
-            stderr.start_forwarding(parent_stderr, PipeConfig::default())?;
-        }
-        Ok(())
-    }
-    
-    /// Stop all forwarding
-    pub fn stop_forwarding(&mut self) -> LayerResult<()> {
-        if let Some(ref mut stdout) = self.stdout {
-            stdout.stop_forwarding()?;
-        }
-        if let Some(ref mut stderr) = self.stderr {
-            stderr.stop_forwarding()?;
+            stderr.start_forwarding(parent_stderr)?;
         }
         Ok(())
     }
 
-    /// Close write handles after process creation (child has inherited them)
+    /// Stop all forwarding
+    pub fn stop_forwarding(&mut self) {
+        self.apply_to_pipes_void(|pipe| pipe.stop_forwarding());
+    }
+
+    /// Detach all forwarding threads so they continue running independently
+    pub fn detach_forwarding(&mut self) {
+        self.apply_to_pipes_void(|pipe| pipe.detach_forwarding());
+    }
+
+    /// Close write handles after process creation
     pub fn close_child_handles(&mut self) {
         unsafe {
-            if let Some(ref stdout) = self.stdout {
-                CloseHandle(stdout.write_handle());
-            }
-            if let Some(ref stderr) = self.stderr {
-                CloseHandle(stderr.write_handle());
-            }
+            self.apply_to_pipes_void(|pipe| {
+                CloseHandle(pipe.write_handle());
+            });
         }
     }
 }
 
 impl Drop for StdioRedirection {
     fn drop(&mut self) {
-        let _ = self.stop_forwarding(); // Best effort cleanup
+        self.stop_forwarding();
     }
 }

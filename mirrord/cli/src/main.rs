@@ -528,12 +528,16 @@ where
     .join(" ");
 
     // spawn the process (including mirrord layer injection and wait for initialization)
-    let process_result = LayerManagedProcess::execute_from_cli(
+    let exit_code = LayerManagedProcess::execute(
         Some(binary_path_str),
         command_line,
-        None, // current_directory
+        // current_directory (inherit from parent)
+        None,
         env_vars,
+        // original_fn (Use CreateProcessW)
+        None,
     )
+    .and_then(|managed_process| managed_process.wait_until_exit())
     .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
@@ -543,7 +547,6 @@ where
     progress.success(Some("Ready!"));
 
     // Exit with the same code as the child process
-    let exit_code = process_result.exit_code.unwrap_or(0);
     std::process::exit(exit_code as i32);
 }
 
