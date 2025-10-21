@@ -25,7 +25,8 @@ use winapi::{
     },
 };
 
-use crate::{apply_hook, process::parse_environment_block};
+use crate::apply_hook;
+use crate::process::environment::parse_environment_block;
 
 /// Static storage for the original CreateProcessInternalW function pointer.
 static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
@@ -73,8 +74,8 @@ unsafe extern "system" fn create_process_internal_w_hook(
         }
     };
 
-    // Parse environment from Windows API call
-    let env_vars = unsafe { parse_environment_block(environment as *mut std::ffi::c_void) };
+    // Parse environment from Windows API call - check creation flags for format
+    let env_vars = unsafe { parse_environment_block(environment as *mut std::ffi::c_void, creation_flags) };
 
     tracing::debug!(
         "Windows CreateProcess parameters: app_name={:?}, cmd_line={:?}, current_dir={:?}, parent_pid={}, env_count={}",

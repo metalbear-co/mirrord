@@ -258,7 +258,7 @@ use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
-// use extract::extract_library;
+use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -941,10 +941,10 @@ fn main() -> miette::Result<()> {
             }),
             Commands::Extract { path } => {
                 // extract_library(
-                    Some(path),
-                    &ProgressTracker::from_env("mirrord extract library..."),
-                    false,
-                )?;
+                //     Some(path),
+                //     &ProgressTracker::from_env("mirrord extract library..."),
+                //     false,
+                // )?;
             }
             Commands::ListTargets(args) => {
                 let rich_output = std::env::var(ListTargetArgs::RICH_OUTPUT_ENV)

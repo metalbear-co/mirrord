@@ -33,6 +33,7 @@ use crate::{
     process::windows::execution::pipes::StdioRedirection,
     proxy_connection::PROXY_CONNECTION,
     setup::layer_setup,
+    socket::sockets::SHARED_SOCKETS_ENV_VAR,
 };
 
 pub mod debug;
@@ -118,6 +119,12 @@ impl LayerManagedProcess {
         }
         if let Ok(layer_file) = std::env::var(MIRRORD_LAYER_FILE_ENV) {
             env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), layer_file);
+        }
+        
+        // Forward shared sockets environment variable if it exists
+        if let Ok(shared_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), shared_sockets.clone());
+            tracing::debug!("Forwarding shared sockets to child process: {}", shared_sockets);
         }
         
         // Add resolved config for child process inheritance

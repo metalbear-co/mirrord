@@ -1,8 +1,10 @@
 pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 
-    // Find the first null byte (0) or use the entire buffer
-    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    // Find the first null byte (0) using iterator pattern
+    let len = (0..buffer.len())
+        .take_while(|&i| buffer[i] != 0)
+        .count();
 
     // Convert to string, handling invalid UTF-8 gracefully
     String::from_utf8_lossy(buffer.get(..len).unwrap_or(buffer)).into_owned()
@@ -11,8 +13,10 @@ pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
 pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 
-    // Find the first null u16 (0) or use the entire buffer
-    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    // Find the first null u16 (0) using iterator pattern
+    let len = (0..buffer.len())
+        .take_while(|&i| buffer[i] != 0)
+        .count();
 
     // Convert u16 slice to string by treating each u16 as a Unicode code point
     // This is a simplified approach - real UTF-16 would be more complex
@@ -24,45 +28,34 @@ pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
         .collect()
 }
 
-pub fn u8_multi_buffer_to_strings<T: AsRef<[u8]>>(buffer: T) -> Vec<String> {
-    let buffer = buffer.as_ref();
-
-    if buffer.is_empty() {
-        return vec![];
-    }
-
-    let mut result = Vec::new();
-    let mut start = 0;
-
-    for (i, &c) in buffer.iter().enumerate() {
-        if c == 0 {
-            if start < i {
-                if let Some(slice) = buffer.get(start..i) {
-                    if let Ok(substring) = String::from_utf8(slice.to_vec()) {
-                        if !substring.is_empty() {
-                            result.push(substring);
-                        }
-                    } else {
-                        // Fallback: lossy decode if invalid UTF-8
-                        result.push(String::from_utf8_lossy(slice).into_owned());
-                    }
-                }
-            }
-            start = i + 1;
-
-            // Check for double null terminator (end of MULTI_SZ)
-            if buffer.get(i + 1).copied().unwrap_or(1) == 0 {
-                break;
-            }
-        }
-    }
-
-    result
+/// Trait for characters that can be parsed from multi-buffer format
+pub trait MultiBufferChar: Copy + PartialEq + Default {
+    /// Convert a slice of this character type to a String
+    fn slice_to_string(slice: &[Self]) -> String;
 }
 
-pub fn u16_multi_buffer_to_strings<T: AsRef<[u16]>>(buffer: T) -> Vec<String> {
-    let buffer = buffer.as_ref();
+impl MultiBufferChar for u8 {
+    fn slice_to_string(slice: &[Self]) -> String {
+        if let Ok(substring) = String::from_utf8(slice.to_vec()) {
+            substring
+        } else {
+            // Fallback: lossy decode if invalid UTF-8
+            String::from_utf8_lossy(slice).into_owned()
+        }
+    }
+}
 
+impl MultiBufferChar for u16 {
+    fn slice_to_string(slice: &[Self]) -> String {
+        slice
+            .iter()
+            .filter_map(|&c| std::char::from_u32(c as u32))
+            .collect()
+    }
+}
+
+/// Multi-buffer parser for both u8 and u16 character types
+pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> {
     if buffer.is_empty() {
         return vec![];
     }
@@ -70,26 +63,26 @@ pub fn u16_multi_buffer_to_strings<T: AsRef<[u16]>>(buffer: T) -> Vec<String> {
     let mut result = Vec::new();
     let mut start = 0;
 
-    for (i, &c) in buffer.iter().enumerate() {
-        if c == 0 {
-            if start < i {
-                // Convert the substring to String
-                if let Some(slice) = buffer.get(start..i) {
-                    let substring: String = slice
-                        .iter()
-                        .filter_map(|&c| std::char::from_u32(c as u32))
-                        .collect();
-                    if !substring.is_empty() {
-                        result.push(substring);
-                    }
+    while start < buffer.len() {
+        // Find the length of current string using iterator pattern
+        let len = (start..buffer.len())
+            .take_while(|&i| buffer[i] != T::default())
+            .count();
+        
+        if len > 0 {
+            if let Some(slice) = buffer.get(start..start + len) {
+                let substring = T::slice_to_string(slice);
+                if !substring.is_empty() {
+                    result.push(substring);
                 }
             }
-            start = i + 1;
-
-            // Check for double null terminator (end of MULTI_SZ)
-            if buffer.get(i + 1).copied().unwrap_or(1) == 0 {
-                break;
-            }
+        }
+        
+        start += len + 1; // Move past the null terminator
+        
+        // Check for double null terminator (end of MULTI_SZ)
+        if start < buffer.len() && buffer[start] == T::default() {
+            break;
         }
     }
 
@@ -166,4 +159,65 @@ pub unsafe fn lpcwstr_to_string(ptr: *const u16) -> Option<String> {
 /// * `String` - The converted string, or empty string if pointer is null
 pub unsafe fn lpcwstr_to_string_or_empty(ptr: *const u16) -> String {
     unsafe { lpcwstr_to_string(ptr) }.unwrap_or_default()
+}
+
+/// Find the safe length of a multi-buffer by locating the double null terminator
+/// 
+/// This function safely searches for the end of a multi-buffer (MULTI_SZ format)
+/// by finding the double null terminator pattern. It bounds the search to prevent
+/// reading beyond reasonable memory limits.
+///
+/// # Safety
+///
+/// The caller must ensure that `ptr` points to a valid multi-buffer or null pointer.
+/// The function will not read beyond `max_bytes` to maintain safety.
+///
+/// # Arguments
+///
+/// * `ptr` - A pointer to the start of a multi-buffer
+/// * `max_bytes` - Maximum number of bytes to search (safety limit)
+///
+/// # Returns
+///
+/// * `Some(usize)` - The length including the double null terminator if found
+/// * `None` - If double null terminator not found within max_bytes or ptr is null
+pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
+    ptr: *const T, 
+    max_bytes: usize
+) -> Option<usize> {
+    if ptr.is_null() {
+        return None;
+    }
+    
+    let max_elements = max_bytes / std::mem::size_of::<T>();
+    let max_reasonable_size = max_elements as isize;
+    
+    let size = (0..max_reasonable_size)
+        .take_while(|&i| {
+            unsafe {
+                let current = *ptr.offset(i);
+                if current == T::default() {
+                    // Found first null, check for double null
+                    if i + 1 < max_reasonable_size {
+                        let next = *ptr.offset(i + 1);
+                        // Continue if not double null
+                        next != T::default()
+                    } else {
+                        // Stop if we're at the end
+                        false
+                    }
+                } else {
+                    // Continue if not null
+                    true
+                }
+            }
+        })
+        .count();
+    
+    // Add 2 to include both null terminators if we found them
+    if (size as isize) < max_reasonable_size {
+        Some(size + 2)
+    } else {
+        None // Malformed or too large
+    }
 }
