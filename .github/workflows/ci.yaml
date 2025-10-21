@@ -201,6 +201,8 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 22
+      - run: npm install
+        working-directory: ./wizard-frontend
       - run: npm run lint
         working-directory: ./wizard-frontend
 
@@ -213,6 +215,13 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 22
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - name: "Update config types from current schema"
+        run: |
+          rm -f ./src/mirrord-schema.d.ts
+          npx json2ts ../mirrord-schema.json -o ./src/mirrord-schema.d.ts
+        working-directory: ./wizard-frontend
       - run: npm run build
         working-directory: ./wizard-frontend
       - run: tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
