@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use kube::Resource;
 
@@ -7,122 +7,123 @@ use crate::error::KubeApiError;
 
 /// Resource's `metadata.name` value, cannot be empty.
 #[derive(Debug)]
-pub struct Name(pub String);
+pub struct Name<'r>(pub Cow<'r, str>);
 
-impl<R, C> FromResource<R, C> for Name
-where
-    R: Resource<DynamicType = ()> + Send + Sync,
-    C: Send + Sync,
-{
-    type Rejection = KubeApiError;
-
-    fn from_resource(
-        resource: &R,
-        _: Arc<C>,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        std::future::ready(
-            resource
-                .meta()
-                .name
-                .clone()
-                .map(Name)
-                .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.name")),
-        )
+impl<'r> Name<'r> {
+    pub fn into_inner(self) -> Cow<'r, str> {
+        self.0
     }
 }
 
-impl<R, C> OptionalFromResource<R, C> for Name
+impl<'r, R, C> FromResource<'r, R, C> for Name<'r>
 where
-    R: Resource + Send + Sync,
-    C: Send + Sync,
+    R: Resource<DynamicType = ()>,
 {
     type Rejection = KubeApiError;
 
-    fn from_resource(
-        resource: &R,
-        _: Arc<C>,
-    ) -> impl Future<Output = Result<Option<Self>, Self::Rejection>> + Send {
-        std::future::ready(Ok(resource.meta().name.clone().map(Name)))
+    fn from_resource(resource: &'r R, _: Arc<C>) -> Result<Self, Self::Rejection> {
+        resource
+            .meta()
+            .name
+            .as_deref()
+            .map(Cow::Borrowed)
+            .map(Name)
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.name"))
+    }
+}
+
+impl<'r, R, C> OptionalFromResource<'r, R, C> for Name<'r>
+where
+    R: Resource,
+{
+    type Rejection = KubeApiError;
+
+    fn from_resource(resource: &'r R, _: Arc<C>) -> Result<Option<Self>, Self::Rejection> {
+        Ok(resource.meta().name.as_deref().map(Cow::Borrowed).map(Name))
     }
 }
 
 /// Resource's `metadata.namespace` value, cannot be empty.
-pub struct Namespace(pub String);
+pub struct Namespace<'r>(pub Cow<'r, str>);
 
-impl<R, C> FromResource<R, C> for Namespace
-where
-    R: Resource<DynamicType = ()> + Send + Sync,
-    C: Send + Sync,
-{
-    type Rejection = KubeApiError;
-
-    fn from_resource(
-        resource: &R,
-        _: Arc<C>,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        std::future::ready(
-            resource
-                .meta()
-                .namespace
-                .clone()
-                .map(Namespace)
-                .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.namespace")),
-        )
+impl<'r> Namespace<'r> {
+    pub fn into_inner(self) -> Cow<'r, str> {
+        self.0
     }
 }
 
-impl<R, C> OptionalFromResource<R, C> for Namespace
+impl<'r, R, C> FromResource<'r, R, C> for Namespace<'r>
 where
-    R: Resource + Send + Sync,
-    C: Send + Sync,
+    R: Resource<DynamicType = ()>,
 {
     type Rejection = KubeApiError;
 
-    fn from_resource(
-        resource: &R,
-        _: Arc<C>,
-    ) -> impl Future<Output = Result<Option<Self>, Self::Rejection>> + Send {
-        std::future::ready(Ok(resource.meta().namespace.clone().map(Namespace)))
+    fn from_resource(resource: &'r R, _: Arc<C>) -> Result<Self, Self::Rejection> {
+        resource
+            .meta()
+            .namespace
+            .as_deref()
+            .map(Cow::Borrowed)
+            .map(Namespace)
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.namespace"))
+    }
+}
+
+impl<'r, R, C> OptionalFromResource<'r, R, C> for Namespace<'r>
+where
+    R: Resource,
+{
+    type Rejection = KubeApiError;
+
+    fn from_resource(resource: &'r R, _: Arc<C>) -> Result<Option<Self>, Self::Rejection> {
+        Ok(resource
+            .meta()
+            .namespace
+            .as_deref()
+            .map(Cow::Borrowed)
+            .map(Namespace))
     }
 }
 
 /// Resource's `metadata.uid` value, cannot be empty.
-pub struct Uid(pub String);
+pub struct Uid<'r>(pub Cow<'r, str>);
 
-impl<R, C> FromResource<R, C> for Uid
-where
-    R: Resource<DynamicType = ()> + Send + Sync,
-    C: Send + Sync,
-{
-    type Rejection = KubeApiError;
-
-    fn from_resource(
-        resource: &R,
-        _: Arc<C>,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        std::future::ready(
-            resource
-                .meta()
-                .uid
-                .clone()
-                .map(Uid)
-                .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.namespace")),
-        )
+impl<'r> Uid<'r> {
+    pub fn into_inner(self) -> Cow<'r, str> {
+        self.0
     }
 }
 
-impl<R, C> OptionalFromResource<R, C> for Uid
+impl<'r, R, C> FromResource<'r, R, C> for Uid<'r>
 where
-    R: Resource + Send + Sync,
-    C: Send + Sync,
+    R: Resource<DynamicType = ()>,
 {
     type Rejection = KubeApiError;
 
-    fn from_resource(
-        resource: &R,
-        _: Arc<C>,
-    ) -> impl Future<Output = Result<Option<Self>, Self::Rejection>> + Send {
-        std::future::ready(Ok(resource.meta().namespace.clone().map(Uid)))
+    fn from_resource(resource: &'r R, _: Arc<C>) -> Result<Self, Self::Rejection> {
+        resource
+            .meta()
+            .uid
+            .as_deref()
+            .map(Cow::Borrowed)
+            .map(Uid)
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.namespace"))
+    }
+}
+
+impl<'r, R, C> OptionalFromResource<'r, R, C> for Uid<'r>
+where
+    R: Resource,
+{
+    type Rejection = KubeApiError;
+
+    fn from_resource(resource: &'r R, _: Arc<C>) -> Result<Option<Self>, Self::Rejection> {
+        Ok(resource
+            .meta()
+            .namespace
+            .as_deref()
+            .map(Cow::Borrowed)
+            .map(Uid))
     }
 }
 
@@ -136,35 +137,28 @@ mod tests {
 
     use super::*;
 
-    static TEST_RESOURCE: LazyLock<Arc<Pod>> = LazyLock::new(|| {
-        Arc::new(Pod {
-            metadata: ObjectMeta {
-                name: Some("foo".into()),
-                namespace: Some("default".into()),
-                ..Default::default()
-            },
+    static TEST_RESOURCE: LazyLock<Pod> = LazyLock::new(|| Pod {
+        metadata: ObjectMeta {
+            name: Some("foo".into()),
+            namespace: Some("default".into()),
             ..Default::default()
-        })
+        },
+        ..Default::default()
     });
 
-    #[tokio::test]
-    async fn extract_name() {
-        let Name(name) =
-            <Name as FromResource<Pod, ()>>::from_resource(&TEST_RESOURCE, Arc::<()>::default())
-                .await
-                .expect("should be extracted");
+    #[test]
+    fn extract_name() {
+        let Name(name) = FromResource::from_resource(&*TEST_RESOURCE, Arc::<()>::default())
+            .expect("should be extracted");
 
         assert_eq!(name, "foo");
     }
 
-    #[tokio::test]
-    async fn extract_namespace() {
-        let Namespace(namespace) = <Namespace as FromResource<Pod, ()>>::from_resource(
-            &TEST_RESOURCE,
-            Arc::<()>::default(),
-        )
-        .await
-        .expect("should be extracted");
+    #[test]
+    fn extract_namespace() {
+        let Namespace(namespace) =
+            FromResource::from_resource(&*TEST_RESOURCE, Arc::<()>::default())
+                .expect("should be extracted");
 
         assert_eq!(namespace, "default");
     }

@@ -3,37 +3,28 @@ use std::sync::Arc;
 pub mod metadata;
 
 /// Types that can be created from kubernetes resource
-pub trait FromResource<R, C>: Sized {
+pub trait FromResource<'r, R, C>: Sized {
     /// "rejection" type that will be used if extraction is failed.
     type Rejection;
 
-    fn from_resource(
-        resource: &R,
-        context: Arc<C>,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send;
+    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Self, Self::Rejection>;
 }
 
 /// Types that can be created from kubernetes resource but are optional.
-pub trait OptionalFromResource<R, C>: Sized {
+pub trait OptionalFromResource<'r, R, C>: Sized {
     /// "rejection" type that will be used if extraction is failed.
     type Rejection;
 
-    fn from_resource(
-        resource: &R,
-        context: Arc<C>,
-    ) -> impl Future<Output = Result<Option<Self>, Self::Rejection>> + Send;
+    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Option<Self>, Self::Rejection>;
 }
 
-impl<T, R, C> FromResource<R, C> for Option<T>
+impl<'r, T, R, C> FromResource<'r, R, C> for Option<T>
 where
-    T: OptionalFromResource<R, C>,
+    T: OptionalFromResource<'r, R, C>,
 {
     type Rejection = T::Rejection;
 
-    fn from_resource(
-        resource: &R,
-        context: Arc<C>,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Self, Self::Rejection> {
         T::from_resource(resource, context)
     }
 }
@@ -43,21 +34,19 @@ macro_rules! impl_tuple_from_resource {
         [$($ty:ident),*], $last:ident
     ) => {
     	#[allow(non_snake_case)]
-    	impl<R, C, Rej, $($ty,)* $last> FromResource<R, C> for ($($ty,)* $last,)
+    	impl<'r, R, C, Rej, $($ty,)* $last> FromResource<'r, R, C> for ($($ty,)* $last,)
 		where
-			$( $ty: FromResource<R, C, Rejection = Rej> + Send, )*
-            $last: FromResource<R, C, Rejection = Rej> + Send,
-		    R: Send + Sync,
-		    C: Send + Sync,
+			$( $ty: FromResource<'r, R, C, Rejection = Rej>, )*
+            $last: FromResource<'r, R, C, Rejection = Rej>,
 		{
 		    type Rejection = Rej;
 
 		    #[allow(non_snake_case)]
-		    async fn from_resource(resource: &R, context: Arc<C>) -> Result<Self, Self::Rejection> {
+		    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Self, Self::Rejection> {
 		    	$(
-                    let $ty = $ty::from_resource(resource.clone(), context.clone()).await?;
+                    let $ty = $ty::from_resource(resource.clone(), context.clone())?;
                 )*
-                let $last = $last::from_resource(resource, context).await?;
+                let $last = $last::from_resource(resource, context)?;
 
 		        Ok(($($ty,)* $last,))
 		    }
@@ -103,51 +92,35 @@ mod tests {
 
     struct TestField;
 
-    impl<R, C> FromResource<R, C> for TestField
-    where
-        R: Send + Sync,
-        C: Send + Sync,
-    {
+    impl<R, C> FromResource<'_, R, C> for TestField {
         type Rejection = Infallible;
 
-        async fn from_resource(_: &R, _cx: Arc<C>) -> Result<Self, Self::Rejection> {
+        fn from_resource(_: &R, _cx: Arc<C>) -> Result<Self, Self::Rejection> {
             Ok(TestField)
         }
     }
 
     struct TestField2;
 
-    impl<R, C> FromResource<R, C> for TestField2
-    where
-        R: Send + Sync,
-        C: Send + Sync,
-    {
+    impl<R, C> FromResource<'_, R, C> for TestField2 {
         type Rejection = Infallible;
 
-        async fn from_resource(_: &R, _cx: Arc<C>) -> Result<Self, Self::Rejection> {
+        fn from_resource(_: &R, _cx: Arc<C>) -> Result<Self, Self::Rejection> {
             Ok(TestField2)
         }
     }
 
-    #[tokio::test]
-    async fn single_field() {
+    #[test]
+    fn single_field() {
         let resource = Pod::default();
 
-        assert!(
-            TestField::from_resource(&resource, Arc::new(()))
-                .await
-                .is_ok()
-        );
+        assert!(TestField::from_resource(&resource, Arc::new(())).is_ok());
     }
 
-    #[tokio::test]
-    async fn multiple_fields() {
+    #[test]
+    fn multiple_fields() {
         let resource = Pod::default();
 
-        assert!(
-            <(TestField, TestField2)>::from_resource(&resource, Arc::new(()))
-                .await
-                .is_ok()
-        )
+        assert!(<(TestField, TestField2)>::from_resource(&resource, Arc::new(())).is_ok())
     }
 }
