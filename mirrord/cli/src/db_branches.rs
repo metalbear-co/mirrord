@@ -34,8 +34,7 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
-    layer_config.agent.privileged = true;
+    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
@@ -155,8 +154,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
-    layer_config.agent.privileged = true;
+    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
