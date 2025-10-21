@@ -417,12 +417,12 @@ jobs:
           path: /tmp/intproxy_logs/linux
 
   macos_tests:
-    runs-on: macos-13
+    runs-on: macos-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/file.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -430,7 +430,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           components: rustfmt, clippy
-          target: aarch64-apple-darwin
+          target: x86_64-apple-darwin, aarch64-apple-darwin
           toolchain: nightly-2025-08-01
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
@@ -438,17 +438,17 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      # this is required for clippy lint because the layer path variable is checked at compile time
-      - name: create fake layer file
-        run: touch /tmp/file.dylib
-      - name: clippy x64
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - name: clippy aarch64
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      # Build layer before linting because the `mirrord` crate expects `MIRRORD_LAYER_FILE_MACOS_ARM64` to point to an existing file.
+      - name: build layer
+        run: cargo build -p mirrord-layer
+      - name: build layer x86
+        run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: lint
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord-sip UT
-        run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
+        run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT
-        run: cargo test --target=x86_64-apple-darwin -p mirrord-intproxy
+        run: cargo test -p mirrord-intproxy
       # prepare stuff needed for integration tests
       - run: |
           cd mirrord/layer/tests/apps/issue1123
@@ -541,9 +541,8 @@ jobs:
           node-version: 18
       - run: npm install express # For http mirroring test with node.
       - run: npm install portfinder # For a node specific test
-      - run: cargo build --target=x86_64-apple-darwin -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - name: mirrord layer tests
-        run: cargo test --target=x86_64-apple-darwin -p mirrord-layer
+        run: cargo test -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -694,4 +693,3 @@ jobs:
             (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
             (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
-
