@@ -1,15 +1,19 @@
 use std::collections::HashSet;
 
 use kube::{
-    Api, Client,
+    Api,
     api::{DeleteParams, ListParams},
+    client::ClientBuilder,
 };
+use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_kube::{api::kubernetes::create_kube_config, retry::RetryKube};
 use mirrord_operator::crd::mysql_branching::MysqlBranchDatabase;
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
+use tower::{buffer::BufferLayer, retry::RetryLayer};
 
 use crate::{
-    CliResult,
+    CliError, CliResult,
     config::{DbBranchesArgs, DbBranchesCommand},
 };
 
@@ -26,13 +30,34 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
     let mut progress = ProgressTracker::from_env("DB Branches Status");
     let mut status_progress = progress.subtask("fetching branches");
 
-    let client = Client::try_default().await.map_err(|e| {
-        crate::CliError::CreateKubeApiFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-    })?;
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
+        .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
+
+    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    layer_config.agent.privileged = true;
+
+    let client = create_kube_config(
+        layer_config.accept_invalid_certificates,
+        layer_config.kubeconfig.clone(),
+        layer_config.kube_context.clone(),
+    )
+    .await
+    .and_then(|config| {
+        Ok(ClientBuilder::try_from(config.clone())?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &layer_config.startup_retry,
+            )?))
+            .build())
+    })
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
     let api: Api<MysqlBranchDatabase> = if args.all_namespaces {
         Api::all(client)
     } else if let Some(namespace) = &args.namespace {
+        Api::namespaced(client, namespace)
+    } else if let Some(namespace) = &layer_config.target.namespace {
         Api::namespaced(client, namespace)
     } else {
         Api::default_namespaced(client)
@@ -126,13 +151,34 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
     let mut progress = ProgressTracker::from_env("DB Branches Destroy");
     let mut destroy_progress = progress.subtask("deleting branches");
 
-    let client = Client::try_default().await.map_err(|e| {
-        crate::CliError::CreateKubeApiFailed(mirrord_kube::error::KubeApiError::KubeError(e))
-    })?;
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
+        .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
+
+    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    layer_config.agent.privileged = true;
+
+    let client = create_kube_config(
+        layer_config.accept_invalid_certificates,
+        layer_config.kubeconfig.clone(),
+        layer_config.kube_context.clone(),
+    )
+    .await
+    .and_then(|config| {
+        Ok(ClientBuilder::try_from(config.clone())?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(RetryKube::try_from(
+                &layer_config.startup_retry,
+            )?))
+            .build())
+    })
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
     let api: Api<MysqlBranchDatabase> = if args.all_namespaces {
         Api::all(client)
     } else if let Some(namespace) = &args.namespace {
+        Api::namespaced(client, namespace)
+    } else if let Some(namespace) = &layer_config.target.namespace {
         Api::namespaced(client, namespace)
     } else {
         Api::default_namespaced(client)

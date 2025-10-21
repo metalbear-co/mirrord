@@ -1126,6 +1126,11 @@ pub(super) struct DbBranchesArgs {
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
 
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: DbBranchesCommand,
 }
