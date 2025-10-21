@@ -1,7 +1,8 @@
 
 import { Server } from "lucide-react";
+import { WizardStep } from "../Wizard";
 
-const IntroStep = () => {
+const IntroStep: () => WizardStep = () => {
 
     return {
     id: "intro-new-user",
