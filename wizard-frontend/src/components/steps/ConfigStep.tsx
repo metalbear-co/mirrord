@@ -1,6 +1,7 @@
+import { WizardStep } from "../Wizard";
 import ConfigTabs from "./ConfigTabs";
 
-const ConfigStep = () => {
+const ConfigStep: () => WizardStep = () => {
     return {
     id: "config-new-user",
     title: "Configuration Setup",
