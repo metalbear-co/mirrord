@@ -93,7 +93,8 @@ impl ClientStore {
     /// However, this was causing issues with HTTP mirroring, so we're re-enabling it.
     #[inline]
     fn should_enable_connection_pooling() -> bool {
-        true // Re-enabled for Windows to fix HTTP mirroring issues
+         // Re-enabled for Windows to fix HTTP mirroring issues
+        true
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].

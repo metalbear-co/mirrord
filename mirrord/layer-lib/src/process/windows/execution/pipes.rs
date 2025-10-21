@@ -163,7 +163,8 @@ impl Drop for PipeForwarder {
 pub struct StdioRedirection {
     pub stdout: Option<PipeForwarder>,
     pub stderr: Option<PipeForwarder>,
-    pub stdin: Option<PipeForwarder>, // Future expansion
+     // Future expansion
+    pub stdin: Option<PipeForwarder>,
 }
 
 impl StdioRedirection {

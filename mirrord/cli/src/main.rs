@@ -941,10 +941,10 @@ fn main() -> miette::Result<()> {
             }),
             Commands::Extract { path } => {
                 // extract_library(
-                //     Some(path),
-                //     &ProgressTracker::from_env("mirrord extract library..."),
-                //     false,
-                // )?;
+                    Some(path),
+                    &ProgressTracker::from_env("mirrord extract library..."),
+                    false,
+                )?;
             }
             Commands::ListTargets(args) => {
                 let rich_output = std::env::var(ListTargetArgs::RICH_OUTPUT_ENV)

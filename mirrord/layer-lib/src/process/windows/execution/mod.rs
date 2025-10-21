@@ -7,16 +7,16 @@ use mirrord_config::LayerConfig;
 use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
-        minwindef::{DWORD, LPVOID},
-        ntdef::HANDLE,
+        minwindef::{BOOL, DWORD, LPVOID},
+        ntdef::{HANDLE, LPCWSTR, LPWSTR},
     },
     um::{
         handleapi::CloseHandle,
         minwinbase::LPSECURITY_ATTRIBUTES,
         processenv::GetStdHandle,
         processthreadsapi::{
-            LPPROCESS_INFORMATION, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
-            TerminateProcess,
+            LPPROCESS_INFORMATION, LPSTARTUPINFOW, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
+            TerminateProcess, CreateProcessW, GetExitCodeProcess,
         },
         synchapi::WaitForSingleObject,
         winbase::{
@@ -57,18 +57,18 @@ const LAYER_INIT_TIMEOUT_MS: u32 = 30_000;
 /// Function signature for CreateProcessInternalW Windows API call.
 pub type CreateProcessInternalWType = unsafe extern "system" fn(
     user_token: HANDLE,
-    application_name: winapi::shared::ntdef::LPCWSTR,
-    command_line: winapi::shared::ntdef::LPWSTR,
+    application_name: LPCWSTR,
+    command_line: LPWSTR,
     process_attributes: LPSECURITY_ATTRIBUTES,
     thread_attributes: LPSECURITY_ATTRIBUTES,
-    inherit_handles: winapi::shared::minwindef::BOOL,
-    creation_flags: winapi::shared::minwindef::DWORD,
+    inherit_handles: BOOL,
+    creation_flags: DWORD,
     environment: LPVOID,
-    current_directory: winapi::shared::ntdef::LPCWSTR,
-    startup_info: winapi::um::processthreadsapi::LPSTARTUPINFOW,
+    current_directory: LPCWSTR,
+    startup_info: LPSTARTUPINFOW,
     process_information: LPPROCESS_INFORMATION,
     restricted_user_token: PHANDLE,
-) -> winapi::shared::minwindef::BOOL;
+) -> BOOL;
 
 pub struct LayerManagedProcess {
     process_info: PROCESS_INFORMATION,
@@ -206,7 +206,7 @@ impl LayerManagedProcess {
 
             let mut process_info: PROCESS_INFORMATION = std::mem::zeroed();
 
-            let success = winapi::um::processthreadsapi::CreateProcessW(
+            let success = CreateProcessW(
                 if application_name.is_some() {
                     app_name_wide.as_ptr()
                 } else {
@@ -374,7 +374,7 @@ impl LayerManagedProcess {
             }
 
             let mut exit_code = 0u32;
-            if winapi::um::processthreadsapi::GetExitCodeProcess(
+            if GetExitCodeProcess(
                 self.process_info.hProcess,
                 &mut exit_code,
             ) == 0
