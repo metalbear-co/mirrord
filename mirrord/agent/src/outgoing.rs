@@ -1,9 +1,17 @@
-use std::{collections::HashMap, fmt, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt,
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
+use futures::{FutureExt, Stream, future::BoxFuture, stream::FuturesUnordered};
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, LogMessage, RemoteError, ResponseError,
+    ConnectionId, DaemonMessage, LogMessage, RemoteError, RemoteResult, ResponseError,
     outgoing::{tcp::*, *},
+    uid::Uid,
 };
 use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
@@ -11,7 +19,6 @@ use tokio::{
     io::{self, AsyncWriteExt, ReadHalf, WriteHalf},
     select,
     sync::mpsc::{self, Receiver, Sender, error::SendError},
-    time,
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -101,6 +108,8 @@ struct TcpOutgoingTask {
     pid: Option<u64>,
     layer_rx: Receiver<LayerTcpOutgoing>,
     daemon_tx: Sender<DaemonMessage>,
+    connects_v1: FuturesQueue<BoxFuture<'static, RemoteResult<Connected>>>,
+    connects_v2: FuturesUnordered<BoxFuture<'static, (RemoteResult<Connected>, Uid)>>,
 }
 
 impl Drop for TcpOutgoingTask {
@@ -144,6 +153,8 @@ impl TcpOutgoingTask {
             pid,
             layer_rx,
             daemon_tx,
+            connects_v1: Default::default(),
+            connects_v2: Default::default(),
         }
     }
 
@@ -167,6 +178,14 @@ impl TcpOutgoingTask {
                 Some((connection_id, remote_read)) = self.readers.next() => {
                     self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
                 },
+
+                Some(result) = self.connects_v1.next() => {
+                    self.handle_connect_result(None, result).await.is_err()
+                }
+
+                Some((result, uid)) = self.connects_v2.next() => {
+                    self.handle_connect_result(Some(uid), result).await.is_err()
+                }
             };
 
             if channel_closed {
@@ -268,6 +287,69 @@ impl TcpOutgoingTask {
         Ok(())
     }
 
+    async fn connect(
+        remote_address: SocketAddress,
+        target_pid: Option<u64>,
+    ) -> RemoteResult<Connected> {
+        let started_at = Instant::now();
+        let socket_stream = tokio::time::timeout(
+            Self::CONNECT_TIMEOUT,
+            SocketStream::connect(remote_address.clone(), target_pid),
+        )
+        .await
+        .map_err(|_| {
+            ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address.clone()))
+        })??;
+        tracing::debug!(
+            %remote_address,
+            elapsed = ?started_at.elapsed(),
+            "Outgoing connection made",
+        );
+        let local_address = socket_stream.local_addr()?;
+        Ok(Connected {
+            stream: socket_stream,
+            remote_address,
+            local_address,
+        })
+    }
+
+    async fn handle_connect_result(
+        &mut self,
+        uid: Option<Uid>,
+        result: RemoteResult<Connected>,
+    ) -> Result<(), SendError<DaemonMessage>> {
+        let message = result.map(|connected| {
+            let connection_id = self.next_connection_id;
+            self.next_connection_id += 1;
+
+            let (read_half, write_half) = io::split(connected.stream);
+            self.writers.insert(connection_id, write_half);
+            self.readers.insert(
+                connection_id,
+                ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
+            );
+            TCP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+            DaemonConnect {
+                connection_id,
+                remote_address: connected.remote_address,
+                local_address: connected.local_address,
+            }
+        });
+
+        let message = match uid {
+            Some(uid) => DaemonTcpOutgoing::ConnectV2(DaemonConnectV2 {
+                uid,
+                connect: message,
+            }),
+            None => DaemonTcpOutgoing::Connect(message),
+        };
+
+        self.daemon_tx
+            .send(DaemonMessage::TcpOutgoing(message))
+            .await
+    }
+
     /// Returns [`Err`] only when the client has disconnected.
     #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_layer_msg(
@@ -278,47 +360,19 @@ impl TcpOutgoingTask {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.
             LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
-                let daemon_connect = time::timeout(
-                    Self::CONNECT_TIMEOUT,
-                    SocketStream::connect(remote_address.clone(), self.pid),
-                )
-                .await
-                .unwrap_or_else(|_elapsed| {
-                    Err(ResponseError::Remote(RemoteError::ConnectTimedOut(
-                        remote_address.clone(),
-                    )))
-                })
-                .and_then(|remote_stream| {
-                    let agent_address = remote_stream.local_addr()?;
-                    let connection_id = self.next_connection_id;
-                    self.next_connection_id += 1;
+                let fut = Self::connect(remote_address, self.pid).boxed();
+                self.connects_v1.push(fut);
+                Ok(())
+            }
 
-                    let (read_half, write_half) = io::split(remote_stream);
-                    self.writers.insert(connection_id, write_half);
-                    self.readers.insert(
-                        connection_id,
-                        ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
-                    );
-                    TCP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                    Ok(DaemonConnect {
-                        connection_id,
-                        remote_address,
-                        local_address: agent_address,
-                    })
-                });
-
-                tracing::trace!(
-                    result = ?daemon_connect,
-                    "Connection attempt finished.",
-                );
-
-                self.daemon_tx
-                    .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(
-                        daemon_connect,
-                    )))
-                    .await?;
-
+            LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            }) => {
+                let fut = Self::connect(remote_address, self.pid)
+                    .map(move |result| (result, uid))
+                    .boxed();
+                self.connects_v2.push(fut);
                 Ok(())
             }
 
@@ -410,5 +464,54 @@ impl TcpOutgoingTask {
                 Ok(())
             }
         }
+    }
+}
+
+/// Established outgoing connection.
+struct Connected {
+    stream: SocketStream,
+    remote_address: SocketAddress,
+    local_address: SocketAddress,
+}
+
+/// FIFO queue of futures, implements [`Stream`].
+///
+/// The futures **not** polled in parallel.
+/// Only the oldest future is polled.
+struct FuturesQueue<F> {
+    inner: VecDeque<F>,
+}
+
+impl<F> FuturesQueue<F> {
+    fn push(&mut self, fut: F) {
+        self.inner.push_back(fut);
+    }
+}
+
+impl<F> Default for FuturesQueue<F> {
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+        }
+    }
+}
+
+impl<F: Future + Unpin> Stream for FuturesQueue<F> {
+    type Item = F::Output;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let Some(fut) = this.inner.front_mut() else {
+            return Poll::Ready(None);
+        };
+
+        let result = std::task::ready!(Pin::new(fut).poll(cx));
+
+        this.inner.pop_front();
+        if this.inner.len() < this.inner.capacity() / 3 {
+            this.inner.shrink_to_fit();
+        }
+
+        Poll::Ready(Some(result))
     }
 }

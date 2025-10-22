@@ -4,7 +4,7 @@ use std::fmt;
 use super::TestProcess;
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
 
-pub(crate) mod env;
+pub mod env;
 pub(crate) mod file_ops;
 
 /// Go versions used with test applications.
@@ -37,6 +37,7 @@ pub enum Application {
     PythonFastApiHTTP,
     PythonFastApiHTTPIPv6,
     NodeHTTP,
+    NodeHTTPNpm,
     NodeHTTP2,
     /// Can run as both HTTP and HTTPS server, listens on port 80.
     ///
@@ -97,6 +98,7 @@ impl Application {
             .map(String::from)
             .to_vec(),
             Application::NodeHTTP => ["node", "node-e2e/app.mjs"].map(String::from).to_vec(),
+            Application::NodeHTTPNpm => ["npm", "run", "start"].map(String::from).to_vec(),
             Application::NodeHTTP2 => ["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
                 .map(String::from)
                 .to_vec(),

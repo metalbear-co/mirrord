@@ -10,7 +10,7 @@ use futures::{
     stream::{SplitSink, SplitStream},
 };
 use mirrord_protocol::{
-    ConnectionId, Payload, ResponseError,
+    ConnectionId, Payload, RemoteResult, ResponseError,
     outgoing::{udp::*, *},
 };
 use streammap_ext::StreamMap;
@@ -169,8 +169,54 @@ impl UdpOutgoingTask {
         Ok(())
     }
 
+    /// Connects to the remote address.
+    ///
+    /// This includes binding a [`UdpSocket`] and calling [`UdpSocket::connect`].
+    /// Note that these operations do not require any IO, as [`SocketAddress`] cannot be a hostname.
+    /// Therefore, this function is async only due to [`UdpSocket`] interface's constraints.
+    ///
+    /// Handles:
+    /// 1. Normal `connect` called on an udp socket by the user, through the [`LayerConnect`]
+    ///    message;
+    /// 2. DNS special-case connection that comes on port `53`, where we have a hack that fakes a
+    ///    connected udp socket. This case in particular requires that the user enable file ops with
+    ///    read access to `/etc/resolv.conf`, otherwise they'll be getting a mismatched connection;
+    /// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
+    ///    connection.
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
+    async fn connect(&mut self, remote_address: SocketAddress) -> RemoteResult<DaemonConnect> {
+        let peer_addr = remote_address.clone().try_into()?;
+        let bind_addr = match peer_addr {
+            std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+            std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+        };
+
+        let socket = UdpSocket::bind(bind_addr).await?;
+        socket.connect(peer_addr).await?;
+
+        let connection_id = self.next_connection_id;
+        self.next_connection_id += 1;
+
+        let peer_address = socket.peer_addr()?;
+        let local_address = socket.local_addr()?;
+        let local_address = SocketAddress::Ip(local_address);
+
+        let framed = UdpFramed::new(socket, BytesCodec::new());
+
+        let (sink, stream) = framed.split();
+
+        self.writers.insert(connection_id, (sink, peer_address));
+        self.readers.insert(connection_id, stream);
+        UDP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        Ok(DaemonConnect {
+            connection_id,
+            remote_address,
+            local_address,
+        })
+    }
+
     /// Returns [`Err`] only when the client has disconnected.
-    #[allow(clippy::type_complexity)]
     #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_layer_msg(
         &mut self,
@@ -180,45 +226,31 @@ impl UdpOutgoingTask {
             // [user] -> [layer] -> [agent] -> [layer]
             // `user` is asking us to connect to some remote host.
             LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
-                let daemon_connect =
-                    connect(remote_address.clone())
-                        .await
-                        .and_then(|mirror_socket| {
-                            let connection_id = self.next_connection_id;
-                            self.next_connection_id += 1;
-
-                            let peer_address = mirror_socket.peer_addr()?;
-                            let local_address = mirror_socket.local_addr()?;
-                            let local_address = SocketAddress::Ip(local_address);
-
-                            let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
-
-                            let (sink, stream): (
-                                SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
-                                SplitStream<UdpFramed<BytesCodec>>,
-                            ) = framed.split();
-
-                            self.writers.insert(connection_id, (sink, peer_address));
-                            self.readers.insert(connection_id, stream);
-                            UDP_OUTGOING_CONNECTION
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                            Ok(DaemonConnect {
-                                connection_id,
-                                remote_address,
-                                local_address,
-                            })
-                        });
-
+                let daemon_connect = self.connect(remote_address).await;
                 tracing::trace!(
                     result = ?daemon_connect,
                     "Connection attempt finished.",
                 );
-
                 self.daemon_tx
                     .send(DaemonUdpOutgoing::Connect(daemon_connect))
                     .await?;
-
+                Ok(())
+            }
+            // [user] -> [layer] -> [agent] -> [layer]
+            // `user` is asking us to connect to some remote host.
+            LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            }) => {
+                let connect = self.connect(remote_address).await;
+                let daemon_connect = DaemonConnectV2 { uid, connect };
+                tracing::trace!(
+                    result = ?daemon_connect,
+                    "Connection attempt finished.",
+                );
+                self.daemon_tx
+                    .send(DaemonUdpOutgoing::ConnectV2(daemon_connect))
+                    .await?;
                 Ok(())
             }
             // [user] -> [layer] -> [agent] -> [remote]
@@ -281,28 +313,6 @@ pub(crate) struct UdpOutgoingApi {
 
     /// Reads the `Daemon` message from the `interceptor_task`.
     daemon_rx: Receiver<DaemonUdpOutgoing>,
-}
-
-/// Performs an [`UdpSocket::connect`] that handles 3 situations:
-///
-/// 1. Normal `connect` called on an udp socket by the user, through the [`LayerConnect`] message;
-/// 2. DNS special-case connection that comes on port `53`, where we have a hack that fakes a
-///    connected udp socket. This case in particular requires that the user enable file ops with
-///    read access to `/etc/resolv.conf`, otherwise they'll be getting a mismatched connection;
-/// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
-///    connection.
-#[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
-async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseError> {
-    let remote_address = remote_address.try_into()?;
-    let mirror_address = match remote_address {
-        std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-        std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
-    };
-
-    let mirror_socket = UdpSocket::bind(mirror_address).await?;
-    mirror_socket.connect(remote_address).await?;
-
-    Ok(mirror_socket)
 }
 
 impl UdpOutgoingApi {

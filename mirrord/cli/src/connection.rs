@@ -20,7 +20,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use crate::{CliError, CliResult};
+use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -39,6 +39,7 @@ async fn try_connect_using_operator<P, R>(
     progress: &P,
     analytics: &mut R,
     branch_name: Option<String>,
+    mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<Option<OperatorSessionConnection>>
 where
     P: Progress,
@@ -52,7 +53,9 @@ where
 
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
-        None if layer_config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
+        None if layer_config.operator == Some(true) => {
+            return Err(CliError::OperatorNotInstalled);
+        }
         None => {
             operator_subtask.success(Some("operator not found"));
             return Ok(None);
@@ -75,10 +78,23 @@ where
     }
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    let api = api
-        .prepare_client_cert(analytics, progress, layer_config)
-        .await
-        .into_certified()?;
+    let api = match mirrord_for_ci {
+        Some(mirrord_for_ci) => {
+            api.with_ci_api_key(
+                analytics,
+                progress,
+                layer_config,
+                mirrord_for_ci.api_key().ok_or(CiError::MissingCiApiKey)?,
+            )
+            .await
+        }
+        None => {
+            api.with_client_certificate(analytics, progress, layer_config)
+                .await
+        }
+    }
+    .into_certified()?;
+
     user_cert_subtask.success(Some("user credentials prepared"));
 
     let target = ResolvedTarget::new(
@@ -118,9 +134,10 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     progress: &mut P,
     analytics: &mut R,
     branch_name: Option<String>,
+    mirrord_for_ci: Option<&MirrordCi>,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)> {
     if let Some(connection) =
-        try_connect_using_operator(config, progress, analytics, branch_name).await?
+        try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
         return Ok((
             AgentConnectInfo::Operator(connection.session),

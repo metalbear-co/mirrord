@@ -254,6 +254,7 @@ use clap_complete::generate;
 use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
+use db_branches::db_branches_command;
 use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::MirrordExecution;
@@ -289,6 +290,7 @@ mod ci;
 mod config;
 mod connection;
 mod container;
+mod db_branches;
 mod diagnose;
 mod dump;
 mod error;
@@ -318,7 +320,8 @@ use mirrord_layer_lib::process::windows::execution::LayerManagedProcess;
 use verify_config::verify_config;
 
 use crate::{
-    newsletter::suggest_newsletter_signup, user_data::UserData, util::get_user_git_branch,
+    ci::MirrordCi, newsletter::suggest_newsletter_signup, user_data::UserData,
+    util::get_user_git_branch,
 };
 
 async fn exec_process<P>(
@@ -328,6 +331,7 @@ async fn exec_process<P>(
     progress: &mut P,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
+    mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -367,6 +371,7 @@ where
         Some(binary_args.as_slice()),
         &mut sub_progress,
         analytics,
+        mirrord_for_ci.as_ref(),
     )
     .await?;
 
@@ -423,13 +428,15 @@ where
 
     let sub_progress = progress.subtask("running process");
 
-    execve_process(
+    run_process_with_mirrord(
         binary,
         binary_args,
         env_vars,
         _did_sip_patch,
         sub_progress,
         analytics,
+        #[cfg(not(target_os = "windows"))]
+        mirrord_for_ci,
     )
     .await
 }
@@ -439,17 +446,15 @@ fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
 }
 
 #[cfg(not(target_os = "windows"))]
-async fn execve_process<P>(
+async fn run_process_with_mirrord<P: Progress>(
     binary: String,
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<()>
-where
-    P: Progress,
-{
+    mirrord_for_ci: Option<MirrordCi>,
+) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
     let binary_path = process_which(&binary)?;
 
@@ -463,35 +468,50 @@ where
 
     // env vars should be formatted as "varname=value" CStrings
     let env = env_vars
+        .clone()
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
     progress.success(Some("Ready!"));
 
-    // The execve hook is not yet active and does not hijack this call.
-    let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
-        .expect_err("call to execve cannot succeed");
-    error!("Couldn't execute {:?}", errno);
-    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+    match mirrord_for_ci {
+        Some(mirrord_ci) => mirrord_ci
+            .prepare_command(
+                &mut progress,
+                &binary,
+                &binary_path,
+                &binary_args,
+                &env_vars,
+            )
+            .await
+            .map_err(From::from),
+        None => {
+            // The execve hook is not yet active and does not hijack this call.
+            let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
+                .expect_err("call to execve cannot succeed");
+            error!("Couldn't execute {:?}", errno);
+            analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if errno == Errno::from_raw(86) {
-        // "Bad CPU type in executable"
-        if _did_sip_patch {
-            return Err(CliError::RosettaMissing(binary));
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            if errno == Errno::from_raw(86) {
+                // "Bad CPU type in executable"
+                if _did_sip_patch {
+                    return Err(CliError::RosettaMissing(binary));
+                }
+            }
+
+            if errno == nix::errno::Errno::E2BIG {
+                return Err(CliError::ExecveE2Big);
+            }
+
+            Err(CliError::BinaryExecuteFailed(binary, binary_args))
         }
     }
-
-    if errno == nix::errno::Errno::E2BIG {
-        return Err(CliError::ExecveE2Big);
-    }
-
-    Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
 #[cfg(target_os = "windows")]
-async fn execve_process<P>(
+async fn run_process_with_mirrord<P>(
     binary: String,
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
@@ -502,15 +522,9 @@ async fn execve_process<P>(
 where
     P: Progress,
 {
-    // Add .exe extension if necessary on Windows
-    // From CreateProcessW documentation:
-    // lpApplicationName - This parameter must include the file name extension; no default extension
-    // is assumed.
-    let binary_name = if binary.ends_with(".exe") {
-        binary.clone()
-    } else {
-        format!("{}.exe", binary)
-    };
+    // Let Windows handle executable resolution naturally
+    // Don't force .exe extension - Windows will try .exe, .bat, .cmd, etc. automatically
+    let binary_name = binary.clone();
 
     let binary_path = process_which(&binary_name).map_err(|e| {
         error!("process_which failed: {:?}", e);
@@ -713,12 +727,17 @@ pub(crate) fn print_config<P>(
     ));
 }
 
-async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) -> CliResult<()> {
+async fn exec(
+    args: &ExecArgs,
+    watch: drain::Watch,
+    user_data: &mut UserData,
+    progress: &mut ProgressTracker,
+    mirrord_for_ci: Option<MirrordCi>,
+) -> CliResult<()> {
     ensure_not_nested()?;
 
-    let mut progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
-        prompt_outdated_version(&progress).await;
+        prompt_outdated_version(progress).await;
     }
     info!(
         "Launching {:?} with arguments {:?}",
@@ -741,7 +760,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
 
-    crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
+    crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
@@ -761,9 +780,10 @@ async fn exec(args: &ExecArgs, watch: drain::Watch, user_data: &mut UserData) ->
         config,
         config_file_path.as_deref(),
         args,
-        &mut progress,
+        progress,
         &mut analytics,
         user_data,
+        mirrord_for_ci,
     )
     .await;
 
@@ -861,8 +881,14 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let (connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, branch_name).await?;
+    let (connection_info, connection) = create_and_connect(
+        &mut config,
+        &mut progress,
+        &mut analytics,
+        branch_name,
+        None,
+    )
+    .await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
@@ -935,7 +961,10 @@ fn main() -> miette::Result<()> {
             .unwrap_or_default();
 
         match cli.commands {
-            Commands::Exec(args) => exec(&args, watch, &mut user_data).await?,
+            Commands::Exec(args) => {
+                let mut progress = ProgressTracker::from_env("mirrord exec");
+                exec(&args, watch, &mut user_data, &mut progress, None).await?
+            }
             Commands::Dump(args) => windows_unsupported!(args, "dump", {
                 dump_command(&args, watch, &user_data).await?
             }),
@@ -960,9 +989,18 @@ fn main() -> miette::Result<()> {
             Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
                 extension_exec(*args, watch, &user_data).await?;
             }),
-            Commands::InternalProxy { port, .. } => {
+            Commands::InternalProxy {
+                port,
+                mirrord_for_ci,
+                ..
+            } => {
                 let config = mirrord_config::util::read_resolved_config()?;
-                logging::init_intproxy_tracing_registry(&config)?;
+
+                if mirrord_for_ci {
+                    MirrordCi::prepare_intproxy().await?;
+                }
+
+                logging::init_intproxy_tracing_registry(&config).await?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
@@ -990,7 +1028,7 @@ fn main() -> miette::Result<()> {
             Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;
 
-                logging::init_extproxy_tracing_registry(&config)?;
+                logging::init_extproxy_tracing_registry(&config).await?;
                 external_proxy::proxy(config, port, watch, &user_data).await?
             }),
             Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
@@ -998,7 +1036,8 @@ fn main() -> miette::Result<()> {
                 windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
             }
             Commands::Newsletter => newsletter::newsletter_command().await,
-            Commands::Ci(args) => ci::ci_command(*args).await?,
+            Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
+            Commands::DbBranches(args) => db_branches_command(*args).await?,
         };
 
         Ok(())
@@ -1024,35 +1063,60 @@ fn ensure_not_nested() -> CliResult<()> {
     }
 }
 
+/// Sends a request to the `analytics-server` at `/get-latest-version` to check if the mirrord
+/// version being used is outdated.
+///
+/// We send some extra information in the query params of this request, to help us identify the
+/// `source` (cli, or some IDE), `platform` (linux, macos, windows), and if we're running in ci.
 async fn prompt_outdated_version(progress: &ProgressTracker) {
     let mut progress = progress.subtask("version check");
     let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
 
-    if check_version
-        && let Ok(client) = reqwest::Client::builder()
-            .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
-            .build()
-            && let Ok(result) = client
+    if check_version {
+        let result: Result<(), Box<dyn std::error::Error>> = try {
+            let client = reqwest::Client::builder()
+                .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
+                .build()?;
+
+            let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
-                    CURRENT_VERSION,
-                    std::env::consts::OS
+                    "https://version.mirrord.dev/get-latest-version?source=&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    version = CURRENT_VERSION,
+                    platform = std::env::consts::OS,
+                    is_ci = is_ci::cached(),
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await
-                && let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
-                    if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
-                        let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
-                        let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
-                        progress.print(&format!("New mirrord version available: {}. To update, run: `{:?}`.", latest_version, command));
-                        progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.");
-                        progress.success(Some(&format!("update to {latest_version} available")));
-                    } else {
-                        progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
-                    }
-                }
+                .send().await?;
+
+            let latest_version = Version::parse(&sent.text().await.unwrap())?;
+
+            if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
+                let is_homebrew = which("mirrord")
+                    .ok()
+                    .map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew"))
+                    .unwrap_or_default();
+                let command = if is_homebrew {
+                    "brew upgrade metalbear-co/mirrord/mirrord"
+                } else {
+                    "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash"
+                };
+                progress.print(&format!(
+                    "New mirrord version available: {}. To update, run: `{:?}`.",
+                    latest_version, command
+                ));
+                progress.print(
+                    "To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.",
+                );
+                progress.success(Some(&format!("update to {latest_version} available")));
+            } else {
+                progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
+            }
+        };
+
+        result.ok();
+    }
 }
 
 #[cfg(test)]

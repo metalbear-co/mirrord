@@ -27,6 +27,9 @@ pub enum LayerUdpOutgoing {
     /// when reading or writing. Which means that this message is not the only way of
     /// closing outgoing udp connections.
     Close(LayerClose),
+
+    /// Same as [`LayerUdpOutgoing::Connect`], but contains a [`Uid`].
+    ConnectV2(LayerConnectV2),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -49,4 +52,8 @@ pub enum DaemonUdpOutgoing {
     /// the user with [`LayerUdpOutgoing::Close`], or from some error in the agent when
     /// writing or reading from the connection.
     Close(ConnectionId),
+
+    /// Same as [`DaemonUdpOutgoing::Connect`], but can be tracked back to the request with a
+    /// [`Uid`].
+    ConnectV2(DaemonConnectV2),
 }

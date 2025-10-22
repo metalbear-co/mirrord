@@ -45,8 +45,8 @@ pub enum LayerToProxyMessage {
     File(FileRequest),
     /// A DNS request.
     GetAddrInfo(GetAddrInfoRequestV2),
-    /// A request to initiate a new outgoing connection.
-    OutgoingConnect(OutgoingConnectRequest),
+    /// Requests related to outgoing connections.
+    Outgoing(OutgoingRequest),
     /// Requests related to incoming connections.
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
@@ -128,6 +128,14 @@ impl fmt::Display for NetProtocol {
     }
 }
 
+/// Requests related to outgoing connections.
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+pub enum OutgoingRequest {
+    Connect(OutgoingConnectRequest),
+    ConnMetadata(OutgoingConnMetadataRequest),
+    Close(OutgoingConnCloseRequest),
+}
+
 /// A request to initiate a new outgoing connection.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectRequest {
@@ -135,6 +143,20 @@ pub struct OutgoingConnectRequest {
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
+}
+
+/// A request for additional metadata for an outgoing connection.
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+pub struct OutgoingConnMetadataRequest {
+    /// ID of the outgoing connection.
+    pub conn_id: u128,
+}
+
+/// A request for closing the outgoing connection.
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+pub struct OutgoingConnCloseRequest {
+    /// ID of the outgoing connection.
+    pub conn_id: u128,
 }
 
 /// Requests related to incoming connections.
@@ -222,8 +244,8 @@ pub enum ProxyToLayerMessage {
     File(FileResponse),
     /// A response to layer's [`GetAddrInfoRequestV2`].
     GetAddrInfo(GetAddrInfoResponse),
-    /// A response to layer's [`OutgoingConnectRequest`].
-    OutgoingConnect(RemoteResult<OutgoingConnectResponse>),
+    /// A response to layer's [`OutgoingRequest`].
+    Outgoing(OutgoingResponse),
     /// A response to layer's [`IncomingRequest`].
     Incoming(IncomingResponse),
     /// A response to layer's [`LayerToProxyMessage::GetEnv`].
@@ -245,13 +267,33 @@ pub enum IncomingResponse {
     ConnMetadata(ConnMetadataResponse),
 }
 
+/// A response to layer's [`OutgoingRequest`].
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+pub enum OutgoingResponse {
+    Connect(RemoteResult<OutgoingConnectResponse>),
+    ConnMetadata(Option<OutgoingConnMetadataResponse>),
+}
+
 /// A response to layer's [`OutgoingConnectRequest`].
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectResponse {
+    /// Unique ID for this outgoing connection.
+    ///
+    /// Can later be used with [`OutgoingConnMetadataRequest`].
+    pub connection_id: u128,
     /// The address the layer should connect to instead of the address requested by the user.
     pub layer_address: SocketAddress,
     /// In-cluster address of the pod.
-    pub in_cluster_address: SocketAddress,
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
+    pub in_cluster_address: Option<SocketAddress>,
+}
+
+/// A response to layer's [`OutgoingConnMetadataRequest`].
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+pub struct OutgoingConnMetadataResponse {
+    /// In-cluster address of the pod.
+    pub in_cluster_address: SocketAddr,
 }
 
 /// A helper trait for `layer -> proxy` requests.
@@ -470,8 +512,20 @@ impl_request!(
 impl_request!(
     req = OutgoingConnectRequest,
     res = RemoteResult<OutgoingConnectResponse>,
-    req_path = LayerToProxyMessage::OutgoingConnect,
-    res_path = ProxyToLayerMessage::OutgoingConnect,
+    req_path = LayerToProxyMessage::Outgoing => OutgoingRequest::Connect,
+    res_path = ProxyToLayerMessage::Outgoing => OutgoingResponse::Connect,
+);
+
+impl_request!(
+    req = OutgoingConnMetadataRequest,
+    res = Option<OutgoingConnMetadataResponse>,
+    req_path = LayerToProxyMessage::Outgoing => OutgoingRequest::ConnMetadata,
+    res_path = ProxyToLayerMessage::Outgoing => OutgoingResponse::ConnMetadata,
+);
+
+impl_request!(
+    req = OutgoingConnCloseRequest,
+    req_path = LayerToProxyMessage::Outgoing => OutgoingRequest::Close,
 );
 
 impl_request!(

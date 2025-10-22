@@ -141,6 +141,14 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+
+        /// Set this when starting the internal proxy from `mirrord ci start`.
+        ///
+        /// Enables mirrord-for-ci intproxy pid saving, and checking for the `MIRRORD_CI_API_KEY`
+        /// env var.
+        #[arg(long, default_value_t = false)]
+        mirrord_for_ci: bool,
+
         /// Debug arguments.
         ///
         /// These are passed only for visibility in `ps` output,
@@ -155,6 +163,10 @@ pub(super) enum Commands {
     /// or intercept traffic and direct it to local ports (unstable).
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
+
+    /// Manage database branching.
+    #[command(name = "db-branches")]
+    DbBranches(Box<DbBranchesArgs>),
 
     /// Verify config file without starting mirrord.
     ///
@@ -177,7 +189,6 @@ pub(super) enum Commands {
     Newsletter,
 
     /// Execute a command related to mirrord CI.
-    #[command(hide = true)]
     Ci(Box<CiArgs>),
 }
 
@@ -260,8 +271,8 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub no_telemetry: bool,
 
-    #[arg(long)]
     /// Disable version check on startup.
+    #[arg(long)]
     pub disable_version_check: bool,
 
     /// Load config from config file
@@ -804,15 +815,6 @@ pub(super) struct OperatorSetupParams {
     #[arg(long, default_value_t = false)]
     pub(super) application_auto_pause: bool,
 
-    /// Enable MirrordClusterSession CRD's (curretly experimental and requires operator compiled
-    /// with experimental flag).
-    #[arg(
-        long = "experimental-statefull-sessions",
-        default_value_t = false,
-        hide = true
-    )]
-    pub(super) stateful_sessions: bool,
-
     /// Enable MySQL database branching.
     /// When set, some extra CRDs will be installed on the cluster, and the operator will run
     /// a mysql branching component.
@@ -1084,12 +1086,62 @@ pub(super) struct CiArgs {
     pub command: CiCommand,
 }
 
+/// `mirrord ci` commands.
 #[derive(Subcommand, Debug)]
 pub(super) enum CiCommand {
+    /// Generates a `CiApiKey` that should be set in the ci's environment variable as
+    /// `MIRRORD_CI_API_KEY`.
     ApiKey {
         /// Specify config file to use
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
+    },
+    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec`.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    Start(Box<ExecArgs>),
+
+    /// Stops mirrord for ci.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    Stop,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct DbBranchesArgs {
+    /// Specify the namespace to operate on
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Operate on all namespaces
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: DbBranchesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum DbBranchesCommand {
+    /// Show the status of database branches
+    Status {
+        /// Names of specific branches to show status for (all branches if none specified)
+        #[arg()]
+        names: Vec<String>,
+    },
+    /// Destroy database branches
+    Destroy {
+        /// Destroy all branches
+        #[arg(long, conflicts_with = "names")]
+        all: bool,
+        /// Names of specific branches to destroy
+        #[arg(required_unless_present = "all")]
+        names: Vec<String>,
     },
 }
 
