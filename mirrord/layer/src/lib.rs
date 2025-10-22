@@ -724,6 +724,9 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    // make sure none holds the mutex while fork is executing to avoid issues like https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
+    // might need to add more mutexes or all mutexes here.
+    let sockets = SOCKETS.lock();
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -771,6 +774,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
             Ordering::Less => tracing::debug!("fork failed"),
         }
 
+        drop(sockets);
         res
     }
 }
