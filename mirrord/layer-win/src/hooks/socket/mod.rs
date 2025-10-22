@@ -29,7 +29,7 @@ use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, FALSE, INT, TRUE},
+        minwindef::{BOOL, FALSE, HMODULE, INT, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{
             ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
@@ -2267,132 +2267,32 @@ unsafe extern "system" fn getsockopt_detour(
 }
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
-    let enabled_remote_dns = layer_setup().remote_dns_enabled();
+pub fn initialize_hooks(
+    guard: &mut DetourGuard<'static>,
+    setup: &mirrord_layer_lib::setup::windows::LayerSetup,
+) -> anyhow::Result<()> {
+    use mirrord_layer_lib::setup::windows::NetworkHookConfig;
 
-    // Register core socket operations
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "socket",
-        socket_detour,
-        SocketType,
-        SOCKET_ORIGINAL
-    )?;
+    let dns_enabled = setup.dns_hooks_enabled();
+    let socket_enabled = setup.socket_hooks_enabled();
+    let network_config = setup.network_config();
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "bind",
-        bind_detour,
-        BindType,
-        BIND_ORIGINAL
-    )?;
+    // Early return if no socket features are enabled
+    if !dns_enabled && !socket_enabled {
+        tracing::info!("All socket hooks disabled by configuration");
+        return Ok(());
+    }
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "listen",
-        listen_detour,
-        ListenType,
-        LISTEN_ORIGINAL
-    )?;
+    tracing::info!(
+        "Initializing socket hooks (DNS: {}, Sockets: {})",
+        dns_enabled,
+        socket_enabled
+    );
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "connect",
-        connect_detour,
-        ConnectType,
-        CONNECT_ORIGINAL
-    )?;
+    // DNS resolution hooks (if DNS is enabled)
+    if dns_enabled {
+        tracing::info!("Enabling DNS resolution hooks");
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "accept",
-        accept_detour,
-        AcceptType,
-        ACCEPT_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "getsockname",
-        getsockname_detour,
-        GetSockNameType,
-        GET_SOCK_NAME_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "getpeername",
-        getpeername_detour,
-        GetPeerNameType,
-        GET_PEER_NAME_ORIGINAL
-    )?;
-
-    // Register GetComputerNameExW hook - this is what Python's socket.gethostname() actually uses
-    apply_hook!(
-        guard,
-        "kernel32",
-        "GetComputerNameExW",
-        get_computer_name_ex_w_detour,
-        GetComputerNameExWType,
-        GET_COMPUTER_NAME_EX_W_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "kernel32",
-        "GetComputerNameExA",
-        get_computer_name_ex_a_detour,
-        GetComputerNameExAType,
-        GET_COMPUTER_NAME_EX_A_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "kernel32",
-        "GetComputerNameA",
-        get_computer_name_a_detour,
-        GetComputerNameAType,
-        GET_COMPUTER_NAME_A_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "kernel32",
-        "GetComputerNameW",
-        get_computer_name_w_detour,
-        GetComputerNameWType,
-        GET_COMPUTER_NAME_W_ORIGINAL
-    )?;
-
-    // WSAStartup hook
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSAStartup",
-        wsa_startup_detour,
-        WSAStartupType,
-        WSA_STARTUP_ORIGINAL
-    )?;
-
-    // Add WSACleanup hook to complete Winsock lifecycle management
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSACleanup",
-        wsa_cleanup_detour,
-        WSACleanupType,
-        WSA_CLEANUP_ORIGINAL
-    )?;
-
-    if enabled_remote_dns {
-        // Add DNS resolution hooks to handle our modified hostnames
         apply_hook!(
             guard,
             "ws2_32",
@@ -2420,12 +2320,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
             GET_ADDR_INFO_W_ORIGINAL
         )?;
 
-        // FreeAddrInfoW is a fraud - don't need to detour it explictly
-        // It should be named FreeAddrInfo(A|W), for reasons of UNICODE (blahblah) variable exports.
-        // freeaddrinfo is the same func for freeaddrinfo and FreeAddrInfoW
-        // MANAGED_ADDRINFO.remove called by freeaddrinfo_detour is aware of both cases
-        // see: https://learn.microsoft.com/en-us/windows/win32/api/ws2def/ns-ws2def-addrinfow
-
         apply_hook!(
             guard,
             "ws2_32",
@@ -2434,201 +2328,361 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
             FreeAddrInfoWType,
             FREE_ADDR_INFO_W_ORIGINAL
         )?;
+
+        // Hostname hooks
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "gethostname",
+            gethostname_detour,
+            GetHostNameType,
+            GET_HOST_NAME_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "kernel32",
+            "GetComputerNameExW",
+            get_computer_name_ex_w_detour,
+            GetComputerNameExWType,
+            GET_COMPUTER_NAME_EX_W_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "kernel32",
+            "GetComputerNameExA",
+            get_computer_name_ex_a_detour,
+            GetComputerNameExAType,
+            GET_COMPUTER_NAME_EX_A_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "kernel32",
+            "GetComputerNameA",
+            get_computer_name_a_detour,
+            GetComputerNameAType,
+            GET_COMPUTER_NAME_A_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "kernel32",
+            "GetComputerNameW",
+            get_computer_name_w_detour,
+            GetComputerNameWType,
+            GET_COMPUTER_NAME_W_ORIGINAL
+        )?;
+    } else {
+        tracing::info!("DNS hooks disabled by configuration");
     }
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "gethostname",
-        gethostname_detour,
-        GetHostNameType,
-        GET_HOST_NAME_ORIGINAL
-    )?;
+    // Socket operation hooks (if socket features are enabled)
+    if socket_enabled {
+        tracing::info!("Enabling socket operation hooks");
 
-    // Register data transfer hooks
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "recv",
-        recv_detour,
-        RecvType,
-        RECV_ORIGINAL
-    )?;
+        // Core socket operations (always needed if sockets enabled)
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "socket",
+            socket_detour,
+            SocketType,
+            SOCKET_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "send",
-        send_detour,
-        SendType,
-        SEND_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSASocketA",
+            wsa_socket_detour,
+            WSASocketType,
+            WSA_SOCKET_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "recvfrom",
-        recvfrom_detour,
-        RecvFromType,
-        RECV_FROM_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSASocketW",
+            wsa_socket_w_detour,
+            WSASocketWType,
+            WSA_SOCKET_W_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "sendto",
-        sendto_detour,
-        SendToType,
-        SEND_TO_ORIGINAL
-    )?;
+        // Socket lifecycle management
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "closesocket",
+            closesocket_detour,
+            CloseSocketType,
+            CLOSE_SOCKET_ORIGINAL
+        )?;
 
-    // Register socket management hooks
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "closesocket",
-        closesocket_detour,
-        CloseSocketType,
-        CLOSE_SOCKET_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "shutdown",
+            shutdown_detour,
+            ShutdownType,
+            SHUTDOWN_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "shutdown",
-        shutdown_detour,
-        ShutdownType,
-        SHUTDOWN_ORIGINAL
-    )?;
+        // Winsock startup/cleanup
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSAStartup",
+            wsa_startup_detour,
+            WSAStartupType,
+            WSA_STARTUP_ORIGINAL
+        )?;
 
-    // Register socket option hooks
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "setsockopt",
-        setsockopt_detour,
-        SetSockOptType,
-        SET_SOCK_OPT_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSACleanup",
+            wsa_cleanup_detour,
+            WSACleanupType,
+            WSA_CLEANUP_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "getsockopt",
-        getsockopt_detour,
-        GetSockOptType,
-        GET_SOCK_OPT_ORIGINAL
-    )?;
+        // Socket information hooks
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "getsockname",
+            getsockname_detour,
+            GetSockNameType,
+            GET_SOCK_NAME_ORIGINAL
+        )?;
 
-    // Register additional I/O control and monitoring hooks
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSAIoctl",
-        wsa_ioctl_detour,
-        WSAIoctlType,
-        WSA_IOCTL_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "getpeername",
+            getpeername_detour,
+            GetPeerNameType,
+            GET_PEER_NAME_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "ioctlsocket",
-        ioctlsocket_detour,
-        IoCtlSocketType,
-        IOCTL_SOCKET_ORIGINAL
-    )?;
+        // Socket options
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "setsockopt",
+            setsockopt_detour,
+            SetSockOptType,
+            SET_SOCK_OPT_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "select",
-        select_detour,
-        SelectType,
-        SELECT_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "getsockopt",
+            getsockopt_detour,
+            GetSockOptType,
+            GET_SOCK_OPT_ORIGINAL
+        )?;
 
-    // Register advanced Windows socket APIs
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSAGetLastError",
-        wsa_get_last_error_detour,
-        WSAGetLastErrorType,
-        WSA_GET_LAST_ERROR_ORIGINAL
-    )?;
+        // I/O control
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSAIoctl",
+            wsa_ioctl_detour,
+            WSAIoctlType,
+            WSA_IOCTL_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSASocketA",
-        wsa_socket_detour,
-        WSASocketType,
-        WSA_SOCKET_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "ioctlsocket",
+            ioctlsocket_detour,
+            IoCtlSocketType,
+            IOCTL_SOCKET_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSASocketW",
-        wsa_socket_w_detour,
-        WSASocketWType,
-        WSA_SOCKET_W_ORIGINAL
-    )?;
-    // Register Node.js specific WSA async I/O hooks
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSAConnect",
-        wsa_connect_detour,
-        WSAConnectType,
-        WSA_CONNECT_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "select",
+            select_detour,
+            SelectType,
+            SELECT_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSAAccept",
-        wsa_accept_detour,
-        WSAAcceptType,
-        WSA_ACCEPT_ORIGINAL
-    )?;
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "WSAGetLastError",
+            wsa_get_last_error_detour,
+            WSAGetLastErrorType,
+            WSA_GET_LAST_ERROR_ORIGINAL
+        )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSASend",
-        wsa_send_detour,
-        WSASendType,
-        WSA_SEND_ORIGINAL
-    )?;
+        // Incoming connection hooks (if incoming mode is not Off)
+        if network_config.requires_incoming_hooks() {
+            tracing::info!("Enabling incoming connection hooks");
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSARecv",
-        wsa_recv_detour,
-        WSARecvType,
-        WSA_RECV_ORIGINAL
-    )?;
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "bind",
+                bind_detour,
+                BindType,
+                BIND_ORIGINAL
+            )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSASendTo",
-        wsa_send_to_detour,
-        WSASendToType,
-        WSA_SEND_TO_ORIGINAL
-    )?;
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "listen",
+                listen_detour,
+                ListenType,
+                LISTEN_ORIGINAL
+            )?;
 
-    apply_hook!(
-        guard,
-        "ws2_32",
-        "WSARecvFrom",
-        wsa_recv_from_detour,
-        WSARecvFromType,
-        WSA_RECV_FROM_ORIGINAL
-    )?;
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "accept",
+                accept_detour,
+                AcceptType,
+                ACCEPT_ORIGINAL
+            )?;
 
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "WSAAccept",
+                wsa_accept_detour,
+                WSAAcceptType,
+                WSA_ACCEPT_ORIGINAL
+            )?;
+        } else {
+            tracing::info!("Incoming connection hooks disabled (incoming mode = Off)");
+        }
+
+        // Outgoing connection hooks (if outgoing features enabled)
+        if network_config.requires_outgoing_hooks() {
+            tracing::info!(
+                "Enabling outgoing connection hooks (TCP: {}, UDP: {})",
+                network_config.requires_tcp_hooks(),
+                network_config.requires_udp_hooks()
+            );
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "connect",
+                connect_detour,
+                ConnectType,
+                CONNECT_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "WSAConnect",
+                wsa_connect_detour,
+                WSAConnectType,
+                WSA_CONNECT_ORIGINAL
+            )?;
+        } else {
+            tracing::info!("Outgoing connection hooks disabled (no outgoing features enabled)");
+        }
+
+        // Data transfer hooks (conditional based on TCP/UDP settings)
+        if network_config.requires_tcp_hooks() {
+            tracing::info!("Enabling TCP data transfer hooks");
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "send",
+                send_detour,
+                SendType,
+                SEND_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "recv",
+                recv_detour,
+                RecvType,
+                RECV_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "WSASend",
+                wsa_send_detour,
+                WSASendType,
+                WSA_SEND_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "WSARecv",
+                wsa_recv_detour,
+                WSARecvType,
+                WSA_RECV_ORIGINAL
+            )?;
+        } else {
+            tracing::info!("TCP data transfer hooks disabled (TCP outgoing disabled)");
+        }
+
+        if network_config.requires_udp_hooks() {
+            tracing::info!("Enabling UDP data transfer hooks");
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "sendto",
+                sendto_detour,
+                SendToType,
+                SEND_TO_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "recvfrom",
+                recvfrom_detour,
+                RecvFromType,
+                RECV_FROM_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "WSASendTo",
+                wsa_send_to_detour,
+                WSASendToType,
+                WSA_SEND_TO_ORIGINAL
+            )?;
+
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "WSARecvFrom",
+                wsa_recv_from_detour,
+                WSARecvFromType,
+                WSA_RECV_FROM_ORIGINAL
+            )?;
+        } else {
+            tracing::info!("UDP data transfer hooks disabled (UDP outgoing disabled)");
+        }
+    } else {
+        tracing::info!("Socket operation hooks disabled by configuration");
+    }
+
+    tracing::info!("Socket hooks initialization completed");
     Ok(())
 }

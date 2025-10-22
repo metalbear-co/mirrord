@@ -2,9 +2,7 @@ pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 
     // Find the first null byte (0) using iterator pattern
-    let len = (0..buffer.len())
-        .take_while(|&i| buffer[i] != 0)
-        .count();
+    let len = (0..buffer.len()).take_while(|&i| buffer[i] != 0).count();
 
     // Convert to string, handling invalid UTF-8 gracefully
     String::from_utf8_lossy(buffer.get(..len).unwrap_or(buffer)).into_owned()
@@ -14,9 +12,7 @@ pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 
     // Find the first null u16 (0) using iterator pattern
-    let len = (0..buffer.len())
-        .take_while(|&i| buffer[i] != 0)
-        .count();
+    let len = (0..buffer.len()).take_while(|&i| buffer[i] != 0).count();
 
     // Convert u16 slice to string by treating each u16 as a Unicode code point
     // This is a simplified approach - real UTF-16 would be more complex
@@ -68,7 +64,7 @@ pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> 
         let len = (start..buffer.len())
             .take_while(|&i| buffer[i] != T::default())
             .count();
-        
+
         if len > 0 {
             if let Some(slice) = buffer.get(start..start + len) {
                 let substring = T::slice_to_string(slice);
@@ -77,9 +73,9 @@ pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> 
                 }
             }
         }
-        
+
         start += len + 1; // Move past the null terminator
-        
+
         // Check for double null terminator (end of MULTI_SZ)
         if start < buffer.len() && buffer[start] == T::default() {
             break;
@@ -162,7 +158,7 @@ pub unsafe fn lpcwstr_to_string_or_empty(ptr: *const u16) -> String {
 }
 
 /// Find the safe length of a multi-buffer by locating the double null terminator
-/// 
+///
 /// This function safely searches for the end of a multi-buffer (MULTI_SZ format)
 /// by finding the double null terminator pattern. It bounds the search to prevent
 /// reading beyond reasonable memory limits.
@@ -182,16 +178,16 @@ pub unsafe fn lpcwstr_to_string_or_empty(ptr: *const u16) -> String {
 /// * `Some(usize)` - The length including the double null terminator if found
 /// * `None` - If double null terminator not found within max_bytes or ptr is null
 pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
-    ptr: *const T, 
-    max_bytes: usize
+    ptr: *const T,
+    max_bytes: usize,
 ) -> Option<usize> {
     if ptr.is_null() {
         return None;
     }
-    
+
     let max_elements = max_bytes / std::mem::size_of::<T>();
     let max_reasonable_size = max_elements as isize;
-    
+
     let size = (0..max_reasonable_size)
         .take_while(|&i| {
             unsafe {
@@ -213,7 +209,7 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
             }
         })
         .count();
-    
+
     // Add 2 to include both null terminators if we found them
     if (size as isize) < max_reasonable_size {
         Some(size + 2)

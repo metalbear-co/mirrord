@@ -5,6 +5,7 @@
 //! processes.
 
 use std::{net::SocketAddr, time::Duration};
+
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
     proxy_connection::ProxyConnection,
@@ -40,14 +41,17 @@ pub fn detect_process_context() -> LayerResult<ProcessContext> {
         std::env::var(MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID),
         std::env::var(MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR),
     ) {
-        let parent_pid: u32 = parent_pid_str.parse()
-            .map_err(|_| LayerError::ProcessSynchronization("Invalid parent PID format".to_string()))?;
-        
-        let layer_id: u64 = parent_layer_id_str.parse()
-            .map_err(|_| LayerError::ProcessSynchronization("Invalid parent layer ID format".to_string()))?;
+        let parent_pid: u32 = parent_pid_str.parse().map_err(|_| {
+            LayerError::ProcessSynchronization("Invalid parent PID format".to_string())
+        })?;
 
-        let proxy_addr: SocketAddr = proxy_addr_str.parse()
-            .map_err(|_| LayerError::ProcessSynchronization("Invalid proxy address format".to_string()))?;
+        let layer_id: u64 = parent_layer_id_str.parse().map_err(|_| {
+            LayerError::ProcessSynchronization("Invalid parent layer ID format".to_string())
+        })?;
+
+        let proxy_addr: SocketAddr = proxy_addr_str.parse().map_err(|_| {
+            LayerError::ProcessSynchronization("Invalid proxy address format".to_string())
+        })?;
 
         Ok(ProcessContext::Child {
             parent_pid,
@@ -65,9 +69,16 @@ pub fn create_proxy_connection(context: &ProcessContext) -> LayerResult<ProxyCon
     let timeout = Duration::from_secs(DEFAULT_PROXY_CONNECTION_TIMEOUT_SECS);
 
     match context {
-        ProcessContext::Child { parent_pid, layer_id, proxy_addr } => {
+        ProcessContext::Child {
+            parent_pid,
+            layer_id,
+            proxy_addr,
+        } => {
             // This is a child process - handle inheritance similar to Unix fork_detour
-            tracing::debug!("Child process {} initializing layer with parent inheritance", current_pid);
+            tracing::debug!(
+                "Child process {} initializing layer with parent inheritance",
+                current_pid
+            );
 
             let process_info = create_process_info(current_pid, *parent_pid);
 
@@ -79,8 +90,12 @@ pub fn create_proxy_connection(context: &ProcessContext) -> LayerResult<ProxyCon
 
             let connection = ProxyConnection::new(*proxy_addr, session, timeout)
                 .map_err(LayerError::ProxyConnectionFailed)?;
-            
-            tracing::debug!("Child process {} successfully inherited layer state from parent {}", current_pid, parent_pid);
+
+            tracing::debug!(
+                "Child process {} successfully inherited layer state from parent {}",
+                current_pid,
+                parent_pid
+            );
             Ok(connection)
         }
         ProcessContext::Parent => {

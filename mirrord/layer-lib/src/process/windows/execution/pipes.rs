@@ -6,8 +6,9 @@
 use std::{ptr, thread};
 
 use winapi::{
-    shared::ntdef::{HANDLE, NULL},
+    shared::{ntdef::{HANDLE, NULL}, winerror::{ERROR_BROKEN_PIPE, ERROR_NO_DATA}},
     um::{
+        errhandlingapi::GetLastError,
         fileapi::{ReadFile, WriteFile},
         handleapi::{CloseHandle, SetHandleInformation},
         namedpipeapi::CreatePipe,
@@ -137,7 +138,7 @@ impl PipeForwarder {
             // Don't join the thread, let it continue running independently
             // The thread will naturally exit when the child process closes its end of the pipe
             std::mem::forget(handle);
-            
+
             // Don't close handles here - let the child process continue using them
             // The handles will be cleaned up when the child process exits
         }
@@ -163,7 +164,7 @@ impl Drop for PipeForwarder {
 pub struct StdioRedirection {
     pub stdout: Option<PipeForwarder>,
     pub stderr: Option<PipeForwarder>,
-     // Future expansion
+    // Future expansion
     pub stdin: Option<PipeForwarder>,
 }
 

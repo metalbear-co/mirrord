@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, ffi::OsString, ops::Deref, ptr};
 
+use base64::prelude::*;
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use mirrord_config::LayerConfig;
 use str_win::string_to_u16_buffer;
@@ -13,16 +14,12 @@ use winapi::{
     um::{
         handleapi::CloseHandle,
         minwinbase::LPSECURITY_ATTRIBUTES,
-        processenv::GetStdHandle,
         processthreadsapi::{
-            LPPROCESS_INFORMATION, LPSTARTUPINFOW, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
-            TerminateProcess, CreateProcessW, GetExitCodeProcess,
+            CreateProcessW, GetExitCodeProcess, LPPROCESS_INFORMATION, LPSTARTUPINFOW,
+            PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess,
         },
         synchapi::WaitForSingleObject,
-        winbase::{
-            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, STD_ERROR_HANDLE,
-            STD_OUTPUT_HANDLE, WAIT_OBJECT_0,
-        },
+        winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, WAIT_OBJECT_0},
         winnt::PHANDLE,
     },
 };
@@ -30,7 +27,6 @@ use winapi::{
 use super::sync::{LayerInitEvent, MIRRORD_LAYER_INIT_EVENT_NAME};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
-    process::windows::execution::pipes::StdioRedirection,
     proxy_connection::PROXY_CONNECTION,
     setup::layer_setup,
     socket::sockets::SHARED_SOCKETS_ENV_VAR,
@@ -73,20 +69,11 @@ pub type CreateProcessInternalWType = unsafe extern "system" fn(
 
 pub struct LayerManagedProcess {
     process_info: PROCESS_INFORMATION,
-    stdio_redirection: Option<StdioRedirection>,
     released: bool,
     terminate_on_drop: bool,
 }
 
 impl LayerManagedProcess {
-    /// Create stdio redirection for child process output to parent
-    fn create_stdio_redirection() -> LayerResult<Option<StdioRedirection>> {
-        match StdioRedirection::create_for_child() {
-            Ok(redirection) => Ok(Some(redirection)),
-            Err(_) => Ok(None), // Fallback to no redirection
-        }
-    }
-
     /// Build Windows environment block from HashMap (UTF-16 format)
     fn build_windows_env_block(environment: &HashMap<String, String>) -> Vec<u16> {
         let mut windows_environment: Vec<u16> = Vec::new();
@@ -95,10 +82,8 @@ impl LayerManagedProcess {
             let entry_wide = string_to_u16_buffer(&entry);
             windows_environment.extend(entry_wide);
         }
-        // Unicode environment block is terminated by four zero bytes:
-        // two for the last string, two more to terminate the block
-        windows_environment.push(0); // Terminate the last string
-        windows_environment.push(0); // Terminate the block
+        // add environment block null terminator
+        windows_environment.push(0);
         windows_environment
     }
 
@@ -120,30 +105,99 @@ impl LayerManagedProcess {
         if let Ok(layer_file) = std::env::var(MIRRORD_LAYER_FILE_ENV) {
             env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), layer_file);
         }
-        
-        // Forward shared sockets environment variable if it exists
-        if let Ok(shared_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), shared_sockets.clone());
-            tracing::debug!("Forwarding shared sockets to child process: {}", shared_sockets);
-        }
-        
-        // Add resolved config for child process inheritance
-        // First try to get from environment variable, then fallback to encoding current config
-        if let Ok(resolved_config) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
-            env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), resolved_config);
+
+        // Forward RUST_LOG for child process tracing
+        if let Ok(rust_log) = std::env::var("RUST_LOG") {
+            tracing::warn!(
+                "🎯 LAYER_LIB: Forwarding RUST_LOG={} to child process",
+                rust_log
+            );
+            env_vars.insert("RUST_LOG".to_string(), rust_log);
         } else {
-            // Fallback: try to encode current config if layer setup is available
-            // Use a safe approach that doesn't panic if setup isn't initialized
-            match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
-                Ok(Ok(encoded_config)) => {
-                    env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
-                    tracing::debug!("Fallback: encoded current config for child process inheritance");
+            tracing::warn!("🎯 LAYER_LIB: No RUST_LOG found in current process environment");
+        }
+
+        // Forward RUST_BACKTRACE for child process debugging
+        if let Ok(rust_backtrace) = std::env::var("RUST_BACKTRACE") {
+            env_vars.insert("RUST_BACKTRACE".to_string(), rust_backtrace);
+        }
+
+        // Encode and forward current socket state to child process (like Unix prepare_execve_envp)
+        match crate::socket::sockets::shared_sockets() {
+            Ok(sockets) => {
+                let socket_count = sockets.len();
+                match bincode::encode_to_vec(&sockets, bincode::config::standard()) {
+                    Ok(encoded_bytes) => {
+                        let encoded_sockets = BASE64_URL_SAFE.encode(encoded_bytes);
+                        env_vars
+                            .insert(SHARED_SOCKETS_ENV_VAR.to_string(), encoded_sockets.clone());
+                        tracing::debug!(
+                            "Encoded and forwarding {} shared sockets to child process: {}",
+                            socket_count,
+                            encoded_sockets
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to encode shared sockets: {}", e);
+                        // Fallback: try to forward existing environment variable if it exists
+                        if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
+                            env_vars.insert(
+                                SHARED_SOCKETS_ENV_VAR.to_string(),
+                                existing_sockets.clone(),
+                            );
+                            tracing::debug!(
+                                "Fallback: forwarding existing shared sockets: {}",
+                                existing_sockets
+                            );
+                        }
+                    }
                 }
-                Ok(Err(encode_error)) => {
-                    tracing::warn!("Could not encode current config for child process: {}", encode_error);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get shared sockets: {}", e);
+                // Fallback: try to forward existing environment variable if it exists
+                if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
+                    env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), existing_sockets.clone());
+                    tracing::debug!(
+                        "Fallback: forwarding existing shared sockets: {}",
+                        existing_sockets
+                    );
                 }
-                Err(_) => {
-                    tracing::error!("Layer setup not available yet, cannot provide fallback config to child process");
+            }
+        }
+
+        // Add resolved config for child process inheritance
+        // Only add if not already present in the environment we're building
+        if !env_vars.contains_key(LayerConfig::RESOLVED_CONFIG_ENV) {
+            // First try to get from current environment variable, then fallback to encoding current
+            // config
+            if let Ok(resolved_config) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
+                env_vars.insert(
+                    LayerConfig::RESOLVED_CONFIG_ENV.to_string(),
+                    resolved_config,
+                );
+            } else {
+                // Fallback: try to encode current config if layer setup is available
+                // Use a safe approach that doesn't panic if setup isn't initialized
+                match std::panic::catch_unwind(|| layer_setup().layer_config().encode()) {
+                    Ok(Ok(encoded_config)) => {
+                        env_vars
+                            .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
+                        tracing::debug!(
+                            "Fallback: encoded current config for child process inheritance"
+                        );
+                    }
+                    Ok(Err(encode_error)) => {
+                        tracing::warn!(
+                            "Could not encode current config for child process: {}",
+                            encode_error
+                        );
+                    }
+                    Err(_) => {
+                        tracing::error!(
+                            "Layer setup not available yet, cannot provide fallback config to child process"
+                        );
+                    }
                 }
             }
         }
@@ -168,19 +222,6 @@ impl LayerManagedProcess {
                 proxy_conn.proxy_addr().to_string(),
             );
         }
-    }
-
-    /// Setup stdio forwarding from child to parent handles
-    fn setup_stdio_forwarding(&mut self) -> LayerResult<()> {
-        if let Some(ref mut redirection) = self.stdio_redirection {
-            unsafe {
-                let parent_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-                let parent_stderr = GetStdHandle(STD_ERROR_HANDLE);
-
-                redirection.start_forwarding(parent_stdout, parent_stderr)?;
-            }
-        }
-        Ok(())
     }
 
     /// Execute process with layer injection for CLI context, returning managed process
@@ -272,8 +313,9 @@ impl LayerManagedProcess {
 
         let parent_event = LayerInitEvent::for_parent()?;
 
-        // Determine the final environment: either caller's custom environment or parent environment + mirrord vars
-        // Always create environment block since we need mirrord variables in both cases
+        // Determine the final environment: either caller's custom environment or parent environment
+        // + mirrord vars Always create environment block since we need mirrord variables in
+        // both cases
         let environment = {
             let mut env = if caller_env_vars.is_empty() {
                 // Caller wants to inherit parent environment - get current environment
@@ -287,11 +329,6 @@ impl LayerManagedProcess {
         };
         let mut env_storage = Self::build_windows_env_block(&environment);
         let environment_ptr = env_storage.as_mut_ptr() as LPVOID;
-        // Create stdio redirection and setup original startup info
-        let stdio_redirection = Self::create_stdio_redirection()?;
-        if let Some(ref redirection) = stdio_redirection {
-            redirection.setup_startup_info(caller_startup_info);
-        }
 
         // Calculate final creation flags (original + environment + suspended)
         let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
@@ -299,17 +336,11 @@ impl LayerManagedProcess {
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
 
-        let mut managed_process = Self {
+        let managed_process = Self {
             process_info,
-            stdio_redirection,
             released: false,
             terminate_on_drop: false,
         };
-
-        // Close child handles after process creation
-        if let Some(ref mut redirection) = managed_process.stdio_redirection {
-            redirection.close_child_handles();
-        }
 
         // The process is already created and suspended by the original call
         // Now we just need to inject the DLL and resume
@@ -317,11 +348,7 @@ impl LayerManagedProcess {
     }
 
     /// Inject DLL into existing suspended process and resume execution
-    fn inject_and_resume(
-        mut self,
-        dll_path: &str,
-        parent_event: &LayerInitEvent,
-    ) -> LayerResult<Self> {
+    fn inject_and_resume(self, dll_path: &str, parent_event: &LayerInitEvent) -> LayerResult<Self> {
         let injector_process = InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)
             .map_err(|_| LayerError::ProcessNotFound(self.process_info.dwProcessId))?;
 
@@ -342,9 +369,6 @@ impl LayerManagedProcess {
             }
         }
 
-        // Setup stdio forwarding BEFORE resuming the thread to avoid race conditions
-        self.setup_stdio_forwarding()?;
-
         // Resume the main thread - ResumeThread returns the previous suspend count
         // A return value of u32::MAX (0xFFFFFFFF) indicates an error
         unsafe {
@@ -353,12 +377,10 @@ impl LayerManagedProcess {
                 let error = WindowsError::last_error();
                 return Err(LayerError::WindowsProcessCreation(error));
             }
-            tracing::debug!("✅ Thread resumed, previous suspend count: {}", previous_suspend_count);
-        }
-
-        // Detach stdio forwarding to let it run independently
-        if let Some(ref mut redirection) = self.stdio_redirection {
-            redirection.detach_forwarding();
+            tracing::debug!(
+                "✅ Thread resumed, previous suspend count: {}",
+                previous_suspend_count
+            );
         }
 
         Ok(self)
@@ -381,11 +403,7 @@ impl LayerManagedProcess {
             }
 
             let mut exit_code = 0u32;
-            if GetExitCodeProcess(
-                self.process_info.hProcess,
-                &mut exit_code,
-            ) == 0
-            {
+            if GetExitCodeProcess(self.process_info.hProcess, &mut exit_code) == 0 {
                 return Err(LayerError::WindowsProcessCreation(
                     WindowsError::last_error(),
                 ));
@@ -407,10 +425,6 @@ impl Deref for LayerManagedProcess {
 
 impl Drop for LayerManagedProcess {
     fn drop(&mut self) {
-        if let Some(ref mut redirection) = self.stdio_redirection {
-            redirection.stop_forwarding();
-        }
-
         if !self.released {
             if self.terminate_on_drop {
                 unsafe {

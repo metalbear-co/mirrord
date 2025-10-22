@@ -5,12 +5,16 @@ use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use mirrord_config::{
     LayerConfig,
-    feature::network::{
-        incoming::{
-            IncomingConfig,
-            http_filter::{HttpFilterConfig, InnerFilter, PortList},
+    feature::{
+        fs::FsModeConfig,
+        network::{
+            NetworkConfig,
+            incoming::{
+                IncomingConfig, IncomingMode as ConfigIncomingMode,
+                http_filter::{HttpFilterConfig, InnerFilter, PortList},
+            },
+            outgoing::OutgoingConfig,
         },
-        outgoing::OutgoingConfig,
     },
     target::Target,
 };
@@ -21,6 +25,58 @@ use mirrord_protocol::{
 };
 
 use crate::socket::{DnsSelector, OutgoingSelector};
+
+/// Helper trait to extend FsModeConfig with hook decision logic
+pub trait FsHookConfig {
+    fn should_enable_read_hooks(&self) -> bool;
+    fn should_enable_write_hooks(&self) -> bool;
+    fn should_enable_metadata_hooks(&self) -> bool;
+    fn is_active(&self) -> bool;
+}
+
+impl FsHookConfig for FsModeConfig {
+    fn should_enable_read_hooks(&self) -> bool {
+        matches!(self, FsModeConfig::Read | FsModeConfig::Write)
+    }
+
+    fn should_enable_write_hooks(&self) -> bool {
+        matches!(self, FsModeConfig::Write)
+    }
+
+    fn should_enable_metadata_hooks(&self) -> bool {
+        !matches!(self, FsModeConfig::Local)
+    }
+
+    fn is_active(&self) -> bool {
+        !matches!(self, FsModeConfig::Local)
+    }
+}
+
+/// Helper trait for network hook decisions
+pub trait NetworkHookConfig {
+    fn requires_incoming_hooks(&self) -> bool;
+    fn requires_outgoing_hooks(&self) -> bool;
+    fn requires_tcp_hooks(&self) -> bool;
+    fn requires_udp_hooks(&self) -> bool;
+}
+
+impl NetworkHookConfig for NetworkConfig {
+    fn requires_incoming_hooks(&self) -> bool {
+        self.incoming.mode != ConfigIncomingMode::Off
+    }
+
+    fn requires_outgoing_hooks(&self) -> bool {
+        self.outgoing.tcp || self.outgoing.udp
+    }
+
+    fn requires_tcp_hooks(&self) -> bool {
+        self.outgoing.tcp
+    }
+
+    fn requires_udp_hooks(&self) -> bool {
+        self.outgoing.udp
+    }
+}
 
 /// Windows supported layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -98,6 +154,47 @@ impl LayerSetup {
 
     pub fn local_hostname(&self) -> bool {
         self.local_hostname
+    }
+
+    // Hook control methods for configuration-based hook enablement
+
+    /// Check if file system hooks should be enabled based on configuration
+    pub fn fs_hooks_enabled(&self) -> bool {
+        use mirrord_config::feature::fs::FsModeConfig;
+        !matches!(self.config.feature.fs.mode, FsModeConfig::Local)
+    }
+
+    /// Check if socket hooks should be enabled based on configuration
+    pub fn socket_hooks_enabled(&self) -> bool {
+        self.config.feature.network.incoming.mode != ConfigIncomingMode::Off
+            || self.config.feature.network.outgoing.tcp
+            || self.config.feature.network.outgoing.udp
+    }
+
+    /// Check if DNS hooks should be enabled based on configuration
+    pub fn dns_hooks_enabled(&self) -> bool {
+        self.config.feature.network.dns.enabled
+    }
+
+    /// Check if process hooks should be enabled (always true for Windows)
+    pub fn process_hooks_enabled(&self) -> bool {
+        // Process hooks always needed for Windows DLL injection
+        true
+    }
+
+    /// Get access to experimental configuration
+    pub fn experimental_features(&self) -> &mirrord_config::experimental::ExperimentalConfig {
+        &self.config.experimental
+    }
+
+    /// Get access to file system configuration
+    pub fn fs_config(&self) -> &mirrord_config::feature::fs::FsConfig {
+        &self.config.feature.fs
+    }
+
+    /// Get access to network configuration  
+    pub fn network_config(&self) -> &mirrord_config::feature::network::NetworkConfig {
+        &self.config.feature.network
     }
 }
 
