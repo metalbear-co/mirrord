@@ -579,7 +579,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
         }
     }
 
-    /// Get the environment variable with [`name`] from the target's pod spec.
+    /// Get the environment variable with `name` from the target's pod spec.
     pub fn get_env(&self, name: &str) -> Option<&EnvVar> {
         let pod_spec = self.get_pod_spec()?;
         let target_container = self.container();
