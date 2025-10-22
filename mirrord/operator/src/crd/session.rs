@@ -1,8 +1,8 @@
 use std::{fmt, time::Duration};
 
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use kube::CustomResource;
 use mirrord_config::feature::network::incoming::ConcurrentSteal;
-use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
@@ -109,121 +109,100 @@ impl fmt::Display for AgentLimit {
     group = "mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordClusterSession",
-    status = "MirrordClusterSessionStatus"
+    status = "MirrordClusterSessionStatus",
+    printcolumn = r#"{"name":"USER ID", "type":"string", "description":"User unique ID..", "jsonPath":".spec.owner.userId"}"#,
+    printcolumn = r#"{"name":"USERNAME", "type":"string", "description":"User local POSIX name.", "jsonPath":".spec.owner.username"}"#,
+    printcolumn = r#"{"name":"HOSTNAME", "type":"string", "description":"User hostname.", "jsonPath":".spec.owner.hostname"}"#,
+    printcolumn = r#"{"name":"K8S USER", "type":"string", "description":"User Kubernetes name.", "jsonPath":".spec.owner.k8sUsername"}"#,
+    printcolumn = r#"{"name":"NAMESPACE", "type":"string", "description":"Namespace of the session.", "jsonPath":".spec.namespace"}"#,
+    printcolumn = r#"{"name":"TARGET", "type":"string", "description":"Target of the session.", "jsonPath":".spec.target"}"#,
+    printcolumn = r#"{"name":"STARTED AT", "type":"date", "description":"Time when the session was started.", "jsonPath":".metadata.creationTimestamp"}"#,
+    printcolumn = r#"{"name":"CLOSED AT", "type":"date", "description":"Time when the session was closed.", "jsonPath":".metadata.deletionTimestamp"}"#,
+    printcolumn = r#"{"name":"CLOSE REASON", "type":"string", "description":"Reason for which the session was closed.", "jsonPath":".status.closed.reason"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionSpec {
-    /// Resources needed to report session metrics to the mirrord Jira app
+    /// Resources needed to report session metrics to the mirrord Jira app.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub jira_metrics_resources: Option<JiraMetricsResources>,
-
+    pub jira_metrics: Option<SessionJiraMetrics>,
     /// Owner of this session
-    pub owner: MirrordClusterSessionOwner,
-
+    pub owner: SessionOwner,
+    /// Kubernetes namespace of the session.
+    pub namespace: String,
     /// Agent Limit
     #[serde(default)]
     #[schemars(with = "String")]
     pub agent_limit: AgentLimit,
-
     /// State of concurrent steal
     #[serde(default)]
     pub on_concurrent_steal: ConcurrentSteal,
-
+    /// Sesssion Max time
     #[serde(default)]
     pub max_time: Option<Duration>,
-
-    /// Session's [`Target`](mirrord_config::target::Target)
-    pub target: SessionTarget,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrordClusterSessionStatus {
-    /// List of registed agents
-    #[serde(default)]
-    pub agents: Vec<MirrordClusterSessionAgent>,
-}
-
-#[derive(Clone, Debug, Deserialize, Default, Eq, PartialEq, Serialize, JsonSchema)]
-pub enum MirrordClusterSessionAgentPhase {
-    #[default]
-    Pending,
-
-    Created,
-
-    Running,
-
-    Terminating,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionAgentError {
+    /// Target of the session.
+    ///
+    /// None for targetless sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<i32>,
-
-    pub message: String,
+    pub target: Option<SessionTarget>,
 }
 
+/// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordClusterSessionAgent {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connection_info: Option<AgentKubernetesConnectInfo>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<SessionAgentError>,
-
-    #[serde(default)]
-    pub phase: MirrordClusterSessionAgentPhase,
-
-    pub target: SessionTarget,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrordClusterSessionOwner {
+pub struct SessionOwner {
     /// Unique ID.
     pub user_id: String,
-    /// Creator local username.
+    /// Name of the POSIX user that executed the CLI command.
     pub username: String,
-    /// Creator hostname.
+    /// Hostname of the machine where the CLI command was executed.
     pub hostname: String,
-    /// Creator Kubernetes username.
+    /// Name of the Kubernetes user who's identity was assumed by the CLI.
     pub k8s_username: String,
 }
 
-/// Resources needed to report session metrics to the mirrord Jira app
+/// Describes a target of a mirrord session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
-    /// Target's Resource apiVersion
+    /// Kubernetes resource apiVersion.
     pub api_version: String,
-
-    /// Target's Resource Kind
+    /// Kubernetes resource kind.
     pub kind: String,
-
-    /// Target Namespace
-    pub namespace: String,
-
-    /// Target Name (will be empty for targetless)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    /// Target Container
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub container: Option<String>,
+    /// Kubernetes resource name.
+    pub name: String,
+    /// Name of the container defined in the Pod spec.
+    pub container: String,
 }
 
-/// Resources needed to report session metrics to the mirrord Jira app
+/// Resources needed to report session metrics to the mirrord Jira app.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct JiraMetricsResources {
-    /// The Jira webhook URL, used to update total session time in the mirrord Jira app
-    pub jira_webhook_url: String,
-
-    /// The user's current git branch, used for sending session metrics to mirrord Jira app
+pub struct SessionJiraMetrics {
+    /// The user's current git branch.
     pub branch_name: String,
+}
+
+/// Describes an owner of a mirrord session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordClusterSessionStatus {
+    /// Last time when the session was observed to have an open user connection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_timestamp: Option<MicroTime>,
+    /// If the session has been closed, describes the reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed: Option<SessionClosed>,
+}
+
+/// Describes the reason for with a mirrord session was closed.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClosed {
+    /// Short reason in PascalCase.
+    pub reason: String,
+    /// Optional human friendly message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[cfg(test)]
