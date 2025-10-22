@@ -152,6 +152,10 @@ use crate::go::go_hooks;
 
 const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
+/// if this env var exists, we exit.
+/// This to allow a way to protect from mirrord being used in destructive tests and such.
+const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
+
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
 //  2. Is `Sync` (because shared static vars have to be).
@@ -187,6 +191,12 @@ static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
+    // we don't care about value, just that this env exists
+    let dont_start = std::env::var(FAILSAFE_ENV).is_ok();
+    if dont_start {
+        panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
+    }
+
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {

@@ -11,7 +11,7 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource, ConnectionSourceKind, DatabaseBranchConfig, DatabaseBranchesConfig,
-        DatabaseType,
+        MysqlBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -178,15 +178,15 @@ impl DatabaseBranchParams {
     pub(crate) fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
         let mut mysql = HashMap::new();
         for branch_db_config in config.0.iter() {
-            let id = if let Some(id) = branch_db_config.id.clone() {
-                BranchDatabaseId::specified(id)
-            } else {
-                BranchDatabaseId::generate_new()
-            };
-            match branch_db_config._type {
-                DatabaseType::MySql => {
-                    let params = MysqlBranchParams::new(id.as_ref(), branch_db_config, target);
-                    mysql.insert(id, params)
+            match branch_db_config {
+                DatabaseBranchConfig::Mysql(mysql_config) => {
+                    let id = if let Some(id) = mysql_config.base.id.clone() {
+                        BranchDatabaseId::specified(id)
+                    } else {
+                        BranchDatabaseId::generate_new()
+                    };
+                    let params = MysqlBranchParams::new(id.as_ref(), mysql_config, target);
+                    mysql.insert(id, params);
                 }
             };
         }
@@ -248,9 +248,9 @@ pub(crate) struct MysqlBranchParams {
 }
 
 impl MysqlBranchParams {
-    pub(crate) fn new(id: &str, config: &DatabaseBranchConfig, target: &Target) -> Self {
+    pub(crate) fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = match &config.connection {
+        let connection_source = match &config.base.connection {
             ConnectionSource::Url(kind) => match kind {
                 ConnectionSourceKind::Env {
                     container,
@@ -263,11 +263,11 @@ impl MysqlBranchParams {
         };
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_string(),
-            database_name: config.name.clone(),
+            database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
-            ttl_secs: config.ttl_secs,
-            mysql_version: config.version.clone(),
+            ttl_secs: config.base.ttl_secs,
+            mysql_version: config.base.version.clone(),
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),

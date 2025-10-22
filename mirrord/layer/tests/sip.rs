@@ -35,7 +35,7 @@ async fn tmp_dir_read_locally(dylib_path: &Path) {
         TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
-    let mut intproxy = TestIntProxy::new(listener).await;
+    let mut intproxy = TestIntProxy::new(listener, None).await;
     println!("Application subscribed to port, sending tcp messages.");
 
     intproxy

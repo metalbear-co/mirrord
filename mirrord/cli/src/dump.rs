@@ -62,7 +62,7 @@ pub async fn dump_command(
 
     // Create connection to the agent
     let (_connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None).await?;
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
 
     // Start the dump session
     let session = DumpSession::new(connection, args.ports.clone());

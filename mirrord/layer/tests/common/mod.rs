@@ -17,18 +17,24 @@ use std::{
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, LayerFileConfig, MIRRORD_LAYER_INTPROXY_ADDR,
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
 use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
+    outgoing::{
+        DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
+    uid::Uid,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
@@ -117,9 +123,21 @@ pub struct TestIntProxy {
 }
 
 impl TestIntProxy {
-    pub async fn new(listener: TcpListener) -> Self {
+    pub async fn new(listener: TcpListener, config: Option<&Path>) -> Self {
         let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
+        let experimental_config = match config {
+            Some(path) => {
+                LayerFileConfig::from_path(path)
+                    .unwrap()
+                    .generate_config(&mut Default::default())
+                    .unwrap()
+                    .experimental
+            }
+            None => ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+        };
 
         tokio::spawn(async move {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
@@ -131,9 +149,7 @@ impl TestIntProxy {
                 0,
                 Default::default(),
                 Duration::from_secs(60),
-                &ExperimentalFileConfig::default()
-                    .generate_config(&mut Default::default())
-                    .unwrap(),
+                &experimental_config,
             );
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
@@ -153,6 +169,72 @@ impl TestIntProxy {
 
     pub async fn recv(&mut self) -> ClientMessage {
         self.try_recv().await.expect("intproxy connection closed")
+    }
+
+    pub async fn recv_tcp_connect(&mut self) -> (Uid, SocketAddr) {
+        match self.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                println!("Received TCP connect request for address {addr} with uid {uid}");
+                (uid, addr)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_tcp_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_addr: SocketAddr,
+        local_addr: SocketAddr,
+    ) {
+        self.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: remote_addr.into(),
+                    local_address: local_addr.into(),
+                }),
+            },
+        )))
+        .await
+    }
+
+    pub async fn recv_udp_connect(&mut self) -> (Uid, SocketAddr) {
+        match self.recv().await {
+            ClientMessage::UdpOutgoing(LayerUdpOutgoing::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address: SocketAddress::Ip(addr),
+            })) => {
+                println!("Received UDP connect request for address {addr} with uid {uid}");
+                (uid, addr)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_udp_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_addr: SocketAddr,
+        local_addr: SocketAddr,
+    ) {
+        self.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::ConnectV2(
+            DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address: remote_addr.into(),
+                    local_address: local_addr.into(),
+                }),
+            },
+        )))
+        .await
     }
 
     pub async fn try_recv(&mut self) -> Option<ClientMessage> {
@@ -180,8 +262,12 @@ impl TestIntProxy {
             .expect("intproxy connection failed");
     }
 
-    pub async fn new_with_app_port(listener: TcpListener, app_port: u16) -> Self {
-        let mut res = Self::new(listener).await;
+    pub async fn new_with_app_port(
+        listener: TcpListener,
+        app_port: u16,
+        config: Option<&Path>,
+    ) -> Self {
+        let mut res = Self::new(listener, config).await;
 
         let msg = res.recv().await;
         println!("Got first message from library: {:?}", msg);
@@ -858,7 +944,9 @@ pub enum Application {
     GoFAccessAt(GoVersion),
     GoSelfOpen(GoVersion),
     RustOutgoingUdp,
-    RustOutgoingTcp,
+    RustOutgoingTcp {
+        non_blocking: bool,
+    },
     RustIssue1123,
     RustIssue1054,
     RustIssue1458,
@@ -983,7 +1071,7 @@ impl Application {
             Application::RustIssue1458PortNot53 => {
                 String::from("tests/apps/issue1458portnot53/target/issue1458portnot53")
             }
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
@@ -1199,10 +1287,21 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+            Application::RustOutgoingTcp {
+                non_blocking: false,
+            } => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            Application::RustOutgoingTcp { non_blocking: true } => [
+                "--tcp",
+                RUST_OUTGOING_LOCAL,
+                RUST_OUTGOING_PEERS,
+                "--non-blocking",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
             Application::GoOpen {
                 path, flags, mode, ..
             } => {
@@ -1254,7 +1353,7 @@ impl Application {
             | Application::GoSelfOpen(..)
             | Application::GoDir(..)
             | Application::RustOutgoingUdp
-            | Application::RustOutgoingTcp
+            | Application::RustOutgoingTcp { .. }
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
             | Application::RustIssue1776
@@ -1306,7 +1405,10 @@ impl Application {
         let env = get_env(dylib_path, address, extra_env_vars, configuration_file);
         let test_process = self.get_test_process(env).await;
 
-        (test_process, TestIntProxy::new(listener).await)
+        (
+            test_process,
+            TestIntProxy::new(listener, configuration_file).await,
+        )
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
@@ -1323,7 +1425,8 @@ impl Application {
 
         (
             test_process,
-            TestIntProxy::new_with_app_port(listener, self.get_app_port()).await,
+            TestIntProxy::new_with_app_port(listener, self.get_app_port(), configuration_file)
+                .await,
         )
     }
 }

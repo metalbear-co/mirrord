@@ -33,6 +33,7 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
+mirrord-auth= { path = "../auth" }
 
 actix-codec.workspace = true
 clap.workspace = true
@@ -68,9 +69,10 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
+is_ci = "1.2.0"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-nix = { workspace = true, features = ["process", "resource"] }
+nix = { workspace = true, features = ["process", "resource", "signal"] }
 base64.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
