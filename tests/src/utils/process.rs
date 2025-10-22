@@ -1,7 +1,8 @@
 use core::ops::Not;
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
-    os::unix::process::ExitStatusExt,
     process::{ExitStatus, Stdio},
     sync::Arc,
     time::Duration,
@@ -75,21 +76,37 @@ impl TestProcess {
 
     pub async fn wait_assert_success(&mut self) {
         let output = self.wait().await;
+        #[cfg(not(target_os = "windows"))]
         assert!(
             output.success(),
             "application unexpectedly failed: exit code {:?}, signal code {:?}",
             output.code(),
             output.signal(),
         );
+
+        #[cfg(target_os = "windows")]
+        assert!(
+            output.success(),
+            "application unexpectedly failed: exit code {:?}",
+            output.code(),
+        );
     }
 
     pub async fn wait_assert_fail(&mut self) {
         let output = self.wait().await;
+        #[cfg(not(target_os = "windows"))]
         assert!(
             output.success().not(),
             "application unexpectedly succeeded: exit code {:?}, signal code {:?}",
             output.code(),
             output.signal()
+        );
+
+        #[cfg(target_os = "windows")]
+        assert!(
+            output.success().not(),
+            "application unexpectedly succeeded: exit code {:?}",
+            output.code(),
         );
     }
 

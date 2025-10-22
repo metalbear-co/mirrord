@@ -180,7 +180,7 @@ impl PortForwarder {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_agent(
         &mut self,
         message: DaemonMessage,
@@ -233,6 +233,12 @@ impl PortForwarder {
                         let _ = self.id_oneshots.pop_front();
                     }
                 },
+                DaemonTcpOutgoing::ConnectV2(..) => {
+                    // Port forwarder does not use connect v2 variants.
+                    return Err(PortForwardError::AgentError(format!(
+                        "unexpected message from agent: {message:?}"
+                    )));
+                }
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
                         let Some(ConnectionPortMapping {
@@ -357,7 +363,7 @@ impl PortForwarder {
             | DaemonMessage::UdpOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)) => {
-                // includes unexepcted DaemonMessage::Pong
+                // includes unexpected DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"
                 )));
@@ -367,7 +373,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_listener_stream(
         &mut self,
         message: (SocketAddr, Result<TcpStream, std::io::Error>),
@@ -378,7 +384,7 @@ impl PortForwarder {
             Err(error) => {
                 // error from TcpStream
                 tracing::error!(
-                    "error occured while listening to local socket {local_socket}: {error}"
+                    "error occurred while listening to local socket {local_socket}: {error}"
                 );
                 self.listeners.remove(&local_socket);
                 return Ok(());
@@ -423,7 +429,7 @@ impl PortForwarder {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     async fn handle_msg_from_task(
         &mut self,
         message: PortForwardMessage,
@@ -712,7 +718,7 @@ struct LocalConnectionTask {
     /// read half of the TcpStream connected to the local port, wrapped in a stream
     read_stream: ReaderStream<OwnedReadHalf>,
     /// write half of the TcpStream connected to the local port
-    write: OwnedWriteHalf,
+    write: Option<OwnedWriteHalf>,
     /// the mapping local_port:remote_ip:remote_port
     port_mapping: AddrPortMapping,
     /// tx for sending internal messages to the main loop
@@ -739,7 +745,7 @@ impl LocalConnectionTask {
         Self {
             peer_socket,
             read_stream,
-            write,
+            write: Some(write),
             port_mapping,
             task_internal_tx,
             data_rx: response_rx,
@@ -753,6 +759,7 @@ impl LocalConnectionTask {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err, ret)]
     pub async fn run(&mut self) -> Result<(), PortForwardError> {
         let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
         let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
@@ -876,18 +883,31 @@ impl LocalConnectionTask {
                 },
 
                 message = self.data_rx.recv() => match message {
-                    Some(message) => {
-                        match self.write.write_all(message.as_ref()).await {
-                            Ok(_) => continue,
-                            Err(error) => {
-                                tracing::error!(
-                                    %error,
-                                    port_mapping = ?self.port_mapping,
-                                    "local connection failed",
-                                );
-                                break Ok(());
-                            },
+                    Some(message) if message.is_empty() => {
+                        // ignore repeat empty messages
+                        if let Some(write) = self.write.take() {
+                            drop(write);
+                            tracing::debug!(
+                                port_mapping = ?self.port_mapping,
+                                "remote half closed the connection",
+                            );
                         }
+                    }
+                    Some(message) => {
+                       // ignore messages after write half closed
+                        if let Some(write) = self.write.as_mut() {
+                            match write.write_all(message.as_ref()).await {
+                                Ok(_) => continue,
+                                Err(error) => {
+                                    tracing::error!(
+                                        %error,
+                                        port_mapping = ?self.port_mapping,
+                                        "local connection failed",
+                                    );
+                                    break Ok(());
+                                },
+                            }
+                        };
                     },
                     None => break Ok(()),
                 }
@@ -1063,7 +1083,7 @@ pub enum PortForwardError {
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
-    #[error("multiple port forwarding mappings found for desination port `{0:?}`")]
+    #[error("multiple port forwarding mappings found for destination port `{0:?}`")]
     ReversePortMapSetupError(RemotePort),
 
     #[error("agent closed connection with error: `{0}`")]
@@ -1101,6 +1121,7 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 mod test {
     use std::{
         collections::HashMap,
+        io::ErrorKind::WouldBlock,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
@@ -1242,7 +1263,7 @@ mod test {
         }));
         assert_eq!(test_connection.recv().await, expected,);
 
-        // reply with successful on daemon_msg_tx
+        // Reply with successful on daemon_msg_tx
         test_connection
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
                 DaemonConnect {
@@ -1259,7 +1280,7 @@ mod test {
         }));
         assert_eq!(test_connection.recv().await, expected);
 
-        // send response data from agent on daemon_msg_tx
+        // Send response data from agent on daemon_msg_tx
         test_connection
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
@@ -1269,10 +1290,35 @@ mod test {
             ))))
             .await;
 
-        // check data arrives at local
+        // Check data arrives at local
         let mut buf = [0; 16];
         stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-my-beloved".as_ref());
+
+        // Half closure: check that the (local port) read half of the stream is still open
+        assert_eq!(
+            stream
+                .try_read(&mut buf)
+                .expect_err("reading should give `WouldBlock` error (no data to read)")
+                .kind(),
+            WouldBlock
+        );
+
+        // Half close the connection (emulate sending FIN from remote)
+        test_connection
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 1,
+                    bytes: "".to_payload(),
+                },
+            ))))
+            .await;
+
+        // Wait for the socket to be readable
+        stream.readable().await.unwrap();
+
+        // Check that the (local port) read half of the stream has closed
+        assert_eq!(stream.try_read(&mut buf).unwrap(), 0);
     }
 
     #[tokio::test]

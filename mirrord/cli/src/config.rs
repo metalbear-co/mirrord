@@ -1,11 +1,12 @@
 #![deny(missing_docs)]
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStringExt;
 use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    os::unix::ffi::OsStringExt,
     path::PathBuf,
     str::FromStr,
 };
@@ -22,6 +23,24 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
+
+/// Macro to automatically handle Windows unsupported commands.
+/// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
+#[macro_export]
+macro_rules! windows_unsupported {
+    ($args:expr, $command_name:literal, $block:block) => {{
+        // we use cfg! to prevent rust from optimizing out $block which forces us to
+        // cfg(not(windows))  existing pieces of compilable code, used but unix but
+        // currently not windows,  which'll be used by windows in the future (currently
+        // assumed as untested but compilable)
+        if cfg!(target_os = "windows") {
+            return Err($crate::error::CliError::UnsupportedOnWindows(
+                $command_name.to_string(),
+            ));
+        }
+        $block
+    }};
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -47,6 +66,7 @@ pub(super) enum Commands {
     Exec(Box<ExecArgs>),
 
     /// Print incoming tcp traffic of specific ports from remote target.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Dump(Box<DumpArgs>),
 
     /// Generate shell completions for the provided shell.
@@ -62,6 +82,7 @@ pub(super) enum Commands {
     Extract { path: String },
 
     /// Execute a command related to the mirrord Operator.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Operator(Box<OperatorArgs>),
 
     /// List available mirrord targets in the cluster.
@@ -120,6 +141,14 @@ pub(super) enum Commands {
         /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
+
+        /// Set this when starting the internal proxy from `mirrord ci start`.
+        ///
+        /// Enables mirrord-for-ci intproxy pid saving, and checking for the `MIRRORD_CI_API_KEY`
+        /// env var.
+        #[arg(long, default_value_t = false)]
+        mirrord_for_ci: bool,
+
         /// Debug arguments.
         ///
         /// These are passed only for visibility in `ps` output,
@@ -142,6 +171,7 @@ pub(super) enum Commands {
     VerifyConfig(VerifyConfigArgs),
 
     /// Try out mirrord for Teams.
+    #[cfg_attr(target_os = "windows", command(hide = true))]
     Teams,
 
     /// Diagnose mirrord setup.
@@ -153,6 +183,9 @@ pub(super) enum Commands {
 
     /// Subscribe to the mirrord newsletter
     Newsletter,
+
+    /// Execute a command related to mirrord CI.
+    Ci(Box<CiArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -234,8 +267,8 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub no_telemetry: bool,
 
-    #[arg(long)]
     /// Disable version check on startup.
+    #[arg(long)]
     pub disable_version_check: bool,
 
     /// Load config from config file
@@ -283,10 +316,11 @@ impl ExecParams {
             );
         }
         if let Some(fs_mode) = self.fs_mode {
-            envs.insert(
-                "MIRRORD_FILE_MODE".as_ref(),
-                Cow::Owned(OsString::from_vec(fs_mode.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let file_mode = OsString::from_vec(fs_mode.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let file_mode = OsString::from(fs_mode.to_string());
+            envs.insert("MIRRORD_FILE_MODE".as_ref(), Cow::Owned(file_mode));
         }
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
@@ -484,17 +518,21 @@ impl AgentParams {
             );
         }
         if let Some(agent_ttl) = &self.agent_ttl {
-            envs.insert(
-                "MIRRORD_AGENT_TTL".as_ref(),
-                Cow::Owned(OsString::from_vec(agent_ttl.to_string().into_bytes())),
-            );
+            #[cfg(not(target_os = "windows"))]
+            let agent_ttl = OsString::from_vec(agent_ttl.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_ttl = OsString::from(agent_ttl.to_string());
+            envs.insert("MIRRORD_AGENT_TTL".as_ref(), Cow::Owned(agent_ttl));
         }
         if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            #[cfg(not(target_os = "windows"))]
+            let agent_startup_timeout =
+                OsString::from_vec(agent_startup_timeout.to_string().into_bytes());
+            #[cfg(target_os = "windows")]
+            let agent_startup_timeout = OsString::from(agent_startup_timeout.to_string());
             envs.insert(
                 "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),
-                Cow::Owned(OsString::from_vec(
-                    agent_startup_timeout.to_string().into_bytes(),
-                )),
+                Cow::Owned(agent_startup_timeout),
             );
         }
         if self.ephemeral_container {
@@ -1044,6 +1082,34 @@ pub(super) struct VpnArgs {
     /// Path to resolver (macOS)
     #[arg(long, default_value = "/etc/resolver")]
     pub resolver_path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct CiArgs {
+    /// Command to use with `mirrord ci`.
+    #[command(subcommand)]
+    pub command: CiCommand,
+}
+
+/// `mirrord ci` commands.
+#[derive(Subcommand, Debug)]
+pub(super) enum CiCommand {
+    /// Generates a `CiApiKey` that should be set in the ci's environment variable as
+    /// `MIRRORD_CI_API_KEY`.
+    ApiKey {
+        /// Specify config file to use
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+        config_file: Option<PathBuf>,
+    },
+    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec`.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    Start(Box<ExecArgs>),
+
+    /// Stops mirrord for ci.
+    ///
+    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    Stop,
 }
 
 #[cfg(test)]

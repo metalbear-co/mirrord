@@ -161,6 +161,7 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "network_interface": "eth0",
     "flush_connections": false,
     "exclude_from_mesh": false
+    "inject_headers": false,
   }
 }
 ```
@@ -171,10 +172,12 @@ Allows setting up custom annotations for the agent Job and Pod.
 
 ```json
 {
-  "annotations": {
-    "cats.io/inject": "enabled"
-    "prometheus.io/scrape": "true",
-    "prometheus.io/port": "9000"
+  "agent": {
+    "annotations": {
+      "cats.io/inject": "enabled"
+      "prometheus.io/scrape": "true",
+      "prometheus.io/port": "9000"
+    }
   }
 }
 ```
@@ -252,7 +255,9 @@ Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
 
 ```json
 {
-  "image": "internal.repo/images/mirrord:latest"
+  "agent": {
+    "image": "internal.repo/images/mirrord:latest"
+  }
 }
 ```
 
@@ -260,9 +265,11 @@ Complete setup:
 
 ```json
 {
-  "image": {
-    "registry": "internal.repo/images/mirrord",
-    "tag": "latest"
+  "agent": {
+    "image": {
+      "registry": "internal.repo/images/mirrord",
+      "tag": "latest"
+    }
   }
 }
 ```
@@ -295,6 +302,18 @@ Read more [here](https://kubernetes.io/docs/concepts/containers/images/#referrin
 }
 ```
 
+### agent.inject_headers {#agent-inject_headers}
+
+Sets whether `Mirrord-Agent` headers are injected into HTTP
+responses that went through the agent.
+
+Possible values for the header:
+
+- `passed-through`: set when the request was not sent to the local app (perhaps because it
+  didn't match the filters)
+
+- `forwarded-to-client`: set when the request was sent to the local app
+
 ### agent.json_log {#agent-json_log}
 
 Controls whether the agent produces logs in a human-friendly format, or json.
@@ -313,7 +332,9 @@ Allows setting up custom labels for the agent Job and Pod.
 
 ```json
 {
-  "labels": { "user": "meow", "state": "asleep" }
+  "agent": {
+    "labels": { "user": "meow", "state": "asleep" }
+  }
 }
 ```
 
@@ -342,7 +363,9 @@ configured to scrape for metrics.
 
 ```json
 {
-  "metrics": "0.0.0.0:9000"
+  "agent": {
+    "metrics": "0.0.0.0:9000"
+  }
 }
 ```
 
@@ -376,7 +399,9 @@ as targeted agent always runs on the same node as its target container.
 
 ```json
 {
-  "node_selector": { "kubernetes.io/hostname": "node1" }
+  "agent": {
+    "node_selector": { "kubernetes.io/hostname": "node1" }
+  }
 }
 ```
 
@@ -399,7 +424,9 @@ This option is only applicable when running in the targetless mode.
 
 ```json
 {
-  "priority_class": "my-priority-class-name"
+  "agent": {
+    "priority_class": "my-priority-class-name"
+  }
 }
 ```
 
@@ -420,19 +447,23 @@ as targetless agent containers are never privileged.
 
 ### agent.resources {#agent-resources}
 
-Set pod resource reqirements. (not with ephemeral agents)
+Set pod resource requirements. (not with ephemeral agents)
 Default is
 ```json
 {
-  "requests":
-  {
-    "cpu": "1m",
-    "memory": "1Mi"
-  },
-  "limits":
-  {
-    "cpu": "100m",
-      "memory": "100Mi"
+  "agent": {
+    "resources": {
+      "requests":
+      {
+        "cpu": "1m",
+        "memory": "1Mi"
+      },
+      "limits":
+      {
+        "cpu": "100m",
+        "memory": "100Mi"
+      }
+    }
   }
 }
 ```
@@ -443,7 +474,9 @@ Allows setting up custom Service Account for the agent Job and Pod.
 
 ```json
 {
-  "service_account": "my-service-account"
+  "agent": {
+    "service_account": "my-service-account"
+  }
 }
 ```
 
@@ -462,11 +495,15 @@ Set pod tolerations. (not with ephemeral agents).
 Defaults to `operator: Exists`.
 
 ```json
-[
-  {
-    "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+{
+  "agent": {
+    "tolerations": [
+        {
+          "key": "meow", "operator": "Exists", "effect": "NoSchedule"
+        }
+    ]
   }
-]
+}
 ```
 
 Set to an empty array to have no tolerations at all
@@ -629,6 +666,10 @@ Defaults to 3000ms.
 
 Disables any system wide proxy configuration for affecting the running application.
 
+### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+
+Enables better support for outgoing connections using non-blocking TCP sockets.
+
 ### _experimental_ readlink {#experimental-readlink}
 
 DEPRECATED, WILL BE REMOVED
@@ -716,7 +757,14 @@ Defaults to true.
 
 ### external_proxy.log_destination {#external_proxy-log_destination}
 
-Set the log file destination for the external proxy.
+Set the log destination for the external proxy.
+
+1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be
+   treated as a path to directory where the log file should be created.
+2. Otherwise, if the path exists, mirrord will check if it's a directory or not.
+3. Otherwise, it will be treated as a path to the log file.
+
+mirrord will auto create all parent directories.
 
 Defaults to a randomized path inside the temporary directory.
 
@@ -875,11 +923,11 @@ Example:
 }
 ```
 
-### feature.db_branches.type {#feature-db_branches-type}
+When configuring a branch for MySQL, set `type` to `mysql`.
 
-Currently MySQL is the only supported database type.
+Despite the database type, all database branch config objects share the following fields.
 
-### feature.db_branches.connection {#feature-db_branches-connection}
+### feature.db_branches.base.connection {#feature-db_branches-base-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -901,18 +949,20 @@ the target pod template.
 }
 ```
 
-### feature.db_branches.id {#feature-db_branches-id}
+Different ways to source the connection options.
+
+### feature.db_branches.base.id {#feature-db_branches-base-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-### feature.db_branches.name {#feature-db_branches-name}
+### feature.db_branches.base.name {#feature-db_branches-base-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-### feature.db_branches.ttl_secs {#feature-db_branches-ttl_secs}
+### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -920,7 +970,7 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-### feature.db_branches.version {#feature-db_branches-version}
+### feature.db_branches.base.version {#feature-db_branches-base-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1143,6 +1193,22 @@ Default option for general file configuration.
 
 The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 
+#### feature.fs.mode.local {#feature-fs-mode-local}
+
+mirrord won't do anything fs-related, all operations will be local.
+
+#### feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}
+
+mirrord will run overrides on some file operations, but most will be local.
+
+#### feature.fs.mode.read {#feature-fs-mode-read}
+
+mirrord will read files from the remote, but won't write to them.
+
+#### feature.fs.mode.write {#feature-fs-mode-write}
+
+mirrord will read/write from the remote.
+
 ### feature.fs.not_found {#feature-fs-not_found}
 
 Specify file path patterns that if matched will be treated as non-existent.
@@ -1280,6 +1346,12 @@ Takes a list of values, such as:
 ```
 
 Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
+
+When filters are specified under `local`, matching DNS queries will go through the local
+app , everything else will go through the remote pod.
+
+When filters are specified under `remote`, matching DNS queries will go through the remote
+pod, everything else will go through local.
 
 ### feature.network.incoming {#feature-network-incoming}
 
@@ -1848,6 +1920,12 @@ Takes a list of values, such as:
 
 Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
 
+When filters are specified under `local`, matching traffic will go through the local app,
+everything else will go through the remote pod.
+
+When filters are specified under `remote`, matching traffic will go through the remote pod,
+everything else will go through local.
+
 #### feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}
 
 Defaults to `false`.
@@ -1917,7 +1995,12 @@ will be used, and your local application will not receive any messages from that
 }
 ```
 
+Amazon Simple Queue Service and Kafka are supported.
+
 More queue types might be added in the future.
+
+When a newer client sends a new filter kind to an older operator, that does not yet know
+about that filter type, the filter will be deserialized to unknown.
 
 ## internal_proxy {#root-internal_proxy}
 
@@ -1960,7 +2043,14 @@ Defaults to true.
 
 ### internal_proxy.log_destination {#internal_proxy-log_destination}
 
-Set the log file destination for the internal proxy.
+Set the log destination for the internal proxy.
+
+1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be
+   treated as a path to directory where the log file should be created.
+2. Otherwise, if the path exists, mirrord will check if it's a directory or not.
+3. Otherwise, it will be treated as a path to the log file.
+
+mirrord will auto create all parent directories.
 
 Defaults to a randomized path inside the temporary directory.
 

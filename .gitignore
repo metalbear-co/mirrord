@@ -14,9 +14,11 @@ build/
 
 ### go tests ###
 *.go_test_app
+*.go_test_app.exe
 
 ### c test apps ###
 *.c_test_app
+*.c_test_app.exe
 
 ### other test apps ###
 *.test_app

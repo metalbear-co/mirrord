@@ -6,7 +6,7 @@ use syn::{Attribute, Expr, Ident, Type, TypePath};
 
 use crate::{
     DocsError,
-    types::{PartialField, PartialType},
+    types::{PartialField, PartialType, PartialVariant},
 };
 
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
@@ -121,6 +121,7 @@ impl TryFrom<syn::ItemMod> for PartialType<'_> {
             ident: ident.into(),
             docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields: Default::default(),
+            variants: Default::default(),
         })
     }
 }
@@ -132,10 +133,17 @@ impl TryFrom<syn::ItemEnum> for PartialType<'_> {
 
     fn try_from(item: syn::ItemEnum) -> Result<Self, Self::Error> {
         let ident = item.ident.to_string();
+        let variants = item
+            .variants
+            .into_iter()
+            .filter_map(|variant| PartialVariant::try_from(variant).ok())
+            .collect();
+
         Ok(PartialType {
             ident: ident.into(),
             docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields: Default::default(),
+            variants,
         })
     }
 }
@@ -157,6 +165,7 @@ impl TryFrom<syn::ItemStruct> for PartialType<'_> {
             ident: ident.into(),
             docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields,
+            variants: Default::default(),
         })
     }
 }
@@ -231,6 +240,21 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
                     cache.insert(&field.ty, resolved_type_docs.clone());
                     // append the docs of the field to the resolved type docs
                     new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
+                });
+                type_.variants.iter().for_each(|variant| {
+                    let mut resolved_type_docs = Vec::new();
+                    let mut current_recursion_level = *recursion_level + 1;
+                    for field in &variant.fields {
+                        resolved_type_docs.extend(dfs_fields::<MAX_RECURSION_LEVEL>(
+                            field,
+                            types,
+                            cache,
+                            &mut current_recursion_level,
+                        ));
+                        max_recursion_level = max_recursion_level.max(current_recursion_level);
+                    }
+                    new_type_docs
+                        .extend(variant.docs.clone().into_iter().chain(resolved_type_docs));
                 });
                 cache.insert(&type_.ident, new_type_docs.clone());
                 *recursion_level = max_recursion_level;
@@ -317,11 +341,30 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
                         field
                     })
                     .collect::<BTreeSet<_>>();
+                type_.variants = type_
+                    .variants
+                    .into_iter()
+                    .map(|mut variant| {
+                        let mut resolved_type_docs = Vec::new();
+                        for field in &variant.fields {
+                            resolved_type_docs.extend(dfs_fields::<MAX_RECURSION_LEVEL>(
+                                field,
+                                &types,
+                                &mut cache,
+                                &mut recursion_level,
+                            ));
+                        }
+                        variant.docs.extend(resolved_type_docs);
+                        variant
+                    })
+                    .collect();
                 (recursion_level, type_)
             })
         })
         // Get the type with the maximum "area", which should be our root type.
         // Area is recursion_level * number of fields in the type.
-        .max_by_key(|(recursion_level, type_)| *recursion_level * type_.fields.len())
+        .max_by_key(|(recursion_level, type_)| {
+            *recursion_level * (type_.fields.len() + type_.variants.len())
+        })
         .map(|(_, type_)| type_)
 }
