@@ -811,15 +811,6 @@ pub(super) struct OperatorSetupParams {
     #[arg(long, default_value_t = false)]
     pub(super) application_auto_pause: bool,
 
-    /// Enable MirrordClusterSession CRD's (curretly experimental and requires operator compiled
-    /// with experimental flag).
-    #[arg(
-        long = "experimental-statefull-sessions",
-        default_value_t = false,
-        hide = true
-    )]
-    pub(super) stateful_sessions: bool,
-
     /// Enable MySQL database branching.
     /// When set, some extra CRDs will be installed on the cluster, and the operator will run
     /// a mysql branching component.
