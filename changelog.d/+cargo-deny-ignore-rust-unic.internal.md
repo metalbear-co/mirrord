@@ -1,0 +1,1 @@
+Add ignore to `RUSTSEC-2025-0074`, `RUSTSEC-2025-0075`, `RUSTSEC-2025-0080`, `RUSTSEC-2025-0081`, `RUSTSEC-2025-0098`and `RUSTSEC-2025-0104` becuase open-i18n/rust-unic is unmaintained but we should not have any issue with it.
