@@ -104,13 +104,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        let out_queues = Arc::new(OutQueues {
-            queues: Mutex::new(HashMap::new()),
-            nonempty: Arc::new(Notify::new()),
-            in_tx: inbound_tx.clone(),
-            // Add input argument to fill this in shall the need arise.
-            out_filter: None,
-        });
+        let out_queues = Arc::new(SharedState::new(inbound_tx.clone(), None));
 
         let tx_handle = TxHandle(out_queues.clone());
 
@@ -141,12 +135,10 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        let out_queues = Arc::new(OutQueues {
-            queues: Mutex::new(HashMap::new()),
-            nonempty: Arc::new(Notify::new()),
-            in_tx: inbound_tx.clone(),
-            out_filter: filter.map(|f| Box::new(f) as _),
-        });
+        let out_queues = Arc::new(SharedState::new(
+            inbound_tx.clone(),
+            filter.map(|f| Box::new(f) as _),
+        ));
 
         let tx_handle = TxHandle::<Type>(out_queues.clone());
         tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
@@ -160,12 +152,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
-        let out_queues = Arc::new(OutQueues {
-            queues: Mutex::new(HashMap::new()),
-            nonempty: Arc::new(Notify::new()),
-            in_tx: inbound_tx.clone(),
-            out_filter: None,
-        });
+        let out_queues = Arc::new(SharedState::new(inbound_tx.clone(), None));
 
         let tx_handle = TxHandle(out_queues.clone());
 
@@ -211,7 +198,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 }
 
 // For tests mostly
-pub struct ConnectionOutput<Type: ProtocolEndpoint>(Arc<OutQueues<Type>>);
+pub struct ConnectionOutput<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
 
 impl<Type: ProtocolEndpoint> ConnectionOutput<Type>
 where
@@ -227,7 +214,7 @@ where
 #[instrument(skip_all)]
 async fn io_task<Channel, Type>(
     framed: Channel,
-    queues: Arc<OutQueues<Type>>,
+    queues: Arc<SharedState<Type>>,
     tx: mpsc::Sender<Type::InMsg>,
 ) where
     Type: ProtocolEndpoint,
@@ -277,8 +264,13 @@ struct OutQueue {
 
 type FilterFn<I, O> = dyn Fn(O) -> Either<O, I> + Send + Sync;
 
-struct OutQueues<Type: ProtocolEndpoint> {
-    queues: Mutex<HashMap<QueueId<Type::OutMsg>, OutQueue>>,
+struct Queues<Type: ProtocolEndpoint> {
+    queues: HashMap<QueueId<Type::OutMsg>, OutQueue>,
+    ready: Vec<QueueId<Type::OutMsg>>,
+}
+
+struct SharedState<Type: ProtocolEndpoint> {
+    queues: Mutex<Queues<Type>>,
     nonempty: Arc<Notify>,
 
     /// Used for injecting "fake" incoming messages.
@@ -286,21 +278,42 @@ struct OutQueues<Type: ProtocolEndpoint> {
 
     /// Used for doing a sort of filter_map and message faking. If
     /// Some, all outgoing messages are passed to this function, and
-    /// (return value).0 is actually enqueued for sending and (return
-    /// value).1 is injected into the incoming stream. Used by the
-    /// operator client.
+    /// the return value is either injected as an incoming message
+    /// (left), or enqueued for sending (right).
     out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
 }
 
-impl<Type: ProtocolEndpoint> OutQueues<Type> {
+impl<Type: ProtocolEndpoint> SharedState<Type> {
     const MAX_CAPACITY: usize = 1024 * 16;
+    fn new(
+        in_tx: mpsc::Sender<Type::InMsg>,
+        out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
+    ) -> Self {
+        Self {
+            queues: Mutex::new(Queues {
+                queues: HashMap::new(),
+                ready: Vec::new(),
+            }),
+            nonempty: Arc::new(Notify::new()),
+            in_tx,
+            out_filter,
+        }
+    }
+
     fn try_push(
         &self,
         queue_id: QueueId<Type::OutMsg>,
         encoded: Vec<u8>,
     ) -> Result<(), (Vec<u8>, OwnedNotified)> {
         let mut lock = self.queues.lock().unwrap();
-        let queue = lock.entry(queue_id.clone()).or_default();
+
+        // Garbage-collect unused queues
+        if lock.queues.len() > 8 && lock.ready.len() < lock.queues.len() / 3 {
+			// We can remove all empty ones because we know they wont be in `ready`
+            lock.queues.retain(|_, v| !v.messages.is_empty());
+        }
+
+        let queue = lock.queues.entry(queue_id.clone()).or_default();
 
         if queue.used_bytes > Self::MAX_CAPACITY {
             return Err((encoded, queue.free.clone().notified_owned()));
@@ -308,6 +321,11 @@ impl<Type: ProtocolEndpoint> OutQueues<Type> {
 
         queue.used_bytes += encoded.len();
         queue.messages.push_back(encoded);
+
+        if queue.messages.len() == 1 {
+			// .len() > 1 implies that it was already in `ready`
+            lock.ready.push(queue_id);
+        }
 
         drop(lock);
 
@@ -319,16 +337,19 @@ impl<Type: ProtocolEndpoint> OutQueues<Type> {
     fn poll_next(&self) -> Option<Vec<u8>> {
         let mut lock = self.queues.lock().unwrap();
 
-        let (key, queue) = lock
-            .iter_mut()
-            .choose(&mut rand::rng())
-            .map(|(k, v)| (k.clone(), v))?;
+		// If `ready` is empty then we have nothing to do.
+        let key_idx = (0..lock.ready.len()).choose(&mut rand::rng())?;
+        let key = lock.ready[key_idx].clone();
 
-        let Some(next) = queue.messages.pop_front() else {
-            // Shouldn't really happen
-            lock.remove(&key);
-            return None;
-        };
+        let queue = lock
+            .queues
+            .get_mut(&key)
+            .expect("key was in Queues::ready but the corresponding queue was not found");
+
+        let next = queue
+            .messages
+            .pop_front()
+            .expect("key was in Queues::ready but the corresponding queue was empty");
 
         let was_full = queue.used_bytes >= Self::MAX_CAPACITY;
 
@@ -339,7 +360,7 @@ impl<Type: ProtocolEndpoint> OutQueues<Type> {
         }
 
         if queue.messages.is_empty() {
-            lock.remove(&key);
+            lock.ready.swap_remove(key_idx);
         }
 
         Some(next)
@@ -358,7 +379,7 @@ impl<Type: ProtocolEndpoint> OutQueues<Type> {
 }
 
 #[derive(Clone)]
-pub struct TxHandle<Type: ProtocolEndpoint>(Arc<OutQueues<Type>>);
+pub struct TxHandle<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
 
 impl<Type: ProtocolEndpoint> TxHandle<Type> {
     pub async fn send(&self, mut msg: Type::OutMsg) {
