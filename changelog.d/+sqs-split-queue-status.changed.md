@@ -1,0 +1,1 @@
+Operator status not showing data for SQS split queues.
