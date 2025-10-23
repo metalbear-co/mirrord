@@ -1,16 +1,19 @@
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
+    hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     process::Stdio,
 };
 
+use ci_info::types::CiInfo;
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::client::OperatorApi;
+use mirrord_kube::resolved::ResolvedTarget;
+use mirrord_operator::{MirrordCiInfo, client::OperatorApi};
 use mirrord_progress::{Progress, ProgressTracker};
 use serde::{Deserialize, Serialize};
 use tokio::{fs, io::AsyncWriteExt};
@@ -254,5 +257,36 @@ impl MirrordCi {
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn clear(self) -> CiResult<()> {
         MirrordCiStore::remove_file().await
+    }
+
+    pub(super) fn info(&self, target: ResolvedTarget<false>) -> MirrordCiInfo {
+        let CiInfo {
+            vendor: _,
+            name,
+            ci: _,
+            pr: _,
+            branch_name,
+        } = ci_info::get();
+
+        let mut hasher = DefaultHasher::new();
+
+        MirrordCiInfo {
+            vendor: {
+                name.map(|name| {
+                    name.hash(&mut hasher);
+                    hasher.finish()
+                })
+            },
+            target: {
+                target.to_string().hash(&mut hasher);
+                hasher.finish()
+            },
+            branch_name: {
+                branch_name.map(|name| {
+                    name.hash(&mut hasher);
+                    hasher.finish()
+                })
+            },
+        }
     }
 }

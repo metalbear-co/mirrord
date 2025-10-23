@@ -211,6 +211,18 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
     }
 }
 
+impl<const CHECKED: bool> core::fmt::Display for ResolvedTarget<CHECKED> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}/{}/{}",
+            self.type_(),
+            self.namespace().unwrap_or_default(),
+            self.name_any()
+        )
+    }
+}
+
 impl ResolvedTarget<false> {
     /// Gets a target from k8s with the [`Client`] that is passed here.
     /// Currently this `client` comes set up with a mirrord-operator config.

@@ -33,6 +33,7 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
+    MirrordCiInfo,
     client::database_branches::{
         DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
     },
@@ -686,6 +687,7 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
+        mirrord_ci_info: Option<MirrordCiInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -821,6 +823,8 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
+            // TODO(alex) [high] 2: Seems like we should add the ci stuff in
+            // `make_operator_session`, the connect params doesn't seem to fit it.
             let session = self.make_operator_session(None, connect_url)?;
 
             (session, false)
@@ -888,6 +892,7 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::LayerReconnect);
 
+        // TODO(alex) [high] 3: Probably add ci info here.
         Ok(OperatorSession {
             id,
             connect_url,
@@ -1236,6 +1241,8 @@ impl OperatorApi<PreparedClientCert> {
         client: &Client,
         session: &OperatorSession,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
+        // TODO(alex) [high] 4: But then, do we add it as a header? Feels weird, could it be body?
+        // It doesn't really belong in the `connect_url`, it's too much info for that...
         let request = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string())
