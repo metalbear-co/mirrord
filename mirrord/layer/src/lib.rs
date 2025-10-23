@@ -100,8 +100,11 @@ use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
+    common::make_proxy_request_with_response,
+    debugger_ports::DebuggerPorts,
+    detour::DetourGuard,
     load::LoadType,
+    socket::{hooks::MANAGED_ADDRINFO, ops::REMOTE_DNS_REVERSE_MAPPING},
 };
 
 /// Silences `deny(unused_crate_dependencies)`.
@@ -724,9 +727,15 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    // make sure none holds the mutex while fork is executing to avoid issues like https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
-    // might need to add more mutexes or all mutexes here.
+    // when running in multi-threaded app, we can have a scenario where another thread holds a mutex
+    // while the fork executes this leaves the mutex locked forever in the child process since
+    // there's no thread to unlock it so we need to grab all the mutexes we can here, and drop
+    // after the fork see https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
     let sockets = SOCKETS.lock();
+    let open_files = OPEN_FILES.lock();
+    let addr_info = MANAGED_ADDRINFO.lock();
+    let dns_mapping = REMOTE_DNS_REVERSE_MAPPING.lock();
+
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -775,6 +784,9 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
         }
 
         drop(sockets);
+        drop(open_files);
+        drop(addr_info);
+        drop(dns_mapping);
         res
     }
 }
