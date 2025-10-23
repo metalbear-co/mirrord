@@ -448,6 +448,7 @@ fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
     which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[cfg(not(target_os = "windows"))]
 async fn run_process_with_mirrord<P: Progress>(
     binary: String,
