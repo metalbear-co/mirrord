@@ -1,6 +1,6 @@
 Thank you for contributing to mirrord!
 
-Please make sure you a changelog file in `changelog.d/` named `<identifier>.<category>.md`
+Please make sure you add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 
 **Examples:**
 - `1054.changed.md` (with GitHub issue)
