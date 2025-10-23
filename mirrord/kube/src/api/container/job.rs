@@ -163,7 +163,7 @@ where
         }
     }
 
-    let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+    let version = wait_for_agent_startup(&pod_api, pod_name, "mirrord-agent".to_string()).await?;
     match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(

@@ -1,6 +1,6 @@
 use kube::Resource;
 
-use super::{FromResource, OptionalFromResource};
+use super::FromResource;
 use crate::error::KubeApiError;
 
 /// Resource's `metadata.name` value, cannot be empty.
@@ -54,17 +54,6 @@ where
     }
 }
 
-impl<'r, R, C> OptionalFromResource<'r, R, C> for Namespace<'r>
-where
-    R: Resource,
-{
-    type Rejection = KubeApiError;
-
-    fn from_resource(resource: &'r R, _: &C) -> Result<Option<Self>, Self::Rejection> {
-        Ok(resource.meta().namespace.as_deref().map(Namespace))
-    }
-}
-
 /// Resource's `metadata.uid` value, cannot be empty.
 pub struct Uid<'r>(pub &'r str);
 
@@ -87,17 +76,6 @@ where
             .as_deref()
             .map(Uid)
             .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.namespace"))
-    }
-}
-
-impl<'r, R, C> OptionalFromResource<'r, R, C> for Uid<'r>
-where
-    R: Resource,
-{
-    type Rejection = KubeApiError;
-
-    fn from_resource(resource: &'r R, _: &C) -> Result<Option<Self>, Self::Rejection> {
-        Ok(resource.meta().namespace.as_deref().map(Uid))
     }
 }
 
