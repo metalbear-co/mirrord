@@ -1,6 +1,5 @@
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
-use mirrord_config::config::ConfigError;
 use thiserror::Error;
 
 #[derive(Error, Debug, Diagnostic)]
@@ -62,7 +61,4 @@ pub(crate) enum CiError {
         "`mirrord ci` failed to execute an internal command for this operation, please report it to us."
     ))]
     NixErrno(#[from] nix::errno::Errno),
-
-    #[error(transparent)]
-    Config(#[from] ConfigError),
 }
