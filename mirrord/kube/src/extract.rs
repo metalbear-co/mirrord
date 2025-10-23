@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 pub mod metadata;
 
 /// Types that can be created from kubernetes resource
@@ -7,7 +5,7 @@ pub trait FromResource<'r, R, C>: Sized {
     /// "rejection" type that will be used if extraction is failed.
     type Rejection;
 
-    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Self, Self::Rejection>;
+    fn from_resource(resource: &'r R, context: &C) -> Result<Self, Self::Rejection>;
 }
 
 /// Types that can be created from kubernetes resource but are optional.
@@ -15,7 +13,7 @@ pub trait OptionalFromResource<'r, R, C>: Sized {
     /// "rejection" type that will be used if extraction is failed.
     type Rejection;
 
-    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Option<Self>, Self::Rejection>;
+    fn from_resource(resource: &'r R, context: &C) -> Result<Option<Self>, Self::Rejection>;
 }
 
 impl<'r, T, R, C> FromResource<'r, R, C> for Option<T>
@@ -24,7 +22,7 @@ where
 {
     type Rejection = T::Rejection;
 
-    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Self, Self::Rejection> {
+    fn from_resource(resource: &'r R, context: &C) -> Result<Self, Self::Rejection> {
         T::from_resource(resource, context)
     }
 }
@@ -42,7 +40,7 @@ macro_rules! impl_tuple_from_resource {
 		    type Rejection = Rej;
 
 		    #[allow(non_snake_case)]
-		    fn from_resource(resource: &'r R, context: Arc<C>) -> Result<Self, Self::Rejection> {
+		    fn from_resource(resource: &'r R, context: &C) -> Result<Self, Self::Rejection> {
 		    	$(
                     let $ty = $ty::from_resource(resource.clone(), context.clone())?;
                 )*
@@ -95,7 +93,7 @@ mod tests {
     impl<R, C> FromResource<'_, R, C> for TestField {
         type Rejection = Infallible;
 
-        fn from_resource(_: &R, _cx: Arc<C>) -> Result<Self, Self::Rejection> {
+        fn from_resource(_: &R, _cx: &C) -> Result<Self, Self::Rejection> {
             Ok(TestField)
         }
     }
@@ -105,7 +103,7 @@ mod tests {
     impl<R, C> FromResource<'_, R, C> for TestField2 {
         type Rejection = Infallible;
 
-        fn from_resource(_: &R, _cx: Arc<C>) -> Result<Self, Self::Rejection> {
+        fn from_resource(_: &R, _cx: &C) -> Result<Self, Self::Rejection> {
             Ok(TestField2)
         }
     }
@@ -114,13 +112,13 @@ mod tests {
     fn single_field() {
         let resource = Pod::default();
 
-        assert!(TestField::from_resource(&resource, Arc::new(())).is_ok());
+        assert!(TestField::from_resource(&resource, &()).is_ok());
     }
 
     #[test]
     fn multiple_fields() {
         let resource = Pod::default();
 
-        assert!(<(TestField, TestField2)>::from_resource(&resource, Arc::new(())).is_ok())
+        assert!(<(TestField, TestField2)>::from_resource(&resource, &()).is_ok())
     }
 }

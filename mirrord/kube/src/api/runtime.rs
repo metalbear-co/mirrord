@@ -7,7 +7,6 @@ use std::{
     net::IpAddr,
     ops::FromResidual,
     str::FromStr,
-    sync::Arc,
 };
 
 use k8s_openapi::{
@@ -113,8 +112,7 @@ impl RuntimeData {
     /// 2. pod is not in deletion,
     /// 3. target container is ready.
     pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
-        let (Name(pod_name), Namespace(pod_namespace)) =
-            FromResource::from_resource(pod, Arc::<()>::default())?;
+        let (Name(pod_name), Namespace(pod_namespace)) = FromResource::from_resource(pod, &())?;
 
         let phase = pod
             .status
@@ -226,8 +224,8 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_ips,
-            pod_name: pod_name.into_owned(),
-            pod_namespace: pod_namespace.into_owned(),
+            pod_name: pod_name.to_owned(),
+            pod_namespace: pod_namespace.to_owned(),
             node_name,
             container_id,
             container_runtime,
