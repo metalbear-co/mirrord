@@ -642,6 +642,24 @@ You can check the run as it progresses and download the completed artifacts from
 
 If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
 
+# Submitting a Pull Request
+
+## Changelog Entry
+
+Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
+
+**Examples:**
+- `1054.changed.md` (with GitHub issue)
+- `+some-name.added.md` (without issue)
+
+**Identifier:**
+- Use the GitHub issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
+- Use `+some-name` if no issue exists
+- Don't use Linear issues or private repo issue numbers
+
+**Category:**
+Check `towncrier.toml` for available categories (`added`, `changed`, `fixed`, etc.) and choose the one that fits your change.
+
 ## Architecture
 
 A high level view of mirrord.
