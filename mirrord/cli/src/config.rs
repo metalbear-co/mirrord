@@ -164,6 +164,10 @@ pub(super) enum Commands {
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
 
+    /// Manage database branching.
+    #[command(name = "db-branches")]
+    DbBranches(Box<DbBranchesArgs>),
+
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.
@@ -811,15 +815,6 @@ pub(super) struct OperatorSetupParams {
     #[arg(long, default_value_t = false)]
     pub(super) application_auto_pause: bool,
 
-    /// Enable MirrordClusterSession CRD's (curretly experimental and requires operator compiled
-    /// with experimental flag).
-    #[arg(
-        long = "experimental-statefull-sessions",
-        default_value_t = false,
-        hide = true
-    )]
-    pub(super) stateful_sessions: bool,
-
     /// Enable MySQL database branching.
     /// When set, some extra CRDs will be installed on the cluster, and the operator will run
     /// a mysql branching component.
@@ -1110,6 +1105,44 @@ pub(super) enum CiCommand {
     ///
     /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
     Stop,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct DbBranchesArgs {
+    /// Specify the namespace to operate on
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Operate on all namespaces
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: DbBranchesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum DbBranchesCommand {
+    /// Show the status of database branches
+    Status {
+        /// Names of specific branches to show status for (all branches if none specified)
+        #[arg()]
+        names: Vec<String>,
+    },
+    /// Destroy database branches
+    Destroy {
+        /// Destroy all branches
+        #[arg(long, conflicts_with = "names")]
+        all: bool,
+        /// Names of specific branches to destroy
+        #[arg(required_unless_present = "all")]
+        names: Vec<String>,
+    },
 }
 
 #[cfg(test)]
