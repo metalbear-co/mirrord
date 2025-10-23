@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{convert::Infallible, fmt};
 
 use kube::Resource;
 use mirrord_config::target::TargetType;
@@ -152,5 +152,11 @@ impl KubeApiError {
 
     pub fn requires_copy<R: Resource<DynamicType = ()>>() -> Self {
         Self::RequiresCopy(R::plural(&()).into_owned())
+    }
+}
+
+impl From<Infallible> for KubeApiError {
+    fn from(_: Infallible) -> Self {
+        unreachable!()
     }
 }

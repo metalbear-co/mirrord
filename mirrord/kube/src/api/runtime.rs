@@ -27,6 +27,10 @@ use crate::{
         kubernetes::get_k8s_resource_api,
     },
     error::{KubeApiError, Result},
+    extract::{
+        FromResource,
+        metadata::{Name, Namespace},
+    },
     resolved::ResolvedTarget,
 };
 
@@ -108,18 +112,7 @@ impl RuntimeData {
     /// 2. pod is not in deletion,
     /// 3. target container is ready.
     pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
-        let pod_name = pod
-            .metadata
-            .name
-            .as_ref()
-            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.name"))?
-            .to_owned();
-        let pod_namespace = pod
-            .metadata
-            .namespace
-            .as_ref()
-            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.namespace"))?
-            .to_owned();
+        let (Name(pod_name), Namespace(pod_namespace)) = FromResource::from_resource(pod, &())?;
 
         let phase = pod
             .status
@@ -231,8 +224,8 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_ips,
-            pod_name,
-            pod_namespace,
+            pod_name: pod_name.to_owned(),
+            pod_namespace: pod_namespace.to_owned(),
             node_name,
             container_id,
             container_runtime,

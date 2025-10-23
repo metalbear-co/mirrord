@@ -20,5 +20,6 @@ pub use kube;
 
 pub mod api;
 pub mod error;
+pub mod extract;
 pub mod resolved;
 pub mod retry;
