@@ -259,7 +259,7 @@ use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
-use extract::extract_library;
+// use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };

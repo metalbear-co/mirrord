@@ -339,7 +339,7 @@ impl LayerManagedProcess {
         let managed_process = Self {
             process_info,
             released: false,
-            terminate_on_drop: false,
+            terminate_on_drop: true,
         };
 
         // The process is already created and suspended by the original call

@@ -29,7 +29,7 @@ use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, FALSE, HMODULE, INT, TRUE},
+        minwindef::{BOOL, FALSE, INT, TRUE},
         winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
         ws2def::{
             ADDRINFOA, ADDRINFOW, AF_INET, AF_INET6, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
@@ -525,10 +525,14 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
             set_socket_state(s, SocketState::Listening(bound_state));
 
             // this log message is expected by some E2E tests
-            tracing::debug!(
+            tracing::info!(
                 "daemon subscribed port {}",
                 bound_state.requested_address.port()
             );
+
+            // Also print to stdout for Windows tests that check stdout
+            #[cfg(windows)]
+            println!("daemon subscribed port {}", bound_state.requested_address.port());
 
             tracing::info!(
                 "listen_detour -> socket {} now listening through mirrord agent on port {}",
@@ -2272,6 +2276,16 @@ pub fn initialize_hooks(
     setup: &mirrord_layer_lib::setup::windows::LayerSetup,
 ) -> anyhow::Result<()> {
     use mirrord_layer_lib::setup::windows::NetworkHookConfig;
+
+    // 🎯 TRACE: Prove RUST_LOG is working in child process socket initialization
+    tracing::warn!(
+        "🎯 [SOCKET_INIT] Socket hooks initializing in process {} - RUST_LOG is working!",
+        std::process::id()
+    );
+
+    // Ensure winsock libraries are loaded before attempting to hook them
+    // This prevents issues with Python's _socket.pyd or other dynamic loaders
+    // ensure_winsock_libraries_loaded()?;
 
     let dns_enabled = setup.dns_hooks_enabled();
     let socket_enabled = setup.socket_hooks_enabled();

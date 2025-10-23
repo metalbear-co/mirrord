@@ -6,7 +6,10 @@
 use std::{ptr, thread};
 
 use winapi::{
-    shared::{ntdef::{HANDLE, NULL}, winerror::{ERROR_BROKEN_PIPE, ERROR_NO_DATA}},
+    shared::{
+        ntdef::{HANDLE, NULL},
+        winerror::{ERROR_BROKEN_PIPE, ERROR_NO_DATA},
+    },
     um::{
         errhandlingapi::GetLastError,
         fileapi::{ReadFile, WriteFile},
@@ -96,9 +99,39 @@ impl PipeForwarder {
                         ptr::null_mut(),
                     );
 
-                    if read_success == 0 || bytes_read == 0 {
-                        break;
+                    // Check for actual read failure
+                    if read_success == 0 {
+                        let error = GetLastError();
+                        match error {
+                            ERROR_BROKEN_PIPE => {
+                                tracing::debug!(
+                                    "📡 Pipe closed (broken pipe), forwarding thread exiting"
+                                );
+                                break;
+                            }
+                            ERROR_NO_DATA => {
+                                tracing::debug!("📡 No data available, continuing...");
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                                continue;
+                            }
+                            _ => {
+                                tracing::debug!(
+                                    "📡 ReadFile failed with error {}, forwarding thread exiting",
+                                    error
+                                );
+                                break;
+                            }
+                        }
                     }
+
+                    // Handle case where ReadFile succeeded but no bytes were read
+                    if bytes_read == 0 {
+                        tracing::debug!("📡 ReadFile succeeded but 0 bytes read, continuing...");
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+
+                    tracing::debug!("📡 Read {} bytes, forwarding...", bytes_read);
 
                     let write_success = WriteFile(
                         dst_handle as HANDLE,
@@ -109,8 +142,11 @@ impl PipeForwarder {
                     );
 
                     if write_success == 0 {
+                        tracing::debug!("📡 Write failed, forwarding thread exiting");
                         break;
                     }
+
+                    tracing::debug!("📡 Successfully wrote {} bytes", bytes_written);
                 }
             }
         });
@@ -209,10 +245,18 @@ impl StdioRedirection {
         parent_stdout: HANDLE,
         parent_stderr: HANDLE,
     ) -> LayerResult<()> {
+        tracing::debug!(
+            "🎯 StdioRedirection::start_forwarding called with stdout: {:?}, stderr: {:?}",
+            parent_stdout,
+            parent_stderr
+        );
+
         if let Some(ref mut stdout) = self.stdout {
+            tracing::debug!("🎯 Starting stdout forwarding...");
             stdout.start_forwarding(parent_stdout)?;
         }
         if let Some(ref mut stderr) = self.stderr {
+            tracing::debug!("🎯 Starting stderr forwarding...");
             stderr.start_forwarding(parent_stderr)?;
         }
         Ok(())

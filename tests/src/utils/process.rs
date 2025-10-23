@@ -182,11 +182,7 @@ impl TestProcess {
     pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
         let now = std::time::Instant::now();
         while now.elapsed() < timeout {
-            let output = if cfg!(windows) {
-                self.get_stdout().await
-            } else {
-                self.get_stderr().await
-            };
+            let output = self.get_stderr().await;
 
             if output.contains(line) {
                 return;
