@@ -3,32 +3,8 @@
 #[cfg(test)]
 mod tests {
     use mirrord_config::feature::{
-        fs::FsModeConfig,
         network::{NetworkConfig, incoming::IncomingMode},
     };
-
-    #[test]
-    fn test_fs_hook_config_trait() {
-        use mirrord_layer_lib::setup::windows::FsHookConfig;
-
-        // Test Local mode (hooks disabled)
-        assert!(!FsModeConfig::Local.is_active());
-        assert!(!FsModeConfig::Local.should_enable_read_hooks());
-        assert!(!FsModeConfig::Local.should_enable_write_hooks());
-        assert!(!FsModeConfig::Local.should_enable_metadata_hooks());
-
-        // Test Read mode (read hooks enabled)
-        assert!(FsModeConfig::Read.is_active());
-        assert!(FsModeConfig::Read.should_enable_read_hooks());
-        assert!(!FsModeConfig::Read.should_enable_write_hooks());
-        assert!(FsModeConfig::Read.should_enable_metadata_hooks());
-
-        // Test Write mode (all hooks enabled)
-        assert!(FsModeConfig::Write.is_active());
-        assert!(FsModeConfig::Write.should_enable_read_hooks());
-        assert!(FsModeConfig::Write.should_enable_write_hooks());
-        assert!(FsModeConfig::Write.should_enable_metadata_hooks());
-    }
 
     #[test]
     fn test_network_hook_config_trait() {
@@ -70,27 +46,7 @@ mod tests {
         // This test verifies the core logic of hook enablement
         // without requiring full LayerConfig construction
 
-        use mirrord_layer_lib::setup::windows::{FsHookConfig, NetworkHookConfig};
-
-        // File system hook logic
-        let local_mode = FsModeConfig::Local;
-        let read_mode = FsModeConfig::Read;
-        let write_mode = FsModeConfig::Write;
-
-        // Only Local mode should disable hooks
-        assert!(!local_mode.is_active());
-        assert!(read_mode.is_active());
-        assert!(write_mode.is_active());
-
-        // Read hooks should be enabled for Read and Write modes
-        assert!(!local_mode.should_enable_read_hooks());
-        assert!(read_mode.should_enable_read_hooks());
-        assert!(write_mode.should_enable_read_hooks());
-
-        // Write hooks should only be enabled for Write mode
-        assert!(!local_mode.should_enable_write_hooks());
-        assert!(!read_mode.should_enable_write_hooks());
-        assert!(write_mode.should_enable_write_hooks());
+        use mirrord_layer_lib::setup::windows::NetworkHookConfig;
 
         // Network hook logic
         let mut network_all_off = NetworkConfig {

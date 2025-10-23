@@ -20,7 +20,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     // Conditionally enable file hooks
     if setup.fs_hooks_enabled() {
         tracing::info!("Enabling file system hooks");
-        files::initialize_hooks(guard, setup)?;
+        files::initialize_hooks(guard)?;
     } else {
         tracing::info!("File system hooks disabled by configuration (fs.mode = Local)");
     }

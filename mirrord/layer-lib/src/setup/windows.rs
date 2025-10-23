@@ -6,7 +6,6 @@ use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 use mirrord_config::{
     LayerConfig,
     feature::{
-        fs::FsModeConfig,
         network::{
             NetworkConfig,
             incoming::{
@@ -25,32 +24,6 @@ use mirrord_protocol::{
 };
 
 use crate::socket::{DnsSelector, OutgoingSelector};
-
-/// Helper trait to extend FsModeConfig with hook decision logic
-pub trait FsHookConfig {
-    fn should_enable_read_hooks(&self) -> bool;
-    fn should_enable_write_hooks(&self) -> bool;
-    fn should_enable_metadata_hooks(&self) -> bool;
-    fn is_active(&self) -> bool;
-}
-
-impl FsHookConfig for FsModeConfig {
-    fn should_enable_read_hooks(&self) -> bool {
-        matches!(self, FsModeConfig::Read | FsModeConfig::Write)
-    }
-
-    fn should_enable_write_hooks(&self) -> bool {
-        matches!(self, FsModeConfig::Write)
-    }
-
-    fn should_enable_metadata_hooks(&self) -> bool {
-        !matches!(self, FsModeConfig::Local)
-    }
-
-    fn is_active(&self) -> bool {
-        !matches!(self, FsModeConfig::Local)
-    }
-}
 
 /// Helper trait for network hook decisions
 pub trait NetworkHookConfig {

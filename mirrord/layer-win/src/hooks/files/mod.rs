@@ -1301,9 +1301,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
 
 pub fn initialize_hooks(
     guard: &mut DetourGuard<'static>,
-    setup: &mirrord_layer_lib::setup::windows::LayerSetup,
 ) -> anyhow::Result<()> {
-    use mirrord_layer_lib::setup::windows::FsHookConfig;
 
     // ----------------------------------------------------------------------------
     // ~NOTE(gabriela):
@@ -1331,20 +1329,7 @@ pub fn initialize_hooks(
     // wraps around it, and depends on specific returns, etc.
     // ----------------------------------------------------------------------------
 
-    // Check specific file operation modes
-    let fs_config = setup.fs_config();
-
-    match &fs_config.mode {
-        mode if !mode.is_active() => {
-            tracing::info!("File hooks disabled - fs.mode = Local");
-            return Ok(());
-        }
-        mode => {
-            tracing::info!("File hooks enabled for mode: {:?}", mode);
-        }
-    }
-
-    // Core file operation hooks (always needed when FS is active)
+    // Core file operation hooks
     apply_hook!(
         guard,
         "ntdll",
@@ -1390,123 +1375,103 @@ pub fn initialize_hooks(
         NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
     )?;
 
-    // Read hooks (only if needed)
-    if fs_config.mode.should_enable_read_hooks() {
-        tracing::info!("Enabling file read hooks");
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtReadFile",
-            nt_read_file_hook,
-            NtReadFileType,
-            NT_READ_FILE_ORIGINAL
-        )?;
-    } else {
-        tracing::info!("File read hooks disabled (read mode not active)");
-    }
+    // Read hooks
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtReadFile",
+        nt_read_file_hook,
+        NtReadFileType,
+        NT_READ_FILE_ORIGINAL
+    )?;
 
-    // Write hooks (only if needed)
-    if fs_config.mode.should_enable_write_hooks() {
-        tracing::info!("Enabling file write hooks");
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtWriteFile",
-            nt_write_file_hook,
-            NtWriteFileType,
-            NT_WRITE_FILE_ORIGINAL
-        )?;
-    } else {
-        tracing::info!("File write hooks disabled (write mode not active)");
-    }
+    // Write hooks
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtWriteFile",
+        nt_write_file_hook,
+        NtWriteFileType,
+        NT_WRITE_FILE_ORIGINAL
+    )?;
 
-    // Metadata and directory hooks (if metadata operations needed)
-    if fs_config.mode.should_enable_metadata_hooks() {
-        tracing::info!("Enabling file metadata hooks");
+    // Metadata and directory hooks
 
-        // ----------------------------------------------------------------------------
-        // NOTE(gabriela): the following hooks are unimplemented!
-        // They're only here to trace missing logic! Please move above once they're
-        // implemented!
+    // ----------------------------------------------------------------------------
+    // NOTE(gabriela): the following hooks are unimplemented!
+    // They're only here to trace missing logic! Please move above once they're
+    // implemented!
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtSetVolumeInformationFile",
-            nt_set_volume_information_file_hook,
-            NtSetVolumeInformationFileType,
-            NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtSetVolumeInformationFile",
+        nt_set_volume_information_file_hook,
+        NtSetVolumeInformationFileType,
+        NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtSetQuotaInformationFile",
-            nt_set_quota_information_file_hook,
-            NtSetQuotaInformationFileType,
-            NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtSetQuotaInformationFile",
+        nt_set_quota_information_file_hook,
+        NtSetQuotaInformationFileType,
+        NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtQueryAttributesFile",
-            nt_query_attributes_file_hook,
-            NtQueryAttributesFileType,
-            NT_QUERY_ATTRIBUTES_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtQueryAttributesFile",
+        nt_query_attributes_file_hook,
+        NtQueryAttributesFileType,
+        NT_QUERY_ATTRIBUTES_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtQueryQuotaInformationFile",
-            nt_query_quota_information_file_hook,
-            NtQueryQuotaInformationFileType,
-            NT_QUERY_QUOTA_INFORMATION_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtQueryQuotaInformationFile",
+        nt_query_quota_information_file_hook,
+        NtQueryQuotaInformationFileType,
+        NT_QUERY_QUOTA_INFORMATION_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtDeleteFile",
-            nt_delete_file_hook,
-            NtDeleteFileType,
-            NT_DELETE_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtDeleteFile",
+        nt_delete_file_hook,
+        NtDeleteFileType,
+        NT_DELETE_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtDeviceIoControlFile",
-            nt_device_io_control_file_hook,
-            NtDeviceIoControlFileType,
-            NT_DEVICE_IO_CONTROL_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtDeviceIoControlFile",
+        nt_device_io_control_file_hook,
+        NtDeviceIoControlFileType,
+        NT_DEVICE_IO_CONTROL_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtLockFile",
-            nt_lock_file_hook,
-            NtLockFileType,
-            NT_LOCK_FILE_ORIGINAL
-        )?;
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtLockFile",
+        nt_lock_file_hook,
+        NtLockFileType,
+        NT_LOCK_FILE_ORIGINAL
+    )?;
 
-        apply_hook!(
-            guard,
-            "ntdll",
-            "NtUnlockFile",
-            nt_unlock_file_hook,
-            NtUnlockFileType,
-            NT_UNLOCK_FILE_ORIGINAL
-        )?;
-    } else {
-        tracing::info!("File metadata hooks disabled (metadata operations not needed)");
-    }
-
-    tracing::info!(
-        "File hooks initialization completed for mode: {:?}",
-        fs_config.mode
-    );
+    apply_hook!(
+        guard,
+        "ntdll",
+        "NtUnlockFile",
+        nt_unlock_file_hook,
+        NtUnlockFileType,
+        NT_UNLOCK_FILE_ORIGINAL
+    )?;    tracing::info!("File hooks initialization completed");
     Ok(())
 }
