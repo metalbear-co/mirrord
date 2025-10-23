@@ -653,7 +653,7 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - `+some-name.added.md` (without issue)
 
 **Identifier:**
-- Use the GitHub issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
+- If a GitHub issue exists, use the issue number from the public [mirrord repo](https://github.com/metalbear-co/mirrord)
 - Use `+some-name` if no issue exists
 - Don't use Linear issues or private repo issue numbers
 
