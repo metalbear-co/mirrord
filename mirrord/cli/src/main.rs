@@ -437,6 +437,7 @@ where
         _did_sip_patch,
         sub_progress,
         analytics,
+        &config,
         #[cfg(not(target_os = "windows"))]
         mirrord_for_ci,
     )
@@ -455,6 +456,7 @@ async fn run_process_with_mirrord<P: Progress>(
     _did_sip_patch: bool,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
+    config: &LayerConfig,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
@@ -485,6 +487,7 @@ async fn run_process_with_mirrord<P: Progress>(
                 &binary_path,
                 &binary_args,
                 &env_vars,
+                config,
             )
             .await
             .map_err(From::from),
@@ -520,6 +523,7 @@ async fn run_process_with_mirrord<P>(
     _did_sip_patch: bool,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
+    _config: &LayerConfig,
 ) -> CliResult<()>
 where
     P: Progress,

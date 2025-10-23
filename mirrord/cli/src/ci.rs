@@ -13,7 +13,10 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use serde::{Deserialize, Serialize};
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::{
+    fs::{self, File, create_dir_all},
+    io::{self, AsyncWriteExt},
+};
 use tracing::Level;
 
 use crate::{CiArgs, CiCommand, CliError, CliResult, ci::error::CiError, user_data::UserData};
@@ -197,8 +200,24 @@ impl MirrordCi {
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
+        LayerConfig { ci: ci_config, .. }: &LayerConfig,
     ) -> CiResult<()> {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+
+        let create_stdio_file = async |file_path: Option<&PathBuf>| match file_path {
+            Some(full_path) => {
+                let parent = full_path.parent().ok_or(io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Could not find parent directory for {full_path:?}!"),
+                ))?;
+
+                create_dir_all(parent).await?;
+                let stdio_file = File::create(full_path).await?;
+
+                Ok::<_, io::Error>(stdio_file.into_std().await.into())
+            }
+            None => Ok(Stdio::null()),
+        };
 
         if mirrord_ci_store.user_pid.is_some() {
             Err(CiError::UserPidAlreadyPresent)
@@ -206,9 +225,9 @@ impl MirrordCi {
             match tokio::process::Command::new(binary_path)
                 .args(binary_args.iter().skip(1))
                 .envs(env_vars)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdin(create_stdio_file(ci_config.stdin_file.as_ref()).await?)
+                .stdout(create_stdio_file(ci_config.stdout_file.as_ref()).await?)
+                .stderr(create_stdio_file(ci_config.stderr_file.as_ref()).await?)
                 .kill_on_drop(false)
                 .spawn()
             {
