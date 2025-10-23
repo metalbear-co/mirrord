@@ -254,6 +254,7 @@ use clap_complete::generate;
 use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
+use db_branches::db_branches_command;
 use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::MirrordExecution;
@@ -291,6 +292,7 @@ mod ci;
 mod config;
 mod connection;
 mod container;
+mod db_branches;
 mod diagnose;
 mod dump;
 mod error;
@@ -1053,6 +1055,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::Newsletter => newsletter::newsletter_command().await,
             Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
+            Commands::DbBranches(args) => db_branches_command(*args).await?,
         };
 
         Ok(())

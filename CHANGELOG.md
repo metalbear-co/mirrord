@@ -8,6 +8,38 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.168.0](https://github.com/metalbear-co/mirrord/tree/3.168.0) - 2025-10-23
+
+
+### Added
+
+- CLI for db branches to show and destroy
+
+
+### Changed
+
+- Changed semantics of `internal_proxy.log_destination` and
+  `external_proxy.log_destination` fields.
+  Now mirrord auto detects whether the path leads to the desired log files, or
+  directories where the log files should be created.
+
+
+### Fixed
+
+- fix rare case of fork and deadlock
+  [#3659](https://github.com/metalbear-co/mirrord/issues/3659)
+
+
+### Internal
+
+- The macOS CI now uses github's aarch64 runners
+  [#3305](https://github.com/metalbear-co/mirrord/issues/3305)
+- Add ignore to `RUSTSEC-2025-0074`, `RUSTSEC-2025-0075`, `RUSTSEC-2025-0080`,
+  `RUSTSEC-2025-0081`, `RUSTSEC-2025-0098`and `RUSTSEC-2025-0104` becuase
+  open-i18n/rust-unic is unmaintained but we should not have any issue with it.
+- Added a nix devshell
+- Improved `MirrordClusterSession` CRD.
+
 ## [3.167.0](https://github.com/metalbear-co/mirrord/tree/3.167.0) - 2025-10-17
 
 ### Added
