@@ -1,2 +1,0 @@
-Changed semantics of `internal_proxy.log_destination` and `external_proxy.log_destination` fields.
-Now mirrord auto detects whether the path leads to the desired log files, or directories where the log files should be created.
