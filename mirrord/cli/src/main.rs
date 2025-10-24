@@ -539,7 +539,7 @@ where
 
     // spawn the process (including mirrord layer injection and wait for initialization)
     let exit_code = LayerManagedProcess::execute(
-        None, // Let Windows resolve the executable from command_line
+        Some(binary_path_str), // Pass the resolved binary path as application name
         command_line,
         // current_directory (inherit from parent)
         None,
