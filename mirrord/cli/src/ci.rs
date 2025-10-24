@@ -225,7 +225,7 @@ impl MirrordCi {
             match tokio::process::Command::new(binary_path)
                 .args(binary_args.iter().skip(1))
                 .envs(env_vars)
-                .stdin(create_stdio_file(ci_config.stdin_file.as_ref()).await?)
+                .stdin(Stdio::null())
                 .stdout(create_stdio_file(ci_config.stdout_file.as_ref()).await?)
                 .stderr(create_stdio_file(ci_config.stderr_file.as_ref()).await?)
                 .kill_on_drop(false)
