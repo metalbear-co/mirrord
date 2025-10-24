@@ -41,7 +41,7 @@ use crate::{
     CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, AgentConnection, create_and_connect},
     error::CliError,
-    // extract::extract_library,
+    extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
 };
 
@@ -195,9 +195,17 @@ impl MirrordExecution {
     where
         P: Progress,
     {
-        // Extract Layer from exe
-        // let lib_path = extract_library(None, progress, true)?;
-        let lib_path = env!("MIRRORD_LAYER_FILE");
+        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for debugging)
+        let lib_path = match std::env::var("MIRRORD_LAYER_FILE") {
+            Ok(existing_path) => {
+                tracing::debug!("Using existing library file from MIRRORD_LAYER_FILE: {}", existing_path);
+                std::path::PathBuf::from(existing_path)
+            },
+            Err(_) => {
+                tracing::debug!("MIRRORD_LAYER_FILE not set, extracting library from binary");
+                extract_library(None, progress, true)?
+            }
+        };
 
         if !config.use_proxy {
             remove_proxy_env();
@@ -278,7 +286,7 @@ impl MirrordExecution {
         }
 
         // let lib_path = lib_path.to_string_lossy().into_owned();
-        let lib_path = lib_path.to_string().to_owned();
+        let lib_path = lib_path.to_string_lossy().into_owned();
         #[cfg(not(target_os = "windows"))]
         {
             // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES

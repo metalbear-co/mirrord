@@ -259,7 +259,7 @@ use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
-// use extract::extract_library;
+use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -534,16 +534,12 @@ where
     let binary_path_str = binary_path.to_string_lossy().to_string();
 
     // Create CLI executor and configure it
-    let command_line = if binary_args.len() > 1 {
-        &binary_args[1..] // Skip the program name (first element)
-    } else {
-        &[] // No arguments if only program name present
-    }
-    .join(" ");
+    // For Windows, include the full command line with executable name
+    let command_line = binary_args.join(" ");
 
     // spawn the process (including mirrord layer injection and wait for initialization)
     let exit_code = LayerManagedProcess::execute(
-        Some(binary_path_str),
+        None, // Let Windows resolve the executable from command_line
         command_line,
         // current_directory (inherit from parent)
         None,
@@ -969,11 +965,11 @@ fn main() -> miette::Result<()> {
                 dump_command(&args, watch, &user_data).await?
             }),
             Commands::Extract { path } => {
-                // extract_library(
-                //     Some(path),
-                //     &ProgressTracker::from_env("mirrord extract library..."),
-                //     false,
-                // )?;
+                extract_library(
+                    Some(path),
+                    &ProgressTracker::from_env("mirrord extract library..."),
+                    false,
+                )?;
             }
             Commands::ListTargets(args) => {
                 let rich_output = std::env::var(ListTargetArgs::RICH_OUTPUT_ENV)
