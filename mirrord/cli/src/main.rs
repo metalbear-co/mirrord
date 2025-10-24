@@ -1100,7 +1100,7 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
             let sent = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=&currentVersion={version}&platform={platform}&ci={is_ci}",
+                    "https://version.mirrord.dev/get-latest-version?source2=&currentVersion={version}&platform={platform}&ci={is_ci}",
                     version = CURRENT_VERSION,
                     platform = std::env::consts::OS,
                     is_ci = is_ci::cached(),
