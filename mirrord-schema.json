@@ -1904,7 +1904,7 @@
       }
     },
     "MysqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\nCreate an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreate an empty database and copy schema of all tables.\n\n- Data\n\nCopy both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\nCreate an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreate an empty database and copy schema of all tables.\n\n- All\n\nCopy both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
@@ -1961,7 +1961,7 @@
             "mode": {
               "type": "string",
               "enum": [
-                "data"
+                "all"
               ]
             }
           }

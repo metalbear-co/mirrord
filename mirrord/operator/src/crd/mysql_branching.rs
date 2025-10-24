@@ -103,7 +103,8 @@ pub struct BranchCopyConfig {
 
     /// An optional list of tables whose schema and data will be copied based on their
     /// table level copy config. Only compatible with `Empty` and `Schema` copy mode.
-    pub tables: BTreeMap<String, TableCopyConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tables: Option<BTreeMap<String, TableCopyConfig>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -113,8 +114,9 @@ pub enum BranchCopyMode {
     Empty,
     /// Create a database with all tables' schema copied from the source database.
     Schema,
-    /// Create a database and copy all tables' schema and data fro mthe source database.
-    Data,
+    /// Create a database and copy all tables' schema and data from the source database.
+    /// With this copy mode, all table specific copy configs are ignored.
+    All,
 }
 
 impl Default for BranchCopyConfig {
@@ -131,23 +133,23 @@ impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
         match config {
             MysqlBranchCopyConfig::Empty { tables } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
-                tables: tables
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(name, config)| (name, config.into()))
-                    .collect(),
+                tables: tables.map(|t| {
+                    t.into_iter()
+                        .map(|(name, config)| (name, config.into()))
+                        .collect()
+                }),
             },
             MysqlBranchCopyConfig::Schema { tables } => BranchCopyConfig {
                 mode: BranchCopyMode::Schema,
-                tables: tables
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(name, config)| (name, config.into()))
-                    .collect(),
+                tables: tables.map(|t| {
+                    t.into_iter()
+                        .map(|(name, config)| (name, config.into()))
+                        .collect()
+                }),
             },
-            MysqlBranchCopyConfig::Data => BranchCopyConfig {
-                mode: BranchCopyMode::Data,
-                tables: Default::default(),
+            MysqlBranchCopyConfig::All => BranchCopyConfig {
+                mode: BranchCopyMode::All,
+                tables: None,
             },
         }
     }
