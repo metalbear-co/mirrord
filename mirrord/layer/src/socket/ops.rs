@@ -48,7 +48,7 @@ use crate::{
 ///
 /// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
 /// [`connect`] with, so we can resolve it locally when neccessary.
-pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
+pub(crate) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<Mutex<HashMap<IpAddr, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Hostname initialized from the agent with [`gethostname`].
