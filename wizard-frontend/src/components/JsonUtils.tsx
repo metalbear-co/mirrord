@@ -1,49 +1,220 @@
 import {
   FeatureCopyTargetCopyTarget,
   HTTPFilter,
+  HttpFilterFileConfig,
   IncomingAdvancedSetup,
   IncomingMode,
+  InnerFilter,
   LayerFileConfig,
   NetworkFileConfig,
   PortMapping,
+  Target,
+  TargetFileConfig,
 } from "@/mirrord-schema";
 import { DefaultConfig } from "./UserDataContext";
 
-// infer the selected boilerplate type (or `custom` if the config has been changed manually) from config state
-export const readBoilerplateType = (config: LayerFileConfig): "steal" | "mirror" | "replace" | "custom" => {
-  // TODO
+// These functions are utils to interact with the current config.
+// The config type `LayerFileConfig` is generated from the mirrord schema file, as are all
+// the other config-related types. These are imported from `src/mirrord-schema.d.ts`.
+//
+// The functions here are all one of two types:
+// - functions that read the current state of the config
+// - functions that create a new config from the existing one, with some specific section changed
+//
+// *NOTE* that functions of the latter type DO NOT update the config directly, they return a new
+// `LayerFileConfig` which must be set _by the caller_.
 
-  // if (mode === "mirror") {
-  //     return "Mirror mode"
-  //   }
-  //   if (config.config.agent.scaledown && config.config.agent.copyTarget) {
-  //     return "Replace mode";
-  //   } else if (!config.config.agent.scaledown && !config.config.agent.copyTarget) {
-  //     return "Filtering mode";
-  //   }
-  //   return "Custom mode";
-  
-  return "steal";
-}
+// Infer the selected boilerplate type (or `custom` if the config has been changed manually)
+// from config state.
+export const readBoilerplateType = (
+  config: LayerFileConfig
+): "steal" | "mirror" | "replace" | "custom" => {
+  if (
+    typeof config.feature.network === "object" &&
+    typeof config.feature.network.incoming === "object"
+  ) {
+    if (config.feature.network.incoming.mode === "mirror") {
+      return "mirror";
+    }
+    if (typeof config.feature.copy_target === "object") {
+      if (
+        config.feature.copy_target.enabled &&
+        config.feature.copy_target.scale_down
+      ) {
+        return "replace";
+      } else if (
+        !config.feature.copy_target.enabled &&
+        !config.feature.copy_target.scale_down
+      ) {
+        return "steal";
+      }
+    }
+  }
+  return "custom";
+};
 
-// Update config.target
-export const updateConfigTarget = (
-  config: LayerFileConfig,
-  setConfig: (config: LayerFileConfig) => void,
-  targetType: string,
-  targetName: string,
-  targetNamespace: string
-) => {
-  // create new value for target
-  let targetPath;
-  if (targetType === "targetless") {
-    targetPath = targetType;
-  } else {
-    targetPath = targetType + "/" + targetName;
+const getTargetDetails = (
+  target: Target | any
+): { type: string; name?: string } => {
+  if (target === "targetless") {
+    return { type: "targetless" };
+  }
+  if (typeof target === "string") {
+    const nameParts = target.split("/");
+    if (nameParts.length < 2) {
+      return { type: "targetless" };
+    } else {
+      return { type: nameParts[0], name: nameParts[1] };
+    }
+  }
+  if ("deployment" in target) {
+    return { type: "deployment", name: target.deployment };
+  }
+  if ("pod" in target) {
+    return { type: "pod", name: target.pod };
+  }
+  if ("rollout" in target) {
+    return { type: "rollout", name: target.rollout };
+  }
+  if ("job" in target) {
+    return { type: "job", name: target.job };
+  }
+  if ("cron_job" in target) {
+    return { type: "cron_job", name: target.cron_job };
+  }
+  if ("stateful_set" in target) {
+    return { type: "stateful_set", name: target.stateful_set };
+  }
+  if ("service" in target) {
+    return { type: "service", name: target.service };
+  }
+  if ("replica_set" in target) {
+    return { type: "replica_set", name: target.replica_set };
+  }
+  return { type: "targetless" };
+};
+
+// Return the type and name of the target currently set in the given config.
+export const readCurrentTargetDetails = (
+  config: LayerFileConfig
+): { type: string; name?: string } => {
+  const target = config.target;
+  if (typeof target === "string") {
+    const nameParts = target.split("/");
+    if (nameParts.length < 2) {
+      return { type: "targetless" };
+    } else {
+      return { type: nameParts[0], name: nameParts[1] };
+    }
+  } else if (!target) {
+    return { type: "targetless" };
+  } else if (typeof target === "object") {
+    if ("path" in target) {
+      return getTargetDetails(target.path);
+    } else {
+      return getTargetDetails(target);
+    }
+  }
+};
+
+// Return the filters currently set in the given config, as well as the operator used to
+// combine them ("any", "all" or null).
+// Instead of using the generated type `InnerFilter`, we just return
+export const readCurrentFilters = (
+  config: LayerFileConfig
+): {
+  header: string[];
+  path: string[];
+  operator: "any" | "all" | null;
+} => {
+  let headerGenType: InnerFilter[] = [];
+  let pathGenType: InnerFilter[] = [];
+  let operator = null;
+
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object" &&
+    typeof config.feature?.network.incoming.http_filter === "object"
+  ) {
+    const filter = config.feature?.network.incoming.http_filter;
+
+    if (filter.header_filter) {
+      // single header filter
+      headerGenType = [{ header: filter.header_filter }];
+    } else if (filter.path_filter) {
+      // single path filter
+      pathGenType = [{ path: filter.path_filter }];
+    } else if (filter.all_of || filter.any_of) {
+      // multiple filters
+      headerGenType = filter.all_of
+        ?.filter((innerFilter) => {
+          "header" in innerFilter;
+        })
+        .concat(
+          filter.any_of?.filter((innerFilter) => {
+            "header" in innerFilter;
+          })
+        );
+      pathGenType = filter.all_of
+        ?.filter((innerFilter) => {
+          "path" in innerFilter;
+        })
+        .concat(
+          filter.any_of?.filter((innerFilter) => {
+            "path" in innerFilter;
+          })
+        );
+
+      if (filter.all_of) operator = "all";
+      else if (filter.any_of) operator = "any";
+    }
   }
 
+  // ### Generated types (they may change slightly as mirrord config changes):
+  //
+  // export type InnerFilter =
+  //   | Feature[...]HeaderFilter
+  //   | Feature[...]PathFilter
+  //   | {
+  //       method: string;
+  //       [k: string]: unknown;
+  //     };
+  //
+  // export interface Feature[...]HeaderFilter {
+  //   header: string;
+  //   [k: string]: unknown;
+  // }
+  //
+  // export interface Feature[...]PathFilter {
+  //   path: string;
+  //   [k: string]: unknown;
+  // }
+  //
+  // For this, we can ignore the unknown keys and method filtering.
+
+  const header: string[] = headerGenType
+    .filter((inner) => "header" in inner)
+    .map((inner) => (inner.header as string) ?? "")
+    .filter((string) => string.length > 0);
+  const path: string[] = pathGenType
+    .filter((inner) => "path" in inner)
+    .map((inner) => (inner.path as string) ?? "")
+    .filter((string) => string.length > 0);
+  return { header, path, operator };
+};
+
+export const readCurrentPorts = (config: LayerFileConfig) => {
+  // todo
+};
+
+// Returns an updated config with new config.target according to parameters.
+export const updateConfigTarget = (
+  config: LayerFileConfig,
+  target: string,
+  targetNamespace: string
+) => {
   const newTarget = {
-    path: targetPath,
+    path: target,
     namespace: targetNamespace,
   };
 
@@ -53,14 +224,13 @@ export const updateConfigTarget = (
     target: newTarget,
   };
 
-  setConfig(newConfig);
+  return newConfig;
 };
 
-// Update config.feature.network.incoming.mode
+// Returns an updated config with new config.feature.network.incoming.mode according to parameters.
 export const updateConfigMode = (
   mode: "mirror" | "steal",
-  config: LayerFileConfig,
-  setConfig: (config: LayerFileConfig) => void
+  config: LayerFileConfig
 ) => {
   if (typeof config !== "object") {
     throw "config badly formed";
@@ -123,15 +293,14 @@ export const updateConfigMode = (
     },
   };
 
-  setConfig(newConfig);
+  return newConfig;
 };
 
-// Update config.feature.network.incoming.mode
+// Returns an updated config with new config.feature.network.incoming.mode according to parameters.
 export const updateConfigCopyTarget = (
   copy_target: boolean,
   scale_down: boolean,
-  config: LayerFileConfig,
-  setConfig: (config: LayerFileConfig) => void
+  config: LayerFileConfig
 ) => {
   if (typeof config !== "object") {
     throw "config badly formed";
@@ -143,27 +312,26 @@ export const updateConfigCopyTarget = (
   }
 
   // overwrite copy_target
-  const newConfig = {
+  const newConfig: LayerFileConfig = {
     ...config,
     feature: {
       ...config.feature,
       copy_target: {
         enabled: copy_target,
-        scale_down: scale_down
-      }
+        scale_down: scale_down,
+      },
     },
   };
 
-  setConfig(newConfig);
+  return newConfig;
 };
 
-// Update config.feature.network.filter
+// Returns an updated config with new config.feature.network.filter according to parameters.
 export const updateConfigFilter = (
   headerFilters: string[],
   pathFilters: string[],
   operator: "any" | "all",
-  config: LayerFileConfig,
-  setConfig: (config: LayerFileConfig) => void
+  config: LayerFileConfig
 ) => {
   if (typeof config !== "object") {
     throw "config badly formed";
@@ -253,14 +421,14 @@ export const updateConfigFilter = (
     },
   };
 
-  setConfig(newConfig);
+  return newConfig;
 };
 
-// Update config.feature.network.incoming.port_mapping
+// Returns an updated config with new config.feature.network.incoming.port_mapping according
+// to parameters.
 export const updateConfigPorts = (
   portMappings: PortMapping,
-  config: LayerFileConfig,
-  setConfig: (config: LayerFileConfig) => void
+  config: LayerFileConfig
 ) => {
   if (typeof config !== "object") {
     throw "config badly formed";
@@ -321,26 +489,25 @@ export const updateConfigPorts = (
     },
   };
 
-  setConfig(newConfig);
+  return newConfig;
 };
 
-// Update config from user's text box input, if and only if it passes validation
+// Update config from user's text box input, if and only if it passes validation.
 export const updateConfigFromJson = (
   jsonString: string,
-  setConfig: (config: LayerFileConfig) => void,
   setJsonError: (error: string) => void
 ): void => {
   if (validateJson(jsonString, setJsonError)) {
     try {
       const parsedConfig = JSON.parse(jsonString);
-      setConfig(parsedConfig);
+      // setConfig(parsedConfig); // TODO:?
     } catch (error) {
       console.error("Error updating config from JSON:", error);
     }
   }
 };
 
-// For validating the config JSON is well-formed JSON
+// For validating the config JSON is well-formed JSON.
 export const validateJson = (
   jsonString: string,
   setJsonError: (error: string) => void
@@ -358,4 +525,9 @@ export const validateJson = (
     );
     return false;
   }
+};
+
+// Stringify the config object with whitespace for display or file download
+export const getConfigString = (config: LayerFileConfig): string => {
+  return JSON.stringify(config, null, 2);
 };
