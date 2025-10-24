@@ -210,7 +210,7 @@ where
             tx: out_msg_tx,
             rx: in_msg_rx,
             token: token.clone(),
-            agent_tx: self.agent_tx.clone(),
+            agent_tx: self.agent_tx.another(),
         };
 
         self.handles.insert(

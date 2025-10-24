@@ -3,7 +3,10 @@ use std::{
     fmt,
     io::{self},
     marker::PhantomData,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     task::{Context, Poll},
 };
 
@@ -11,10 +14,7 @@ use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
 use bincode::error::DecodeError;
 use bytes::{BufMut, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, future::Either};
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, ProtocolCodec,
-    queueing::{QueueId, Queueable},
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, ProtocolCodec};
 use rand::seq::IteratorRandom;
 use tokio::{
     pin, select,
@@ -43,7 +43,7 @@ pub enum Mode {
 
 pub trait ProtocolEndpoint: 'static + Sized + Clone {
     type InMsg: bincode::Decode<()> + Send + fmt::Debug;
-    type OutMsg: bincode::Encode + Send + Queueable + fmt::Debug;
+    type OutMsg: bincode::Encode + Send + fmt::Debug;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -92,7 +92,7 @@ impl<I> Encoder<Vec<u8>> for Codec<I> {
 
 pub struct Connection<Type: ProtocolEndpoint> {
     rx: mpsc::Receiver<Type::InMsg>,
-    tx_handle: TxHandle<Type>,
+    shared_state: Arc<SharedState<Type>>,
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
@@ -104,15 +104,17 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        let out_queues = Arc::new(SharedState::new(inbound_tx.clone(), None));
+        let shared_state = Arc::new(SharedState::new(inbound_tx.clone(), None));
 
-        let tx_handle = TxHandle(out_queues.clone());
-
-        tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
+        tokio::spawn(io_task::<_, Type>(
+            framed,
+            Arc::clone(&shared_state),
+            inbound_tx,
+        ));
 
         Ok(Self {
             rx: inbound_rx,
-            tx_handle,
+            shared_state,
         })
     }
 
@@ -135,40 +137,45 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        let out_queues = Arc::new(SharedState::new(
+        let shared_state = Arc::new(SharedState::new(
             inbound_tx.clone(),
             filter.map(|f| Box::new(f) as _),
         ));
 
-        let tx_handle = TxHandle::<Type>(out_queues.clone());
-        tokio::spawn(io_task::<_, Type>(framed, out_queues, inbound_tx));
+        tokio::spawn(io_task::<_, Type>(
+            framed,
+            Arc::clone(&shared_state),
+            inbound_tx,
+        ));
 
         Ok(Self {
             rx: inbound_rx,
-            tx_handle,
+            shared_state,
         })
     }
 
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
-        let out_queues = Arc::new(SharedState::new(inbound_tx.clone(), None));
-
-        let tx_handle = TxHandle(out_queues.clone());
+        let shared_state = Arc::new(SharedState::new(inbound_tx.clone(), None));
 
         let connection = Connection {
             rx: inbound_rx,
-            tx_handle,
+            shared_state: Arc::clone(&shared_state),
         };
 
-        (connection, inbound_tx, ConnectionOutput::<Type>(out_queues))
+        (
+            connection,
+            inbound_tx,
+            ConnectionOutput::<Type>(shared_state),
+        )
     }
 
     /// Replaces the internal send queue of this connection with the
     /// one provided. Used to preserve and carry over queued messages
     /// between reconnections.
-    pub fn replace_queue(&mut self, tx_handle: TxHandle<Type>) {
-        self.tx_handle = tx_handle;
+    pub fn replace_queue(&mut self, tx_handle: Arc<SharedState<Type>>) {
+        self.shared_state = tx_handle;
     }
 
     #[inline]
@@ -183,12 +190,12 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
     #[inline]
     pub async fn send(&self, msg: Type::OutMsg) {
-        self.tx_handle.send(msg).await
+        self.shared_state.push(QueueId(0), msg).await
     }
 
     #[inline]
     pub fn tx_handle(&self) -> TxHandle<Type> {
-        self.tx_handle.clone()
+        self.shared_state.clone().new_queue()
     }
 
     #[inline]
@@ -254,7 +261,7 @@ async fn io_task<Channel, Type>(
     let _ = framed.close().await;
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct OutQueue {
     messages: VecDeque<Vec<u8>>,
     used_bytes: usize,
@@ -264,13 +271,16 @@ struct OutQueue {
 
 type FilterFn<I, O> = dyn Fn(O) -> Either<O, I> + Send + Sync;
 
-struct Queues<Type: ProtocolEndpoint> {
-    queues: HashMap<QueueId<Type::OutMsg>, OutQueue>,
-    ready: Vec<QueueId<Type::OutMsg>>,
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+struct QueueId(usize);
+
+struct Queues {
+    queues: HashMap<QueueId, OutQueue>,
+    ready: Vec<QueueId>,
 }
 
 struct SharedState<Type: ProtocolEndpoint> {
-    queues: Mutex<Queues<Type>>,
+    queues: Mutex<Queues>,
     nonempty: Arc<Notify>,
 
     /// Used for injecting "fake" incoming messages.
@@ -281,6 +291,8 @@ struct SharedState<Type: ProtocolEndpoint> {
     /// the return value is either injected as an incoming message
     /// (left), or enqueued for sending (right).
     out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
+
+    next_queue_id: AtomicUsize,
 }
 
 impl<Type: ProtocolEndpoint> SharedState<Type> {
@@ -297,19 +309,21 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             nonempty: Arc::new(Notify::new()),
             in_tx,
             out_filter,
+            // 0 is reserved for the Connection struct
+            next_queue_id: 1.into(),
         }
     }
 
     fn try_push(
         &self,
-        queue_id: QueueId<Type::OutMsg>,
+        queue_id: QueueId,
         encoded: Vec<u8>,
     ) -> Result<(), (Vec<u8>, OwnedNotified)> {
         let mut lock = self.queues.lock().unwrap();
 
         // Garbage-collect unused queues
         if lock.queues.len() > 8 && lock.ready.len() < lock.queues.len() / 3 {
-			// We can remove all empty ones because we know they wont be in `ready`
+            // We can remove all empty ones because we know they wont be in `ready`
             lock.queues.retain(|_, v| !v.messages.is_empty());
         }
 
@@ -323,9 +337,11 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         queue.messages.push_back(encoded);
 
         if queue.messages.len() == 1 {
-			// .len() > 1 implies that it was already in `ready`
+            // .len() > 1 implies that it was already in `ready`
             lock.ready.push(queue_id);
         }
+
+		tracing::info!(queues = ?lock.queues.keys() ,"added queue");
 
         drop(lock);
 
@@ -337,7 +353,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
     fn poll_next(&self) -> Option<Vec<u8>> {
         let mut lock = self.queues.lock().unwrap();
 
-		// If `ready` is empty then we have nothing to do.
+        // If `ready` is empty then we have nothing to do.
         let key_idx = (0..lock.ready.len()).choose(&mut rand::rng())?;
         let key = lock.ready[key_idx].clone();
 
@@ -366,6 +382,30 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         Some(next)
     }
 
+    async fn push(&self, id: QueueId, mut msg: Type::OutMsg) {
+        if let Some(filter) = &self.out_filter {
+            match filter(msg) {
+                Either::Left(out) => msg = out,
+                Either::Right(inj) => {
+                    let _ = self.in_tx.send(inj).await;
+                    return;
+                }
+            }
+        }
+
+        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
+
+        loop {
+            match self.try_push(id, encoded) {
+                Ok(()) => break,
+                Err((r, notify)) => {
+                    encoded = r;
+                    notify.await;
+                }
+            }
+        }
+    }
+
     async fn next(&self) -> Vec<u8> {
         loop {
             match self.poll_next() {
@@ -376,34 +416,36 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             }
         }
     }
+
+    fn new_queue(self: Arc<Self>) -> TxHandle<Type> {
+        let next = self.next_queue_id.fetch_add(1, Ordering::Relaxed);
+        if next > usize::MAX / 2 {
+            panic!("Too many QueueIds generated");
+        }
+
+        TxHandle {
+            shared_state: self,
+            id: QueueId(next),
+        }
+    }
 }
 
+/// A handle to a queue for outbound messages.
+///
+/// Cloning this struct returns a handle to the same queue. To create
+/// a new queue, use `Self::another`.
 #[derive(Clone)]
-pub struct TxHandle<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
+pub struct TxHandle<Type: ProtocolEndpoint> {
+    shared_state: Arc<SharedState<Type>>,
+    id: QueueId,
+}
 
 impl<Type: ProtocolEndpoint> TxHandle<Type> {
-    pub async fn send(&self, mut msg: Type::OutMsg) {
-        if let Some(filter) = &self.0.out_filter {
-            match filter(msg) {
-                Either::Left(out) => msg = out,
-                Either::Right(inj) => {
-                    let _ = self.0.in_tx.send(inj).await;
-                    return;
-                }
-            }
-        }
+    pub async fn send(&self, msg: Type::OutMsg) {
+        self.shared_state.push(self.id, msg).await
+    }
 
-        let queue_id = msg.queue_id();
-        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
-
-        loop {
-            match self.0.try_push(queue_id.clone(), encoded) {
-                Ok(()) => break,
-                Err((r, notify)) => {
-                    encoded = r;
-                    notify.await;
-                }
-            }
-        }
+    pub fn another(&self) -> Self {
+        self.shared_state.clone().new_queue()
     }
 }

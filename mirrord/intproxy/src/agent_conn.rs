@@ -183,7 +183,8 @@ impl AgentConnection {
         };
 
         if let Some(old_queue) = old_queue {
-            connection.replace_queue(old_queue);
+            // connection.replace_queue(old_queue);
+			todo!()
         }
 
         Ok(Self {

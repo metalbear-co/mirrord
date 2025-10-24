@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     marker::PhantomData,
-    mem::discriminant,
     sync::LazyLock,
 };
 
@@ -21,8 +20,7 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
-    queueing::{QueueId, Queueable},
-    tcp::{ChunkedRequest, ChunkedResponse, DaemonTcp, LayerTcp, LayerTcpSteal},
+    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
 };
 
@@ -106,32 +104,6 @@ pub enum FileRequest {
     Rename(RenameRequest),
 }
 
-impl Queueable for DaemonMessage {
-    fn queue_id(&self) -> QueueId<Self> {
-        use QueueId::{Normal, Tcp};
-        match &self {
-            DaemonMessage::TcpSteal(t) | DaemonMessage::Tcp(t) => match t {
-                DaemonTcp::NewConnectionV1(p) => Tcp(p.connection_id),
-                DaemonTcp::Data(p) => Tcp(p.connection_id),
-                DaemonTcp::Close(p) => Tcp(p.connection_id),
-                DaemonTcp::HttpRequest(p) => Tcp(p.connection_id),
-                DaemonTcp::HttpRequestFramed(p) => Tcp(p.connection_id),
-                DaemonTcp::HttpRequestChunked(p) => match p {
-                    ChunkedRequest::StartV1(r) => Tcp(r.connection_id),
-                    ChunkedRequest::Body(r) => Tcp(r.connection_id),
-                    ChunkedRequest::ErrorV1(r) => Tcp(r.connection_id),
-                    ChunkedRequest::StartV2(r) => Tcp(r.connection_id),
-                    ChunkedRequest::ErrorV2(r) => Tcp(r.connection_id),
-                },
-                DaemonTcp::NewConnectionV2(p) => Tcp(p.connection.connection_id),
-                _ => Normal(discriminant(self)),
-            },
-
-            _ => Normal(discriminant(self)),
-        }
-    }
-}
-
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
@@ -176,26 +148,6 @@ pub enum ClientMessage {
     ///
     /// Has the same ID that we got from the [`DaemonMessage::OperatorPing`].
     OperatorPong(u128),
-}
-
-impl Queueable for ClientMessage {
-    fn queue_id(&self) -> QueueId<Self> {
-        use QueueId::{Normal, Tcp};
-        match self {
-            ClientMessage::TcpSteal(l) => match l {
-                LayerTcpSteal::Data(d) => Tcp(d.connection_id),
-                LayerTcpSteal::HttpResponse(r) => Tcp(r.connection_id),
-                LayerTcpSteal::HttpResponseFramed(r) => Tcp(r.connection_id),
-                LayerTcpSteal::HttpResponseChunked(r) => match r {
-                    ChunkedResponse::Start(c) => Tcp(c.connection_id),
-                    ChunkedResponse::Body(c) => Tcp(c.connection_id),
-                    ChunkedResponse::Error(c) => Tcp(c.connection_id),
-                },
-                _ => Normal(discriminant(self)),
-            },
-            _ => Normal(discriminant(self)),
-        }
-    }
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
