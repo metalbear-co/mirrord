@@ -82,7 +82,9 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .map(|s| s.to_string())
     .collect();
 
-    if let Ok(cwd) = env::current_dir() {
+    if let Ok(cwd) = env::current_dir()
+        && cwd.as_os_str().as_encoded_bytes() != b"/"
+    {
         patterns.push(format!(
             "^{}(/|$)",
             // We trim any trailing '/' and add it above, so that the regex is correct whether
