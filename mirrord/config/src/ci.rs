@@ -17,7 +17,6 @@ use crate::config::source::MirrordConfigSource;
 /// {
 ///   "ci": {
 ///     "stdout_file": "/tmp/mirrord-ci-logs/stdout",
-///     "stdin_file": "/tmp/mirrord-ci-logs/stdin",
 ///     "stderr_file": "/tmp/mirrord-ci-logs/stderr"
 ///   }
 /// }
@@ -31,11 +30,6 @@ pub struct CiConfig {
     /// Pipe `stdout` to the file specified here.
     pub stdout_file: Option<PathBuf>,
 
-    /// ### ci.stdin_file {#ci-stdin_file}
-    ///
-    /// Pipe `stdin` to the file specified here.
-    pub stdin_file: Option<PathBuf>,
-
     /// ### ci.stderr_file {#ci-stderr_file}
     ///
     /// Pipe `stderr` to the file specified here.
@@ -48,7 +42,6 @@ pub struct CiConfig {
 impl CollectAnalytics for &CiConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("stdout_file", self.stdout_file.is_some());
-        analytics.add("stdin_file", self.stdout_file.is_some());
         analytics.add("stderr_file", self.stdout_file.is_some());
     }
 }
