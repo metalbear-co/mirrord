@@ -23,6 +23,17 @@
         }
       ]
     },
+    "ci": {
+      "title": "ci {#root-ci}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CiFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "container": {
       "title": "container {#root-container}",
       "anyOf": [
@@ -603,6 +614,21 @@
           "type": "string"
         }
       }
+    },
+    "CiFileConfig": {
+      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"info_dir\": \"/tmp/mirrord/\", } } ```",
+      "type": "object",
+      "properties": {
+        "info_dir": {
+          "title": "ci.info_dir{#ci-info_dir}",
+          "description": "`mirrord ci` commands creates some temporary files (e.g. a file for the output of `stdio`), and you can specify the directory where these files will be created here.\n\nDefaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",

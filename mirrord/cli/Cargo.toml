@@ -70,6 +70,7 @@ fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 is_ci = "1.2.0"
+rand.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }
