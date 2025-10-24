@@ -1,8 +1,25 @@
+/// Find the length of a null-terminated buffer using an efficient search
+///
+/// This utility function replaces the common pattern of using `(0..).take_while`
+/// to find null terminators in buffers.
+///
+/// # Arguments
+///
+/// * `buffer` - The buffer to search
+/// * `null_value` - The value to search for (usually 0)
+///
+/// # Returns
+///
+/// The index of the first occurrence of `null_value`, or the buffer length if not found
+fn find_null_terminator_length<T: PartialEq>(buffer: &[T], null_value: T) -> usize {
+    buffer.iter().position(|x| *x == null_value).unwrap_or(buffer.len())
+}
+
 pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 
-    // Find the first null byte (0) using iterator pattern
-    let len = (0..buffer.len()).take_while(|&i| buffer[i] != 0).count();
+    // Find the first null byte (0) using utility function
+    let len = find_null_terminator_length(buffer, 0);
 
     // Convert to string, handling invalid UTF-8 gracefully
     String::from_utf8_lossy(buffer.get(..len).unwrap_or(buffer)).into_owned()
@@ -11,8 +28,8 @@ pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
 pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
     let buffer = buffer.as_ref();
 
-    // Find the first null u16 (0) using iterator pattern
-    let len = (0..buffer.len()).take_while(|&i| buffer[i] != 0).count();
+    // Find the first null u16 (0) using utility function
+    let len = find_null_terminator_length(buffer, 0);
 
     // Convert u16 slice to string by treating each u16 as a Unicode code point
     // This is a simplified approach - real UTF-16 would be more complex
@@ -60,10 +77,12 @@ pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> 
     let mut start = 0;
 
     while start < buffer.len() {
-        // Find the length of current string using iterator pattern
-        let len = (start..buffer.len())
-            .take_while(|&i| buffer[i] != T::default())
-            .count();
+        // Find the length of current string using utility function
+        let len = if start < buffer.len() {
+            find_null_terminator_length(&buffer[start..], T::default())
+        } else {
+            0
+        };
 
         if len > 0 {
             if let Some(slice) = buffer.get(start..start + len) {
@@ -101,61 +120,6 @@ pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
         .collect()
 }
 
-/// Convert a null-terminated wide string pointer (LPCWSTR) to a Rust String.
-///
-/// This function safely handles Windows API wide string pointers by:
-/// 1. Checking for null pointers
-/// 2. Finding the null terminator
-/// 3. Using proper UTF-16 decoding
-///
-/// # Safety
-///
-/// The caller must ensure that `ptr` is a valid pointer to a null-terminated
-/// wide string, or a null pointer.
-///
-/// # Arguments
-///
-/// * `ptr` - A pointer to a null-terminated wide string (LPCWSTR) or null
-///
-/// # Returns
-///
-/// * `Some(String)` - If the pointer is valid and can be converted
-/// * `None` - If the pointer is null
-pub unsafe fn lpcwstr_to_string(ptr: *const u16) -> Option<String> {
-    if ptr.is_null() {
-        return None;
-    }
-
-    // Find the length by counting until null terminator
-    let len = (0..)
-        .take_while(|&i| unsafe { *ptr.offset(i) != 0 })
-        .count();
-
-    // Create slice and convert using proper UTF-16 decoding
-    let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-    Some(String::from_utf16_lossy(slice))
-}
-
-/// Convert a null-terminated wide string pointer (LPCWSTR) to a Rust String,
-/// returning an empty string for null pointers.
-///
-/// This is a convenience wrapper around `lpcwstr_to_string` that never returns None.
-///
-/// # Safety
-///
-/// The caller must ensure that `ptr` is a valid pointer to a null-terminated
-/// wide string, or a null pointer.
-///
-/// # Arguments
-///
-/// * `ptr` - A pointer to a null-terminated wide string (LPCWSTR) or null
-///
-/// # Returns
-///
-/// * `String` - The converted string, or empty string if pointer is null
-pub unsafe fn lpcwstr_to_string_or_empty(ptr: *const u16) -> String {
-    unsafe { lpcwstr_to_string(ptr) }.unwrap_or_default()
-}
 
 /// Find the safe length of a multi-buffer by locating the double null terminator
 ///
@@ -186,34 +150,29 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
     }
 
     let max_elements = max_bytes / std::mem::size_of::<T>();
-    let max_reasonable_size = max_elements as isize;
-
-    let size = (0..max_reasonable_size)
-        .take_while(|&i| {
-            unsafe {
-                let current = *ptr.offset(i);
-                if current == T::default() {
-                    // Found first null, check for double null
-                    if i + 1 < max_reasonable_size {
-                        let next = *ptr.offset(i + 1);
-                        // Continue if not double null
-                        next != T::default()
-                    } else {
-                        // Stop if we're at the end
-                        false
-                    }
-                } else {
-                    // Continue if not null
-                    true
-                }
+    
+    // Create a slice with the maximum safe length to search within
+    let slice = unsafe { std::slice::from_raw_parts(ptr, max_elements) };
+    
+    // Search for double null terminator pattern using our utility function
+    let mut pos = 0;
+    while pos < slice.len() {
+        let remaining_slice = &slice[pos..];
+        let next_null = find_null_terminator_length(remaining_slice, T::default());
+        
+        if next_null == 0 {
+            // Found a null at current position, check if next is also null (double null)
+            if pos + 1 < slice.len() && slice[pos + 1] == T::default() {
+                // Found double null terminator
+                return Some(pos + 2);
             }
-        })
-        .count();
-
-    // Add 2 to include both null terminators if we found them
-    if (size as isize) < max_reasonable_size {
-        Some(size + 2)
-    } else {
-        None // Malformed or too large
+            // Single null, move past it
+            pos += 1;
+        } else {
+            // Move past this string and its null terminator
+            pos += next_null + 1;
+        }
     }
+    
+    None // Double null terminator not found within bounds
 }

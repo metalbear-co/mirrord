@@ -14,7 +14,7 @@ use mirrord_layer_lib::{
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, DWORD, HMODULE, LPVOID, TRUE},
+        minwindef::{BOOL, DWORD, HMODULE, LPVOID, TRUE, FALSE},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
     },
     um::{
@@ -61,17 +61,6 @@ unsafe extern "system" fn create_process_internal_w_hook(
 ) -> BOOL {
     tracing::debug!("🎯 CreateProcessInternalW hook intercepted process creation");
 
-    // // winapi loop until IsDebuggerPresent is false
-    // use winapi::um::debugapi::{IsDebuggerPresent, DebugBreak};
-    // while IsDebuggerPresent() == 0 {
-    //     std::thread::sleep(std::time::Duration::from_millis(10));
-    // }
-
-    // Convert Windows API parameters to Rust types
-    let app_name = unsafe { str_win::lpcwstr_to_string(application_name) };
-    let cmd_line = unsafe { str_win::lpcwstr_to_string_or_empty(command_line) };
-    let current_dir = unsafe { str_win::lpcwstr_to_string(current_directory) };
-
     // Get the original function pointer
     let original = match CREATE_PROCESS_INTERNAL_W_ORIGINAL.get() {
         Some(original_fn) => original_fn,
@@ -79,19 +68,16 @@ unsafe extern "system" fn create_process_internal_w_hook(
             tracing::error!(
                 "❌ Original CreateProcessInternalW function not available - hook not properly installed"
             );
-            return winapi::shared::minwindef::FALSE;
+            return FALSE;
         }
     };
 
     // Parse environment from Windows API call - check creation flags for format
     let env_vars =
-        unsafe { parse_environment_block(environment as *mut std::ffi::c_void, creation_flags) };
+        unsafe { parse_environment_block(environment as *mut _, creation_flags) };
 
     tracing::debug!(
-        "Windows CreateProcess parameters: app_name={:?}, cmd_line={:?}, current_dir={:?}, parent_pid={}, env_count={}",
-        app_name,
-        cmd_line,
-        current_dir,
+        "Windows CreateProcess parameters: parent_pid={}, env_count={}",
         std::process::id(),
         env_vars.len()
     );

@@ -51,6 +51,15 @@ pub const MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR: &str = "MIRRORD_LAYER_CHILD_PR
 
 const LAYER_INIT_TIMEOUT_MS: u32 = 30_000;
 
+/// Environment variables that should be explicitly forwarded from parent to child process
+const FORWARDED_ENV_VARS: &[&str] = &[
+    MIRRORD_AGENT_ADDR_ENV,
+    MIRRORD_LAYER_ID_ENV,
+    MIRRORD_LAYER_FILE_ENV,
+    "RUST_LOG",
+    "RUST_BACKTRACE",
+];
+
 /// Function signature for CreateProcessInternalW Windows API call.
 pub type CreateProcessInternalWType = unsafe extern "system" fn(
     user_token: HANDLE,
@@ -95,31 +104,13 @@ impl LayerManagedProcess {
             parent_event.name().to_string(),
         );
 
-        // Add other mirrord environment variables if they exist in current process
-        if let Ok(agent_addr) = std::env::var(MIRRORD_AGENT_ADDR_ENV) {
-            env_vars.insert(MIRRORD_AGENT_ADDR_ENV.to_string(), agent_addr);
-        }
-        if let Ok(layer_id) = std::env::var(MIRRORD_LAYER_ID_ENV) {
-            env_vars.insert(MIRRORD_LAYER_ID_ENV.to_string(), layer_id);
-        }
-        if let Ok(layer_file) = std::env::var(MIRRORD_LAYER_FILE_ENV) {
-            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), layer_file);
-        }
-
-        // Forward RUST_LOG for child process tracing
-        if let Ok(rust_log) = std::env::var("RUST_LOG") {
-            tracing::warn!(
-                "🎯 LAYER_LIB: Forwarding RUST_LOG={} to child process",
-                rust_log
-            );
-            env_vars.insert("RUST_LOG".to_string(), rust_log);
-        } else {
-            tracing::warn!("🎯 LAYER_LIB: No RUST_LOG found in current process environment");
-        }
-
-        // Forward RUST_BACKTRACE for child process debugging
-        if let Ok(rust_backtrace) = std::env::var("RUST_BACKTRACE") {
-            env_vars.insert("RUST_BACKTRACE".to_string(), rust_backtrace);
+        // Forward explicitly configured environment variables from parent to child
+        for &env_var in FORWARDED_ENV_VARS {
+            if let Ok(value) = std::env::var(env_var) {
+                env_vars.insert(env_var.to_string(), value.clone());
+            } else {
+                tracing::debug!("No {} found in current process environment", env_var);
+            }
         }
 
         // Encode and forward current socket state to child process (like Unix prepare_execve_envp)

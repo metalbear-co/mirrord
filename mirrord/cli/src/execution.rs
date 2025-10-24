@@ -285,7 +285,6 @@ impl MirrordExecution {
             );
         }
 
-        // let lib_path = lib_path.to_string_lossy().into_owned();
         let lib_path = lib_path.to_string_lossy().into_owned();
         #[cfg(not(target_os = "windows"))]
         {
