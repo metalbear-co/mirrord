@@ -149,15 +149,23 @@ impl StatusCommandHandler {
             // From the list of queue names, loop over them so we can match the `QueueId`
             // of a name with the `QueueId` of a filter.
             for (
-                queue_id,
+                composite_key,
                 QueueNameUpdate {
                     original_name,
                     output_name,
                 },
             ) in names.iter()
             {
-                // Basically `filter.queue_id == name.queue_id`.
-                if let Some(filters_by_id) = filters.get(queue_id) {
+                // Parse the composite key format "queue_id::input_name" to extract queue_id
+                let queue_id = composite_key
+                    .split_once("::")
+                    .map(|(id, _)| id)
+                    .unwrap_or(composite_key.as_str());
+
+                // Match with filters by queue_id, or use wildcard "*" if present
+                let filters_by_id = filters.get(queue_id).or_else(|| filters.get("*"));
+
+                if let Some(filters_by_id) = filters_by_id {
                     // Loop over the filters and start building the rows.
                     for (filter_key, filter) in filters_by_id.iter() {
                         // Group rows by the queue `consumer`.
