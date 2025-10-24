@@ -129,6 +129,8 @@ pub struct OperatorSession {
 
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
+
+    pub mirrord_ci_info: Option<MirrordCiInfo>,
 }
 
 impl fmt::Debug for OperatorSession {
@@ -760,7 +762,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
             );
-            let session = self.make_operator_session(id, connect_url)?;
+            let session = self.make_operator_session(id, connect_url, mirrord_ci_info.clone())?;
 
             (session, reused)
         } else {
@@ -825,7 +827,7 @@ impl OperatorApi<PreparedClientCert> {
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             // TODO(alex) [high] 2: Seems like we should add the ci stuff in
             // `make_operator_session`, the connect params doesn't seem to fit it.
-            let session = self.make_operator_session(None, connect_url)?;
+            let session = self.make_operator_session(None, connect_url, mirrord_ci_info.clone())?;
 
             (session, false)
         };
@@ -854,7 +856,8 @@ impl OperatorApi<PreparedClientCert> {
                     .status
                     .as_ref()
                     .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
-                let session = self.make_operator_session(session_id, connect_url)?;
+                let session =
+                    self.make_operator_session(session_id, connect_url, mirrord_ci_info)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
                 let (tx, rx) = Self::connect_target(&self.client, &session).await?;
@@ -875,6 +878,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
+        mirrord_ci_info: Option<MirrordCiInfo>,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
@@ -900,6 +904,7 @@ impl OperatorApi<PreparedClientCert> {
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
             allow_reconnect,
+            mirrord_ci_info,
         })
     }
 
@@ -1243,12 +1248,21 @@ impl OperatorApi<PreparedClientCert> {
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         // TODO(alex) [high] 4: But then, do we add it as a header? Feels weird, could it be body?
         // It doesn't really belong in the `connect_url`, it's too much info for that...
-        let request = Request::builder()
+        let request_builder = Request::builder()
             .uri(&session.connect_url)
-            .header(SESSION_ID_HEADER, session.id.to_string())
+            .header(SESSION_ID_HEADER, session.id.to_string());
+
+        if let Some(ci_info) = session
+            .mirrord_ci_info
+            .as_ref()
+            .map(|info| "hello".to_string())
+        {
+            request_builder.header("x-ci-info", ci_info);
+        };
+
+        let request = request_builder
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
-
         let connection = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {

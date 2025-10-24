@@ -26,7 +26,7 @@ pub enum CiTrigger {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MirrordCiInfo {
-    pub vendor: Option<u64>,
+    pub vendor: Option<String>,
     pub target: u64,
     pub branch_name: Option<u64>,
 }

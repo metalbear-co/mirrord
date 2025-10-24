@@ -271,12 +271,7 @@ impl MirrordCi {
         let mut hasher = DefaultHasher::new();
 
         MirrordCiInfo {
-            vendor: {
-                name.map(|name| {
-                    name.hash(&mut hasher);
-                    hasher.finish()
-                })
-            },
+            vendor: name,
             target: {
                 target.to_string().hash(&mut hasher);
                 hasher.finish()
