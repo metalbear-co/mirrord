@@ -20,6 +20,7 @@ crate-type = ["cdylib"]
 mirrord-layer-macro = { path = "../layer/macro" }
 mirrord-layer-lib = { path = "../layer-lib", features = ["layer-hook-execution"] }
 mirrord-protocol = { path = "../protocol" }
+mirrord-progress = { path = "../progress" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-console = { path = "../console" }
 mirrord-config = { path = "../config" }

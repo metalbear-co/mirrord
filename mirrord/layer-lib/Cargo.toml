@@ -26,6 +26,7 @@ layer-hook-execution = []
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-progress = { path = "../progress" }
 mirrord-layer-macro = { path = "../layer/macro" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 

@@ -516,7 +516,7 @@ async fn run_process_with_mirrord<P>(
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
-    mut progress: P,
+    progress: P,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
 where
@@ -539,11 +539,12 @@ where
 
     // spawn the process (including mirrord layer injection and wait for initialization)
     let exit_code = LayerManagedProcess::execute(
-        Some(binary_path_str), // Pass the resolved binary path as application name
+        Some(binary_path_str),
         command_line,
         // current_directory (inherit from parent)
         None,
         env_vars,
+        Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
     .map_err(|e| {
@@ -551,8 +552,6 @@ where
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
     })?;
-
-    progress.success(Some("Ready!"));
 
     // Exit with the same code as the child process
     std::process::exit(exit_code as i32);

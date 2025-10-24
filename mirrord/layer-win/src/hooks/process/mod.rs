@@ -120,6 +120,7 @@ unsafe extern "system" fn create_process_internal_w_hook(
         creation_flags,
         unsafe { &mut *startup_info },
         create_process_fn,
+        None::<mirrord_progress::NullProgress>, // No progress in hook context
     )
     .map(|managed_process| managed_process.release())
     {

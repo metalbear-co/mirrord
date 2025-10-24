@@ -20,6 +20,7 @@ use winapi::{
         },
         synchapi::WaitForSingleObject,
         winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, WAIT_OBJECT_0},
+        wincon::FreeConsole,
         winnt::PHANDLE,
     },
 };
@@ -215,12 +216,16 @@ impl LayerManagedProcess {
     }
 
     /// Execute process with layer injection for CLI context, returning managed process
-    pub fn execute(
+    pub fn execute<P>(
         application_name: Option<String>,
         command_line: String,
         current_directory: Option<String>,
         env_vars: HashMap<String, String>,
-    ) -> LayerResult<Self> {
+        progress: Option<P>,
+    ) -> LayerResult<Self>
+    where
+        P: mirrord_progress::Progress,
+    {
         // For CLI context, create default parameters and use execute_with_closure
         let default_creation_flags = 0;
         let mut default_startup_info = STARTUPINFOW {
@@ -279,19 +284,22 @@ impl LayerManagedProcess {
             default_creation_flags,
             &mut default_startup_info,
             create_process_fn,
+            progress,
         )
     }
 
     /// Execute process with layer injection using a closure for the original function call.
     /// This method is optimized for hook contexts where all original parameters are available.
-    pub fn execute_with_closure<F>(
+    pub fn execute_with_closure<F, P>(
         caller_env_vars: HashMap<String, String>,
         caller_creation_flags: DWORD,
         caller_startup_info: &mut STARTUPINFOW,
         create_process_fn: F,
+        progress: Option<P>,
     ) -> LayerResult<Self>
     where
         F: FnOnce(DWORD, LPVOID, &mut STARTUPINFOW) -> LayerResult<PROCESS_INFORMATION>,
+        P: mirrord_progress::Progress,
     {
         let dll_path = std::env::var("MIRRORD_LAYER_FILE").map_err(LayerError::VarError)?;
         if !std::path::Path::new(&dll_path).exists() {
@@ -334,11 +342,19 @@ impl LayerManagedProcess {
 
         // The process is already created and suspended by the original call
         // Now we just need to inject the DLL and resume
-        managed_process.inject_and_resume(&dll_path, &parent_event)
+        managed_process.inject_and_resume(&dll_path, &parent_event, progress)
     }
 
     /// Inject DLL into existing suspended process and resume execution
-    fn inject_and_resume(self, dll_path: &str, parent_event: &LayerInitEvent) -> LayerResult<Self> {
+    fn inject_and_resume<P>(
+        self, 
+        dll_path: &str, 
+        parent_event: &LayerInitEvent,
+        progress: Option<P>,
+    ) -> LayerResult<Self>
+    where
+        P: mirrord_progress::Progress,
+    {
         let injector_process = InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)
             .map_err(|_| LayerError::ProcessNotFound(self.process_info.dwProcessId))?;
 
@@ -350,7 +366,19 @@ impl LayerManagedProcess {
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
 
         match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
-            true => {}
+            true => {
+                // Layer initialization successful - report ready!
+                if let Some(mut progress) = progress {
+                    progress.success(Some("Ready!"));
+                    
+                    // Detach console since we have progress (interactive mode)
+                    // This gives the child process exclusive access to the console
+                    unsafe {
+                        FreeConsole();
+                    }
+                    tracing::debug!("Parent console detached - child now owns console");
+                }
+            }
             false => {
                 return Err(LayerError::ProcessSynchronization(format!(
                     "Layer initialization timed out after {}ms for process {}",
