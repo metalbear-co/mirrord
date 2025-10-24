@@ -9,15 +9,10 @@ use crate::config::source::MirrordConfigSource;
 
 /// Configuration for mirrord for CI.
 ///
-/// Logs from the app are sent to `/dev/null` when using `mirrord ci start`. You can pipe them
-/// to a file by setting one of the `stdio` file paths (note that the file doesn't have to exist,
-/// mirrord will take care of creating it).
-///
 /// ```json
 /// {
 ///   "ci": {
-///     "stdout_file": "/tmp/mirrord-ci-logs/stdout",
-///     "stderr_file": "/tmp/mirrord-ci-logs/stderr"
+///     "info_dir": "/tmp/mirrord/",
 ///   }
 /// }
 /// ```
@@ -25,23 +20,17 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "CiFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct CiConfig {
-    /// ### ci.stdout_file {#ci-stdout_file}
+    /// ### ci.info_dir{#ci-info_dir}
     ///
-    /// Pipe `stdout` to the file specified here.
-    pub stdout_file: Option<PathBuf>,
-
-    /// ### ci.stderr_file {#ci-stderr_file}
+    /// `mirrord ci` commands creates some temporary files (e.g. a file for the output of `stdio`),
+    /// and you can specify the directory where these files will be created here.
     ///
-    /// Pipe `stderr` to the file specified here.
-    ///
-    /// If you're running mirrord with logs enabled, this will contain your app `stderr` logs, and
-    /// mirrord logs.
-    pub stderr_file: Option<PathBuf>,
+    /// Defaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`
+    pub info_dir: Option<PathBuf>,
 }
 
 impl CollectAnalytics for &CiConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add("stdout_file", self.stdout_file.is_some());
-        analytics.add("stderr_file", self.stdout_file.is_some());
+        analytics.add("stdio_dir", self.info_dir.is_some());
     }
 }
