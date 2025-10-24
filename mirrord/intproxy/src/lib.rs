@@ -322,7 +322,6 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), ProxyRuntimeError> {
         match msg {
-            // REVIEW Will the queueing work during reconnects?
             ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_)
                 if self.reconnect_task_queue.is_some() =>
             {
