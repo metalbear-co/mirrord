@@ -5,7 +5,7 @@ export const UserDataContext = React.createContext<boolean | undefined>(
   undefined
 );
 
-interface ConfigData {
+export interface ConfigData {
   config: LayerFileConfig;
   setConfig: (config: LayerFileConfig) => void;
 }

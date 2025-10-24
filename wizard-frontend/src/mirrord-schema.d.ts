@@ -433,7 +433,11 @@ export type ExternalProxyIdleTimeoutExternalProxyIdleTimeout = number | null;
  */
 export type ExternalProxyJsonLogExternalProxyJsonLog = boolean | null;
 /**
- * Set the log file destination for the external proxy.
+ * Set the log destination for the external proxy.
+ *
+ * 1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be treated as a path to directory where the log file should be created. 2. Otherwise, if the path exists, mirrord will check if it's a directory or not. 3. Otherwise, it will be treated as a path to the log file.
+ *
+ * mirrord will auto create all parent directories.
  *
  * Defaults to a randomized path inside the temporary directory.
  */
@@ -998,6 +1002,8 @@ export type FeatureNetworkOutgoingUnixStreamsFeatureNetworkOutgoingUnixStreams =
  */
 export type FeatureSplitQueuesFeatureSplitQueues = SplitQueuesConfig | null;
 /**
+ * Amazon Simple Queue Service and Kafka are supported.
+ *
  * More queue types might be added in the future.
  */
 export type QueueFilter =
@@ -1037,7 +1043,11 @@ export type InternalProxyIdleTimeoutInternalProxyIdleTimeout = number | null;
  */
 export type InternalProxyJsonLogInternalProxyJsonLog = boolean | null;
 /**
- * Set the log file destination for the internal proxy.
+ * Set the log destination for the internal proxy.
+ *
+ * 1. If the provided path ends with a separator (`/` on UNIX, `\` on Windows), it will be treated as a path to directory where the log file should be created. 2. Otherwise, if the path exists, mirrord will check if it's a directory or not. 3. Otherwise, it will be treated as a path to the log file.
+ *
+ * mirrord will auto create all parent directories.
  *
  * Defaults to a randomized path inside the temporary directory.
  */
@@ -1171,7 +1181,7 @@ export type TargetFileConfig =
       /**
        * <!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.
        */
-      path?: Target | null;
+      path?: Target | null | string;
     };
 export type Target =
   | DeploymentTarget

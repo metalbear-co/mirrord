@@ -104,24 +104,22 @@ const BoilerplateStep: () => WizardStep = () => {
     },
   ];
 
-  const config = useContext(ConfigDataContext);
-
+  const {config, setConfig} = useContext(ConfigDataContext);
   const [selectedBoilerplate, setSelectedBoilerplate] = useState<string>("");
   const handleBoilerplateSelect = (boilerplateId: string) => {
     setSelectedBoilerplate(boilerplateId);
-    switch (boilerplateId) {
-      case "replace":
-        updateConfigCopyTarget(true, true, config.config, config.setConfig);
-        updateConfigMode("steal", config.config, config.setConfig);
-        break;
-      case "mirror":
-        updateConfigCopyTarget(false, false, config.config, config.setConfig);
-        updateConfigMode("mirror", config.config, config.setConfig);
-        break;
-      case "steal":
-        updateConfigCopyTarget(false, false, config.config, config.setConfig);
-        updateConfigMode("steal", config.config, config.setConfig);
-        break;
+    if (boilerplateId === "replace") {
+      const newConfig = updateConfigCopyTarget(true, true, config);
+      const finalConfig = updateConfigMode("steal", newConfig);
+      setConfig(finalConfig);
+    } else if (boilerplateId === "mirror") {
+      const newConfig = updateConfigCopyTarget(false, false, config);
+      const finalConfig = updateConfigMode("mirror", newConfig);
+      setConfig(finalConfig);
+    } else if (boilerplateId === "steal") {
+      const newConfig = updateConfigCopyTarget(false, false, config);
+      const finalConfig = updateConfigMode("steal", newConfig);
+      setConfig(finalConfig);
     }
   };
 

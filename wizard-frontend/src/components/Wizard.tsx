@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "./ui/badge";
-import { ConfigDataContext } from "./UserDataContext";
+import { ConfigDataContext, DefaultConfig } from "./UserDataContext";
 import { readBoilerplateType } from "./JsonUtils";
 
 export interface WizardStep {
@@ -26,15 +26,20 @@ const WizardHeader = ({
   currentStep,
   totalSteps,
   fetchConfigBadge,
+  goToPrevious
 }: {
   title: string;
   currentStep: number;
   totalSteps: number;
   fetchConfigBadge: () => string;
+  goToPrevious: () => void;
 }) => (
   <div className="bg-background p-4 flex-shrink-0">
     <div className="mb-4">
       <DialogTitle className="flex items-center gap-2">
+        {title === "Configuration Setup" && (<Button variant="outline"
+          onClick={goToPrevious}
+          ><ChevronLeft className="h-4 w-4" /></Button>)}
         {title}
         {title === "Configuration Setup" && (
           <Badge variant="secondary">{fetchConfigBadge()}</Badge>
@@ -75,7 +80,7 @@ const WizardFooter = ({
 
       <div className="flex items-center gap-2">
         <Button onClick={onNext} className="flex items-center gap-2">
-          {isLastStep ? "Complete" : "Next"}
+          {isLastStep ? "Close" : "Next"}
           {!isLastStep && <ChevronRight className="h-4 w-4" />}
         </Button>
       </div>
@@ -112,7 +117,7 @@ export const Wizard: React.FC<WizardProps> = ({
   const goToNext = () => {
     if (isLastStep) {
       onComplete?.();
-      onClose?.();
+      onClose();
     } else {
       const nextStep = currentStep + 1;
       setCurrentStep(nextStep);
@@ -126,10 +131,19 @@ export const Wizard: React.FC<WizardProps> = ({
     }
   };
 
+  const closeWizard = () => {
+    // reset current step number
+    setCurrentStep(0);
+    // reset current config to default
+    config.setConfig(DefaultConfig);
+    // close according to prop
+    onClose();
+  }
+
   if (!isOpen) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={closeWizard}>
       <DialogContent className="max-w-2xl max-h-[85vh] p-0 flex flex-col">
         {/* Fixed Header */}
         <WizardHeader
@@ -137,6 +151,7 @@ export const Wizard: React.FC<WizardProps> = ({
           currentStep={currentStep}
           totalSteps={steps.length}
           fetchConfigBadge={fetchConfigBadge}
+          goToPrevious={goToPrevious}
         />
 
         {/* Scrollable Content */}
@@ -149,13 +164,13 @@ export const Wizard: React.FC<WizardProps> = ({
           </div>
         </div>
 
-        {/* Fixed Footer with Navigation */}
-        <WizardFooter
+        {/* Footer with Navigation, use alternative on config tabs*/}
+        {!isLastStep && (<WizardFooter
           onPrevious={goToPrevious}
           onNext={goToNext}
           isFirstStep={isFirstStep}
           isLastStep={isLastStep}
-        />
+        />)}
       </DialogContent>
     </Dialog>
   );

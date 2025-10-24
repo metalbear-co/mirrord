@@ -27,12 +27,8 @@ const Panel = ({
   steps,
 }: PanelProps) => {
   const [showWizard, setShowWizard] = useState(false);
-  const isReturning = useContext(UserDataContext);
 
-  const handleWizardOpen = (steps: WizardStep[]) => {
-    // TODO: take steps param and open correct wizard
-    // TODO: set steps directly?
-    // TODO: forget what step the wizard was on when closed
+  const handleWizardOpen = () => {
     setShowWizard(true);
   };
 
@@ -40,7 +36,7 @@ const Panel = ({
     if (buttonColor == "purple") {
       return (
         <Button
-          onClick={() => handleWizardOpen(steps)}
+          onClick={() => handleWizardOpen()}
           className="w-full bg-gradient-primary hover:shadow-glow"
         >
           {buttonText}
@@ -51,7 +47,7 @@ const Panel = ({
       return (
         <Button
           variant="outline"
-          onClick={() => handleWizardOpen(steps)}
+          onClick={() => handleWizardOpen()}
           className="w-full"
         >
           {buttonText}
