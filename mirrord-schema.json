@@ -616,28 +616,12 @@
       }
     },
     "CiFileConfig": {
-      "description": "Configuration for mirrord for CI.\n\nLogs from the app are sent to `/dev/null` when using `mirrord ci start`. You can pipe them to a file by setting one of the `stdio` file paths (note that the file doesn't have to exist, mirrord will take care of creating it).\n\n```json { \"ci\": { \"stdout_file\": \"/tmp/mirrord-ci-logs/stdout\", \"stdin_file\": \"/tmp/mirrord-ci-logs/stdin\", \"stderr_file\": \"/tmp/mirrord-ci-logs/stderr\" } } ```",
+      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"info_dir\": \"/tmp/mirrord/\", } } ```",
       "type": "object",
       "properties": {
-        "stderr_file": {
-          "title": "ci.stderr_file {#ci-stderr_file}",
-          "description": "Pipe `stderr` to the file specified here.\n\nIf you're running mirrord with logs enabled, this will contain your app `stderr` logs, and mirrord logs.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "stdin_file": {
-          "title": "ci.stdin_file {#ci-stdin_file}",
-          "description": "Pipe `stdin` to the file specified here.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "stdout_file": {
-          "title": "ci.stdout_file {#ci-stdout_file}",
-          "description": "Pipe `stdout` to the file specified here.",
+        "info_dir": {
+          "title": "ci.info_dir{#ci-info_dir}",
+          "description": "`mirrord ci` commands creates some temporary files (e.g. a file for the output of `stdio`), and you can specify the directory where these files will be created here.\n\nDefaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`",
           "type": [
             "string",
             "null"
