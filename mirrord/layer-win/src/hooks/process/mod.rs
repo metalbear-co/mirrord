@@ -28,7 +28,6 @@ use winapi::{
 
 use crate::{apply_hook, process::environment::parse_environment_block};
 
-/// Static storage for the original CreateProcessInternalW function pointer.
 static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
 
 // LoadLibrary hook to detect module loading during injection
