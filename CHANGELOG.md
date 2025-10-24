@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.168.1](https://github.com/metalbear-co/mirrord/tree/3.168.1) - 2025-10-24
+
+
+### Changed
+
+- Operator status not showing data for SQS split queues.
+- When it's root, CWD will no longer be in the default-local list for file
+  operations.
+
+
+### Internal
+
+- Fix missing source value in query params of version check.
+- Remove a leftover file that is not used anywhere.
+
 ## [3.168.0](https://github.com/metalbear-co/mirrord/tree/3.168.0) - 2025-10-23
 
 
