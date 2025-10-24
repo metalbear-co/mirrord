@@ -33,7 +33,6 @@ use crate::{
 };
 
 pub mod debug;
-pub mod pipes;
 
 pub use debug::{
     format_debugger_config, get_current_process_name, is_debugger_wait_enabled,
@@ -369,7 +368,7 @@ impl LayerManagedProcess {
                 return Err(LayerError::WindowsProcessCreation(error));
             }
             tracing::debug!(
-                "✅ Thread resumed, previous suspend count: {}",
+                "Thread resumed, previous suspend count: {}",
                 previous_suspend_count
             );
         }

@@ -2277,12 +2277,6 @@ pub fn initialize_hooks(
 ) -> anyhow::Result<()> {
     use mirrord_layer_lib::setup::windows::NetworkHookConfig;
 
-    // 🎯 TRACE: Prove RUST_LOG is working in child process socket initialization
-    tracing::warn!(
-        "🎯 [SOCKET_INIT] Socket hooks initializing in process {} - RUST_LOG is working!",
-        std::process::id()
-    );
-
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;
