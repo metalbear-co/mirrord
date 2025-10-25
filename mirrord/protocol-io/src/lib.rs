@@ -36,11 +36,6 @@ impl<T, I, O> Transport<I, O> for T where
 {
 }
 
-pub enum Mode {
-    Legacy,
-    Chunked,
-}
-
 pub trait ProtocolEndpoint: 'static + Sized + Clone {
     type InMsg: bincode::Decode<()> + Send + fmt::Debug;
     type OutMsg: bincode::Encode + Send + fmt::Debug;
