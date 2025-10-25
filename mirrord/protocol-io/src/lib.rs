@@ -1,3 +1,4 @@
+/// This module implements mirrord-protocol's wire-level IO.
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -36,6 +37,8 @@ impl<T, I, O> Transport<I, O> for T where
 {
 }
 
+/// "Phony" trait, implemented by `Client` and `Agent`, used for
+/// determining input and output message types.
 pub trait ProtocolEndpoint: 'static + Sized + Clone {
     type InMsg: bincode::Decode<()> + Send + fmt::Debug;
     type OutMsg: bincode::Encode + Send + fmt::Debug;
@@ -85,12 +88,28 @@ impl<I> Encoder<Vec<u8>> for Codec<I> {
     }
 }
 
+/// The main handle to our end of the mirrord-protocol connection.
+/// `Type` is either `Client` or `Agent`.
+///
+/// Implements message queueing and almost-fair scheduling. Use
+/// `Self::tx_handle` to obtain a handle for sending messages.
+/// Messages sent with different send handles are *not* guaranteed to
+/// be delivered in order. To preserve message delivery order, send
+/// all relevant messages through a single `TxHandle` or clones
+/// derived from it.
+///
+/// The impl works by randomly picking a message from one of the
+/// nonempty queues and sending it over the wire. Future versions will
+/// use message chunking to fairly split the available bandwidth
+/// between all queues.
 pub struct Connection<Type: ProtocolEndpoint> {
     rx: mpsc::Receiver<Type::InMsg>,
     shared_state: Arc<SharedState<Type>>,
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
+	/// Create a new connection running over a byte stream, i.e.
+	/// `AsyncRead` + `AsyncWrite`.
     pub async fn from_stream<IO>(inner: IO) -> Result<Self, ProtocolError>
     where
         IO: AsyncIO,
@@ -113,6 +132,8 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
+	/// Create a new connection, running over a `Sink` + `Stream` of `Vec<u8>`s.
+	/// Used for connecting to the operator over a websocket connection.
     pub async fn from_channel<C, Filter>(
         channel: C,
         filter: Option<Filter>,
@@ -149,6 +170,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
+	/// Create a dummy instance, mainly used for tests.
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
@@ -176,11 +198,16 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         self.rx.poll_recv(cx)
     }
 
+	/// Send a message. Note that all messages sent with this function
+	/// will be put in a single queue, and thus be delivered
+	/// sequentially. Use `Self::tx_handle` for queueing messages
+	/// independently.
     #[inline]
     pub async fn send(&self, msg: Type::OutMsg) {
         self.shared_state.push(QueueId(0), msg).await
     }
 
+	/// Returns a send handle to a *new* queue.
     #[inline]
     pub fn tx_handle(&self) -> TxHandle<Type> {
         self.shared_state.clone().new_queue()
@@ -192,7 +219,8 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     }
 }
 
-// For tests mostly
+/// The "other end" of a `Connection`. Used for pulling out messages
+/// sent through it. Used only for testing.
 pub struct ConnectionOutput<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
 
 impl<Type: ProtocolEndpoint> ConnectionOutput<Type>
@@ -302,6 +330,10 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
+	/// Try to push a new message into the queue with id `queue_id`,
+	/// creating it if it doesn't exist. If the queue is full, return
+	/// the message and an `OwnedNotified` that will resolve then the
+	/// queue has free capacity.
     fn try_push(
         &self,
         queue_id: QueueId,
@@ -338,6 +370,35 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         Ok(())
     }
 
+	/// Push a message into the given queue, creating it if necessary.
+	/// Will wait for the queue to free up if necessary, resolves only
+	/// when the message has been successfully pushed.
+    async fn push(&self, id: QueueId, mut msg: Type::OutMsg) {
+        if let Some(filter) = &self.out_filter {
+            match filter(msg) {
+                Either::Left(out) => msg = out,
+                Either::Right(inj) => {
+                    let _ = self.in_tx.send(inj).await;
+                    return;
+                }
+            }
+        }
+
+        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
+
+        loop {
+            match self.try_push(id, encoded) {
+                Ok(()) => break,
+                Err((r, notify)) => {
+                    encoded = r;
+                    notify.await;
+                }
+            }
+        }
+    }
+
+	/// Check for enqueued messages and return one from a
+	/// randomly-picked nonempty queue.
     fn poll_next(&self) -> Option<Vec<u8>> {
         let mut lock = self.queues.lock().unwrap();
 
@@ -370,30 +431,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         Some(next)
     }
 
-    async fn push(&self, id: QueueId, mut msg: Type::OutMsg) {
-        if let Some(filter) = &self.out_filter {
-            match filter(msg) {
-                Either::Left(out) => msg = out,
-                Either::Right(inj) => {
-                    let _ = self.in_tx.send(inj).await;
-                    return;
-                }
-            }
-        }
-
-        let mut encoded = bincode::encode_to_vec(msg, bincode::config::standard()).unwrap();
-
-        loop {
-            match self.try_push(id, encoded) {
-                Ok(()) => break,
-                Err((r, notify)) => {
-                    encoded = r;
-                    notify.await;
-                }
-            }
-        }
-    }
-
+	/// Wait for a new message to be enqueued and return it.
     async fn next(&self) -> Vec<u8> {
         loop {
             match self.poll_next() {
@@ -405,6 +443,11 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
+	/// Return a new `TxHandle` to a new independent queue.
+	///
+	/// The queue is actually created lazily and may be
+	/// garbage-collected and recreated later on, but that process is
+	/// transparent to users of this function.
     fn new_queue(self: Arc<Self>) -> TxHandle<Type> {
         let next = self.next_queue_id.fetch_add(1, Ordering::Relaxed);
         if next > usize::MAX / 2 {
@@ -433,6 +476,8 @@ impl<Type: ProtocolEndpoint> TxHandle<Type> {
         self.shared_state.push(self.id, msg).await
     }
 
+	/// Returns a `TxHandle` to a *new* queue, independent from this
+	/// one.
     pub fn another(&self) -> Self {
         self.shared_state.clone().new_queue()
     }
