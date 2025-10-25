@@ -254,6 +254,7 @@ impl BackgroundTask for AgentConnection {
                 msg = message_bus.recv() => match msg {
                     None => {
                         tracing::trace!("message bus closed, exiting");
+                        let _ = self.send(ClientMessage::Close).await;
                         break Ok(());
                     },
                     Some(AgentConnectionMessage::RequestReconnect) => {

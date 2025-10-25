@@ -1,0 +1,1 @@
+mirrord-intproxy now always finishes the agent connection with `ClientMessage::Close`.
