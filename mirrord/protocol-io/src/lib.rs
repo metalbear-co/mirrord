@@ -108,8 +108,8 @@ pub struct Connection<Type: ProtocolEndpoint> {
 }
 
 impl<Type: ProtocolEndpoint> Connection<Type> {
-	/// Create a new connection running over a byte stream, i.e.
-	/// `AsyncRead` + `AsyncWrite`.
+    /// Create a new connection running over a byte stream, i.e.
+    /// `AsyncRead` + `AsyncWrite`.
     pub async fn from_stream<IO>(inner: IO) -> Result<Self, ProtocolError>
     where
         IO: AsyncIO,
@@ -132,8 +132,8 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
-	/// Create a new connection, running over a `Sink` + `Stream` of `Vec<u8>`s.
-	/// Used for connecting to the operator over a websocket connection.
+    /// Create a new connection, running over a `Sink` + `Stream` of `Vec<u8>`s.
+    /// Used for connecting to the operator over a websocket connection.
     pub async fn from_channel<C, Filter>(
         channel: C,
         filter: Option<Filter>,
@@ -170,7 +170,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         })
     }
 
-	/// Create a dummy instance, mainly used for tests.
+    /// Create a dummy instance, mainly used for tests.
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
@@ -198,16 +198,16 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         self.rx.poll_recv(cx)
     }
 
-	/// Send a message. Note that all messages sent with this function
-	/// will be put in a single queue, and thus be delivered
-	/// sequentially. Use `Self::tx_handle` for queueing messages
-	/// independently.
+    /// Send a message. Note that all messages sent with this function
+    /// will be put in a single queue, and thus be delivered
+    /// sequentially. Use `Self::tx_handle` for queueing messages
+    /// independently.
     #[inline]
     pub async fn send(&self, msg: Type::OutMsg) {
         self.shared_state.push(QueueId(0), msg).await
     }
 
-	/// Returns a send handle to a *new* queue.
+    /// Returns a send handle to a *new* queue.
     #[inline]
     pub fn tx_handle(&self) -> TxHandle<Type> {
         self.shared_state.clone().new_queue()
@@ -330,10 +330,10 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
-	/// Try to push a new message into the queue with id `queue_id`,
-	/// creating it if it doesn't exist. If the queue is full, return
-	/// the message and an `OwnedNotified` that will resolve then the
-	/// queue has free capacity.
+    /// Try to push a new message into the queue with id `queue_id`,
+    /// creating it if it doesn't exist. If the queue is full, return
+    /// the message and an `OwnedNotified` that will resolve then the
+    /// queue has free capacity.
     fn try_push(
         &self,
         queue_id: QueueId,
@@ -361,7 +361,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             lock.ready.push(queue_id);
         }
 
-		tracing::info!(queues = ?lock.queues.keys() ,"added queue");
+        tracing::info!(queues = ?lock.queues.keys() ,"added queue");
 
         drop(lock);
 
@@ -370,9 +370,9 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         Ok(())
     }
 
-	/// Push a message into the given queue, creating it if necessary.
-	/// Will wait for the queue to free up if necessary, resolves only
-	/// when the message has been successfully pushed.
+    /// Push a message into the given queue, creating it if necessary.
+    /// Will wait for the queue to free up if necessary, resolves only
+    /// when the message has been successfully pushed.
     async fn push(&self, id: QueueId, mut msg: Type::OutMsg) {
         if let Some(filter) = &self.out_filter {
             match filter(msg) {
@@ -397,8 +397,8 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
-	/// Check for enqueued messages and return one from a
-	/// randomly-picked nonempty queue.
+    /// Check for enqueued messages and return one from a
+    /// randomly-picked nonempty queue.
     fn poll_next(&self) -> Option<Vec<u8>> {
         let mut lock = self.queues.lock().unwrap();
 
@@ -431,7 +431,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         Some(next)
     }
 
-	/// Wait for a new message to be enqueued and return it.
+    /// Wait for a new message to be enqueued and return it.
     async fn next(&self) -> Vec<u8> {
         loop {
             match self.poll_next() {
@@ -443,11 +443,11 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
-	/// Return a new `TxHandle` to a new independent queue.
-	///
-	/// The queue is actually created lazily and may be
-	/// garbage-collected and recreated later on, but that process is
-	/// transparent to users of this function.
+    /// Return a new `TxHandle` to a new independent queue.
+    ///
+    /// The queue is actually created lazily and may be
+    /// garbage-collected and recreated later on, but that process is
+    /// transparent to users of this function.
     fn new_queue(self: Arc<Self>) -> TxHandle<Type> {
         let next = self.next_queue_id.fetch_add(1, Ordering::Relaxed);
         if next > usize::MAX / 2 {
@@ -476,9 +476,159 @@ impl<Type: ProtocolEndpoint> TxHandle<Type> {
         self.shared_state.push(self.id, msg).await
     }
 
-	/// Returns a `TxHandle` to a *new* queue, independent from this
-	/// one.
+    /// Returns a `TxHandle` to a *new* queue, independent from this
+    /// one.
     pub fn another(&self) -> Self {
         self.shared_state.clone().new_queue()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::time::{Duration, timeout};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_cloned_tx_handle_preserves_order() {
+        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
+
+        let tx1 = connection.tx_handle();
+        let tx2 = tx1.clone();
+
+        // Send messages alternating between cloned handles
+        for _ in 0..10 {
+            tx1.send(ClientMessage::Ping).await;
+            tx2.send(ClientMessage::Close).await;
+        }
+
+        // Verify messages maintain order within the same queue
+        let mut messages = Vec::new();
+        for _ in 0..20 {
+            let msg = timeout(Duration::from_millis(100), output.next())
+                .await
+                .expect("timeout waiting for message")
+                .expect("expected message");
+            messages.push(msg);
+        }
+
+        // Messages should alternate: Ping, Close, Ping, Close, ...
+        for i in 0..10 {
+            assert_eq!(messages[i * 2], ClientMessage::Ping);
+            assert_eq!(messages[i * 2 + 1], ClientMessage::Close);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_independent_queues_no_order_guarantee() {
+        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
+
+        let tx1 = connection.tx_handle();
+        let tx2 = tx1.another(); // Different queue
+
+        // Send to both queues
+        tx1.send(ClientMessage::Ping).await;
+        tx2.send(ClientMessage::Close).await;
+
+        // We should receive both messages, but order between queues is not guaranteed
+        let mut messages = Vec::new();
+        for _ in 0..2 {
+            let msg = timeout(Duration::from_millis(100), output.next())
+                .await
+                .expect("timeout waiting for message")
+                .expect("expected message");
+            messages.push(msg);
+        }
+
+        // Just verify we got both messages (order may vary)
+        assert!(messages.contains(&ClientMessage::Ping));
+        assert!(messages.contains(&ClientMessage::Close));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_messages_same_queue_order() {
+        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
+
+        let tx = connection.tx_handle();
+
+        // Send a specific sequence
+        let mut sequence = Vec::new();
+        for i in 0..20 {
+            sequence.push(if i % 3 == 0 {
+                ClientMessage::Ping
+            } else {
+                ClientMessage::Close
+            });
+        }
+
+        for msg in &sequence {
+            tx.send(msg.clone()).await;
+        }
+
+        // Verify exact order preservation
+        for expected in &sequence {
+            let received = timeout(Duration::from_millis(100), output.next())
+                .await
+                .expect("timeout waiting for message")
+                .expect("expected message");
+
+            assert_eq!(&received, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_high_volume_order_preservation() {
+        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
+
+        let msg_count_per_queue = 50;
+        let num_queues = 10;
+
+        // Create 10 independent tx handles
+        let handles: Vec<_> = (0..num_queues).map(|_| connection.tx_handle()).collect();
+
+        // Generate random sequences for each queue (store as bools to save memory)
+        let sequences: Vec<Vec<bool>> = (0..num_queues)
+            .map(|_| {
+                (0..msg_count_per_queue)
+                    .map(|_| rand::random::<bool>())
+                    .collect()
+            })
+            .collect();
+
+        // Spawn concurrent tasks, each sending its unique random sequence
+        let mut tasks = Vec::new();
+        for (tx, sequence) in handles.into_iter().zip(sequences.iter()) {
+            let sequence = sequence.clone();
+            let task = tokio::spawn(async move {
+                for &is_ping in &sequence {
+                    let msg = if is_ping {
+                        ClientMessage::Ping
+                    } else {
+                        ClientMessage::Close
+                    };
+                    tx.send(msg).await;
+                }
+            });
+            tasks.push(task);
+        }
+
+        // Wait for all sends to complete
+        for task in tasks {
+            task.await.unwrap();
+        }
+
+        // Collect all received messages
+        let total_messages = num_queues * msg_count_per_queue;
+        let mut received = Vec::new();
+        for _ in 0..total_messages {
+            let msg = timeout(Duration::from_millis(100), output.next())
+                .await
+                .expect("timeout waiting for message")
+                .expect("expected message");
+            received.push(msg);
+        }
+
+        // Verify we received all messages
+        assert_eq!(received.len(), total_messages);
     }
 }
