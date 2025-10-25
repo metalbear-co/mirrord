@@ -48,7 +48,6 @@ use crate::{
     },
 };
 
-mod conn_wrapper;
 mod connect_params;
 mod database_branches;
 mod discovery;
