@@ -1,1 +1,0 @@
-CLI for db branches to show and destroy
