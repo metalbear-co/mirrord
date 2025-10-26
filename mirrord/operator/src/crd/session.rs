@@ -137,9 +137,6 @@ pub struct MirrordClusterSessionSpec {
     /// State of concurrent steal
     #[serde(default)]
     pub on_concurrent_steal: ConcurrentSteal,
-    /// Sesssion Max time
-    #[serde(default)]
-    pub max_time: Option<Duration>,
     /// Target of the session.
     ///
     /// None for targetless sessions.
