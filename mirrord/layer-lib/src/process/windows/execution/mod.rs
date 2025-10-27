@@ -19,9 +19,11 @@ use winapi::{
             CreateProcessW, GetExitCodeProcess, LPPROCESS_INFORMATION, LPSTARTUPINFOW,
             PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess,
         },
-        winbase::STARTF_USESTDHANDLES,
         synchapi::WaitForSingleObject,
-        winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, WAIT_OBJECT_0},
+        winbase::{
+            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, STARTF_USESTDHANDLES,
+            WAIT_OBJECT_0,
+        },
         winnt::PHANDLE,
     },
 };
