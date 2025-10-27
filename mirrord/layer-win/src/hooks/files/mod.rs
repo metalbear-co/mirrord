@@ -1299,10 +1299,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
-pub fn initialize_hooks(
-    guard: &mut DetourGuard<'static>,
-) -> anyhow::Result<()> {
-
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
     // ----------------------------------------------------------------------------
     // ~NOTE(gabriela):
     //
@@ -1472,6 +1469,8 @@ pub fn initialize_hooks(
         nt_unlock_file_hook,
         NtUnlockFileType,
         NT_UNLOCK_FILE_ORIGINAL
-    )?;    tracing::info!("File hooks initialization completed");
+    )?;
+
+    tracing::info!("File hooks initialization completed");
     Ok(())
 }

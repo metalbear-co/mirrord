@@ -2,9 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::feature::{
-        network::{NetworkConfig, incoming::IncomingMode},
-    };
+    use mirrord_config::feature::network::{NetworkConfig, incoming::IncomingMode};
 
     #[test]
     fn test_network_hook_config_trait() {

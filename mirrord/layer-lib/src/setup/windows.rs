@@ -5,15 +5,13 @@ use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
 use mirrord_config::{
     LayerConfig,
-    feature::{
-        network::{
-            NetworkConfig,
-            incoming::{
-                IncomingConfig, IncomingMode as ConfigIncomingMode,
-                http_filter::{HttpFilterConfig, InnerFilter, PortList},
-            },
-            outgoing::OutgoingConfig,
+    feature::network::{
+        NetworkConfig,
+        incoming::{
+            IncomingConfig, IncomingMode as ConfigIncomingMode,
+            http_filter::{HttpFilterConfig, InnerFilter, PortList},
         },
+        outgoing::OutgoingConfig,
     },
     target::Target,
 };

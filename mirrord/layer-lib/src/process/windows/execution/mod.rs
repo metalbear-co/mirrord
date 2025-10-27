@@ -347,8 +347,8 @@ impl LayerManagedProcess {
 
     /// Inject DLL into existing suspended process and resume execution
     fn inject_and_resume<P>(
-        self, 
-        dll_path: &str, 
+        self,
+        dll_path: &str,
         parent_event: &LayerInitEvent,
         progress: Option<P>,
     ) -> LayerResult<Self>
@@ -370,7 +370,7 @@ impl LayerManagedProcess {
                 // Layer initialization successful - report ready!
                 if let Some(mut progress) = progress {
                     progress.success(Some("Ready!"));
-                    
+
                     // Detach console since we have progress (interactive mode)
                     // This gives the child process exclusive access to the console
                     unsafe {

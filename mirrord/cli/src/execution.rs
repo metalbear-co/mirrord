@@ -195,12 +195,16 @@ impl MirrordExecution {
     where
         P: Progress,
     {
-        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for debugging)
+        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
+        // debugging)
         let lib_path = match std::env::var("MIRRORD_LAYER_FILE") {
             Ok(existing_path) => {
-                tracing::debug!("Using existing library file from MIRRORD_LAYER_FILE: {}", existing_path);
+                tracing::debug!(
+                    "Using existing library file from MIRRORD_LAYER_FILE: {}",
+                    existing_path
+                );
                 std::path::PathBuf::from(existing_path)
-            },
+            }
             Err(_) => {
                 tracing::debug!("MIRRORD_LAYER_FILE not set, extracting library from binary");
                 extract_library(None, progress, true)?

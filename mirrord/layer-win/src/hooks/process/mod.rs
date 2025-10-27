@@ -14,7 +14,7 @@ use mirrord_layer_lib::{
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, DWORD, HMODULE, LPVOID, TRUE, FALSE},
+        minwindef::{BOOL, DWORD, FALSE, HMODULE, LPVOID, TRUE},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
     },
     um::{
@@ -61,19 +61,10 @@ unsafe extern "system" fn create_process_internal_w_hook(
     tracing::debug!("CreateProcessInternalW hook intercepted process creation");
 
     // Get the original function pointer
-    let original = match CREATE_PROCESS_INTERNAL_W_ORIGINAL.get() {
-        Some(original_fn) => original_fn,
-        None => {
-            tracing::error!(
-                "Original CreateProcessInternalW function not available - hook not properly installed"
-            );
-            return FALSE;
-        }
-    };
+    let original = CREATE_PROCESS_INTERNAL_W_ORIGINAL.get().unwrap();
 
     // Parse environment from Windows API call - check creation flags for format
-    let env_vars =
-        unsafe { parse_environment_block(environment as *mut _, creation_flags) };
+    let env_vars = unsafe { parse_environment_block(environment as *mut _, creation_flags) };
 
     tracing::debug!(
         "Windows CreateProcess parameters: parent_pid={}, env_count={}",
@@ -179,20 +170,14 @@ unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMO
     // Log LoadLibrary calls for debugging
     if !lpLibFileName.is_null() {
         // Convert the wide string to a Rust string for logging
-        let len = unsafe {
-            (0..).take_while(|&i| *lpLibFileName.offset(i) != 0).count()
-        };
+        let len = unsafe { (0..).take_while(|&i| *lpLibFileName.offset(i) != 0).count() };
 
         if len > 0 {
             let wide_slice = unsafe { std::slice::from_raw_parts(lpLibFileName, len) };
             let lib_name = String::from_utf16_lossy(wide_slice);
 
             // Trace library loading for debugging
-            tracing::trace!(
-                "LoadLibraryW: module='{}' handle={:?}",
-                lib_name,
-                result
-            );
+            tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result);
         }
     }
 
@@ -251,7 +236,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
 
     // API monitoring hooks for debugging injection scenarios
     tracing::debug!("Installing API tracing hooks for LoadLibraryW and GetProcAddress");
-    
+
     apply_hook!(
         guard,
         "kernel32",

@@ -12,7 +12,10 @@
 ///
 /// The index of the first occurrence of `null_value`, or the buffer length if not found
 fn find_null_terminator_length<T: PartialEq>(buffer: &[T], null_value: T) -> usize {
-    buffer.iter().position(|x| *x == null_value).unwrap_or(buffer.len())
+    buffer
+        .iter()
+        .position(|x| *x == null_value)
+        .unwrap_or(buffer.len())
 }
 
 pub fn u8_buffer_to_string<T: AsRef<[u8]>>(buffer: T) -> String {
@@ -120,7 +123,6 @@ pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
         .collect()
 }
 
-
 /// Find the safe length of a multi-buffer by locating the double null terminator
 ///
 /// This function safely searches for the end of a multi-buffer (MULTI_SZ format)
@@ -150,16 +152,16 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
     }
 
     let max_elements = max_bytes / std::mem::size_of::<T>();
-    
+
     // Create a slice with the maximum safe length to search within
     let slice = unsafe { std::slice::from_raw_parts(ptr, max_elements) };
-    
+
     // Search for double null terminator pattern using our utility function
     let mut pos = 0;
     while pos < slice.len() {
         let remaining_slice = &slice[pos..];
         let next_null = find_null_terminator_length(remaining_slice, T::default());
-        
+
         if next_null == 0 {
             // Found a null at current position, check if next is also null (double null)
             if pos + 1 < slice.len() && slice[pos + 1] == T::default() {
@@ -173,6 +175,6 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
             pos += next_null + 1;
         }
     }
-    
+
     None // Double null terminator not found within bounds
 }
