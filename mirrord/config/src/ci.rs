@@ -26,7 +26,7 @@ pub struct CiConfig {
     /// and you can specify the directory where these files will be created here.
     ///
     /// Defaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`
-    pub info_dir: Option<PathBuf>,
+    pub output_dir: Option<PathBuf>,
 }
 
 impl CollectAnalytics for &CiConfig {
