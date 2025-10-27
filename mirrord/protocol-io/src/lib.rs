@@ -54,8 +54,11 @@ pub enum ProtocolError {
     UnexpectedPeerMessage,
 }
 
+/// Marker type, representing the client side of a mirrord-protocol connection.
 #[derive(Clone)]
 pub struct Client;
+
+/// Marker type, representing the server side of a mirrord-protocol connection (agent or operator).
 #[derive(Clone)]
 pub struct Agent;
 
