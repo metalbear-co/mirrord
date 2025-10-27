@@ -14,10 +14,12 @@ use winapi::{
     um::{
         handleapi::CloseHandle,
         minwinbase::LPSECURITY_ATTRIBUTES,
+        processenv::GetStdHandle,
         processthreadsapi::{
             CreateProcessW, GetExitCodeProcess, LPPROCESS_INFORMATION, LPSTARTUPINFOW,
             PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess,
         },
+        winbase::STARTF_USESTDHANDLES,
         synchapi::WaitForSingleObject,
         winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, WAIT_OBJECT_0},
         winnt::PHANDLE,
@@ -31,6 +33,15 @@ use crate::{
     setup::layer_setup,
     socket::sockets::SHARED_SOCKETS_ENV_VAR,
 };
+
+// Windows standard handle constants - these values are defined by Windows API
+// but is not available in the winapi crate
+// (DWORD)-10
+const STD_INPUT_HANDLE: u32 = u32::wrapping_neg(10);
+// (DWORD)-11
+const STD_OUTPUT_HANDLE: u32 = u32::wrapping_neg(11);
+// (DWORD)-12
+const STD_ERROR_HANDLE: u32 = u32::wrapping_neg(12);
 
 pub mod debug;
 
@@ -257,7 +268,7 @@ impl LayerManagedProcess {
                 command_line_wide.as_mut_ptr(),
                 ptr::null_mut(),
                 ptr::null_mut(),
-                false.into(),
+                true.into(), // Enable handle inheritance so child can inherit console handles
                 creation_flags,
                 environment,
                 if current_directory.is_some() {
@@ -329,6 +340,13 @@ impl LayerManagedProcess {
 
         // Calculate final creation flags (original + environment + suspended)
         let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
+
+        // Configure startup info for console handle inheritance - this ensures child processes
+        // can inherit console handles for proper stdout/stderr output visibility
+        caller_startup_info.dwFlags |= STARTF_USESTDHANDLES;
+        caller_startup_info.hStdInput = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+        caller_startup_info.hStdOutput = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        caller_startup_info.hStdError = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
 
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;

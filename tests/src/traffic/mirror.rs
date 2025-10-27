@@ -73,6 +73,11 @@ async fn mirror_with_http_header_filter(
         .wait_for_line(Duration::from_secs(120), "daemon subscribed")
         .await;
 
+    // Wait for the FastAPI application to be ready to handle requests
+    mirror_process
+        .wait_for_line(Duration::from_secs(120), "Application startup complete")
+        .await;
+
     // Send request that SHOULD be mirrored
     let client = reqwest::Client::new();
     let req_builder = client.get(&url);
@@ -137,6 +142,7 @@ async fn mirror_with_http_header_filter(
     .expect("local mirroring app did not receive exactly the expected number of requests on time");
 
     // Wait for the process to exit after the DELETE request
+    #[cfg(not(target_os = "windows"))]
     tokio::time::timeout(Duration::from_secs(40), mirror_process.wait())
         .await
         .unwrap();

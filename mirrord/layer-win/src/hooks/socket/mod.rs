@@ -528,12 +528,8 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
             // this log message is expected by some E2E tests
             tracing::info!(
                 "daemon subscribed port {}",
-                bound_state.requested_address.port()
+                bound_state.address.port()
             );
-
-            // Also print to stdout for Windows tests that check stdout
-            #[cfg(windows)]
-            println!("daemon subscribed port {}", bound_state.requested_address.port());
 
             tracing::info!(
                 "listen_detour -> socket {} now listening through mirrord agent on port {}",
