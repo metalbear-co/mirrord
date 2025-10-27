@@ -364,8 +364,6 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             lock.ready.push(queue_id);
         }
 
-        tracing::info!(queues = ?lock.queues.keys() ,"added queue");
-
         drop(lock);
 
         self.nonempty.notify_one();
