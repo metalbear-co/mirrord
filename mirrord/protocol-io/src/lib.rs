@@ -22,7 +22,7 @@ use tokio::{
     pin, select,
     sync::{Notify, futures::OwnedNotified, mpsc},
 };
-use tracing::{instrument, Level};
+use tracing::{Level, instrument};
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + 'static {}
 impl<T: AsyncWrite + AsyncRead + Send + 'static> AsyncIO for T {}

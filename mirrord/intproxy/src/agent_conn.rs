@@ -21,9 +21,7 @@ use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 pub use tls::ConnectionTlsError;
-use tokio::
-    net::{TcpSocket, TcpStream}
-;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio_retry::{RetryIf, strategy::ExponentialBackoff};
 use tracing::Level;
 
