@@ -1,4 +1,5 @@
-/// This module implements mirrord-protocol's wire-level IO.
+//! This module implements mirrord-protocol's wire-level IO.
+
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
