@@ -191,11 +191,15 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         )
     }
 
+    /// Receive the next message.
+    ///
+    /// Cancel safe.
     #[inline]
     pub async fn recv(&mut self) -> Option<Type::InMsg> {
         self.rx.recv().await
     }
 
+    /// Poll the next message.
     #[inline]
     pub fn poll_recv(&mut self, cx: &mut Context) -> Poll<Option<Type::InMsg>> {
         self.rx.poll_recv(cx)
@@ -239,7 +243,7 @@ where
     }
 }
 
-#[instrument(skip_all)]
+#[instrument(level = Level::TRACE, name = "mirrord_protocol_io_task", skip_all)]
 async fn io_task<Channel, Type>(
     framed: Channel,
     queues: Arc<SharedState<Type>>,
@@ -253,8 +257,8 @@ async fn io_task<Channel, Type>(
     loop {
         select! {
             to_send = queues.next() => {
-                if let Err(err) = framed.send(to_send).await {
-                    tracing::error!(?err, "failed to send message");
+                if let Err(error) = framed.send(to_send).await {
+                    tracing::error!(?error, "failed to send message");
                     break;
                 }
             }
@@ -264,13 +268,13 @@ async fn io_task<Channel, Type>(
                         tracing::info!("no more messages, exiting task");
                         break;
                     }
-                    Some(Err(err)) => {
-                        tracing::error!(?err, "failed to receive message");
+                    Some(Err(error)) => {
+                        tracing::error!(?error, "failed to receive message");
                         break;
                     }
-                    Some(Ok(e)) => {
-                        if let Err(e) = tx.send(e).await {
-                            tracing::info!(?e, "io task channel closed");
+                    Some(Ok(msg)) => {
+                        if let Err(error) = tx.send(msg).await {
+                            tracing::info!(?error, "io task channel closed");
                             break;
                         }
                     },
@@ -337,7 +341,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 
     /// Try to push a new message into the queue with id `queue_id`,
     /// creating it if it doesn't exist. If the queue is full, return
-    /// the message and an `OwnedNotified` that will resolve then the
+    /// the message and an `OwnedNotified` that will resolve when the
     /// queue has free capacity.
     fn try_push(
         &self,
@@ -350,6 +354,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         if lock.queues.len() > 8 && lock.ready.len() < lock.queues.len() / 3 {
             // We can remove all empty ones because we know they wont be in `ready`
             lock.queues.retain(|_, v| !v.messages.is_empty());
+            lock.queues.shrink_to_fit();
         }
 
         let queue = lock.queues.entry(queue_id.clone()).or_default();
