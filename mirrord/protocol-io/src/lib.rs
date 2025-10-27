@@ -412,7 +412,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 
         // If `ready` is empty then we have nothing to do.
         let key_idx = (0..lock.ready.len()).choose(&mut rand::rng())?;
-        let key = lock.ready[key_idx];
+        let key = lock.ready.get(key_idx).unwrap().clone();
 
         let queue = lock
             .queues
