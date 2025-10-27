@@ -518,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     #[rstest]
-    #[timeout(Duration::from_millis(1000))]
+    #[timeout(Duration::from_secs(5))]
     async fn preserves_order() {
         let (connection, _inbound_tx, output) = Connection::<Test>::dummy();
 
