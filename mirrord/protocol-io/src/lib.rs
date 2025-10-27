@@ -357,7 +357,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             lock.queues.shrink_to_fit();
         }
 
-        let queue = lock.queues.entry(queue_id.clone()).or_default();
+        let queue = lock.queues.entry(queue_id).or_default();
 
         if queue.used_bytes > Self::MAX_CAPACITY {
             return Err((encoded, queue.free.clone().notified_owned()));
@@ -412,7 +412,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 
         // If `ready` is empty then we have nothing to do.
         let key_idx = (0..lock.ready.len()).choose(&mut rand::rng())?;
-        let key = lock.ready[key_idx].clone();
+        let key = lock.ready[key_idx];
 
         let queue = lock
             .queues
