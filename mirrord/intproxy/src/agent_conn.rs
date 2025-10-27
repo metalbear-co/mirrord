@@ -10,8 +10,12 @@ use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
     error::KubeApiError,
+    kube,
 };
-use mirrord_operator::client::{OperatorApi, OperatorSession, error::OperatorApiError};
+use mirrord_operator::client::{
+    OperatorApi, OperatorSession,
+    error::{OperatorApiError, OperatorOperation},
+};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use strum::IntoDiscriminant;
@@ -22,7 +26,7 @@ use tokio::{
     net::{TcpSocket, TcpStream},
     sync::mpsc::{Receiver, Sender},
 };
-use tokio_retry::{Retry, strategy::ExponentialBackoff};
+use tokio_retry::{RetryIf, strategy::ExponentialBackoff};
 use tracing::Level;
 
 use crate::{
@@ -313,25 +317,38 @@ impl RestartableBackgroundTask for AgentConnection {
                     .factor(500)
                     .max_delay(Duration::from_secs(8))
                     .take(10);
+                // Unless the operator responded with explicit 410 (meaning that the session is
+                // permanently gone), we can still retry.
+                let can_retry = |error: &AgentConnectionError| match error {
+                    AgentConnectionError::Operator(OperatorApiError::KubeError {
+                        error: kube::Error::Api(error),
+                        operation: OperatorOperation::WebsocketConnection,
+                    }) => error.code != 410,
+                    _ => true,
+                };
 
-                let connection = Retry::spawn(retry_strategy, || async {
-                    message_bus
-                        .closed_token()
-                        .run_until_cancelled(AgentConnection::new(
-                            config,
-                            connect_info.clone(),
-                            &mut NullReporter::default(),
-                        ))
-                        .await
-                        .transpose()
-                        .inspect_err(|error| {
-                            tracing::error!(
-                                error = %Report::new(error),
-                                "Failed to reconnect to the {}",
-                                connect_info.discriminant(),
-                            );
-                        })
-                })
+                let connection = RetryIf::spawn(
+                    retry_strategy,
+                    || async {
+                        message_bus
+                            .closed_token()
+                            .run_until_cancelled(AgentConnection::new(
+                                config,
+                                connect_info.clone(),
+                                &mut NullReporter::default(),
+                            ))
+                            .await
+                            .transpose()
+                            .inspect_err(|error| {
+                                tracing::error!(
+                                    error = %Report::new(error),
+                                    "Failed to reconnect to the {}",
+                                    connect_info.discriminant(),
+                                );
+                            })
+                    },
+                    can_retry,
+                )
                 .await;
 
                 match connection {
