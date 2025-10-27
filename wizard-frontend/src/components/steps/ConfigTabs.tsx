@@ -51,7 +51,7 @@ import {
   updateConfigTarget,
   validateJson,
 } from "../JsonUtils";
-import { ConfigDataContext } from "../UserDataContext";
+import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
 
 const ConfigTabs = () => {
   const { config, setConfig } = useContext(ConfigDataContext);
@@ -62,15 +62,13 @@ const ConfigTabs = () => {
   // For copying to clipboard
   const { toast } = useToast();
   const copyToClipboard = async () => {
-    const jsonToCopy = editableJson || (config as string);
+    const jsonToCopy = getConfigString(config);
     await navigator.clipboard.writeText(jsonToCopy);
     toast({
       title: "Copied to clipboard",
       description: "Configuration JSON has been copied to your clipboard.",
     });
   };
-  const [editableJson, setEditableJson] = useState<string>("");
-  const [jsonError, setJsonError] = useState<string>("");
 
   // todo: pull targets and namespaces from backend
   // todo: pull valid target types from backend
@@ -819,19 +817,10 @@ const ConfigTabs = () => {
                   <Textarea
                     id="json-editor"
                     className="font-mono text-sm min-h-[200px] max-h-[200px] resize-none"
-                    value={editableJson || getConfigString(config)} // todo: editable json?
-                    onChange={(e) => {
-                      setEditableJson(e.target.value);
-                      validateJson(e.target.value, setJsonError);
-                    }}
-                    placeholder='{\n     "target": {\n         "path": "deployment/api-service",\n         "namespace": "default"\n     },\n     "feature": {\n         "fs": "read",\n         "env": true,\n         "copy_target": {\n             "scale_down": true\n         }\n     }\n }'
+                    value={getConfigString(config)}
+                    readOnly={true}
+                    placeholder={getConfigString(DefaultConfig)}
                   />
-                  {jsonError && (
-                    <div className="absolute bottom-2 left-2 flex items-center gap-1 text-destructive text-xs bg-background/80 px-2 py-1 rounded">
-                      <AlertCircle className="h-3 w-3" />
-                      {jsonError}
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -840,27 +829,15 @@ const ConfigTabs = () => {
                   variant="outline"
                   size="sm"
                   onClick={copyToClipboard}
-                  disabled={!!jsonError}
                 >
                   <Copy className="h-4 w-4 mr-2" />
                   Copy to Clipboard
                 </Button>
 
                 <DownloadButton
-                  json={editableJson || getConfigString(config)}
+                  json={getConfigString(config)}
                   filename={"mirrord-config"}
                 />
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEditableJson(config);
-                    setJsonError("");
-                  }}
-                >
-                  Reset to Generated
-                </Button>
               </div>
 
               <Separator />
