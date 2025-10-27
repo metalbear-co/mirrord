@@ -98,7 +98,7 @@ impl Application {
             .map(String::from)
             .to_vec(),
             Application::NodeHTTP => ["node", "node-e2e/app.mjs"].map(String::from).to_vec(),
-            Application::NodeHTTPNpm => ["npm", "run", "start"].map(String::from).to_vec(),
+            Application::NodeHTTPNpm => ["npm", "--prefix", "node-e2e", "run", "start"].map(String::from).to_vec(),
             Application::NodeHTTP2 => ["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
                 .map(String::from)
                 .to_vec(),
