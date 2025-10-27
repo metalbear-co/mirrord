@@ -1,0 +1,1 @@
+`mirrord ci start` now pipes application's stdout and stderr to files in a temporary directory (`/tmp/mirrord/{binary-name}-{timestamp}-{random}` by default). This can be configured with the `ci.output_dir` option in your mirrord config.
