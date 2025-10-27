@@ -469,7 +469,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 /// A handle to a queue for outbound messages.
 ///
 /// Cloning this struct returns a handle to the same queue. To create
-/// a new queue, use `Self::another`.
+/// a new queue, use [`Self::another`].
 #[derive(Clone)]
 pub struct TxHandle<Type: ProtocolEndpoint> {
     shared_state: Arc<SharedState<Type>>,
