@@ -208,7 +208,7 @@ impl MirrordCi {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
         // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
-        let ci_run_info_dir = {
+        let ci_run_output_dir = {
             let parent_dir = output_dir
                 .clone()
                 .unwrap_or_else(|| temp_dir().join("mirrord"));
@@ -219,16 +219,16 @@ impl MirrordCi {
                 .expect("system time should not be earlier than UNIX EPOCH")
                 .as_secs();
 
-            let ci_run_info_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
+            let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
 
-            create_dir_all(&ci_run_info_dir).await?;
+            create_dir_all(&ci_run_output_dir).await?;
 
-            ci_run_info_dir
+            ci_run_output_dir
         };
 
         progress.info(&format!(
             "mirrord ci files will be stored in {}",
-            ci_run_info_dir.display()
+            ci_run_output_dir.display()
         ));
 
         if mirrord_ci_store.user_pid.is_some() {
@@ -238,8 +238,8 @@ impl MirrordCi {
                 .args(binary_args.iter().skip(1))
                 .envs(env_vars)
                 .stdin(Stdio::null())
-                .stdout(File::create(ci_run_info_dir.join("stdout"))?)
-                .stderr(File::create(ci_run_info_dir.join("stderr"))?)
+                .stdout(File::create(ci_run_output_dir.join("stdout"))?)
+                .stderr(File::create(ci_run_output_dir.join("stderr"))?)
                 .kill_on_drop(false)
                 .spawn()
             {

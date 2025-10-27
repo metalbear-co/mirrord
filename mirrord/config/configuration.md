@@ -523,17 +523,16 @@ Configuration for mirrord for CI.
 ```json
 {
   "ci": {
-    "info_dir": "/tmp/mirrord/",
+    "output_dir": "/tmp/mirrord/",
   }
 }
 ```
 
-### ci.info_dir{#ci-info_dir}
+### ci.output_dir{#ci-output_dir}
 
-`mirrord ci` commands creates some temporary files (e.g. a file for the output of `stdio`),
-and you can specify the directory where these files will be created here.
+Path to a directory where `mirrord ci` will flush application's stdout and stderr.
 
-Defaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`
+Defaults to `/tmp/mirrord/`.
 
 ## container {#root-container}
 

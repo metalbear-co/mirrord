@@ -616,12 +616,12 @@
       }
     },
     "CiFileConfig": {
-      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"info_dir\": \"/tmp/mirrord/\", } } ```",
+      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"output_dir\": \"/tmp/mirrord/\", } } ```",
       "type": "object",
       "properties": {
-        "info_dir": {
-          "title": "ci.info_dir{#ci-info_dir}",
-          "description": "`mirrord ci` commands creates some temporary files (e.g. a file for the output of `stdio`), and you can specify the directory where these files will be created here.\n\nDefaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`",
+        "output_dir": {
+          "title": "ci.output_dir{#ci-output_dir}",
+          "description": "Path to a directory where `mirrord ci` will flush application's stdout and stderr.\n\nDefaults to `/tmp/mirrord/`.",
           "type": [
             "string",
             "null"

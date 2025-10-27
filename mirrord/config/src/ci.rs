@@ -12,7 +12,7 @@ use crate::config::source::MirrordConfigSource;
 /// ```json
 /// {
 ///   "ci": {
-///     "info_dir": "/tmp/mirrord/",
+///     "output_dir": "/tmp/mirrord/",
 ///   }
 /// }
 /// ```
@@ -20,7 +20,7 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "CiFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct CiConfig {
-    /// ### ci.info_dir{#ci-info_dir}
+    /// ### ci.output_dir{#ci-output_dir}
     ///
     /// Path to a directory where `mirrord ci` will flush application's stdout and stderr.
     ///
