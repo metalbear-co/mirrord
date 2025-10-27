@@ -516,6 +516,25 @@ Can be useful for collecting logs.
 
 Defaults to `1`.
 
+## ci {#root-ci}
+
+Configuration for mirrord for CI.
+
+```json
+{
+  "ci": {
+    "info_dir": "/tmp/mirrord/",
+  }
+}
+```
+
+### ci.info_dir{#ci-info_dir}
+
+`mirrord ci` commands creates some temporary files (e.g. a file for the output of `stdio`),
+and you can specify the directory where these files will be created here.
+
+Defaults to `/tmp/mirrord/{binary-name}-{timestamp}-{random-name}`
+
 ## container {#root-container}
 
 Unstable: `mirrord container` command specific config.
