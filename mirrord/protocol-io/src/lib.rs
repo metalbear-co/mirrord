@@ -201,9 +201,11 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         self.rx.poll_recv(cx)
     }
 
-    /// Send a message. Note that all messages sent with this function
+    /// Send a message.
+    ///
+    /// Note that all messages sent with this function
     /// will be put in a single queue, and thus be delivered
-    /// sequentially. Use `Self::tx_handle` for queueing messages
+    /// sequentially. Use [`Self::tx_handle`] for queueing messages
     /// independently.
     #[inline]
     pub async fn send(&self, msg: Type::OutMsg) {
