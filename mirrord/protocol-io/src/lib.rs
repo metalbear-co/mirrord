@@ -38,8 +38,9 @@ impl<T, I, O> Transport<I, O> for T where
 {
 }
 
-/// "Phony" trait, implemented by `Client` and `Agent`, used for
-/// determining input and output message types.
+/// "Phony" trait, used for determining input and output message types.
+///
+/// Implemented by [`Client`] and [`Agent`].
 pub trait ProtocolEndpoint: 'static + Sized + Clone {
     type InMsg: bincode::Decode<()> + Send + fmt::Debug;
     type OutMsg: bincode::Encode + Send + fmt::Debug;
@@ -51,8 +52,11 @@ pub enum ProtocolError {
     IO(#[from] io::Error),
 }
 
+/// Marker type, representing the client side of a mirrord-protocol connection.
 #[derive(Clone)]
 pub struct Client;
+
+/// Marker type, representing the server side of a mirrord-protocol connection (agent or operator).
 #[derive(Clone)]
 pub struct Agent;
 
@@ -442,7 +446,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
-    /// Return a new `TxHandle` to a new independent queue.
+    /// Return a new [`TxHandle`] to a new independent queue.
     ///
     /// The queue is actually created lazily and may be
     /// garbage-collected and recreated later on, but that process is
@@ -463,7 +467,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 /// A handle to a queue for outbound messages.
 ///
 /// Cloning this struct returns a handle to the same queue. To create
-/// a new queue, use `Self::another`.
+/// a new queue, use [`Self::another`].
 #[derive(Clone)]
 pub struct TxHandle<Type: ProtocolEndpoint> {
     shared_state: Arc<SharedState<Type>>,
