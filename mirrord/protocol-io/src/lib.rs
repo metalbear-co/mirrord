@@ -38,8 +38,9 @@ impl<T, I, O> Transport<I, O> for T where
 {
 }
 
-/// "Phony" trait, implemented by `Client` and `Agent`, used for
-/// determining input and output message types.
+/// "Phony" trait, used for determining input and output message types.
+///
+/// Implemented by [`Client`] and [`Agent`].
 pub trait ProtocolEndpoint: 'static + Sized + Clone {
     type InMsg: bincode::Decode<()> + Send + fmt::Debug;
     type OutMsg: bincode::Encode + Send + fmt::Debug;
