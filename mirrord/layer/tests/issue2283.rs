@@ -5,10 +5,7 @@ use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Dur
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
-    outgoing::{
-        DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-    },
+    outgoing::{DaemonRead, tcp::DaemonTcpOutgoing},
 };
 use rstest::rstest;
 
@@ -60,22 +57,12 @@ async fn test_issue2283(
         ))))
         .await;
 
-    let message = intproxy.recv().await;
-    assert_matches!(
-        message,
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address}))
-        if remote_address == SocketAddress::from(address)
-    );
+    let (uid, addr) = intproxy.recv_tcp_connect().await;
+    assert_eq!(addr, address);
 
-    let local_address = "2.3.4.5:9122".parse::<SocketAddr>().unwrap();
+    let local_address = "2.3.4.5:9122".parse().unwrap();
     intproxy
-        .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: address.into(),
-                local_address: local_address.into(),
-            },
-        ))))
+        .send_tcp_connect_ok(uid, 0, addr, local_address)
         .await;
     intproxy
         .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
@@ -85,6 +72,15 @@ async fn test_issue2283(
             },
         ))))
         .await;
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let stdout = test_process.get_stdout().await;
+        if stdout.contains("received all expected bytes") {
+            break;
+        }
+    }
+
     intproxy
         .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
         .await;

@@ -34,9 +34,9 @@ mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
+mirrord-auth= { path = "../auth" }
 
 actix-codec.workspace = true
-base64.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
@@ -54,7 +54,6 @@ k8s-openapi.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime = "2"
-nix = { workspace = true, features = ["process", "resource"] }
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
@@ -71,6 +70,11 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
+is_ci = "1.2.0"
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+nix = { workspace = true, features = ["process", "resource", "signal"] }
+base64.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
@@ -78,8 +82,17 @@ mirrord-sip = { path = "../sip" }
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf = "0.10"
 
-[build-dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
+str-win = { path = "../str-win" }
+windows.workspace = true
+dll-syringe.workspace = true
+libc.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+mirrord-layer-win = { artifact = "cdylib", path = "../layer-win" }
 
 [dev-dependencies]
 rstest.workspace = true
@@ -88,3 +101,6 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
+
+[features]
+windows_build = []

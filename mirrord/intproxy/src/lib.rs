@@ -160,7 +160,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
-            OutgoingProxy::default(),
+            OutgoingProxy::new(experimental.non_blocking_tcp_connect),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
         );
@@ -360,6 +360,10 @@ impl IntProxy {
                         .incoming
                         .send(IncomingProxyMessage::LayerForked(msg))
                         .await;
+                    self.task_txs
+                        .outgoing
+                        .send(OutgoingProxyMessage::LayerForked(msg))
+                        .await;
                 }
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
@@ -420,6 +424,10 @@ impl IntProxy {
                 self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::LayerClosed(msg))
+                    .await;
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::LayerClosed(msg))
                     .await;
 
                 self.task_txs.layers.remove(&LayerId(id));
@@ -538,7 +546,14 @@ impl IntProxy {
 
                 self.task_txs
                     .incoming
-                    .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
+                    .send(IncomingProxyMessage::AgentProtocolVersion(
+                        protocol_version.clone(),
+                    ))
+                    .await;
+
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentProtocolVersion(protocol_version))
                     .await;
             }
             DaemonMessage::LogMessage(log) => match log.level {
@@ -592,12 +607,10 @@ impl IntProxy {
                     .send(SimpleProxyMessage::AddrInfoReq(message_id, layer_id, req))
                     .await
             }
-            LayerToProxyMessage::OutgoingConnect(req) => {
+            LayerToProxyMessage::Outgoing(req) => {
                 self.task_txs
                     .outgoing
-                    .send(OutgoingProxyMessage::LayerConnect(
-                        req, message_id, layer_id,
-                    ))
+                    .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))
                     .await
             }
             LayerToProxyMessage::Incoming(req) => {

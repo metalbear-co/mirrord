@@ -16,16 +16,12 @@ pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
+pub mod logfile_path;
 pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{
-    collections::HashMap,
-    ops::Not,
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::{collections::HashMap, ops::Not, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
@@ -33,7 +29,6 @@ use experimental::ExperimentalConfig;
 use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
-use rand::distr::{Alphanumeric, SampleString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use target::Target;
@@ -42,7 +37,7 @@ use tracing::warn;
 
 use crate::{
     agent::AgentConfig,
-    config::source::MirrordConfigSource,
+    config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
     external_proxy::ExternalProxyConfig,
     feature::{
@@ -57,6 +52,9 @@ use crate::{
 
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
+
+/// Environment variable to indicate towards layer to wait for debugger.
+pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -762,7 +760,7 @@ impl CollectAnalytics for &LayerConfig {
 }
 
 impl LayerFileConfig {
-    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    pub fn from_path<P>(path: P) -> Result<Self, FromFileError>
     where
         P: AsRef<Path>,
     {
@@ -775,24 +773,9 @@ impl LayerFileConfig {
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
-            _ => Err(ConfigError::UnsupportedFormat),
+            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
-}
-
-/// Returns a default randomized path for proxy logs.
-///
-/// `prefix` can be passed to distinguish between intproxy and extproxy logs.
-fn default_proxy_logfile_path(prefix: &str) -> PathBuf {
-    let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
-    let timestamp = SystemTime::UNIX_EPOCH
-        .elapsed()
-        .expect("system time should not be earlier than UNIX EPOCH")
-        .as_secs();
-
-    let mut path = std::env::temp_dir();
-    path.push(format!("{prefix}-{timestamp}-{random_name}.log"));
-    path
 }
 
 #[cfg(test)]
@@ -1227,10 +1210,38 @@ mod tests {
     fn encode_and_decode_advanced_config() {
         let mut cfg_context = ConfigContext::default();
 
+        let advanced_config: String = format!(
+            r#"
+        {{
+            "accept_invalid_certificates": false,
+            "target": {{
+                "path": "pod/test-service-abcdefg-abcd",
+                "namespace": "default"
+            }},
+            "feature": {{
+                "env": true,
+                "fs": "write",
+                "network": {{
+                    "dns": false,
+                    "incoming": {{
+                        "mode": "steal",
+                        "http_filter": {{
+                            "header_filter": "x-intercept: {{ get_env(name=\"{}\") }}"
+                        }}
+                    }},
+                    "outgoing": {{
+                        "tcp": true,
+                        "udp": false
+                    }}
+                }}
+            }}
+        }}"#,
+            USER_ENVVAR
+        );
         // this config includes template variables, so it needs to be rendered first
         let mut template_engine = Tera::default();
         template_engine
-            .add_raw_template("main", ADVANCED_CONFIG)
+            .add_raw_template("main", &advanced_config)
             .unwrap();
         let rendered = template_engine
             .render("main", &tera::Context::new())
@@ -1246,30 +1257,9 @@ mod tests {
         assert_eq!(decoded, resolved_config);
     }
 
-    const ADVANCED_CONFIG: &str = r#"
-    {
-        "accept_invalid_certificates": false,
-        "target": {
-            "path": "pod/test-service-abcdefg-abcd",
-            "namespace": "default"
-        },
-        "feature": {
-            "env": true,
-            "fs": "write",
-            "network": {
-                "dns": false,
-                "incoming": {
-                    "mode": "steal",
-                    "http_filter": {
-                        "header_filter": "x-intercept: {{ get_env(name="USER") }}"
-                    }
-                },
-                "outgoing": {
-                    "tcp": true,
-                    "udp": false
-                }
-            }
-        }
-    }
-"#;
+    #[cfg(not(target_os = "windows"))]
+    const USER_ENVVAR: &str = "USER";
+
+    #[cfg(target_os = "windows")]
+    const USER_ENVVAR: &str = "USERNAME";
 }

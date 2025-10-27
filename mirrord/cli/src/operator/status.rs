@@ -10,7 +10,10 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
-    crd::{MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate},
+    crd::{
+        MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate,
+        kafka::MirrordKafkaEphemeralTopicSpec,
+    },
     types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -51,6 +54,57 @@ impl StatusCommandHandler {
         progress.success(None);
 
         Ok(Self { operator_api: api })
+    }
+
+    /// The Kafka information we want to display to the user is in the MirrordKafkaEphemeralTopic
+    /// CRDs. This function extracts the topic information and creates display rows.
+    ///
+    /// Returns the Kafka topic status rows keyed by consumer (the targeted resource, i.e. pod).
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    fn kafka_rows(
+        topics: Iter<MirrordKafkaEphemeralTopicSpec>,
+        session_id: String,
+        user: &String,
+        consumer: &String,
+    ) -> Option<HashMap<String, Vec<Row>>> {
+        let mut rows: HashMap<String, Vec<Row>> = HashMap::new();
+
+        // Loop over the `MirrordKafkaEphemeralTopic` crds to build the list of rows.
+        for topic_spec in topics {
+            let topic_name = &topic_spec.name;
+            let client_config = &topic_spec.client_config;
+
+            let topic_type = if topic_name.contains("-fallback-") {
+                "Fallback"
+            } else {
+                "Filtered"
+            };
+
+            // Group rows by the consumer (target).
+            match rows.entry(consumer.clone()) {
+                Entry::Occupied(mut consumer_rows) => {
+                    consumer_rows.get_mut().push(row![
+                        session_id,
+                        topic_name,
+                        user,
+                        client_config,
+                        topic_type,
+                    ]);
+                }
+                Entry::Vacant(consumer_rows) => {
+                    consumer_rows.insert(vec![row![
+                        session_id,
+                        topic_name,
+                        user,
+                        client_config,
+                        topic_type,
+                    ]]);
+                }
+            }
+        }
+
+        // If it's empty, we don't want to display anything.
+        rows.is_empty().not().then_some(rows)
     }
 
     /// The SQS information we want to display to the user is in a mix of different maps, and
@@ -95,15 +149,23 @@ impl StatusCommandHandler {
             // From the list of queue names, loop over them so we can match the `QueueId`
             // of a name with the `QueueId` of a filter.
             for (
-                queue_id,
+                composite_key,
                 QueueNameUpdate {
                     original_name,
                     output_name,
                 },
             ) in names.iter()
             {
-                // Basically `filter.queue_id == name.queue_id`.
-                if let Some(filters_by_id) = filters.get(queue_id) {
+                // Parse the composite key format "queue_id::input_name" to extract queue_id
+                let queue_id = composite_key
+                    .split_once("::")
+                    .map(|(id, _)| id)
+                    .unwrap_or(composite_key.as_str());
+
+                // Match with filters by queue_id, or use wildcard "*" if present
+                let filters_by_id = filters.get(queue_id).or_else(|| filters.get("*"));
+
+                if let Some(filters_by_id) = filters_by_id {
                     // Loop over the filters and start building the rows.
                     for (filter_key, filter) in filters_by_id.iter() {
                         // Group rows by the queue `consumer`.
@@ -229,6 +291,7 @@ Operator License
         ]);
 
         let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
+        let mut kafka_rows: HashMap<String, Vec<Row>> = HashMap::new();
 
         for session in &status.sessions {
             let locked_ports = session
@@ -281,6 +344,17 @@ Operator License
                     }
                 }
             }
+
+            if let Some(kafka_in_status) = session.kafka.as_ref().and_then(|kafka| {
+                Self::kafka_rows(
+                    kafka.iter(),
+                    session.id.clone().unwrap_or_default(),
+                    &session.user,
+                    &session.target,
+                )
+            }) {
+                kafka_rows.extend(kafka_in_status);
+            }
         }
 
         sessions.printstd();
@@ -305,6 +379,24 @@ Operator License
             }
 
             sqs_table.printstd();
+        }
+
+        // The Kafka topic statuses are grouped by consumer (target).
+        for (_, kafka_row) in kafka_rows {
+            let mut kafka_table = Table::new();
+            kafka_table.add_row(row![
+                "Session ID",
+                "Topic Name",
+                "User",
+                "Client Config",
+                "Type",
+            ]);
+
+            for row in kafka_row {
+                kafka_table.add_row(row);
+            }
+
+            kafka_table.printstd();
         }
 
         Ok(())

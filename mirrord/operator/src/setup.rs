@@ -28,9 +28,11 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    MirrordOperatorCrd, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
+    MirrordWorkloadQueueRegistry, TargetCrd,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
+    patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
     session::MirrordClusterSession,
@@ -103,7 +105,6 @@ pub struct SetupOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
-    pub stateful_sessions: bool,
     pub mysql_branching: bool,
 }
 
@@ -124,7 +125,6 @@ pub struct Operator {
     client_ca_role_binding: OperatorClientCaRoleBinding,
     sqs_splitting: bool,
     kafka_splitting: bool,
-    stateful_sessions: bool,
     mysql_branching: bool,
 }
 
@@ -138,7 +138,6 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            stateful_sessions,
             mysql_branching,
         } = options;
 
@@ -155,7 +154,6 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
-            stateful_sessions,
             mysql_branching,
         });
         let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
@@ -206,7 +204,6 @@ impl Operator {
             client_ca_role_binding,
             sqs_splitting,
             kafka_splitting,
-            stateful_sessions,
             mysql_branching,
         }
     }
@@ -295,10 +292,14 @@ impl OperatorSetup for Operator {
             }
         }
 
-        if self.stateful_sessions {
-            writer.write_all(b"---\n")?;
-            MirrordClusterSession::crd().to_writer(&mut writer)?;
-        }
+        writer.write_all(b"---\n")?;
+        MirrordClusterWorkloadPatch::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterWorkloadPatchRequest::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterSession::crd().to_writer(&mut writer)?;
 
         if self.mysql_branching {
             writer.write_all(b"---\n")?;
@@ -574,7 +575,6 @@ pub struct OperatorClusterRoleOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
-    pub stateful_sessions: bool,
     pub mysql_branching: bool,
 }
 
@@ -684,7 +684,42 @@ impl OperatorClusterRole {
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
+            PolicyRule {
+                api_groups: Some(vec![MirrordClusterWorkloadPatch::group(&()).into_owned()]),
+                resources: Some(vec![
+                    MirrordClusterWorkloadPatch::plural(&()).into_owned(),
+                    MirrordClusterWorkloadPatchRequest::plural(&()).into_owned(),
+                    format!("{}/status", MirrordClusterWorkloadPatchRequest::plural(&())),
+                    MirrordClusterSession::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["*".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
+                resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
+                verbs: vec![
+                    "delete".to_owned(),
+                    "deletecollection".to_owned(),
+                    "list".to_owned(),
+                ],
+                ..Default::default()
+            },
         ];
+
+        if options.kafka_splitting || options.sqs_splitting {
+            rules.push(PolicyRule {
+                api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
+                resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
+                verbs: vec![
+                    "create".to_owned(),
+                    "get".to_owned(),
+                    "update".to_owned(),
+                    "patch".to_owned(),
+                ],
+                ..Default::default()
+            });
+        }
 
         if options.kafka_splitting {
             rules.extend([
@@ -772,17 +807,6 @@ impl OperatorClusterRole {
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
                 },
-                // For creating MutatingWebhooks for changing pods in an ArgoCD-compatible way.
-                PolicyRule {
-                    api_groups: Some(vec![MutatingWebhookConfiguration::group(&()).into_owned()]),
-                    resources: Some(vec![MutatingWebhookConfiguration::plural(&()).into_owned()]),
-                    verbs: vec![
-                        "create".to_owned(),
-                        "delete".to_owned(),
-                        "deletecollection".to_owned(),
-                    ],
-                    ..Default::default()
-                },
             ]);
         }
 
@@ -791,18 +815,6 @@ impl OperatorClusterRole {
                 api_groups: Some(vec!["argoproj.io".to_owned()]),
                 resources: Some(vec!["applications".to_owned()]),
                 verbs: vec!["list".to_owned(), "get".to_owned(), "patch".to_owned()],
-                ..Default::default()
-            });
-        }
-
-        if options.stateful_sessions {
-            rules.push(PolicyRule {
-                api_groups: Some(vec![MirrordClusterSession::group(&()).into_owned()]),
-                resources: Some(vec![MirrordClusterSession::plural(&()).into_owned()]),
-                verbs: ["get", "list", "watch", "create", "delete"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
                 ..Default::default()
             });
         }
@@ -1081,6 +1093,16 @@ impl OperatorClusterUserRole {
                 api_groups: Some(vec![MirrordClusterProfile::group(&()).into_owned()]),
                 resources: Some(vec![MirrordClusterProfile::plural(&()).into_owned()]),
                 verbs: vec!["list", "get"].into_iter().map(String::from).collect(),
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec![
+                    MirrordClusterOperatorUserCredential::group(&()).into_owned(),
+                ]),
+                resources: Some(vec![
+                    MirrordClusterOperatorUserCredential::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
         ];

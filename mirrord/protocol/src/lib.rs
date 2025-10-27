@@ -57,6 +57,9 @@
 #![feature(io_error_more)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+// windows features for protocol/file.rs in From<Metadata> for MetadataInternal
+#![cfg_attr(target_os = "windows", feature(windows_change_time))]
+#![cfg_attr(target_os = "windows", feature(windows_by_handle))]
 
 pub mod batched_body;
 pub mod codec;
@@ -68,6 +71,7 @@ pub mod outgoing;
 pub mod pause;
 pub mod payload;
 pub mod tcp;
+pub mod uid;
 pub mod vpn;
 
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};

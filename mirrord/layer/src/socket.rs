@@ -16,7 +16,7 @@ use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsubscribe};
 use mirrord_protocol::{
     DnsLookupError, ResolveErrorKindInternal, ResponseError, outgoing::SocketAddress,
 };
@@ -104,7 +104,11 @@ pub struct Connected {
     /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
     remote_address: SocketAddress,
 
-    /// Local address (pod-wise)
+    /// Local address of the agent's socket.
+    ///
+    /// Whenever the user calls [`libc::getsockname`], this is the address we return to them.
+    ///
+    /// Not available in case of experimental non-blocking TCP connections.
     ///
     /// ## Example
     ///
@@ -117,11 +121,16 @@ pub struct Connected {
     ///
     /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
     /// port.
-    local_address: SocketAddress,
+    local_address: Option<SocketAddress>,
 
     /// The address of the interceptor socket, this is what we're really connected to in the
     /// outgoing feature.
     layer_address: Option<SocketAddress>,
+
+    /// Unique ID of this connection.
+    ///
+    /// Only for sockets used for outgoing connections.
+    connection_id: Option<u128>,
 }
 
 /// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.
@@ -223,16 +232,30 @@ impl UserSocket {
     /// Inform internal proxy about closing a listening port.
     #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) {
-        if let Self {
-            state: SocketState::Listening(bound),
-            kind: SocketKind::Tcp(..),
-            ..
-        } = self
-        {
-            let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                port: bound.requested_address.port(),
-                listening_on: bound.address,
-            });
+        match self {
+            Self {
+                state: SocketState::Listening(bound),
+                kind: SocketKind::Tcp(..),
+                ..
+            } => {
+                let _ = common::make_proxy_request_no_response(PortUnsubscribe {
+                    port: bound.requested_address.port(),
+                    listening_on: bound.address,
+                });
+            }
+            Self {
+                state:
+                    SocketState::Connected(Connected {
+                        connection_id: Some(id),
+                        ..
+                    }),
+                ..
+            } => {
+                let _ = common::make_proxy_request_no_response(OutgoingConnCloseRequest {
+                    conn_id: *id,
+                });
+            }
+            _ => {}
         }
     }
 }

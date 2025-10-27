@@ -15,7 +15,7 @@ use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
-    credentials::LicenseValidity,
+    credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{LayerConfig, target::Target};
 use mirrord_kube::{
@@ -38,7 +38,8 @@ use crate::{
         DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
     },
     crd::{
-        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
+        OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
     },
@@ -49,6 +50,7 @@ use crate::{
 };
 
 mod connect_params;
+mod credentials;
 mod database_branches;
 mod discovery;
 pub mod error;
@@ -269,36 +271,51 @@ impl OperatorApi<NoClientCert> {
         })
     }
 
-    /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
-    /// In case of failure, state of this API instance does not change.
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
-    pub async fn prepare_client_cert<P, R>(
+    pub async fn with_ci_api_key<P, R>(
         self,
         reporter: &mut R,
         progress: &P,
         layer_config: &LayerConfig,
+        ci_api_key: &CiApiKey,
     ) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
         P: Progress,
     {
+        let certificate = match ci_api_key {
+            CiApiKey::V1(credentials) => credentials.as_ref(),
+        };
+
+        reporter.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+            license_hash: self
+                .operator
+                .spec
+                .license
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        });
+
+        self.prepare_with_certificate(progress, layer_config, certificate)
+            .await
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(progress))]
+    async fn prepare_with_certificate<P>(
+        self,
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+    ) -> OperatorApi<MaybeClientCert>
+    where
+        P: Progress,
+    {
         let previous_client = self.client.clone();
 
         let result = try {
-            let certificate = self.get_client_certificate().await?;
-
-            reporter.set_operator_properties(AnalyticsOperatorProperties {
-                client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
-                license_hash: self
-                    .operator
-                    .spec
-                    .license
-                    .fingerprint
-                    .as_deref()
-                    .map(AnalyticsHash::from_base64),
-            });
-
-            let header = Self::make_client_cert_header(&certificate)?;
+            let header = Self::make_client_cert_header(certificate)?;
 
             let mut config = self.client_cert.base_config;
             config
@@ -322,7 +339,7 @@ impl OperatorApi<NoClientCert> {
             Ok((new_client, cert)) => OperatorApi {
                 client: new_client,
                 client_cert: MaybeClientCert {
-                    cert_result: Ok(cert),
+                    cert_result: Ok(cert.clone()),
                 },
                 operator: self.operator,
             },
@@ -333,6 +350,52 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: self.operator,
+            },
+        }
+    }
+
+    /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
+    /// In case of failure, state of this API instance does not change.
+    #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
+    pub async fn with_client_certificate<P, R>(
+        self,
+        reporter: &mut R,
+        progress: &P,
+        layer_config: &LayerConfig,
+    ) -> OperatorApi<MaybeClientCert>
+    where
+        R: Reporter,
+        P: Progress,
+    {
+        let previous_client = self.client.clone();
+        let operator_crd = self.operator.clone();
+
+        let result = try {
+            let certificate = self.get_client_certificate().await?;
+
+            reporter.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+                license_hash: self
+                    .operator
+                    .spec
+                    .license
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
+
+            self.prepare_with_certificate(progress, layer_config, &certificate)
+                .await
+        };
+
+        match result {
+            Ok(api) => api,
+            Err(error) => OperatorApi {
+                client: previous_client,
+                client_cert: MaybeClientCert {
+                    cert_result: Err(error),
+                },
+                operator: operator_crd,
             },
         }
     }
@@ -398,25 +461,6 @@ where
         Ok(())
     }
 
-    pub fn check_operator_version<P>(&self, progress: &P) -> bool
-    where
-        P: Progress,
-    {
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION"))
-            .expect("Something went wrong when parsing mirrord version!");
-
-        if self.operator.spec.operator_version > mirrord_version {
-            let message = format!(
-                "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
-                mirrord_version, self.operator.spec.operator_version
-            );
-            progress.warning(&message);
-            false
-        } else {
-            true
-        }
-    }
-
     /// Returns a reference to the operator resource fetched from the cluster.
     pub fn operator(&self) -> &MirrordOperatorCrd {
         &self.operator
@@ -425,6 +469,44 @@ where
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Create a new CI api key by generating a random key pair, creating a certificate
+    /// signing request and sending it to the operator.
+    pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
+        if self
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ExtendableUserCredentials)
+            .not()
+        {
+            return Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::ExtendableUserCredentials,
+                operator_version: self.operator().spec.operator_version.to_string(),
+            });
+        }
+
+        let api_key: CiApiKey = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
+            self.client.clone(),
+            &format!(
+                "mirrord-ci@{}",
+                self.operator.spec.license.organization.as_str()
+            ),
+        )
+        .await
+        .map_err(|error| {
+            OperatorApiError::ClientCertError(format!(
+                "failed to create credentials for CI: {error}"
+            ))
+        })?
+        .into();
+
+        let encoded = api_key.encode().map_err(|error| {
+            OperatorApiError::ClientCertError(format!("failed to encode api key: {error}"))
+        })?;
+
+        Ok(encoded)
     }
 
     /// Creates a base [`Config`] for creating kube [`Client`]s.
@@ -536,10 +618,14 @@ where
         })?;
 
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(
+            .get_client_certificate::<MirrordOperatorCrd, MirrordClusterOperatorUserCredential>(
                 &self.client,
                 fingerprint,
                 subscription_id,
+                self.operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
             .map_err(|error| {
