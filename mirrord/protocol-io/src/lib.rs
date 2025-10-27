@@ -92,19 +92,19 @@ impl<I> Encoder<Vec<u8>> for Codec<I> {
 }
 
 /// The main handle to our end of the mirrord-protocol connection.
-/// `Type` is either `Client` or `Agent`.
+/// `Type` is either [`Client`] or [`Agent`].
 ///
 /// Implements message queueing and almost-fair scheduling. Use
-/// `Self::tx_handle` to obtain a handle for sending messages.
+/// [`Self::tx_handle`] to obtain a handle for sending messages.
 /// Messages sent with different send handles are *not* guaranteed to
 /// be delivered in order. To preserve message delivery order, send
-/// all relevant messages through a single `TxHandle` or clones
+/// all relevant messages through a single [`TxHandle`], or clones
 /// derived from it.
 ///
 /// The impl works by randomly picking a message from one of the
 /// nonempty queues and sending it over the wire. Future versions will
 /// use message chunking to fairly split the available bandwidth
-/// between all queues.
+/// between all queues (as messages can vary in size).
 pub struct Connection<Type: ProtocolEndpoint> {
     rx: mpsc::Receiver<Type::InMsg>,
     shared_state: Arc<SharedState<Type>>,
