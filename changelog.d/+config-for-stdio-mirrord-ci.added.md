@@ -1,1 +1,1 @@
-Adds 3 new mirrord configs `ci.stdout_file`, `ci.stdin_file`, and `ci.stderr_file`, so the user can pipe `stdio` to files specified in these configs.
+`mirrord ci start` now pipes stdio output to a file under `/tmp/mirrord/{binary-name}-{timestamp}-{random}`. This can be configured with the `ci.info_dir` option in your mirrord config.
