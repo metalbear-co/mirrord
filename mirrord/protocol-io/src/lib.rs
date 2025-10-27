@@ -448,7 +448,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
         }
     }
 
-    /// Return a new `TxHandle` to a new independent queue.
+    /// Return a new [`TxHandle`] to a new independent queue.
     ///
     /// The queue is actually created lazily and may be
     /// garbage-collected and recreated later on, but that process is
