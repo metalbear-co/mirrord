@@ -123,7 +123,7 @@ pub struct OperatorSession {
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
     operator_license_fingerprint: Option<String>,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`ConnectionWrapper`].
+    /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
 
     /// Allow the layer to attempt reconnection

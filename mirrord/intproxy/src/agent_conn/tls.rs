@@ -22,8 +22,7 @@ pub enum ConnectionTlsError {
 /// Requires that the external proxy provides a certificate with the
 /// [`MIRRORD_EXTPROXY_TLS_SERVER_NAME`].
 ///
-/// Spawns a background [`tokio::task`] that handles IO on the connection
-/// and returns [`mpsc`] channels to send/receive messages.
+/// Returns a [`Connection`] to send/receive messages.
 ///
 /// # Params
 ///
