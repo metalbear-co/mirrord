@@ -187,8 +187,7 @@ mod test {
                     .unwrap();
                 connection
                     .send(DaemonMessage::Close("it works".into()))
-                    .await
-                    .unwrap();
+                    .await;
             },
             async move {
                 let (stream, _) = listener.accept().await.unwrap();

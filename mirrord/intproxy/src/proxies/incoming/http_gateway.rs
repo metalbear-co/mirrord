@@ -454,9 +454,9 @@ mod test {
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
         ConnectionId, ToPayload,
-        io::Connection,
         tcp::{HttpRequest, InternalHttpRequest, TcpData},
     };
+    use mirrord_protocol_io::Connection;
     use rstest::rstest;
     use rustls::ServerConfig;
     use tokio::{

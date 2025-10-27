@@ -684,6 +684,7 @@ mod test {
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         },
     };
+    use mirrord_protocol_io::Connection;
 
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
@@ -696,9 +697,10 @@ mod test {
     #[tokio::test]
     async fn clear_on_reconnect() {
         let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
+        let (connection, _, out) = Connection::dummy();
 
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
-            BackgroundTasks::default();
+            BackgroundTasks::new(connection.tx_handle());
         let outgoing = background_tasks.register(OutgoingProxy::new(false), (), 8);
 
         for i in 0..=1 {
@@ -713,14 +715,12 @@ mod test {
                     LayerId(0),
                 ))
                 .await;
-            let message = background_tasks.next().await.unwrap().1.unwrap_message();
+            let message = out.next().await.unwrap();
             assert_eq!(
                 message,
-                ProxyMessage::ToAgent(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                    LayerConnect {
-                        remote_address: SocketAddress::Ip(peer_addr),
-                    }
-                ))),
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                    remote_address: SocketAddress::Ip(peer_addr),
+                })),
             );
 
             // Operator confirms with connection id 0.

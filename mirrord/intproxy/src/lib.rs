@@ -713,9 +713,8 @@ mod test {
     use mirrord_intproxy_protocol::{
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
-    use mirrord_protocol::{
-        ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2, io::Connection,
-    };
+    use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
+    use mirrord_protocol_io::Connection;
     use tokio::net::{TcpListener, TcpStream};
 
     use crate::{

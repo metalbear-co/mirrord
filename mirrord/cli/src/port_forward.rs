@@ -1113,7 +1113,6 @@ mod test {
     use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
     use mirrord_protocol::{
         ClientMessage, DaemonMessage, ToPayload,
-        io::{Client, Connection, ConnectionOutput},
         outgoing::{
             DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -1124,6 +1123,7 @@ mod test {
             StealType, TcpClose, TcpData,
         },
     };
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use reqwest::{Method, StatusCode, Version, header::HeaderMap};
     use rstest::rstest;
     use tokio::{
@@ -1178,7 +1178,7 @@ mod test {
         }
 
         async fn auto_responder(
-            rx: ConnectionOutput<ClientMessage>,
+            rx: ConnectionOutput<Client>,
             tx_to_test_code: mpsc::Sender<ClientMessage>,
             tx_to_port_forwarder: mpsc::Sender<DaemonMessage>,
         ) {

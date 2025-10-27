@@ -1208,8 +1208,8 @@ mod tests {
             ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
             SeekFileRequest, SeekFileResponse, SeekFromInternal,
         },
-        io::{Connection, ConnectionOutput},
     };
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use rstest::rstest;
     use semver::Version;
     use tokio::select;
@@ -1254,7 +1254,7 @@ mod tests {
     ) -> (
         TaskSender<FilesProxy>,
         BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
-        ConnectionOutput<ClientMessage>,
+        ConnectionOutput<Client>,
     ) {
         let (connection, _, out) = Connection::dummy();
 
@@ -1278,7 +1278,7 @@ mod tests {
     async fn prepare_dir(
         proxy: &TaskSender<FilesProxy>,
         tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
-        out: &ConnectionOutput<ClientMessage>,
+        out: &ConnectionOutput<Client>,
     ) {
         let request = FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 0xdad });
         proxy
@@ -1424,7 +1424,7 @@ mod tests {
     async fn open_file(
         proxy: &TaskSender<FilesProxy>,
         tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
-        out: &ConnectionOutput<ClientMessage>,
+        out: &ConnectionOutput<Client>,
         readonly: bool,
     ) -> u64 {
         let message_id = rand::random();
@@ -1469,7 +1469,7 @@ mod tests {
     async fn make_read_request(
         proxy: &TaskSender<FilesProxy>,
         tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
-        out: &ConnectionOutput<ClientMessage>,
+        out: &ConnectionOutput<Client>,
         remote_fd: u64,
         buffer_size: u64,
         start_from: Option<u64>,
