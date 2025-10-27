@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::fmt;
+use std::{fmt, time::Duration};
 
 use super::TestProcess;
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
@@ -152,5 +152,27 @@ impl Application {
             process.assert_log_level(true, "CRITICAL").await;
             process.assert_log_level(false, "CRITICAL").await;
         }
+    }
+
+    pub async fn wait_until_listening(&self, process: &TestProcess) {
+        
+        // Wait for application-specific startup message first
+        match self {
+            Application::PythonFastApiHTTP => {
+                process
+                    .wait_for_line(Duration::from_secs(120), "Application startup complete")
+                    .await;
+            },
+            Application::PythonFlaskHTTP  => {
+                process
+                    .wait_for_line_stdout(Duration::from_secs(120), "Server listening on port 80")
+                    .await;
+            }
+            _ => {},
+        };
+        
+        process
+            .wait_for_line(Duration::from_secs(60), "daemon subscribed")
+            .await;
     }
 }

@@ -223,8 +223,20 @@ impl UserSocket {
             };
 
             // Send unsubscribe request to stop port operations
-            // Ignore errors since we're cleaning up anyway
             let _ = make_proxy_request_no_response(port_unsubscribe);
+            
+            // For steal mode on Windows, add a small delay to allow agent processing
+            // This prevents race conditions where subsequent requests arrive before
+            // the agent has processed the port unsubscription
+            #[cfg(target_os = "windows")]
+            {
+                use crate::setup::layer_setup;
+                
+                if layer_setup().incoming_mode().steal {
+                    // Small delay to ensure agent processes unsubscription
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
         }
     }
 }

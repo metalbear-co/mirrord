@@ -526,7 +526,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
             set_socket_state(s, SocketState::Listening(bound_state));
 
             // this log message is expected by some E2E tests
-            tracing::info!("daemon subscribed port {}", bound_state.address.port());
+            tracing::debug!("daemon subscribed port {}", bound_state.address.port());
 
             tracing::info!(
                 "listen_detour -> socket {} now listening through mirrord agent on port {}",
@@ -2207,14 +2207,24 @@ unsafe extern "system" fn sendto_detour(
 /// Socket management detour for closesocket() - closes a socket
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
+    // Get socket info BEFORE closing to send PortUnsubscribe if needed
+    let socket_info = get_socket(s);
+    
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
+    
     // Only clean up mirrord state if the close was successful
     if res == ERROR_SUCCESS_I32 {
         tracing::debug!(
             "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
             s
         );
+        
+        // Call close() method to send PortUnsubscribe if socket was listening
+        if let Some(socket) = &socket_info && socket.is_listening() {
+            socket.close();
+        }
+        
         remove_socket(s);
     } else {
         tracing::warn!(

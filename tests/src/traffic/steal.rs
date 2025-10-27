@@ -68,8 +68,8 @@ mod steal_tests {
             )
             .await;
 
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&process)
             .await;
         send_requests(&url, true, Default::default()).await;
 
