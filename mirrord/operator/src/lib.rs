@@ -2,6 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+use http::{HeaderMap, HeaderValue};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,4 +30,34 @@ pub struct MirrordCiInfo {
     pub vendor: Option<String>,
     pub target: u64,
     pub branch_name: Option<u64>,
+}
+
+impl From<&MirrordCiInfo> for HeaderMap {
+    fn from(
+        MirrordCiInfo {
+            vendor,
+            target,
+            branch_name,
+        }: &MirrordCiInfo,
+    ) -> Self {
+        let mut headers = HeaderMap::new();
+
+        if let Some(vendor) = vendor {
+            headers.insert("x-ci-info-vendor", HeaderValue::from_str(vendor).unwrap());
+        }
+
+        if let Some(branch_name) = branch_name {
+            headers.insert(
+                "x-ci-branch-name",
+                HeaderValue::try_from(branch_name.to_string()).unwrap(),
+            );
+        }
+
+        headers.insert(
+            "x-ci-target",
+            HeaderValue::try_from(target.to_string()).unwrap(),
+        );
+
+        headers
+    }
 }

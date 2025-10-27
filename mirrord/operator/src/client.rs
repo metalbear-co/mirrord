@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use http::{HeaderName, HeaderValue, request::Request};
+use http::{HeaderMap, HeaderName, HeaderValue, request::Request};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -1248,17 +1248,14 @@ impl OperatorApi<PreparedClientCert> {
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         // TODO(alex) [high] 4: But then, do we add it as a header? Feels weird, could it be body?
         // It doesn't really belong in the `connect_url`, it's too much info for that...
-        let request_builder = Request::builder()
+        let mut request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
 
-        if let Some(ci_info) = session
-            .mirrord_ci_info
-            .as_ref()
-            .map(|info| "hello".to_string())
-        {
-            request_builder.header("x-ci-info", ci_info);
-        };
+        if let Some(headers) = request_builder.headers_mut() {
+            let ci_info_headers = session.mirrord_ci_info.as_ref().map(HeaderMap::from);
+            headers.extend(ci_info_headers.unwrap_or_default());
+        }
 
         let request = request_builder
             .body(vec![])
