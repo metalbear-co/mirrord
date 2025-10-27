@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
+    fs::File,
     path::{Path, PathBuf},
     process::Stdio,
     time::SystemTime,
@@ -10,13 +11,13 @@ use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
-use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    fs::{self, File, create_dir_all},
+    fs::{self, create_dir_all},
     io::AsyncWriteExt,
 };
 use tracing::Level;
@@ -202,14 +203,13 @@ impl MirrordCi {
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
-        LayerConfig { ci: ci_config, .. }: &LayerConfig,
+        CiConfig { output_dir }: &CiConfig,
     ) -> CiResult<()> {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
         // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
         let ci_run_info_dir = {
-            let parent_dir = ci_config
-                .info_dir
+            let parent_dir = output_dir
                 .clone()
                 .unwrap_or_else(|| temp_dir().join("mirrord"));
 
@@ -238,18 +238,8 @@ impl MirrordCi {
                 .args(binary_args.iter().skip(1))
                 .envs(env_vars)
                 .stdin(Stdio::null())
-                .stdout(
-                    File::create(ci_run_info_dir.join("stdout"))
-                        .await?
-                        .into_std()
-                        .await,
-                )
-                .stderr(
-                    File::create(ci_run_info_dir.join("stderr"))
-                        .await?
-                        .into_std()
-                        .await,
-                )
+                .stdout(File::create(ci_run_info_dir.join("stdout"))?)
+                .stderr(File::create(ci_run_info_dir.join("stderr"))?)
                 .kill_on_drop(false)
                 .spawn()
             {

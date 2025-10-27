@@ -30,6 +30,6 @@ pub struct CiConfig {
 
 impl CollectAnalytics for &CiConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add("stdio_dir", self.info_dir.is_some());
+        analytics.add("stdio_dir", self.output_dir.is_some());
     }
 }

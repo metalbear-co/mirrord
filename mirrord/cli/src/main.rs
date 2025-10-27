@@ -488,7 +488,7 @@ async fn run_process_with_mirrord<P: Progress>(
                 &binary_path,
                 &binary_args,
                 &env_vars,
-                config,
+                &config.ci,
             )
             .await
             .map_err(From::from),
