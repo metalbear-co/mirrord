@@ -1241,7 +1241,7 @@ impl OperatorApi<PreparedClientCert> {
     }
 
     /// Creates websocket connection to the operator target.
-    #[tracing::instrument(level = Level::TRACE, skip(client), err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(client), err)]
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,

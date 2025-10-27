@@ -2,6 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+#[cfg(feature = "client")]
 use http::{HeaderMap, HeaderValue};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,13 @@ pub struct MirrordCiInfo {
     pub branch_name: Option<u64>,
 }
 
+impl From<HeaderValue> for MirrordCiInfo {
+    fn from(value: HeaderValue) -> Self {
+        todo!()
+    }
+}
+
+#[cfg(feature = "client")]
 impl From<&MirrordCiInfo> for HeaderMap {
     fn from(
         MirrordCiInfo {

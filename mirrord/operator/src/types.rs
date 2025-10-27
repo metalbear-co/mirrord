@@ -36,3 +36,5 @@ pub const CLIENT_NAME_HEADER: &str = "x-client-name";
 /// Name of HTTP header containing operator session id.
 /// Sent with target connection request.
 pub const SESSION_ID_HEADER: &str = "x-session-id";
+
+pub const MIRRORD_CI_INFO_HEADER: &str = "x-mirrord-ci-info";
