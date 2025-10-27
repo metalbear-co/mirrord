@@ -1176,6 +1176,7 @@ impl OperatorApi<PreparedClientCert> {
 
         let conn = Connection::<ProtocolClient>::from_channel(
             ws,
+            // Mock protocol version negotiation if the operator does not support it.
             Some(move |msg| match msg {
                 ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
                     Some(operator_protocol_version) => {
