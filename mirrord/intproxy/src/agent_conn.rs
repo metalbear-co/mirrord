@@ -12,9 +12,12 @@ use mirrord_kube::{
     error::KubeApiError,
     kube,
 };
-use mirrord_operator::client::{
-    OperatorApi, OperatorSession,
-    error::{OperatorApiError, OperatorOperation},
+use mirrord_operator::{
+    client::{
+        OperatorApi, OperatorSession,
+        error::{OperatorApiError, OperatorOperation},
+    },
+    types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
@@ -323,7 +326,10 @@ impl RestartableBackgroundTask for AgentConnection {
                     AgentConnectionError::Operator(OperatorApiError::KubeError {
                         error: kube::Error::Api(error),
                         operation: OperatorOperation::WebsocketConnection,
-                    }) => error.code != 410,
+                    }) => {
+                        error.code != RECONNECT_NOT_POSSIBLE_CODE
+                            || error.reason != RECONNECT_NOT_POSSIBLE_REASON
+                    }
                     _ => true,
                 };
 
