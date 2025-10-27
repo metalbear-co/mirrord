@@ -123,6 +123,82 @@ pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
         .collect()
 }
 
+/// Convert a null-terminated C string pointer to a Rust String.
+///
+/// This function safely converts a C-style string (char*) to a Rust String
+/// by finding the null terminator and converting the resulting slice.
+///
+/// # Safety
+///
+/// The caller must ensure that `ptr` points to a valid null-terminated C string.
+/// The function will read memory until it finds a null terminator (0).
+///
+/// # Arguments
+///
+/// * `ptr` - A pointer to a null-terminated C string (char array)
+///
+/// # Returns
+///
+/// A Rust String containing the converted text, or an empty string if the pointer is null.
+pub unsafe fn c_string_ptr_to_string(ptr: *const i8) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+
+    // Safely determine a reasonable maximum length for the search
+    const MAX_C_STRING_LEN: usize = 32768; // 32KB should be plenty for most use cases
+
+    // Create a slice with maximum safe length, then find the null terminator
+    let c_slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, MAX_C_STRING_LEN) };
+    let len = find_null_terminator_length(c_slice, 0);
+
+    if len == 0 {
+        return String::new();
+    }
+
+    // Create a slice from the pointer and length, then convert
+    let c_slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
+    u8_buffer_to_string(c_slice)
+}
+
+/// Convert a null-terminated wide string pointer to a Rust String.
+///
+/// This function safely converts a Windows-style wide string (LPCWSTR) to a Rust String
+/// by finding the null terminator and converting the resulting slice.
+///
+/// # Safety
+///
+/// The caller must ensure that `ptr` points to a valid null-terminated wide string.
+/// The function will read memory until it finds a null terminator (0).
+///
+/// # Arguments
+///
+/// * `ptr` - A pointer to a null-terminated wide string (u16 array)
+///
+/// # Returns
+///
+/// A Rust String containing the converted text, or an empty string if the pointer is null.
+pub unsafe fn wide_string_ptr_to_string(ptr: *const u16) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+
+    // Safely determine a reasonable maximum length for the search
+    const MAX_WIDE_STRING_LEN: usize = 32768; // 32KB should be plenty for most use cases
+
+    // Create a slice with maximum safe length, then find the null terminator
+    let wide_slice = unsafe { std::slice::from_raw_parts(ptr, MAX_WIDE_STRING_LEN) };
+    let len = find_null_terminator_length(wide_slice, 0);
+
+    if len == 0 {
+        return String::new();
+    }
+
+    // Create a slice from the pointer and length, then convert
+    let wide_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+    u16_buffer_to_string(wide_slice)
+}
+
 /// Find the safe length of a multi-buffer by locating the double null terminator
 ///
 /// This function safely searches for the end of a multi-buffer (MULTI_SZ format)

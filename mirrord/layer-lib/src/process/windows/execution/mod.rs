@@ -20,7 +20,6 @@ use winapi::{
         },
         synchapi::WaitForSingleObject,
         winbase::{CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, WAIT_OBJECT_0},
-        wincon::FreeConsole,
         winnt::PHANDLE,
     },
 };
@@ -370,13 +369,6 @@ impl LayerManagedProcess {
                 // Layer initialization successful - report ready!
                 if let Some(mut progress) = progress {
                     progress.success(Some("Ready!"));
-
-                    // Detach console since we have progress (interactive mode)
-                    // This gives the child process exclusive access to the console
-                    unsafe {
-                        FreeConsole();
-                    }
-                    tracing::debug!("Parent console detached - child now owns console");
                 }
             }
             false => {

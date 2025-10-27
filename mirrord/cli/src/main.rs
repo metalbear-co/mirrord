@@ -316,7 +316,9 @@ mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
-use mirrord_layer_lib::process::windows::execution::LayerManagedProcess;
+use mirrord_layer_lib::process::windows::{
+    console::enable_virtual_terminal_processing, execution::LayerManagedProcess,
+};
 use verify_config::verify_config;
 
 use crate::{
@@ -937,6 +939,10 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> miette::Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
+
+    // Enable Windows virtual terminal processing for proper ANSI sequence support
+    #[cfg(target_os = "windows")]
+    enable_virtual_terminal_processing();
 
     let cli = Cli::parse();
 

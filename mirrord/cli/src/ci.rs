@@ -1,8 +1,8 @@
+#[cfg(not(target_os = "windows"))]
+use std::{collections::HashMap, path::Path, process::Stdio};
 use std::{
-    collections::HashMap,
     env::{self, temp_dir},
-    path::{Path, PathBuf},
-    process::Stdio,
+    path::PathBuf,
 };
 
 use drain::Watch;
@@ -143,6 +143,7 @@ impl MirrordCiStore {
     }
 
     /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
+    #[cfg(not(target_os = "windows"))]
     async fn remove_file() -> CiResult<()> {
         Ok(tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await?)
     }
@@ -189,6 +190,7 @@ impl MirrordCi {
     /// Very similar to to how `mirrord exec` behaves, except that here we `spawn` a child process
     /// that'll keep running, and we store the pid of this process in [`MirrordCiStore`] so we can
     /// kill it later.
+    #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
     pub(super) async fn prepare_command<P: Progress>(
         self,
@@ -251,6 +253,7 @@ impl MirrordCi {
     ///
     /// If one of these files remains available, `mirrord ci start` may fail to execute, as you
     /// always need to match a `mirrord ci start` with a `mirrord ci stop`.
+    #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn clear(self) -> CiResult<()> {
         MirrordCiStore::remove_file().await

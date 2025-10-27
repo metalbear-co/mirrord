@@ -15,7 +15,7 @@ use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortS
 use mirrord_layer_lib::{
     error::{ConnectError, HookError, HookResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
-    setup::layer_setup,
+    setup::{layer_setup, windows::NetworkHookConfig},
     socket::{
         Bound, ConnectResult, Connected, SocketDescriptor, SocketKind, SocketState,
         get_bound_address, get_connected_addresses, get_socket, get_socket_state,
@@ -37,6 +37,7 @@ use winapi::{
     },
     um::{
         minwinbase::OVERLAPPED,
+        sysinfoapi::*,
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
@@ -1722,8 +1723,6 @@ unsafe extern "system" fn get_computer_name_ex_a_detour(
     lpBuffer: *mut i8,
     nSize: *mut u32,
 ) -> i32 {
-    use winapi::um::sysinfoapi::*;
-
     tracing::debug!(
         "GetComputerNameExA hook called with name_type: {}",
         name_type
@@ -1770,7 +1769,6 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
     lpBuffer: *mut u16,
     nSize: *mut u32,
 ) -> BOOL {
-    use winapi::um::sysinfoapi::*;
     let original = GET_COMPUTER_NAME_EX_W_ORIGINAL.get().unwrap();
 
     // supported name types for hostname interception
@@ -2275,8 +2273,6 @@ pub fn initialize_hooks(
     guard: &mut DetourGuard<'static>,
     setup: &mirrord_layer_lib::setup::windows::LayerSetup,
 ) -> anyhow::Result<()> {
-    use mirrord_layer_lib::setup::windows::NetworkHookConfig;
-
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;

@@ -11,10 +11,11 @@ use mirrord_layer_lib::{
     error::{LayerError, windows::WindowsError},
     process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
 };
+use str_win;
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, DWORD, FALSE, HMODULE, LPVOID, TRUE},
+        minwindef::{BOOL, DWORD, HMODULE, LPVOID, TRUE},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
     },
     um::{
@@ -170,12 +171,9 @@ unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMO
     // Log LoadLibrary calls for debugging
     if !lpLibFileName.is_null() {
         // Convert the wide string to a Rust string for logging
-        let len = unsafe { (0..).take_while(|&i| *lpLibFileName.offset(i) != 0).count() };
+        let lib_name = unsafe { str_win::wide_string_ptr_to_string(lpLibFileName) };
 
-        if len > 0 {
-            let wide_slice = unsafe { std::slice::from_raw_parts(lpLibFileName, len) };
-            let lib_name = String::from_utf16_lossy(wide_slice);
-
+        if !lib_name.is_empty() {
             // Trace library loading for debugging
             tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result);
         }
@@ -201,7 +199,9 @@ unsafe extern "system" fn getprocaddress_detour(
     // Only process if we have a valid function name pointer
     if !lpProcName.is_null() {
         // Convert the function name to a string for logging
-        if let Ok(function_name) = unsafe { std::ffi::CStr::from_ptr(lpProcName) }.to_str() {
+        let function_name = unsafe { str_win::c_string_ptr_to_string(lpProcName) };
+
+        if !function_name.is_empty() {
             // Trace function resolution for debugging
             tracing::trace!(
                 "GetProcAddress: module={:?} function='{}' address={:?}",
