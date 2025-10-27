@@ -542,7 +542,7 @@ mod tests {
 
         for sequence in sequences.clone() {
             let mut handles = vec![connection.tx_handle()];
-            (0..handles_per_queue).for_each(|_| handles.push(handles.get(0).unwrap().clone()));
+            (0..handles_per_queue).for_each(|_| handles.push(handles.first().unwrap().clone()));
 
             tasks.push(tokio::spawn(async move {
                 for msg in sequence {
