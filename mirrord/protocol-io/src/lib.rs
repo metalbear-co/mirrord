@@ -485,131 +485,63 @@ impl<Type: ProtocolEndpoint> TxHandle<Type> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{Duration, timeout};
+    use std::time::Duration;
+
+    use bincode::{Decode, Encode};
+    use rand::{Rng, seq::IndexedRandom};
+    use rstest::rstest;
+    use tokio::time::timeout;
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_cloned_tx_handle_preserves_order() {
-        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
+    #[derive(Clone, Debug, Encode, Decode, PartialEq, Eq)]
+    struct Message {
+        from: u32,
+        payload: u64,
+    }
 
-        let tx1 = connection.tx_handle();
-        let tx2 = tx1.clone();
-
-        // Send messages alternating between cloned handles
-        for _ in 0..10 {
-            tx1.send(ClientMessage::Ping).await;
-            tx2.send(ClientMessage::Close).await;
-        }
-
-        // Verify messages maintain order within the same queue
-        let mut messages = Vec::new();
-        for _ in 0..20 {
-            let msg = timeout(Duration::from_millis(100), output.next())
-                .await
-                .expect("timeout waiting for message")
-                .expect("expected message");
-            messages.push(msg);
-        }
-
-        // Messages should alternate: Ping, Close, Ping, Close, ...
-        for i in 0..10 {
-            assert_eq!(messages[i * 2], ClientMessage::Ping);
-            assert_eq!(messages[i * 2 + 1], ClientMessage::Close);
+    impl Message {
+        fn new(from: u32) -> Self {
+            Self {
+                from,
+                payload: rand::rng().random(),
+            }
         }
     }
 
-    #[tokio::test]
-    async fn test_multiple_independent_queues_no_order_guarantee() {
-        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
-
-        let tx1 = connection.tx_handle();
-        let tx2 = tx1.another(); // Different queue
-
-        // Send to both queues
-        tx1.send(ClientMessage::Ping).await;
-        tx2.send(ClientMessage::Close).await;
-
-        // We should receive both messages, but order between queues is not guaranteed
-        let mut messages = Vec::new();
-        for _ in 0..2 {
-            let msg = timeout(Duration::from_millis(100), output.next())
-                .await
-                .expect("timeout waiting for message")
-                .expect("expected message");
-            messages.push(msg);
-        }
-
-        // Just verify we got both messages (order may vary)
-        assert!(messages.contains(&ClientMessage::Ping));
-        assert!(messages.contains(&ClientMessage::Close));
+    #[derive(Clone)]
+    struct Test;
+    impl ProtocolEndpoint for Test {
+        type InMsg = Message;
+        type OutMsg = Message;
     }
 
     #[tokio::test]
-    async fn test_multiple_messages_same_queue_order() {
-        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
+    #[rstest]
+    #[timeout(Duration::from_millis(1000))]
+    async fn preserves_order() {
+        let (connection, _inbound_tx, output) = Connection::<Test>::dummy();
 
-        let tx = connection.tx_handle();
+        let msg_count_per_queue = 200;
+        let num_queues = 20;
+        let handles_per_queue = 5;
 
-        // Send a specific sequence
-        let mut sequence = Vec::new();
-        for i in 0..20 {
-            sequence.push(if i % 3 == 0 {
-                ClientMessage::Ping
-            } else {
-                ClientMessage::Close
-            });
-        }
-
-        for msg in &sequence {
-            tx.send(msg.clone()).await;
-        }
-
-        // Verify exact order preservation
-        for expected in &sequence {
-            let received = timeout(Duration::from_millis(100), output.next())
-                .await
-                .expect("timeout waiting for message")
-                .expect("expected message");
-
-            assert_eq!(&received, expected);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_high_volume_order_preservation() {
-        let (connection, _inbound_tx, mut output) = Connection::<Client>::dummy();
-
-        let msg_count_per_queue = 50;
-        let num_queues = 10;
-
-        // Create 10 independent tx handles
-        let handles: Vec<_> = (0..num_queues).map(|_| connection.tx_handle()).collect();
-
-        // Generate random sequences for each queue (store as bools to save memory)
-        let sequences: Vec<Vec<bool>> = (0..num_queues)
-            .map(|_| {
-                (0..msg_count_per_queue)
-                    .map(|_| rand::random::<bool>())
-                    .collect()
-            })
+        let sequences: Vec<Vec<Message>> = (0..num_queues)
+            .map(|n| (0..msg_count_per_queue).map(|_| Message::new(n)).collect())
             .collect();
 
-        // Spawn concurrent tasks, each sending its unique random sequence
         let mut tasks = Vec::new();
-        for (tx, sequence) in handles.into_iter().zip(sequences.iter()) {
-            let sequence = sequence.clone();
-            let task = tokio::spawn(async move {
-                for &is_ping in &sequence {
-                    let msg = if is_ping {
-                        ClientMessage::Ping
-                    } else {
-                        ClientMessage::Close
-                    };
-                    tx.send(msg).await;
+
+        for sequence in sequences.clone() {
+            let mut handles = vec![connection.tx_handle()];
+            (0..handles_per_queue).for_each(|_| handles.push(handles[0].clone()));
+
+            tasks.push(tokio::spawn(async move {
+                for msg in sequence {
+                    let handle = handles.choose(&mut rand::rng()).unwrap();
+                    handle.send(msg).await;
                 }
-            });
-            tasks.push(task);
+            }));
         }
 
         // Wait for all sends to complete
@@ -617,18 +549,26 @@ mod tests {
             task.await.unwrap();
         }
 
-        // Collect all received messages
-        let total_messages = num_queues * msg_count_per_queue;
-        let mut received = Vec::new();
-        for _ in 0..total_messages {
-            let msg = timeout(Duration::from_millis(100), output.next())
-                .await
-                .expect("timeout waiting for message")
-                .expect("expected message");
-            received.push(msg);
+        // Collect all received messages and verify they're in a valid order.
+        let mut sequences: Vec<_> = sequences.into_iter().map(|v| v.into_iter()).collect();
+
+        loop {
+            let Ok(msg) = timeout(Duration::from_millis(100), output.next()).await else {
+                break;
+            };
+
+            let msg = msg.expect("decoding message failed");
+
+            let sequence = sequences
+                .get_mut(msg.from as usize)
+                .expect("Received a message with an invalid `from` field");
+
+            assert_eq!(sequence.next(), Some(msg));
         }
 
-        // Verify we received all messages
-        assert_eq!(received.len(), total_messages);
+        // Assert we received all the messages with none missing
+        for mut seq in sequences {
+            assert_eq!(seq.next(), None);
+        }
     }
 }
