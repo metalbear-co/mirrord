@@ -343,6 +343,8 @@ jobs:
     needs: release_homebrew
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
+    permissions:
+      contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v4
