@@ -2,6 +2,8 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::MirrordCiInfo;
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
     group = "mirrord.metalbear.co",
@@ -19,6 +21,8 @@ pub struct MirrordClusterSessionSpec {
 
     /// Session's [`Target`](mirrord_config::target::Target)
     pub target: SessionTarget,
+
+    pub ci_info: Option<MirrordCiInfo>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

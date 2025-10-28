@@ -26,16 +26,19 @@ pub enum CiTrigger {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+// TODO(alex) [mid] 6: Move this to /operator/crd/session, probably.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct MirrordCiInfo {
     pub vendor: Option<String>,
     pub target: u64,
     pub branch_name: Option<u64>,
 }
 
-impl From<HeaderValue> for MirrordCiInfo {
-    fn from(value: HeaderValue) -> Self {
-        todo!()
+impl TryFrom<HeaderValue> for MirrordCiInfo {
+    type Error = serde_json::Error;
+
+    fn try_from(value: HeaderValue) -> Result<Self, Self::Error> {
+        serde_json::from_slice(value.as_bytes())
     }
 }
 

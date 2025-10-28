@@ -1241,25 +1241,37 @@ impl OperatorApi<PreparedClientCert> {
     }
 
     /// Creates websocket connection to the operator target.
-    #[tracing::instrument(level = Level::DEBUG, skip(client), err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(client), fields(headers), err)]
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         // TODO(alex) [high] 4: But then, do we add it as a header? Feels weird, could it be body?
         // It doesn't really belong in the `connect_url`, it's too much info for that...
-        let mut request_builder = Request::builder()
+        //
+        // TODO(alex) [high] 5: It's in the header as a type, and in the operator we get it from
+        // `RestfulRemote` params (or whatever it's called). Now I need to make the "SessionStart"
+        // event to send from the operator to the license server.
+        let request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
 
-        if let Some(headers) = request_builder.headers_mut() {
-            let ci_info_headers = session.mirrord_ci_info.as_ref().map(HeaderMap::from);
-            headers.extend(ci_info_headers.unwrap_or_default());
-        }
+        let request_builder = match session
+            .mirrord_ci_info
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()?
+        {
+            Some(ci_info) => request_builder.header("x-foo", ci_info),
+            None => request_builder,
+        };
 
         let request = request_builder
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        tracing::Span::current().record("headers", format!("{:?}", request.headers()));
+
         let connection = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
