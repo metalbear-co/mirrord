@@ -308,7 +308,7 @@ impl TestProcess {
 
                 let string = String::from_utf8_lossy(&buf[..n]);
                 eprint!("stderr {} {pid}: {}", format_time(), string);
-                let _ = std::io::Write::flush(&mut std::io::stderr());
+                let _ = Write::flush(&mut std::io::stderr());
                 {
                     stderr_data_reader.write().await.push_str(&string);
                 }
@@ -324,7 +324,7 @@ impl TestProcess {
                 }
                 let string = String::from_utf8_lossy(&buf[..n]);
                 print!("stdout {} {pid}: {}", format_time(), string);
-                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let _ = Write::flush(&mut std::io::stdout());
                 {
                     stdout_data_reader.write().await.push_str(&string);
                 }
