@@ -71,11 +71,6 @@ async fn mirror_with_http_header_filter(
 
     application.wait_until_listening(&mirror_process).await;
 
-    // Then wait for daemon subscription which happens after app startup
-    mirror_process
-        .wait_for_line(Duration::from_secs(120), "daemon subscribed")
-        .await;
-
     // Send request that SHOULD be mirrored
     let client = reqwest::Client::new();
     let req_builder = client.get(&url);
