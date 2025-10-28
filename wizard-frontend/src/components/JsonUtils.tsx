@@ -119,7 +119,7 @@ export const readCurrentTargetDetails = (
 
 // Return the filters currently set in the given config, as well as the operator used to
 // combine them ("any", "all" or null).
-// Instead of using the generated type `InnerFilter`, we just return
+// Instead of using the generated type `InnerFilter`, return a list of strings for header and path.
 export const readCurrentFilters = (
   config: LayerFileConfig
 ): {
@@ -203,8 +203,30 @@ export const readCurrentFilters = (
   return { header, path, operator };
 };
 
-export const readCurrentPorts = (config: LayerFileConfig) => {
-  // todo
+// Return the ports currently set to remote from `incoming.ports`.
+// Separate and distinct from `incoming.port_mapping`.
+export const readCurrentPorts = (config: LayerFileConfig): number[] => {
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object" &&
+    config.feature?.network.incoming.ports
+  ){
+    return config.feature?.network.incoming.ports;
+  }
+
+  return [];
+};
+
+export const readCurrentPortMapping = (config: LayerFileConfig): PortMapping => {
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object" &&
+    config.feature?.network.incoming.port_mapping
+  ){
+    return config.feature?.network.incoming.port_mapping;
+  }
+  
+  return [];
 };
 
 // Returns an updated config with new config.target according to parameters.
@@ -424,9 +446,72 @@ export const updateConfigFilter = (
   return newConfig;
 };
 
+export const updateConfigPorts = (
+  ports: number[],
+  config: LayerFileConfig
+) => {
+  if (typeof config !== "object") {
+    throw "config badly formed";
+  }
+
+  // If config is not in the right shape, insert from default config
+  if (!("feature" in config) || typeof config.feature !== "object") {
+    config.feature = DefaultConfig.feature;
+  }
+
+  if (
+    !("network" in config.feature) ||
+    typeof config.feature.network !== "object"
+  ) {
+    config.feature.network = DefaultConfig.feature.network as NetworkFileConfig;
+  }
+
+  // type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
+  if (
+    !("incoming" in config.feature.network) ||
+    typeof config.feature.network.incoming !== "object"
+  ) {
+    if (typeof config.feature.network.incoming === "string") {
+      // incoming is using the simplified IncomingMode, replace with equivalent IncomingAdvancedSetup
+      config.feature.network.incoming = {
+        mode: config.feature.network.incoming,
+      } as IncomingAdvancedSetup;
+    } else {
+      config.feature.network.incoming = (
+        DefaultConfig.feature.network as NetworkFileConfig
+      ).incoming as IncomingAdvancedSetup;
+    }
+  }
+
+  // no ports in default config, so insert blank list instead
+  if (
+    !("ports" in config.feature.network.incoming) ||
+    !config.feature.network.incoming.ports
+  ) {
+    config.feature.network.incoming.ports = [];
+  }
+
+  // overwrite ports
+  const newConfig = {
+    ...config,
+    feature: {
+      ...config.feature,
+      network: {
+        ...config.feature.network,
+        incoming: {
+          ...config.feature.network.incoming,
+          ports: ports,
+        },
+      },
+    },
+  };
+
+  return newConfig;
+}
+
 // Returns an updated config with new config.feature.network.incoming.port_mapping according
 // to parameters.
-export const updateConfigPorts = (
+export const updateConfigPortMapping = (
   portMappings: PortMapping,
   config: LayerFileConfig
 ) => {
@@ -471,9 +556,6 @@ export const updateConfigPorts = (
     config.feature.network.incoming.port_mapping = [];
   }
 
-  // create new value for config.feature.network.incoming.port_mapping
-  const newMappings = portMappings;
-
   // overwrite ports
   const newConfig = {
     ...config,
@@ -483,7 +565,7 @@ export const updateConfigPorts = (
         ...config.feature.network,
         incoming: {
           ...config.feature.network.incoming,
-          port_mapping: newMappings,
+          port_mapping: portMappings,
         },
       },
     },
