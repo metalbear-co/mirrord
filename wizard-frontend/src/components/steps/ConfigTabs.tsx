@@ -46,12 +46,17 @@ import DownloadButton from "../DownloadButton";
 import {
   getConfigString,
   readCurrentFilters,
+  readCurrentPortMapping,
+  readCurrentPorts,
   readCurrentTargetDetails,
   updateConfigFilter,
+  updateConfigPortMapping,
+  updateConfigPorts,
   updateConfigTarget,
   validateJson,
 } from "../JsonUtils";
 import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
+import { PortMapping } from "@/mirrord-schema";
 
 const ConfigTabs = () => {
   const { config, setConfig } = useContext(ConfigDataContext);
@@ -106,6 +111,8 @@ const ConfigTabs = () => {
     "kube-system",
     "monitoring",
   ];
+  const mockPorts = [8080, 3000, 5432, 9000, 4000, 6379, 5672, 3306];
+  const mockPreselectedPorts = [8080];
 
   const [targetSearchText, setTargetSearchText] = useState<string>("");
 
@@ -204,7 +211,7 @@ const ConfigTabs = () => {
                     <SelectValue placeholder="Select resource type" />
                   </SelectTrigger>
                   <SelectContent>
-                    // TODO fetch from cli available target types
+                    {/* // TODO fetch from cli available target types */}
                     <SelectItem value="deployment">Deployment</SelectItem>
                     <SelectItem value="statefulset">StatefulSet</SelectItem>
                     <SelectItem value="daemonset">DaemonSet</SelectItem>
@@ -318,22 +325,22 @@ const ConfigTabs = () => {
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() =>
-                              {
-                                const updated = updateConfigFilter([],[],"any", config);
-                                setConfig(updated);
-                              }
-                            }
+                             onClick={() =>
+                               {
+                                const {header: existingH, path: existingP, operator} = readCurrentFilters(config);
+                                const updated = updateConfigFilter(existingH.concat(["header"]),existingP,operator, config);
+                                 setConfig(updated);
+                               }
+                             }
                           >
                             <Plus className="h-4 w-4 mr-1" />
                             Add
                           </Button>
                         </div>
-                        (
                         {readCurrentFilters(config).header.length > 0 && (
                           <div className="space-y-3">
-                            {readCurrentFilters(config).header
-                              .map((headerFilterString, index) => (
+                            {readCurrentFilters(config).header.map(
+                              (headerFilterString, index) => (
                                 <div key={index} className="space-y-2">
                                   <div className="flex items-center gap-2">
                                     <Input
@@ -421,10 +428,10 @@ const ConfigTabs = () => {
                                     </Button>
                                   </div>
                                 </div>
-                              ))}
+                              )
+                            )}
                           </div>
                         )}
-                        )
                       </div>
 
                       {/* Path Filtering */}
@@ -586,65 +593,42 @@ const ConfigTabs = () => {
                         Port Configuration
                       </h3>
                       <p className="text-xs text-muted-foreground mb-3">
-                        Click a port to enable HTTP filtering. Deselect any
-                        ports that are not HTTP or gRPC. The following ports
-                        were detected in your target, with some already
-                        preselected by default.
+                        Click a port to steal or mirror traffic from the remote
+                        port (other ports will remain local). Deselect any ports
+                        that are not HTTP or gRPC. The following ports were
+                        detected in your target, with some already preselected
+                        by default.
                       </p>
                     </div>
 
                     <div className="space-y-4">
-                      {/* Detected Ports */}
+                      {/* Port selection from list of detected ports, ports are added to incoming.ports */}
                       <div>
                         <div className="flex flex-wrap gap-2">
-                          {[
-                            "8080",
-                            "3000",
-                            "5432",
-                            "9000",
-                            "4000",
-                            "6379",
-                            "5672",
-                            "3306",
-                          ].map((port) => {
-                            const isSelected = (
-                              config.feature.network.incoming.ports ?? []
-                            ).some((p) => p.remote === port);
+                          {mockPorts.map((port) => {
+                            const isSelected = readCurrentPorts(config).some(
+                              (p) => p[1] === port
+                            );
                             const togglePort = () => {
                               if (isSelected) {
                                 // Remove port
-                                const newPorts = (
-                                  config.feature.network.incoming.ports ?? []
-                                ).filter((p) => p.remote !== port);
-                                setConfig({
-                                  ...config,
-                                  network: {
-                                    ...config.feature.network,
-                                    incoming: {
-                                      ...config.feature.network.incoming,
-                                      ports: newPorts,
-                                    },
-                                  },
-                                });
+                                const newPorts = readCurrentPorts(
+                                  config
+                                ).filter((p) => p !== port);
+                                const newConfig = updateConfigPorts(
+                                  newPorts,
+                                  config
+                                );
+                                setConfig(newConfig);
                               } else {
                                 // Add port
-                                setConfig({
-                                  ...config,
-                                  network: {
-                                    ...config.feature.network,
-                                    incoming: {
-                                      ...config.feature.network.incoming,
-                                      ports: [
-                                        ...config.feature.network.incoming
-                                          .ports,
-                                        {
-                                          remote: port,
-                                          local: port,
-                                        },
-                                      ],
-                                    },
-                                  },
-                                });
+                                const newPorts = readCurrentPorts(config);
+                                newPorts.push(port);
+                                const newConfig = updateConfigPorts(
+                                  newPorts,
+                                  config
+                                );
+                                setConfig(newConfig);
                               }
                             };
                             return (
@@ -667,20 +651,16 @@ const ConfigTabs = () => {
                       </div>
 
                       {/* Port Mappings */}
-                      {(config.feature.network.incoming.ports ?? []).length >
-                        0 && (
+                      {readCurrentPorts(config).length > 0 && (
                         <div className="space-y-3">
                           <h4 className="text-base font-semibold">
                             Selected Ports
                           </h4>
-                          <p className="text-sm text-muted-foreground mb-3">
-                            Only map ports that run on different ports locally.
-                          </p>
                           <div className="space-y-3">
-                            {(config.feature.network.incoming.ports ?? []).map(
-                              (portConfig, index) => (
+                            {readCurrentPorts(config).map(
+                              (remotePort, index) => (
                                 <div
-                                  key={portConfig.remote}
+                                  key={remotePort}
                                   className="border rounded-lg p-4 space-y-3"
                                 >
                                   <div className="flex items-center justify-between">
@@ -689,7 +669,7 @@ const ConfigTabs = () => {
                                         variant="outline"
                                         className="font-mono"
                                       >
-                                        {portConfig.remote}
+                                        {remotePort}
                                       </Badge>
                                       <span className="text-sm text-muted-foreground">
                                         Remote Port
@@ -699,74 +679,77 @@ const ConfigTabs = () => {
 
                                   <div className="flex items-center space-x-2">
                                     <Checkbox
-                                      id={`local-port-${portConfig.remote}`}
+                                      id={`remote-port-${remotePort}`}
                                       checked={
-                                        portConfig.local !== portConfig.remote
+                                        portConfig.local !== portConfig.remote // checked if remotePort in port mappings
                                       }
                                       onCheckedChange={(checked) => {
-                                        const newPorts = [
-                                          ...config.feature.network.incoming
-                                            .ports,
-                                        ];
-                                        newPorts[index] = {
-                                          ...newPorts[index],
-                                          local: checked
-                                            ? ""
-                                            : portConfig.remote,
-                                        };
-                                        setConfig({
-                                          ...config,
-                                          network: {
-                                            ...config.feature.network,
-                                            incoming: {
-                                              ...config.feature.network
-                                                .incoming,
-                                              ports: newPorts,
-                                            },
-                                          },
-                                        });
+                                        // const newPorts = [
+                                        //   ...config.feature.network.incoming
+                                        //     .ports,
+                                        // ];
+                                        // newPorts[index] = {
+                                        //   ...newPorts[index],
+                                        //   local: checked
+                                        //     ? ""
+                                        //     : portConfig.remote,
+                                        // };
+                                        // setConfig({
+                                        //   ...config,
+                                        //   network: {
+                                        //     ...config.feature.network,
+                                        //     incoming: {
+                                        //       ...config.feature.network
+                                        //         .incoming,
+                                        //       ports: newPorts,
+                                        //     },
+                                        //   },
+                                        // });
+
+                                        // TODO: on change, add port to port mapping (mapped to self) or remove port from port mapping
                                       }}
                                     />
                                     <Label
-                                      htmlFor={`local-port-${portConfig.remote}`}
+                                      htmlFor={`remote-port-${remotePort}`}
                                       className="text-sm"
                                     >
                                       Local port is different than remote
                                     </Label>
                                   </div>
 
-                                  {portConfig.local !== portConfig.remote && (
+                                  {portConfig.local !== portConfig.remote && ( // TODO if remote port in portmappings
                                     <div className="flex items-center gap-3">
                                       <div className="flex-1">
                                         <Label className="text-xs text-muted-foreground">
                                           Local Port
                                         </Label>
                                         <Input
+                                          type="text"
+                                          pattern="[0-9]*"
                                           className="font-mono"
-                                          placeholder={portConfig.remote}
-                                          value={portConfig.local}
-                                          onChange={(e) => {
-                                            const newPorts = [
-                                              ...config.feature.network.incoming
-                                                .ports,
-                                            ];
-                                            newPorts[index] = {
-                                              ...newPorts[index],
-                                              local:
-                                                e.target.value ||
-                                                portConfig.remote,
-                                            };
-                                            setConfig({
-                                              ...config,
-                                              network: {
-                                                ...config.feature.network,
-                                                incoming: {
-                                                  ...config.feature.network
-                                                    .incoming,
-                                                  ports: newPorts,
-                                                },
-                                              },
-                                            });
+                                          value={localPort}
+                                          onChange={(event) => {
+                                            const newPorts: PortMapping =
+                                              readCurrentPorts(config).map(
+                                                ([local, remote]) => {
+                                                  if (local === localPort) {
+                                                    // safety: the value string is guaranteed to be numerical due to Input pattern="[0-9]*"
+                                                    return [
+                                                      Number(
+                                                        event.target.value
+                                                      ),
+                                                      remote,
+                                                    ];
+                                                  } else {
+                                                    return [local, remote];
+                                                  }
+                                                }
+                                              );
+                                            const newConfig = updateConfigPorts(
+                                              newPorts,
+                                              config
+                                            );
+                                            setConfig(newConfig);
                                           }}
                                         />
                                       </div>
@@ -778,9 +761,33 @@ const ConfigTabs = () => {
                                           Remote Port
                                         </Label>
                                         <Input
+                                          type="text"
+                                          pattern="[0-9]*"
                                           className="font-mono"
-                                          value={portConfig.remote}
-                                          readOnly
+                                          value={remotePort}
+                                          onChange={(event) => {
+                                            const newPorts: PortMapping =
+                                              readCurrentPortMapping(config).map(
+                                                ([local, remote]) => {
+                                                  if (remote === remotePort) {
+                                                    // safety: the value string is guaranteed to be numerical due to Input pattern="[0-9]*"
+                                                    return [
+                                                      local,
+                                                      Number(
+                                                        event.target.value
+                                                      ),
+                                                    ];
+                                                  } else {
+                                                    return [local, remote];
+                                                  }
+                                                }
+                                              );
+                                            const newConfig = updateConfigPortMapping(
+                                              newPorts,
+                                              config
+                                            );
+                                            setConfig(newConfig);
+                                          }}
                                         />
                                       </div>
                                     </div>
@@ -825,11 +832,7 @@ const ConfigTabs = () => {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={copyToClipboard}
-                >
+                <Button variant="outline" size="sm" onClick={copyToClipboard}>
                   <Copy className="h-4 w-4 mr-2" />
                   Copy to Clipboard
                 </Button>
