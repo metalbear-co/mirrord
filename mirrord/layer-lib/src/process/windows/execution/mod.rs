@@ -22,7 +22,7 @@ use winapi::{
         synchapi::WaitForSingleObject,
         winbase::{
             CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, STARTF_USESTDHANDLES,
-            WAIT_OBJECT_0,
+            WAIT_OBJECT_0, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, STD_INPUT_HANDLE,
         },
         winnt::PHANDLE,
     },
@@ -35,15 +35,6 @@ use crate::{
     setup::layer_setup,
     socket::sockets::SHARED_SOCKETS_ENV_VAR,
 };
-
-// Windows standard handle constants - these values are defined by Windows API
-// but is not available in the winapi crate
-// (DWORD)-10
-const STD_INPUT_HANDLE: u32 = u32::wrapping_neg(10);
-// (DWORD)-11
-const STD_OUTPUT_HANDLE: u32 = u32::wrapping_neg(11);
-// (DWORD)-12
-const STD_ERROR_HANDLE: u32 = u32::wrapping_neg(12);
 
 pub mod debug;
 
@@ -270,7 +261,8 @@ impl LayerManagedProcess {
                 command_line_wide.as_mut_ptr(),
                 ptr::null_mut(),
                 ptr::null_mut(),
-                true.into(), // Enable handle inheritance so child can inherit console handles
+                 // Enable handle inheritance so child can inherit console handles
+                true.into(),
                 creation_flags,
                 environment,
                 if current_directory.is_some() {

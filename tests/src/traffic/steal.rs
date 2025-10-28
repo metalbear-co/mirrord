@@ -103,8 +103,8 @@ mod steal_tests {
             )
             .await;
 
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&process)
             .await;
 
         let api = Api::<Pod>::namespaced(kube_client.clone(), &service.namespace);
@@ -157,8 +157,8 @@ mod steal_tests {
             )
             .await;
 
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&process)
             .await;
         send_requests(&url, true, Default::default()).await;
 
@@ -192,8 +192,8 @@ mod steal_tests {
             .await;
 
         // Verify that we hooked the socket operations and the agent started stealing.
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&process)
             .await;
 
         // Wait for the test app to close the socket and tell us about it.
@@ -314,8 +314,8 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         // Wait for the app to start listening for stolen data before connecting.
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&process)
             .await;
 
         let mut tcp_stream = TcpStream::connect(portforwarder.address()).await.unwrap();
@@ -393,8 +393,8 @@ mod steal_tests {
             )
             .await;
 
-        client
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&client)
             .await;
 
         let mut headers = HeaderMap::default();
@@ -437,8 +437,8 @@ mod steal_tests {
             )
             .await;
 
-        client
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&client)
             .await;
 
         let mut headers = HeaderMap::default();
@@ -481,8 +481,8 @@ mod steal_tests {
             )
             .await;
 
-        client
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&client)
             .await;
 
         // Send a GET that should go through to remote.
@@ -561,8 +561,8 @@ mod steal_tests {
             )
             .await;
 
-        mirrored_process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&mirrored_process)
             .await;
 
         // Send a GET that should be matched and stolen.
@@ -639,8 +639,8 @@ mod steal_tests {
             )
             .await;
 
-        mirrorded_process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&mirrorded_process)
             .await;
 
         // Send a GET that should be matched and stolen.
@@ -703,8 +703,8 @@ mod steal_tests {
             )
             .await;
 
-        mirrorded_process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&mirrorded_process)
             .await;
 
         let mut stream = TcpStream::connect(portforwarder.address()).await.unwrap();
@@ -774,8 +774,8 @@ mod steal_tests {
             )
             .await;
 
-        mirrorded_process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        application
+            .wait_until_listening(&mirrorded_process)
             .await;
 
         // Create a websocket connection to test the HTTP upgrade bypass.
@@ -852,9 +852,9 @@ mod steal_tests {
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
-
-        mirrorded_process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        
+        application
+            .wait_until_listening(&mirrorded_process)
             .await;
 
         // Create a websocket connection to test the HTTP upgrade steal.
