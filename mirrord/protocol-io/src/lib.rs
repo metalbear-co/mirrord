@@ -263,6 +263,13 @@ async fn io_task<Channel, Type>(
     pin!(framed);
     loop {
         select! {
+			// When >=2 futures complete simultaneously, poll them in
+			// the order they are declared here. We want everything to
+			// be pulled out of the queues and processed before
+			// reacting to the cancellation token, otherwise we will
+			// drop messages.
+            biased;
+
             to_send = queues.next() => {
                 if let Err(error) = framed.send(to_send).await {
                     tracing::error!(?error, "failed to send message");
@@ -288,7 +295,7 @@ async fn io_task<Channel, Type>(
                 }
             }
             _ = queues.cancel.cancelled() => {
-                tracing::info!("Cancellation token triggered, shutting down");
+                tracing::info!("Cancellation token triggered, shutting down after flushing all remaining messages");
                 break;
             }
         }
