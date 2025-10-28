@@ -31,6 +31,10 @@ use crate::{
         runtime::RuntimeData,
     },
     error::{KubeApiError, Result},
+    extract::{
+        FromResource,
+        metadata::{Name, Namespace},
+    },
 };
 
 pub async fn create_job_agent<P, V>(
@@ -74,18 +78,8 @@ where
         })?
         .map_err(|err| KubeApiError::AgentPodStartError(format!("watch stream failed: {err}")))?;
 
-    let pod_name = agent_pod
-        .metadata
-        .name
-        .as_ref()
-        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.name"))?
-        .clone();
-    let pod_namespace = agent_pod
-        .metadata
-        .namespace
-        .as_ref()
-        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.namespace"))?
-        .clone();
+    let (Name(pod_name), Namespace(pod_namespace)) = FromResource::from_resource(&agent_pod, &())?;
+
     pod_progress.success(Some(&format!(
         "agent pod {pod_namespace}/{pod_name} created"
     )));
@@ -169,7 +163,7 @@ where
         }
     }
 
-    let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+    let version = wait_for_agent_startup(&pod_api, pod_name, "mirrord-agent".to_string()).await?;
     match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
@@ -184,8 +178,8 @@ where
     pod_progress.success(Some("pod is ready"));
 
     Ok(AgentKubernetesConnectInfo {
-        pod_name,
-        pod_namespace,
+        pod_name: pod_name.to_owned(),
+        pod_namespace: pod_namespace.to_owned(),
         agent_port: params.port,
     })
 }

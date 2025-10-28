@@ -10,6 +10,7 @@
 //! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 //! including if you only made documentation changes.
 pub mod agent;
+pub mod ci;
 pub mod config;
 pub mod container;
 pub mod experimental;
@@ -37,6 +38,7 @@ use tracing::warn;
 
 use crate::{
     agent::AgentConfig,
+    ci::CiConfig,
     config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
     external_proxy::ExternalProxyConfig,
@@ -383,6 +385,10 @@ pub struct LayerConfig {
     /// ## startup_retry {#root-startup_retry}
     #[config(nested)]
     pub startup_retry: StartupRetryConfig,
+
+    /// ## ci {#root-ci}
+    #[config(nested)]
+    pub ci: CiConfig,
 }
 
 impl LayerConfig {
@@ -1094,6 +1100,7 @@ mod tests {
             experimental: None,
             skip_sip: None,
             startup_retry: None,
+            ci: None,
         };
 
         assert_eq!(config, expect);

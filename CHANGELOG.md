@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.169.0](https://github.com/metalbear-co/mirrord/tree/3.169.0) - 2025-10-27
+
+
+### Added
+
+- `mirrord ci start` now pipes application's stdout and stderr to files in a
+  temporary directory (`/tmp/mirrord/{binary-name}-{timestamp}-{random}` by
+  default). This can be configured with the `ci.output_dir` option in your
+  mirrord config.
+
+
+### Internal
+
+- Add TypedHeader like extractor to mirrord-kube for axum like extraction from
+  kubernetes resources.
+- When reconnecting to an operator session, the CLI now checks for a fatal 410
+  error.
+
 ## [3.168.1](https://github.com/metalbear-co/mirrord/tree/3.168.1) - 2025-10-24
 
 
