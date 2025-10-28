@@ -22,7 +22,7 @@ use winapi::{
         synchapi::WaitForSingleObject,
         winbase::{
             CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, STARTF_USESTDHANDLES,
-            WAIT_OBJECT_0, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, STD_INPUT_HANDLE,
+            STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, WAIT_OBJECT_0,
         },
         winnt::PHANDLE,
     },
@@ -261,7 +261,7 @@ impl LayerManagedProcess {
                 command_line_wide.as_mut_ptr(),
                 ptr::null_mut(),
                 ptr::null_mut(),
-                 // Enable handle inheritance so child can inherit console handles
+                // Enable handle inheritance so child can inherit console handles
                 true.into(),
                 creation_flags,
                 environment,

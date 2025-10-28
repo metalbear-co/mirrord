@@ -68,9 +68,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&process)
-            .await;
+        application.wait_until_listening(&process).await;
         send_requests(&url, true, Default::default()).await;
 
         application.assert(&process).await;
@@ -103,9 +101,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&process)
-            .await;
+        application.wait_until_listening(&process).await;
 
         let api = Api::<Pod>::namespaced(kube_client.clone(), &service.namespace);
         portforward_http_requests(&api, service).await;
@@ -157,9 +153,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&process)
-            .await;
+        application.wait_until_listening(&process).await;
         send_requests(&url, true, Default::default()).await;
 
         application.assert(&process).await;
@@ -192,9 +186,7 @@ mod steal_tests {
             .await;
 
         // Verify that we hooked the socket operations and the agent started stealing.
-        application
-            .wait_until_listening(&process)
-            .await;
+        application.wait_until_listening(&process).await;
 
         // Wait for the test app to close the socket and tell us about it.
         process
@@ -314,9 +306,7 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         // Wait for the app to start listening for stolen data before connecting.
-        application
-            .wait_until_listening(&process)
-            .await;
+        application.wait_until_listening(&process).await;
 
         let mut tcp_stream = TcpStream::connect(portforwarder.address()).await.unwrap();
 
@@ -393,9 +383,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&client)
-            .await;
+        application.wait_until_listening(&client).await;
 
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
@@ -437,9 +425,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&client)
-            .await;
+        application.wait_until_listening(&client).await;
 
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
@@ -481,9 +467,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&client)
-            .await;
+        application.wait_until_listening(&client).await;
 
         // Send a GET that should go through to remote.
         // We retry when we get 502, because the remote app has no readiness probe configured.
@@ -561,9 +545,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&mirrored_process)
-            .await;
+        application.wait_until_listening(&mirrored_process).await;
 
         // Send a GET that should be matched and stolen.
         // And a DELETE that closes the app.
@@ -639,9 +621,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&mirrorded_process)
-            .await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         // Send a GET that should be matched and stolen.
         let client = reqwest::Client::new();
@@ -703,9 +683,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&mirrorded_process)
-            .await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         let mut stream = TcpStream::connect(portforwarder.address()).await.unwrap();
         stream.write_all(tcp_data.as_bytes()).await.unwrap();
@@ -774,9 +752,7 @@ mod steal_tests {
             )
             .await;
 
-        application
-            .wait_until_listening(&mirrorded_process)
-            .await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         // Create a websocket connection to test the HTTP upgrade bypass.
         let (ws_stream, _) = connect_async(format!("ws://{}", portforwarder.address()))
@@ -852,10 +828,8 @@ mod steal_tests {
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
-        
-        application
-            .wait_until_listening(&mirrorded_process)
-            .await;
+
+        application.wait_until_listening(&mirrorded_process).await;
 
         // Create a websocket connection to test the HTTP upgrade steal.
         // Add a header so that the request matches the filter.

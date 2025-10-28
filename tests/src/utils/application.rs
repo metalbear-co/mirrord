@@ -37,7 +37,6 @@ pub enum Application {
     PythonFastApiHTTP,
     PythonFastApiHTTPIPv6,
     NodeHTTP,
-    NodeHTTPNpm,
     NodeHTTP2,
     /// Can run as both HTTP and HTTPS server, listens on port 80.
     ///
@@ -98,7 +97,6 @@ impl Application {
             .map(String::from)
             .to_vec(),
             Application::NodeHTTP => ["node", "node-e2e/app.mjs"].map(String::from).to_vec(),
-            Application::NodeHTTPNpm => ["npm", "--prefix", "node-e2e", "run", "start"].map(String::from).to_vec(),
             Application::NodeHTTP2 => ["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
                 .map(String::from)
                 .to_vec(),
@@ -155,22 +153,21 @@ impl Application {
     }
 
     pub async fn wait_until_listening(&self, process: &TestProcess) {
-        
         // Wait for application-specific startup message first
         match self {
             Application::PythonFastApiHTTP => {
                 process
                     .wait_for_line(Duration::from_secs(120), "Application startup complete")
                     .await;
-            },
-            Application::PythonFlaskHTTP  => {
+            }
+            Application::PythonFlaskHTTP => {
                 process
                     .wait_for_line_stdout(Duration::from_secs(120), "Server listening on port 80")
                     .await;
             }
-            _ => {},
+            _ => {}
         };
-        
+
         process
             .wait_for_line(Duration::from_secs(60), "daemon subscribed")
             .await;

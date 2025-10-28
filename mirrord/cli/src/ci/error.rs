@@ -44,7 +44,6 @@ pub(crate) enum CiError {
     UserPidMissing,
 
     #[error("Failed to execute binary `{0}` with args {1:?}")]
-    #[cfg(not(target_os = "windows"))]
     BinaryExecuteFailed(String, Vec<String>),
 
     #[error(transparent)]

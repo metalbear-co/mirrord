@@ -68,21 +68,8 @@ async fn mirror_with_http_header_filter(
             None,
         )
         .await;
-    
-    // Wait for application-specific startup message first
-    match application {
-        Application::PythonFastApiHTTP => {
-            mirror_process
-                .wait_for_line(Duration::from_secs(120), "Application startup complete")
-                .await;
-        },
-        Application::PythonFlaskHTTP  => {
-            mirror_process
-                .wait_for_line_stdout(Duration::from_secs(120), "Server listening on port 80")
-                .await;
-        }
-        _ => {},
-    };
+
+    application.wait_until_listening(&mirror_process).await;
 
     // Then wait for daemon subscription which happens after app startup
     mirror_process

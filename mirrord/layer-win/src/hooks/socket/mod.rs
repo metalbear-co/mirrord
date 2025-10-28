@@ -2209,22 +2209,24 @@ unsafe extern "system" fn sendto_detour(
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     // Get socket info BEFORE closing to send PortUnsubscribe if needed
     let socket_info = get_socket(s);
-    
+
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
-    
+
     // Only clean up mirrord state if the close was successful
     if res == ERROR_SUCCESS_I32 {
         tracing::debug!(
             "closesocket_detour -> successfully closed socket {}, removing from mirrord tracking",
             s
         );
-        
+
         // Call close() method to send PortUnsubscribe if socket was listening
-        if let Some(socket) = &socket_info && socket.is_listening() {
+        if let Some(socket) = &socket_info
+            && socket.is_listening()
+        {
             socket.close();
         }
-        
+
         remove_socket(s);
     } else {
         tracing::warn!(

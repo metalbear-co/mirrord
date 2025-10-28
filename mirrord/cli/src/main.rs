@@ -1042,7 +1042,9 @@ fn main() -> miette::Result<()> {
                 windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
             }
             Commands::Newsletter => newsletter::newsletter_command().await,
-            Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
+            Commands::Ci(args) => windows_unsupported!(args, "ci", {
+                ci::ci_command(*args, watch, &mut user_data).await?
+            }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
         };
 
