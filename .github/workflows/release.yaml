@@ -203,10 +203,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
-          cache-from: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
-          cache-to: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
@@ -218,10 +216,8 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
-          cache-from: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
-          cache-to: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
