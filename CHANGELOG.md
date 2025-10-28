@@ -10,10 +10,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ## [3.169.1](https://github.com/metalbear-co/mirrord/tree/3.169.1) - 2025-10-28
 
+### Fixed
+
+- Don't publish buildcache in release workflow.
 
 ### Internal
 
 - Fix update_latest job with write permission.
+
 
 ## [3.169.0](https://github.com/metalbear-co/mirrord/tree/3.169.0) - 2025-10-27
 
