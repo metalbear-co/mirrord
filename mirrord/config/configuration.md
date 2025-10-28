@@ -516,6 +516,24 @@ Can be useful for collecting logs.
 
 Defaults to `1`.
 
+## ci {#root-ci}
+
+Configuration for mirrord for CI.
+
+```json
+{
+  "ci": {
+    "output_dir": "/tmp/mirrord/",
+  }
+}
+```
+
+### ci.output_dir{#ci-output_dir}
+
+Path to a directory where `mirrord ci` will flush application's stdout and stderr.
+
+Defaults to `/tmp/mirrord/`.
+
 ## container {#root-container}
 
 Unstable: `mirrord container` command specific config.

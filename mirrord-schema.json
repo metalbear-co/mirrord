@@ -23,6 +23,17 @@
         }
       ]
     },
+    "ci": {
+      "title": "ci {#root-ci}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CiFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "container": {
       "title": "container {#root-container}",
       "anyOf": [
@@ -603,6 +614,21 @@
           "type": "string"
         }
       }
+    },
+    "CiFileConfig": {
+      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"output_dir\": \"/tmp/mirrord/\", } } ```",
+      "type": "object",
+      "properties": {
+        "output_dir": {
+          "title": "ci.output_dir{#ci-output_dir}",
+          "description": "Path to a directory where `mirrord ci` will flush application's stdout and stderr.\n\nDefaults to `/tmp/mirrord/`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
