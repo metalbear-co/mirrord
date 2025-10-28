@@ -1144,7 +1144,7 @@
         },
         "non_blocking_tcp_connect": {
           "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
-          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.",
+          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
