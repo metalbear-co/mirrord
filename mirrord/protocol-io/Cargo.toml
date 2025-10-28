@@ -17,6 +17,7 @@ categories.workspace = true
 mirrord-protocol = { path = "../protocol" }
 
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio-util.workspace = true
 rand.workspace = true
 actix-codec.workspace = true
 bincode.workspace = true

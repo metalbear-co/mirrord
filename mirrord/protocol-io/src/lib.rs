@@ -22,6 +22,7 @@ use tokio::{
     pin, select,
     sync::{Notify, futures::OwnedNotified, mpsc},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{Level, instrument};
 
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + 'static {}
@@ -228,6 +229,12 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     }
 }
 
+impl<Type: ProtocolEndpoint> Drop for Connection<Type> {
+    fn drop(&mut self) {
+        self.shared_state.cancel.cancel();
+    }
+}
+
 /// The "other end" of a `Connection`. Used for pulling out messages
 /// sent through it. Used only for testing.
 pub struct ConnectionOutput<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
@@ -280,6 +287,10 @@ async fn io_task<Channel, Type>(
                     },
                 }
             }
+            _ = queues.cancel.cancelled() => {
+                tracing::info!("Cancellation token triggered, shutting down");
+                break;
+            }
         }
     }
 
@@ -318,6 +329,9 @@ struct SharedState<Type: ProtocolEndpoint> {
     out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
 
     next_queue_id: AtomicUsize,
+
+    /// Used for telling the io task to shut down.
+    cancel: CancellationToken,
 }
 
 impl<Type: ProtocolEndpoint> SharedState<Type> {
@@ -336,6 +350,7 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             out_filter,
             // 0 is reserved for the Connection struct
             next_queue_id: 1.into(),
+            cancel: CancellationToken::new(),
         }
     }
 
