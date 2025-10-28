@@ -12,7 +12,7 @@ use winapi::{
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
     },
     um::{
-        handleapi::CloseHandle,
+        handleapi::{CloseHandle, SetHandleInformation},
         minwinbase::LPSECURITY_ATTRIBUTES,
         processenv::GetStdHandle,
         processthreadsapi::{
@@ -21,7 +21,7 @@ use winapi::{
         },
         synchapi::WaitForSingleObject,
         winbase::{
-            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, INFINITE, STARTF_USESTDHANDLES,
+            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, HANDLE_FLAG_INHERIT, INFINITE, STARTF_USESTDHANDLES,
             STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, WAIT_OBJECT_0,
         },
         winnt::PHANDLE,
@@ -86,6 +86,22 @@ pub struct LayerManagedProcess {
 }
 
 impl LayerManagedProcess {
+    /// Ensure a handle is inheritable for child processes
+    fn ensure_handle_inheritable(handle: HANDLE) -> LayerResult<HANDLE> {
+        if handle.is_null() || handle == ptr::null_mut() {
+            return Ok(handle); // Invalid handles can't be made inheritable
+        }
+
+        unsafe {
+            if SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) == 0 {
+                // If SetHandleInformation fails, log a warning but continue
+                // Some handles (like console handles) might already be inheritable
+                tracing::warn!("Failed to set handle inheritance: {}", WindowsError::last_error());
+            }
+        }
+        Ok(handle)
+    }
+
     /// Build Windows environment block from HashMap (UTF-16 format)
     fn build_windows_env_block(environment: &HashMap<String, String>) -> Vec<u16> {
         let mut windows_environment: Vec<u16> = Vec::new();
@@ -338,9 +354,9 @@ impl LayerManagedProcess {
         // Configure startup info for console handle inheritance - this ensures child processes
         // can inherit console handles for proper stdout/stderr output visibility
         caller_startup_info.dwFlags |= STARTF_USESTDHANDLES;
-        caller_startup_info.hStdInput = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-        caller_startup_info.hStdOutput = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
-        caller_startup_info.hStdError = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+        caller_startup_info.hStdInput = Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_INPUT_HANDLE) })?;
+        caller_startup_info.hStdOutput = Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) })?;
+        caller_startup_info.hStdError = Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_ERROR_HANDLE) })?;
 
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
