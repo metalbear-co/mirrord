@@ -32,6 +32,7 @@ jobs:
             target/aarch64-unknown-linux-gnu/release/mirrord
             target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
+
   build_binaries_x86_64-unknown-linux-gnu:
     runs-on: ubuntu-24.04
     steps:
@@ -51,6 +52,7 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/mirrord
             target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
+
   build_binaries_macos:
     runs-on: macos-latest
     steps:
@@ -160,7 +162,6 @@ jobs:
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
-
       - name: Build and push (final/release)
         if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v6
@@ -203,21 +204,24 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
+          cache-to: |
+            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}
-
       - name: Build and push (final/release)
         if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
+          cache-to: |
+            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
@@ -243,26 +247,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
           pattern: +(*-unknown-linux-gnu|*-apple-darwin)
+
       - uses: metalbear-co/action-zip@0852c26906e00f8a315c704958823928d8018b28
+
       - name: Create mirrord linux-x64 zip file
         run: |
           zip mirrord_linux_x86_64.zip mirrord
           shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
         working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
+
       - name: Create mirrord linux-aarch64 zip file
         run: |
           zip mirrord_linux_aarch64.zip mirrord
           shasum -a 256 mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
         working-directory: /tmp/artifacts/aarch64-unknown-linux-gnu
+
       - name: Create mirrord macos zip file
         run: |
           zip mirrord_mac_universal.zip mirrord
           shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
         working-directory: /tmp/artifacts/universal-apple-darwin
+
       # used for the homebrew formula
       - uses: actions/upload-artifact@v4
         with:
@@ -272,6 +282,7 @@ jobs:
             /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
             /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
           if-no-files-found: error
+
       - name: Prepare binaries for upload
         run: |
           mkdir /tmp/release
@@ -279,22 +290,80 @@ jobs:
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
-
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_aarch64.so
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_aarch64
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip /tmp/release/mirrord_linux_aarch64.zip
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
-
           mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
-      # Consider to add changelog generation..
-      - name: Release
-        uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
+      # === Create/Update SAME tag release as Windows and upload all Unix assets ===
+      - name: Create/Update Release + Upload (idempotent, same page as Windows)
+        uses: actions/github-script@v7
+        env:
+          TAG: ${{ github.ref_name }}
         with:
-          files: /tmp/release/**
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const tag = process.env.TAG;
+
+            // Get or create the release for this tag
+            let rel;
+            try {
+              const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              rel = r.data;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              try {
+                const r = await github.rest.repos.createRelease({
+                  owner, repo,
+                  tag_name: tag,
+                  name: `mirrord ${tag}`,
+                  target_commitish: context.sha,
+                  draft: false,
+                  prerelease: false,
+                  generate_release_notes: true,
+                });
+                rel = r.data;
+              } catch (err) {
+                // Race: Windows (or another job) created it in the meantime.
+                if (err.status === 422) {
+                  const r2 = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+                  rel = r2.data;
+                } else { throw err; }
+              }
+            }
+
+            // Upload all files from /tmp/release, replace if same name exists
+            async function upload(filePath) {
+              const name = path.basename(filePath);
+              const stat = fs.statSync(filePath);
+              if (!stat.isFile()) return;
+
+              const assets = await github.paginate(
+                github.rest.repos.listReleaseAssets,
+                { owner, repo, release_id: rel.id, per_page: 100 }
+              );
+              const existing = assets.find(a => a.name === name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+              }
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: rel.id, name,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': stat.size },
+                data: fs.readFileSync(filePath),
+              });
+              core.info(`Uploaded ${name}`);
+            }
+
+            for (const f of fs.readdirSync('/tmp/release')) {
+              await upload(path.join('/tmp/release', f));
+            }
 
   release_homebrew:
     needs: release_gh
@@ -339,8 +408,6 @@ jobs:
     needs: release_homebrew
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
-    permissions:
-      contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v4
