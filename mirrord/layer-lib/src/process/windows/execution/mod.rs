@@ -89,7 +89,7 @@ pub struct LayerManagedProcess {
 impl LayerManagedProcess {
     /// Ensure a handle is inheritable for child processes
     fn ensure_handle_inheritable(handle: HANDLE) -> LayerResult<HANDLE> {
-        if handle.is_null() || handle == ptr::null_mut() {
+        if handle.is_null() {
             return Ok(handle); // Invalid handles can't be made inheritable
         }
 

@@ -4,6 +4,7 @@ use mirrord_config::feature::network::incoming::{
     IncomingConfig, IncomingMode as ConfigIncomingMode, http_filter::HttpFilterConfig,
 };
 use mirrord_intproxy_protocol::PortSubscription;
+#[cfg(target_os = "windows")]
 use mirrord_layer_lib::setup::windows::IncomingMode;
 use mirrord_protocol::{ClientMessage, tcp::LayerTcpSteal};
 use rstest::fixture;
@@ -52,16 +53,29 @@ pub struct TestIntProxy {
 }
 
 impl TestIntProxy {
+    #[cfg(not(target_os = "windows"))]
+    pub async fn recv(&mut self) -> ClientMessage {
+        // currently layer-lib is not used in unix
+        unreachable!()
+    }
+
+    #[cfg(target_os = "windows")]
     pub async fn recv(&mut self) -> ClientMessage {
         // In layer-lib unit tests, we simulate the expected behavior by
         // parsing the config and creating the appropriate subscription message
         if let Some(config_str) = &self.expected_config {
             let config: serde_json::Value = serde_json::from_str(config_str).unwrap();
-            let http_filter = &config["feature"]["network"]["incoming"]["http_filter"];
+            let http_filter_config_value = config
+                .get("feature")
+                .and_then(|feature| feature.get("network"))
+                .and_then(|network| network.get("incoming"))
+                .and_then(|incoming| incoming.get("http_filter"))
+                .cloned()
+                .unwrap_or_default();
 
             // Parse the http_filter using layer-lib logic
             let http_filter_config: HttpFilterConfig =
-                serde_json::from_value(http_filter.clone()).unwrap();
+                serde_json::from_value(http_filter_config_value).unwrap();
 
             let mut incoming_config = IncomingConfig {
                 mode: ConfigIncomingMode::Steal,
