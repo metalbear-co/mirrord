@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
+    fs::File,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     process::Stdio,
+    time::SystemTime,
 };
 
 use ci_info::types::CiInfo;
@@ -11,12 +13,16 @@ use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
-use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_kube::resolved::ResolvedTarget;
 use mirrord_operator::{MirrordCiInfo, client::OperatorApi};
 use mirrord_progress::{Progress, ProgressTracker};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::{
+    fs::{self, create_dir_all},
+    io::AsyncWriteExt,
+};
 use tracing::Level;
 
 use crate::{CiArgs, CiCommand, CliError, CliResult, ci::error::CiError, user_data::UserData};
@@ -200,8 +206,33 @@ impl MirrordCi {
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
+        CiConfig { output_dir }: &CiConfig,
     ) -> CiResult<()> {
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+
+        // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
+        let ci_run_output_dir = {
+            let parent_dir = output_dir
+                .clone()
+                .unwrap_or_else(|| temp_dir().join("mirrord"));
+
+            let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
+            let timestamp = SystemTime::UNIX_EPOCH
+                .elapsed()
+                .expect("system time should not be earlier than UNIX EPOCH")
+                .as_secs();
+
+            let ci_run_output_dir = parent_dir.join(format!("{binary}-{timestamp}-{random_name}"));
+
+            create_dir_all(&ci_run_output_dir).await?;
+
+            ci_run_output_dir
+        };
+
+        progress.info(&format!(
+            "mirrord ci files will be stored in {}",
+            ci_run_output_dir.display()
+        ));
 
         if mirrord_ci_store.user_pid.is_some() {
             Err(CiError::UserPidAlreadyPresent)
@@ -210,8 +241,8 @@ impl MirrordCi {
                 .args(binary_args.iter().skip(1))
                 .envs(env_vars)
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(File::create(ci_run_output_dir.join("stdout"))?)
+                .stderr(File::create(ci_run_output_dir.join("stderr"))?)
                 .kill_on_drop(false)
                 .spawn()
             {

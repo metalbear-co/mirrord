@@ -37,4 +37,14 @@ pub const CLIENT_NAME_HEADER: &str = "x-client-name";
 /// Sent with target connection request.
 pub const SESSION_ID_HEADER: &str = "x-session-id";
 
+/// Code returned in error responses from the operator, when reconnecting to a session is no longer
+/// possible.
+///
+/// HTTP 410 Gone.
+pub const RECONNECT_NOT_POSSIBLE_CODE: u16 = 410;
+
+/// Reason returned in error responses from the operator, when reconnecting to a session is no
+/// longer possible.
+pub const RECONNECT_NOT_POSSIBLE_REASON: &str = "ReconnectNotPossible";
+
 pub const MIRRORD_CI_INFO_HEADER: &str = "x-mirrord-ci-info";

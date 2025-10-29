@@ -8,6 +8,82 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.169.1](https://github.com/metalbear-co/mirrord/tree/3.169.1) - 2025-10-28
+
+### Fixed
+
+- Don't publish buildcache in release workflow.
+
+### Internal
+
+- Fix update_latest job with write permission.
+
+
+## [3.169.0](https://github.com/metalbear-co/mirrord/tree/3.169.0) - 2025-10-27
+
+
+### Added
+
+- `mirrord ci start` now pipes application's stdout and stderr to files in a
+  temporary directory (`/tmp/mirrord/{binary-name}-{timestamp}-{random}` by
+  default). This can be configured with the `ci.output_dir` option in your
+  mirrord config.
+
+
+### Internal
+
+- Add TypedHeader like extractor to mirrord-kube for axum like extraction from
+  kubernetes resources.
+- When reconnecting to an operator session, the CLI now checks for a fatal 410
+  error.
+
+## [3.168.1](https://github.com/metalbear-co/mirrord/tree/3.168.1) - 2025-10-24
+
+
+### Changed
+
+- Operator status not showing data for SQS split queues.
+- When it's root, CWD will no longer be in the default-local list for file
+  operations.
+
+
+### Internal
+
+- Fix missing source value in query params of version check.
+- Remove a leftover file that is not used anywhere.
+
+## [3.168.0](https://github.com/metalbear-co/mirrord/tree/3.168.0) - 2025-10-23
+
+
+### Added
+
+- CLI for db branches to show and destroy
+
+
+### Changed
+
+- Changed semantics of `internal_proxy.log_destination` and
+  `external_proxy.log_destination` fields.
+  Now mirrord auto detects whether the path leads to the desired log files, or
+  directories where the log files should be created.
+
+
+### Fixed
+
+- fix rare case of fork and deadlock
+  [#3659](https://github.com/metalbear-co/mirrord/issues/3659)
+
+
+### Internal
+
+- The macOS CI now uses github's aarch64 runners
+  [#3305](https://github.com/metalbear-co/mirrord/issues/3305)
+- Add ignore to `RUSTSEC-2025-0074`, `RUSTSEC-2025-0075`, `RUSTSEC-2025-0080`,
+  `RUSTSEC-2025-0081`, `RUSTSEC-2025-0098`and `RUSTSEC-2025-0104` becuase
+  open-i18n/rust-unic is unmaintained but we should not have any issue with it.
+- Added a nix devshell
+- Improved `MirrordClusterSession` CRD.
+
 ## [3.167.0](https://github.com/metalbear-co/mirrord/tree/3.167.0) - 2025-10-17
 
 ### Added

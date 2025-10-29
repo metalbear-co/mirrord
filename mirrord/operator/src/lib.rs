@@ -3,7 +3,7 @@
 #![deny(unused_crate_dependencies)]
 
 #[cfg(feature = "client")]
-use http::{HeaderMap, HeaderValue};
+use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -34,41 +34,11 @@ pub struct MirrordCiInfo {
     pub branch_name: Option<u64>,
 }
 
+#[cfg(feature = "client")]
 impl TryFrom<HeaderValue> for MirrordCiInfo {
     type Error = serde_json::Error;
 
     fn try_from(value: HeaderValue) -> Result<Self, Self::Error> {
         serde_json::from_slice(value.as_bytes())
-    }
-}
-
-#[cfg(feature = "client")]
-impl From<&MirrordCiInfo> for HeaderMap {
-    fn from(
-        MirrordCiInfo {
-            vendor,
-            target,
-            branch_name,
-        }: &MirrordCiInfo,
-    ) -> Self {
-        let mut headers = HeaderMap::new();
-
-        if let Some(vendor) = vendor {
-            headers.insert("x-ci-info-vendor", HeaderValue::from_str(vendor).unwrap());
-        }
-
-        if let Some(branch_name) = branch_name {
-            headers.insert(
-                "x-ci-branch-name",
-                HeaderValue::try_from(branch_name.to_string()).unwrap(),
-            );
-        }
-
-        headers.insert(
-            "x-ci-target",
-            HeaderValue::try_from(target.to_string()).unwrap(),
-        );
-
-        headers
     }
 }
