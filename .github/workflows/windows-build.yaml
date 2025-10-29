@@ -17,13 +17,18 @@ on:
         description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
         required: false
         type: string
+      sign_artifacts:
+        description: "Code-sign EXE & DLL (uses limited signing tokens)"
+        type: choice
+        options: [false, true]
+        default: false
   push:
   pull_request:
     branches: [main, "*staging*"]
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
-  contents: write   # <-- needed to create/upload GitHub Releases
+  contents: write   # needed for GitHub Releases
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -43,6 +48,7 @@ jobs:
       MODE: ${{ github.event.inputs.mode || 'build_sign' }}
       PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
+      SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
 
     steps:
       - name: Checkout
@@ -69,6 +75,7 @@ jobs:
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
           $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
           New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
 
           if ($env:MODE -eq 'reuse') {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
@@ -83,13 +90,33 @@ jobs:
             $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
             if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
             if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
-            foreach ($f in @($exe,$dll)) {
-              $sha = "$f.sha256"
-              if (-not (Test-Path $sha)) {
+
+            if ($shouldSign) {
+              if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
+                throw "SIGN_ARTIFACTS=true but signtool.exe not found."
+              }
+              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
+              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
+              # refresh .sha256 because files changed
+              foreach ($f in @($exe,$dll)) {
+                $sha = "$f.sha256"
                 $h = (Get-FileHash -Algorithm SHA256 $f).Hash
                 "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
               }
+            } else {
+              # Ensure .sha256 exist even if not signing
+              foreach ($f in @($exe,$dll)) {
+                $sha = "$f.sha256"
+                if (-not (Test-Path $sha)) {
+                  $h = (Get-FileHash -Algorithm SHA256 $f).Hash
+                  "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
+                }
+              }
+              Write-Host "Signing disabled (SIGN_ARTIFACTS=false)."
             }
+
             Set-Env "MIRRORD_EXE" $exe
             Set-Env "MIRRORD_LAYER_FILE" $dll
             Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
@@ -106,11 +133,20 @@ jobs:
           $dll = if (Test-Path (Join-Path $DbgDir  'mirrord_layer_win.dll')) { Join-Path $DbgDir  'mirrord_layer_win.dll' }
                  elseif (Test-Path (Join-Path $RelDir 'mirrord_layer_win.dll')) { Join-Path $RelDir 'mirrord_layer_win.dll' }
                  else { throw "Layer DLL not found in debug or release directories." }
-          # 2) Sign DLL
-          & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
-          & signtool.exe verify /pa "$dll"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL" }
-          # 3) Build CLI with embedded *signed* DLL
+
+          if ($shouldSign) {
+            if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
+              throw "SIGN_ARTIFACTS=true but signtool.exe not found."
+            }
+            # 2) Sign DLL
+            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
+            & signtool.exe verify /pa "$dll"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL" }
+          } else {
+            Write-Host "Signing disabled for DLL."
+          }
+
+          # 3) Build CLI with (optionally) signed DLL embedded
           $env:MIRRORD_LAYER_FILE = $dll
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg  = $meta.packages | Where-Object { $_.targets | Where-Object { $_.kind -contains 'bin' -and $_.name -eq 'mirrord' } } | Select-Object -First 1
@@ -119,16 +155,23 @@ jobs:
           $exe = if (Test-Path (Join-Path $DbgDir  'mirrord.exe')) { Join-Path $DbgDir  'mirrord.exe' }
                  elseif (Test-Path (Join-Path $RelDir 'mirrord.exe')) { Join-Path $RelDir 'mirrord.exe' }
                  else { throw "mirrord.exe not found (debug/release)" }
-          # 4) Sign EXE
-          & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
-          & signtool.exe verify /pa "$exe"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE" }
-          # 5) Checksums
+
+          if ($shouldSign) {
+            # 4) Sign EXE
+            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
+            & signtool.exe verify /pa "$exe"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE" }
+          } else {
+            Write-Host "Signing disabled for EXE."
+          }
+
+          # 5) Checksums (always generate with the final bytes)
           foreach ($f in @($exe,$dll)) {
             $sha = "$f.sha256"
             $h = (Get-FileHash -Algorithm SHA256 $f).Hash
             "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
           }
+
           # 6) Export env
           Set-Env "MIRRORD_LAYER_FILE" $dll
           Set-Env "MIRRORD_EXE" $exe
@@ -193,11 +236,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = $null
           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
-            $tag = "$env:GITHUB_REF".Substring(10)   # tag from push
+            $tag = "$env:GITHUB_REF".Substring(10)
           } elseif ($env:RELEASE_TAG_INPUT) {
-            $tag = $env:RELEASE_TAG_INPUT          # manual input
+            $tag = $env:RELEASE_TAG_INPUT
           } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
-            $tag = "v$($env:MIRRORD_VERSION)"      # fallback from cargo version
+            $tag = "v$($env:MIRRORD_VERSION)"
           } else {
             throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
           }
@@ -231,6 +274,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = $env:MIRRORD_EXE
           $dll = $env:MIRRORD_LAYER_FILE
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
           if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
           if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
           $base = Split-Path $exe -Parent
@@ -249,7 +293,7 @@ jobs:
           $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
           $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
           $sigExe = $null; $sigDll = $null
-          if (Get-Command signtool.exe -ErrorAction SilentlyContinue) {
+          if ($shouldSign -and (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
             & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
           }
@@ -288,16 +332,16 @@ jobs:
           $rows = @()
           $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
           $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
-          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'})); Notes= "child-exit=$childExit" }
+          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($shouldSign -and $sigExe -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($shouldSign -and $sigDll -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
           $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
           $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
           $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
           $md = @()
           $md += '### Windows test results'
           $md += ''
-          $md += ('**Mode:** `{0}`  ' -f $env:MODE)
+          $md += ('**Mode:** `{0}` • **Sign artifacts:** `{1}`  ' -f $env:MODE, $env:SIGN_ARTIFACTS)
           $md += ('**EXE:** `{0}`  ' -f $exe)
           $md += ('**DLL:** `{0}`' -f $dll)
           $md += ''
