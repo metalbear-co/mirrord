@@ -1,9 +1,24 @@
-use std::{fmt, time::Duration};
+use std::fmt;
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::{
+    Resource as _,
+    api::{
+        apps::v1::{Deployment, ReplicaSet, StatefulSet},
+        batch::v1::{CronJob, Job},
+        core::v1::{Pod, Service},
+    },
+    apimachinery::pkg::apis::meta::v1::MicroTime,
+};
 use kube::CustomResource;
-use mirrord_config::feature::network::incoming::ConcurrentSteal;
-use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
+use mirrord_config::{
+    feature::network::incoming::ConcurrentSteal,
+    target::{
+        Target, cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget,
+        pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget,
+        service::ServiceTarget, stateful_set::StatefulSetTarget,
+    },
+};
+use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
@@ -144,6 +159,56 @@ pub struct MirrordClusterSessionSpec {
     pub target: Option<SessionTarget>,
 }
 
+impl MirrordClusterSessionSpec {
+    pub fn as_target(&self) -> Result<Target, SessionTarget> {
+        let Some(target) = &self.target else {
+            return Ok(Target::Targetless);
+        };
+
+        match (target.api_version.as_str(), target.kind.as_str()) {
+            (Deployment::API_VERSION, Deployment::KIND) => {
+                Ok(Target::Deployment(DeploymentTarget {
+                    deployment: target.name.clone(),
+                    container: Some(target.container.clone()),
+                }))
+            }
+            (Pod::API_VERSION, Pod::KIND) => Ok(Target::Pod(PodTarget {
+                pod: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (Rollout::API_VERSION, Rollout::KIND) => Ok(Target::Rollout(RolloutTarget {
+                rollout: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (Job::API_VERSION, Job::KIND) => Ok(Target::Job(JobTarget {
+                job: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (CronJob::API_VERSION, CronJob::KIND) => Ok(Target::CronJob(CronJobTarget {
+                cron_job: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
+                Ok(Target::StatefulSet(StatefulSetTarget {
+                    stateful_set: target.name.clone(),
+                    container: Some(target.container.clone()),
+                }))
+            }
+            (Service::API_VERSION, Service::KIND) => Ok(Target::Service(ServiceTarget {
+                service: target.name.clone(),
+                container: Some(target.container.clone()),
+            })),
+            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
+                Ok(Target::ReplicaSet(ReplicaSetTarget {
+                    replica_set: target.name.clone(),
+                    container: Some(target.container.clone()),
+                }))
+            }
+            _ => Err(target.clone()),
+        }
+    }
+}
+
 /// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -231,27 +296,5 @@ mod tests {
         assert_eq!(AgentLimit::Percentage(40).calculate_max(100), 40);
         assert_eq!(AgentLimit::Percentage(1).calculate_max(1), 1);
         assert_eq!(AgentLimit::Percentage(50).calculate_max(7), 4);
-    }
-
-    #[test]
-    fn correct_serde_for_connection_info() {
-        let info = MirrordClusterSessionAgent {
-            ephemeral: false,
-            name: "my-pod".into(),
-            namespace: "my-namespace".into(),
-            port: 9999,
-            target: SessionTarget {
-                api_version: "v1".into(),
-                kind: "Pod".into(),
-                namespace: "my-target-namespace".into(),
-                name: Some("my-target".into()),
-                container: None,
-            },
-        };
-
-        let info_json = serde_json::to_string(&info).expect("should serialize");
-        let cloned = serde_json::from_str(&info_json).expect("should deserialize");
-
-        assert_eq!(info, cloned)
     }
 }
