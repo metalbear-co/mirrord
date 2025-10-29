@@ -242,6 +242,8 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         .experimental
         .dns_permission_error_fatal
         .or(Some(true));
+    config.experimental.non_blocking_tcp_connect =
+        config.experimental.non_blocking_tcp_connect.or(Some(true));
 
     Ok(())
 }

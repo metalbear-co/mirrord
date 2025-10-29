@@ -688,6 +688,9 @@ Disables any system wide proxy configuration for affecting the running applicati
 
 Enables better support for outgoing connections using non-blocking TCP sockets.
 
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
+
 ### _experimental_ readlink {#experimental-readlink}
 
 DEPRECATED, WILL BE REMOVED
