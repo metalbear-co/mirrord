@@ -8,7 +8,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
-## [3.169.2](https://github.com/metalbear-co/mirrord/tree/3.169.2) - 2025-10-29
+## [3.170.0](https://github.com/metalbear-co/mirrord/tree/3.170.0) - 2025-10-29
+
+
+### Added
+
+- Added copy mode configuration for MySQL branching.
 
 
 ### Changed
@@ -24,17 +29,8 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Internal
 
-- Added copy mode configuration for MySQL branching.
-
-## [3.169.1](https://github.com/metalbear-co/mirrord/tree/3.169.1) - 2025-10-28
-
-### Fixed
-
+- Fixed `update_latest` CI job with write permission.
 - Don't publish buildcache in release workflow.
-
-### Internal
-
-- Fix update_latest job with write permission.
 
 
 ## [3.169.0](https://github.com/metalbear-co/mirrord/tree/3.169.0) - 2025-10-27
