@@ -1302,7 +1302,7 @@ impl OperatorApi<PreparedClientCert> {
                 ) => mysql_config.base.creation_timeout_secs,
             })
             .max()
-            .unwrap_or(default_creation_timeout_secs()); // Default to 60 seconds if no branches configured
+            .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
 
         let created_mysql_branches =
