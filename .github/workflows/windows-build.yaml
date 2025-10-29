@@ -247,15 +247,16 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Release tag: $tag"
 
-      # GitHub-owned action; allowed by your policy
+
       - name: Publish GitHub Release and upload artifacts (github-script)
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
         uses: actions/github-script@v7
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
-          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}   # draft|prerelease|no|release (from your inputs)
+          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}     # draft|prerelease|release|no
           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+          SIGN_ARTIFACTS: ${{ env.SIGN_ARTIFACTS }} # "true" | "false"
         with:
           script: |
             const fs = require('fs');
@@ -265,6 +266,10 @@ jobs:
             const tag = process.env.RELEASE_TAG;
             const isDraft = process.env.PUBLISH_MODE === 'draft';
             const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
+            const signed = /^true$/i.test(process.env.SIGN_ARTIFACTS || '');
+            const signedBlockStart = '<!-- SIGNED_STATUS_START -->';
+            const signedBlockEnd   = '<!-- SIGNED_STATUS_END -->';
+            const signedLine       = `**Signed artifacts:** ${signed ? 'Yes' : 'No'}`;
 
             // Find or create the release
             let rel;
@@ -285,7 +290,7 @@ jobs:
               rel = r.data;
             }
 
-            // If the existing release's draft/prerelease flags changed, update them
+            // Ensure flags (draft/prerelease) match input
             if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
               const r = await github.rest.repos.updateRelease({
                 owner, repo, release_id: rel.id,
@@ -296,14 +301,13 @@ jobs:
               rel = r.data;
             }
 
-            // Helper to (re)upload one file
+            // Upload helper (replaces asset if it already exists)
             async function upload(file) {
               if (!file || !fs.existsSync(file)) {
                 core.warning(`Missing file: ${file}`);
                 return;
               }
               const name = path.basename(file);
-              // Delete same-named asset if it exists
               const assets = await github.paginate(
                 github.rest.repos.listReleaseAssets,
                 { owner, repo, release_id: rel.id, per_page: 100 }
@@ -314,22 +318,40 @@ jobs:
               }
               const data = fs.readFileSync(file);
               await github.rest.repos.uploadReleaseAsset({
-                owner, repo, release_id: rel.id,
-                name,
+                owner, repo, release_id: rel.id, name,
                 headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
                 data,
               });
               core.info(`Uploaded ${name}`);
             }
 
+            // Upload artifacts
             const files = [
               process.env.MIRRORD_EXE,
               `${process.env.MIRRORD_EXE}.sha256`,
               process.env.MIRRORD_LAYER_FILE,
               `${process.env.MIRRORD_LAYER_FILE}.sha256`,
             ];
-
             for (const f of files) { await upload(f); }
+
+            // Append/refresh a small, explicit signed-status block in the body (idempotent)
+            const currentBody = rel.body || '';
+            const block = `${signedBlockStart}\n${signedLine}\n${signedBlockEnd}`;
+            const hasBlock = currentBody.includes(signedBlockStart) && currentBody.includes(signedBlockEnd);
+            const newBody = hasBlock
+              ? currentBody.replace(new RegExp(`${signedBlockStart}[\\s\\S]*?${signedBlockEnd}`,'m'), block)
+              : (currentBody + (currentBody ? '\n\n' : '') + block);
+
+            if (newBody !== currentBody) {
+              await github.rest.repos.updateRelease({
+                owner, repo, release_id: rel.id,
+                body: newBody,
+              });
+              core.info(`Release body updated with signed status: ${signed ? 'Yes' : 'No'}`);
+            } else {
+              core.info('Signed status already up to date in release body.');
+            }
+
 
 
       # ==================================
