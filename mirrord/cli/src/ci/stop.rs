@@ -22,24 +22,39 @@ impl CiStopCommandHandler {
         Ok(Self { mirrord_ci })
     }
 
-    /// `kill`s the intproxy and the user's process with the pids stored in [`MirrordCi`].
+    /// [`kill`](nix::sys::signal::kill)s the intproxy and the user's process, using the pids stored
+    /// in [`MirrordCi`].
     #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<()> {
         use nix::{
+            errno::Errno,
             sys::signal::{Signal, kill},
             unistd::Pid,
         };
 
+        fn try_kill(pid: u32) -> CiResult<()> {
+            kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL))
+                .or_else(|error| {
+                    if error == Errno::ESRCH {
+                        // ESRCH means that the process has already exited.
+                        Ok(())
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(CiError::from)
+        }
+
         let Self { mirrord_ci } = self;
 
         let intproxy_killed = match mirrord_ci.store.intproxy_pid {
-            Some(pid) => kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)).map_err(From::from),
+            Some(pid) => try_kill(pid),
             None => Err(CiError::IntproxyPidMissing),
         };
 
         let user_killed = match mirrord_ci.store.user_pid {
-            Some(pid) => kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)).map_err(From::from),
+            Some(pid) => try_kill(pid),
             None => Err(CiError::UserPidMissing),
         };
 
