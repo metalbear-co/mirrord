@@ -427,7 +427,7 @@ impl ClientConnectionHandler {
                     }}
                 }, if self.tcp_mirror_api.is_some() => match message {
                     Ok(message) => {
-                        self.respond(message).await;
+                        self.respond(message).await?;
                     }
                     Err(e) => break e,
                 },
@@ -438,19 +438,19 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }}
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(message) => self.respond(message).await,
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => self.respond(message).await,
+                    Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
                 message = self.udp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await,
+                    Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
                     Err(e) => break e,
                 },
                 message = self.dns_api.recv() => match message {
-                    Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await,
+                    Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
                 },
                 // message = self.vpn_api.daemon_message() => match message{
@@ -461,17 +461,21 @@ impl ClientConnectionHandler {
             }
         };
 
-        self.respond(DaemonMessage::Close(error.to_string())).await;
+        if let Err(e) = self.respond(DaemonMessage::Close(error.to_string())).await {
+            error!("Failed to send error to client: {e:?}");
+        }
 
         Err(error)
     }
 
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn respond(&mut self, response: DaemonMessage) {
-        if matches!(&response, DaemonMessage::LogMessage(..)).not() || self.ready_for_logs {
-            self.connection.send(response).await
+    async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
+        if matches!(&response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
+            return Ok(());
         }
+
+        self.connection.send(response).await.map_err(Into::into)
     }
 
     /// Handles incoming messages from the connected client (`mirrord-layer`).
@@ -482,7 +486,14 @@ impl ClientConnectionHandler {
         match message {
             ClientMessage::FileRequest(req) => {
                 if let Some(response) = self.file_manager.handle_message(req)? {
-                    self.respond(DaemonMessage::File(response)).await;
+                    self.respond(DaemonMessage::File(response))
+                        .await
+                        .inspect_err(|fail| {
+                            error!(
+                                "handle_client_message -> Failed responding to file message {:#?}!",
+                                fail
+                            )
+                        })?
                 }
             }
             ClientMessage::TcpOutgoing(layer_message) => {
@@ -504,7 +515,7 @@ impl ClientConnectionHandler {
                     env::select_env_vars(&self.state.env, env_vars_filter, env_vars_select);
 
                 self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
-                    .await;
+                    .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
                 self.dns_api
@@ -516,7 +527,7 @@ impl ClientConnectionHandler {
                     .make_request(ClientGetAddrInfoRequest::V2(request))
                     .await?;
             }
-            ClientMessage::Ping => self.respond(DaemonMessage::Pong).await,
+            ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             // Message handled exclusively by the operator, see its docs for details.
             ClientMessage::OperatorPong(_) => (),
             ClientMessage::Tcp(message) => match &mut self.tcp_mirror_api {
@@ -526,7 +537,7 @@ impl ClientConnectionHandler {
                         "component responsible for mirroring incoming traffic is not running, \
                         which might be due to Kubernetes node kernel version <4.20. \
                         Check agent logs for errors and please report a bug if kernel version >=4.20".into(),
-                    )).await;
+                    )).await?;
                 }
             },
             ClientMessage::TcpSteal(message) => {
@@ -543,7 +554,7 @@ impl ClientConnectionHandler {
                 };
 
                 if let Some(error) = error {
-                    self.respond(DaemonMessage::Close(error)).await;
+                    self.respond(DaemonMessage::Close(error)).await?;
                 }
             }
             ClientMessage::Close => {
@@ -553,7 +564,7 @@ impl ClientConnectionHandler {
                 self.respond(DaemonMessage::Close(
                     "Pause isn't supported anymore.".to_string(),
                 ))
-                .await;
+                .await?;
             }
             ClientMessage::SwitchProtocolVersion(client_version) => {
                 let settled_version = (&*mirrord_protocol::VERSION).min(&client_version).clone();
@@ -563,14 +574,14 @@ impl ClientConnectionHandler {
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(
                     settled_version,
                 ))
-                .await;
+                .await?;
             }
             ClientMessage::ReadyForLogs => {
                 self.ready_for_logs = true;
             }
             ClientMessage::Vpn(_message) => {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
-                    .await;
+                    .await?;
             }
         }
 
@@ -606,7 +617,7 @@ pub async fn notify_client_about_dirty_iptables(
                 .send(DaemonMessage::Close(
                     DIRTY_IPTABLES_ERROR_MESSAGE.to_string(),
                 ))
-                .await;
+                .await?;
         }
 
         Ok(Err(error)) => {

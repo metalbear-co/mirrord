@@ -4449,7 +4449,6 @@ dependencies = [
  "mirrord-agent-env",
  "mirrord-agent-iptables",
  "mirrord-protocol",
- "mirrord-protocol-io",
  "mirrord-tls-util",
  "nix 0.29.0",
  "oci-spec",

@@ -4,13 +4,15 @@ use std::{
     sync::Arc,
 };
 
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use mirrord_protocol_io::{Agent, Connection};
+use actix_codec::Framed;
+use futures::{SinkExt, TryStreamExt};
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
 use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_rustls::{
     TlsConnector,
+    client::TlsStream,
     rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
 };
 use tracing::Level;
@@ -81,9 +83,8 @@ pub(crate) enum TlsSetupError {
 
 /// Wrapper over client's network connection with the agent.
 pub struct ClientConnection {
-    connection: Connection<Agent>,
+    framed: ConnectionFramed,
     client_id: ClientId,
-    uses_tls: bool,
 }
 
 impl ClientConnection {
@@ -96,36 +97,39 @@ impl ClientConnection {
         client_id: u32,
         tls: Option<AgentTlsConnector>,
     ) -> io::Result<Self> {
-        let connection = match &tls {
+        let framed = match tls {
             Some(connector) => {
                 let tls_stream = connector
                     .inner
                     .connect(connector.server_name.clone(), stream)
                     .await?;
 
-                Connection::from_stream(tls_stream).await
+                ConnectionFramed::Tls(Framed::new(tls_stream, DaemonCodec::default()))
             }
-            None => Connection::from_stream(stream).await,
-        }
-        .map_err(io::Error::other)?;
+            None => ConnectionFramed::Tcp(Framed::new(stream, DaemonCodec::default())),
+        };
 
-        Ok(Self {
-            connection,
-            client_id,
-            uses_tls: tls.is_some(),
-        })
+        Ok(Self { framed, client_id })
     }
 
     /// Sends a [`DaemonMessage`] to the client.
-    #[tracing::instrument(level = "trace")]
-    pub async fn send(&mut self, message: DaemonMessage) {
-        self.connection.send(message).await
+    #[tracing::instrument(level = "trace", err)]
+    pub async fn send(&mut self, message: DaemonMessage) -> io::Result<()> {
+        match &mut self.framed {
+            ConnectionFramed::Tcp(framed) => framed.send(message).await?,
+            ConnectionFramed::Tls(framed) => framed.send(message).await?,
+        }
+
+        Ok(())
     }
 
     /// Receives a [`ClientMessage`] from the client.
     #[tracing::instrument(level = "trace", err)]
     pub async fn receive(&mut self) -> io::Result<Option<ClientMessage>> {
-        Ok(self.connection.recv().await)
+        match &mut self.framed {
+            ConnectionFramed::Tcp(framed) => framed.try_next().await,
+            ConnectionFramed::Tls(framed) => framed.try_next().await,
+        }
     }
 }
 
@@ -133,16 +137,25 @@ impl fmt::Debug for ClientConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientConnection")
             .field("client_id", &self.client_id)
-            .field("uses_tls", &self.uses_tls)
+            .field(
+                "uses_tls",
+                &matches!(self.framed, ConnectionFramed::Tls(..)),
+            )
             .finish()
     }
+}
+
+/// Enum wraps whole [`Framed`] instead of just [`TcpStream`]/[`TlsStream`], so we don't have to
+/// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
+enum ConnectionFramed {
+    Tcp(Framed<TcpStream, DaemonCodec>),
+    Tls(Framed<TlsStream<TcpStream>, DaemonCodec>),
 }
 
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
 
-    use actix_codec::Framed;
     use futures::StreamExt;
     use mirrord_protocol::ClientCodec;
     use tokio::net::{TcpListener, TcpStream};
@@ -187,7 +200,8 @@ mod test {
                     .unwrap();
                 connection
                     .send(DaemonMessage::Close("it works".into()))
-                    .await;
+                    .await
+                    .unwrap();
             },
             async move {
                 let (stream, _) = listener.accept().await.unwrap();
