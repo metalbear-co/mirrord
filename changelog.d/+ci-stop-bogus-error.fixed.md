@@ -1,0 +1,1 @@
+Fixed a bogus error reported by `mirrord ci stop` when the application has already exited.
