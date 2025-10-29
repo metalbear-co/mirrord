@@ -60,7 +60,7 @@ async fn mirror_with_http_header_filter(
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
     serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
 
-    let mirror_process = application
+    let mut mirror_process = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
