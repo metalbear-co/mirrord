@@ -759,9 +759,10 @@ mod traffic_tests {
     /// execution) This primarily tests outgoing traffic functionality with npm as a non-.exe
     /// binary. Tests both regular Windows execution and Windows Console Host (conhost.exe)
     /// scenarios for older Windows machines support.
+    #[cfg(target_os = "windows")]
     #[rstest]
     #[case::regular(false)]
-    #[cfg_attr(target_os = "windows", case::conhost(true))]
+    #[case::conhost(true)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     async fn outgoing_traffic_npm_node(
