@@ -79,26 +79,31 @@ pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> 
     let mut result = Vec::new();
     let mut start = 0;
 
-    while start < buffer.len() {
-        // Find the length of current string using utility function
-        let len = if start < buffer.len() {
-            find_null_terminator_length(&buffer[start..], T::default())
-        } else {
-            0
-        };
+    while let Some(remaining) = buffer.get(start..) {
+        if remaining.is_empty() {
+            break;
+        }
 
-        if len > 0 && let Some(slice) = buffer.get(start..start + len) {
+        // Find the length of current string using utility function
+        let len = find_null_terminator_length(remaining, T::default());
+
+        if len > 0
+            && let Some(slice) = remaining.get(..len)
+        {
             let substring = T::slice_to_string(slice);
             if !substring.is_empty() {
                 result.push(substring);
             }
         }
 
-        start += len + 1; // Move past the null terminator
+        // Move past the null terminator (or to the end if none was found)
+        start = start.saturating_add(len).saturating_add(1);
 
         // Check for double null terminator (end of MULTI_SZ)
-        if start < buffer.len() && buffer[start] == T::default() {
-            break;
+        match buffer.get(start) {
+            Some(value) if *value == T::default() => break,
+            None => break,
+            _ => {}
         }
     }
 
@@ -232,21 +237,28 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
 
     // Search for double null terminator pattern using our utility function
     let mut pos = 0;
-    while pos < slice.len() {
-        let remaining_slice = &slice[pos..];
+    while let Some(remaining_slice) = slice.get(pos..) {
+        if remaining_slice.is_empty() {
+            break;
+        }
+
         let next_null = find_null_terminator_length(remaining_slice, T::default());
 
         if next_null == 0 {
             // Found a null at current position, check if next is also null (double null)
-            if pos + 1 < slice.len() && slice[pos + 1] == T::default() {
-                // Found double null terminator
-                return Some(pos + 2);
+            if let Some(next_value) = slice.get(pos + 1) {
+                if *next_value == T::default() {
+                    // Found double null terminator
+                    return Some(pos + 2);
+                }
+            } else {
+                break;
             }
             // Single null, move past it
             pos += 1;
         } else {
             // Move past this string and its null terminator
-            pos += next_null + 1;
+            pos = pos.saturating_add(next_null).saturating_add(1);
         }
     }
 
