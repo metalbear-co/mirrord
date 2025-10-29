@@ -9,9 +9,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use crate::common::*;
 
 #[derive(Clone, Copy, Debug)]
 enum TestedStealVariant {

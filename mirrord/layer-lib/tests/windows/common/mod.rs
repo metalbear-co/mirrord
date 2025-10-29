@@ -4,7 +4,6 @@ use mirrord_config::feature::network::incoming::{
     IncomingConfig, IncomingMode as ConfigIncomingMode, http_filter::HttpFilterConfig,
 };
 use mirrord_intproxy_protocol::PortSubscription;
-#[cfg(target_os = "windows")]
 use mirrord_layer_lib::setup::windows::IncomingMode;
 use mirrord_protocol::{ClientMessage, tcp::LayerTcpSteal};
 use rstest::fixture;
@@ -22,8 +21,6 @@ impl Application {
         _env: HashMap<String, String>,
         _config_path: Option<&Path>,
     ) -> (TestProcess, TestIntProxy) {
-        // For layer-lib unit testing: Instead of starting real processes,
-        // we return mocks that will be used to directly test layer-lib logic
         (
             TestProcess { child: TestChild },
             TestIntProxy {
@@ -53,16 +50,7 @@ pub struct TestIntProxy {
 }
 
 impl TestIntProxy {
-    #[cfg(not(target_os = "windows"))]
     pub async fn recv(&mut self) -> ClientMessage {
-        // currently layer-lib is not used in unix
-        unreachable!()
-    }
-
-    #[cfg(target_os = "windows")]
-    pub async fn recv(&mut self) -> ClientMessage {
-        // In layer-lib unit tests, we simulate the expected behavior by
-        // parsing the config and creating the appropriate subscription message
         if let Some(config_str) = &self.expected_config {
             let config: serde_json::Value = serde_json::from_str(config_str).unwrap();
             let http_filter_config_value = config
@@ -73,7 +61,6 @@ impl TestIntProxy {
                 .cloned()
                 .unwrap_or_default();
 
-            // Parse the http_filter using layer-lib logic
             let http_filter_config: HttpFilterConfig =
                 serde_json::from_value(http_filter_config_value).unwrap();
 
@@ -83,11 +70,9 @@ impl TestIntProxy {
                 ..Default::default()
             };
 
-            // Use layer-lib logic to determine the subscription
             let incoming_mode = IncomingMode::new(&mut incoming_config);
             let subscription = incoming_mode.subscription(80);
 
-            // Convert to the expected ClientMessage format
             match subscription {
                 PortSubscription::Steal(steal_type) => {
                     ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type))
