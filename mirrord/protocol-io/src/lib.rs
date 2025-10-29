@@ -263,11 +263,11 @@ async fn io_task<Channel, Type>(
     pin!(framed);
     loop {
         select! {
-			// When >=2 futures complete simultaneously, poll them in
-			// the order they are declared here. We want everything to
-			// be pulled out of the queues and processed before
-			// reacting to the cancellation token, otherwise we will
-			// drop messages.
+            // When >=2 futures complete simultaneously, poll them in
+            // the order they are declared here. We want everything to
+            // be pulled out of the queues and processed before
+            // reacting to the cancellation token, otherwise we will
+            // drop messages.
             biased;
 
             to_send = queues.next() => {
