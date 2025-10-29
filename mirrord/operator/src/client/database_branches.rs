@@ -268,6 +268,7 @@ impl MysqlBranchParams {
             target: target.clone(),
             ttl_secs: config.base.ttl_secs,
             mysql_version: config.base.version.clone(),
+            copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),

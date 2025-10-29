@@ -1,1 +1,0 @@
-When reconnecting to an operator session, the CLI now checks for a fatal 410 error.

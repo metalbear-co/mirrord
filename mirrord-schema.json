@@ -23,6 +23,17 @@
         }
       ]
     },
+    "ci": {
+      "title": "ci {#root-ci}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CiFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "container": {
       "title": "container {#root-container}",
       "anyOf": [
@@ -604,6 +615,21 @@
         }
       }
     },
+    "CiFileConfig": {
+      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"output_dir\": \"/tmp/mirrord/\", } } ```",
+      "type": "object",
+      "properties": {
+        "output_dir": {
+          "title": "ci.output_dir{#ci-output_dir}",
+          "description": "Path to a directory where `mirrord ci` will flush application's stdout and stderr.\n\nDefaults to `/tmp/mirrord/`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
       "oneOf": [
@@ -783,6 +809,17 @@
               "allOf": [
                 {
                   "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "copy": {
+              "default": {
+                "mode": "empty",
+                "tables": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MysqlBranchCopyConfig"
                 }
               ]
             },
@@ -1118,7 +1155,7 @@
         },
         "non_blocking_tcp_connect": {
           "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
-          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.",
+          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
@@ -1863,6 +1900,83 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "MysqlBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\nCreate an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreate an empty database and copy schema of all tables.\n\n- All\n\nCopy both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MysqlBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "schema"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MysqlBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "MysqlBranchTableCopyConfig": {
+      "description": "In addition to copying an empty database or all tables' schema, mirrord operator will copy data from the source DB when an array of table configs are specified.\n\nExample:\n\n```json { \"users\": { \"filter\": \"my_db.users.name = 'alice' OR my_db.users.name = 'bob'\" }, \"orders\": { \"filter\": \"my_db.orders.created_at > 1759948761\" }, } ```\n\nWith the config above, only alice and bob from the `users` table and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
