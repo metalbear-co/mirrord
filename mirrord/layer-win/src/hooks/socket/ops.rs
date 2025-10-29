@@ -331,6 +331,7 @@ where
 
 /// Attempt to establish a connection through the mirrord proxy using layer-lib
 /// This integrates with the shared connect_outgoing logic from layer-lib
+#[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_through_proxy_with_layer_lib<F>(
     socket: SOCKET,
@@ -461,6 +462,7 @@ where
 ///
 /// Returns either a prepared sockaddr ready for the original connect function,
 /// or Fallback to indicate the caller should use the original function.
+#[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn attempt_proxy_connection<F>(
     socket: SOCKET,

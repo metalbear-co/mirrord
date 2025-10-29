@@ -11,7 +11,6 @@ use mirrord_layer_lib::{
     error::{LayerError, windows::WindowsError},
     process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
 };
-use str_win;
 use winapi::{
     ctypes::c_void,
     shared::{

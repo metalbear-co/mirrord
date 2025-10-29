@@ -57,7 +57,7 @@ pub fn is_process_elevated() -> bool {
 
         let is_elevated = elevation.TokenIsElevated != FALSE as u32;
         tracing::debug!("is_process_elevated -> process elevated: {}", is_elevated);
-        is_elevated.into()
+        is_elevated
     }
 }
 

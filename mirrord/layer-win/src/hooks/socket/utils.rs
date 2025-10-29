@@ -965,6 +965,7 @@ impl<T: WindowsAddrInfo> Drop for ManagedAddrInfo<T> {
 }
 
 /// Get the peer address from a connected socket
+#[allow(clippy::result_large_err)]
 pub fn get_peer_address_from_socket(socket: SOCKET) -> HookResult<SocketAddr> {
     let mut addr_storage: SOCKADDR_STORAGE = unsafe { mem::zeroed() };
     let mut addr_len = mem::size_of::<SOCKADDR_STORAGE>() as INT;

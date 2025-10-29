@@ -58,17 +58,11 @@ pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> 
                 .ok()
             })
             .map(|(fds_and_sockets, _)| {
-                #[cfg(unix)]
-                let filtered_sockets = fds_and_sockets.into_iter().filter_map(|(fd, socket)| {
+                let filtered_sockets = fds_and_sockets.into_iter().map(|(fd, socket)| {
                     // Do not inherit sockets that are FD_CLOEXEC on Unix
                     // This requires access to FN_FCNTL which is not available in layer-lib
                     // Unix layer will need to handle this filtering
-                    Some((fd as SocketDescriptor, Arc::new(socket)))
-                });
-
-                #[cfg(windows)]
-                let filtered_sockets = fds_and_sockets.into_iter().map(|(socket, user_socket)| {
-                    (socket as SocketDescriptor, Arc::new(user_socket))
+                    (fd as SocketDescriptor, Arc::new(socket))
                 });
 
                 Mutex::new(HashMap::from_iter(filtered_sockets))

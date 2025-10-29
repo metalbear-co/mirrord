@@ -5,7 +5,9 @@
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-use std::{net::SocketAddr, sync::OnceLock};
+use std::net::SocketAddr;
+#[cfg(target_os = "windows")]
+use std::sync::OnceLock;
 
 use mirrord_config::LayerConfig;
 
