@@ -55,11 +55,16 @@ fn u8_multi_buffer_environment_parsing() {
     let strings = multi_buffer_to_strings(env_buffer);
     assert_eq!(strings.len(), 5); // Should include all entries, even invalid ones
 
-    assert_eq!(strings[0], "PATH=/usr/bin");
-    assert_eq!(strings[1], "USER=test");
-    assert_eq!(strings[2], "=INVALID"); // Starts with = (invalid for env vars)
-    assert_eq!(strings[3], "NOEQUALS"); // No = sign (invalid for env vars)
-    assert_eq!(strings[4], "HOME=/home/user");
+    assert_eq!(
+        strings,
+        [
+            "PATH=/usr/bin",
+            "USER=test",
+            "=INVALID", // Starts with = (invalid for env vars)
+            "NOEQUALS", // No = sign (invalid for env vars)
+            "HOME=/home/user"
+        ]
+    );
 }
 
 #[test]
@@ -75,9 +80,9 @@ fn u8_multi_buffer_malformed_utf8() {
     let strings = multi_buffer_to_strings(&malformed_buffer);
     assert_eq!(strings.len(), 2);
 
-    assert_eq!(strings[0], "VALID=test");
+    assert_eq!(strings.get(0).map(String::as_str), Some("VALID=test"));
     // Second string should be handled with lossy conversion
-    assert!(strings[1].starts_with("BAD="));
+    assert!(matches!(strings.get(1), Some(value) if value.starts_with("BAD=")));
 }
 
 #[test]
