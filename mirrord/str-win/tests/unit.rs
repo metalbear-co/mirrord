@@ -80,7 +80,7 @@ fn u8_multi_buffer_malformed_utf8() {
     let strings = multi_buffer_to_strings(&malformed_buffer);
     assert_eq!(strings.len(), 2);
 
-    assert_eq!(strings.get(0).map(String::as_str), Some("VALID=test"));
+    assert_eq!(strings.first().map(String::as_str), Some("VALID=test"));
     // Second string should be handled with lossy conversion
     assert!(matches!(strings.get(1), Some(value) if value.starts_with("BAD=")));
 }
