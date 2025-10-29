@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.169.2](https://github.com/metalbear-co/mirrord/tree/3.169.2) - 2025-10-29
+
+
+### Changed
+
+- `experimental.non_blocking_tcp_connect` now defaults to `true` in OSS.
+
+
+### Fixed
+
+- Fixed a bogus error reported by `mirrord ci stop` when the application has
+  already exited.
+
+
+### Internal
+
+- Added copy mode configuration for MySQL branching.
+
 ## [3.169.1](https://github.com/metalbear-co/mirrord/tree/3.169.1) - 2025-10-28
 
 ### Fixed
