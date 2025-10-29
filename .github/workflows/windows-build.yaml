@@ -8,13 +8,22 @@ on:
         type: choice
         options: [build_sign, reuse]
         default: build_sign
+      release:
+        description: "Publish a GitHub Release?"
+        type: choice
+        options: [no, draft, prerelease, release]
+        default: no
+      release_tag:
+        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        required: false
+        type: string
   push:
   pull_request:
     branches: [main, "*staging*"]
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
-  contents: read
+  contents: write   # <-- needed to create/upload GitHub Releases
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -32,6 +41,8 @@ jobs:
         shell: pwsh
     env:
       MODE: ${{ github.event.inputs.mode || 'build_sign' }}
+      PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
+      RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
 
     steps:
       - name: Checkout
@@ -47,6 +58,7 @@ jobs:
           rustc -V
           cargo -V
           rustup show
+
       - name: Prepare artifacts (download OR build+sign)
         id: prep
         run: |
@@ -57,6 +69,7 @@ jobs:
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
           $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
           New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
+
           if ($env:MODE -eq 'reuse') {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
               throw "gcloud not found on PATH. Ensure the runner is authenticated."
@@ -70,7 +83,6 @@ jobs:
             $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
             if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
             if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
-            # Ensure .sha256 files exist
             foreach ($f in @($exe,$dll)) {
               $sha = "$f.sha256"
               if (-not (Test-Path $sha)) {
@@ -86,6 +98,7 @@ jobs:
             Write-Host "Picked DLL: $dll"
             exit 0
           }
+
           # === build_sign path ===
           rustup target add $Target
           # 1) Build layer (DLL)
@@ -122,6 +135,7 @@ jobs:
           Set-Env "MIRRORD_PKG" $pkg.name
           Set-Env "MIRRORD_VERSION" $pkg.version
           Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
+
       - name: Upload to GCS (build_sign only)
         if: ${{ env.MODE == 'build_sign' }}
         run: |
@@ -144,6 +158,7 @@ jobs:
           Write-Host "Uploading to $dest"
           Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
           gcloud --quiet storage ls $dest
+
       - name: Run Rust unit tests (single loop)
         run: |
           $ErrorActionPreference = 'Stop'
@@ -156,7 +171,7 @@ jobs:
             @{ name='mirrord-intproxy' ; args='' },
             @{ name='mirrord-auth'     ; args='' },
             @{ name='mirrord-operator' ; args='--features "crd, client"' },
-            @{ name='mirrord'          ; args='' }  # CLI (uses MIRRORD_LAYER_FILE)
+            @{ name='mirrord'          ; args='' }
           )
           foreach ($t in $tests) {
             Write-Host "==> cargo test -p $($t.name) $($t.args)"
@@ -167,7 +182,46 @@ jobs:
             }
             if ($LASTEXITCODE -ne 0) { throw "Tests failed for $($t.name)" }
           }
-      
+
+      # -----------------------------
+      # GitHub Release (optional)
+      # -----------------------------
+      - name: Compute release tag
+        id: tag
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $null
+          if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
+            $tag = "$env:GITHUB_REF".Substring(10)   # tag from push
+          } elseif ($env:RELEASE_TAG_INPUT) {
+            $tag = $env:RELEASE_TAG_INPUT          # manual input
+          } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
+            $tag = "v$($env:MIRRORD_VERSION)"      # fallback from cargo version
+          } else {
+            throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
+          }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Release tag: $tag"
+
+      - name: Publish GitHub Release and upload artifacts
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Windows build ${{ env.RELEASE_TAG }}
+          draft: ${{ env.PUBLISH_MODE == 'draft' }}
+          prerelease: ${{ env.PUBLISH_MODE == 'prerelease' }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            ${{ env.MIRRORD_EXE }}
+            ${{ env.MIRRORD_EXE }}.sha256
+            ${{ env.MIRRORD_LAYER_FILE }}
+            ${{ env.MIRRORD_LAYER_FILE }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       # ==================================
       # === Pretty summary to step tab ===
       # ==================================
@@ -199,7 +253,6 @@ jobs:
             & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
           }
-          # DLL load/unload in child so crashes don't kill the step
           $dllLoadOk = $false
           $dllCrash = $false
           $loader = @"
@@ -237,7 +290,7 @@ jobs:
           $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
           $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($sigExe -eq $true){'✅ Verified'}elseif($sigExe -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
           $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($sigDll -eq $true){'✅ Verified'}elseif($sigDll -eq $false){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
+          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'})); Notes= "child-exit=$childExit" }
           $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
           $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
           $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
