@@ -247,23 +247,90 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Release tag: $tag"
 
-      - name: Publish GitHub Release and upload artifacts
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Windows build ${{ env.RELEASE_TAG }}
-          draft: ${{ env.PUBLISH_MODE == 'draft' }}
-          prerelease: ${{ env.PUBLISH_MODE == 'prerelease' }}
-          target_commitish: ${{ github.sha }}
-          generate_release_notes: true
-          files: |
-            ${{ env.MIRRORD_EXE }}
-            ${{ env.MIRRORD_EXE }}.sha256
-            ${{ env.MIRRORD_LAYER_FILE }}
-            ${{ env.MIRRORD_LAYER_FILE }}.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # GitHub-owned action; allowed by your policy
+- name: Publish GitHub Release and upload artifacts (github-script)
+  if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+  uses: actions/github-script@v7
+  env:
+    RELEASE_TAG: ${{ env.RELEASE_TAG }}
+    PUBLISH_MODE: ${{ env.PUBLISH_MODE }}   # draft|prerelease|no|release (from your inputs)
+    MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
+    MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+  with:
+    script: |
+      const fs = require('fs');
+      const path = require('path');
+      const { owner, repo } = context.repo;
+
+      const tag = process.env.RELEASE_TAG;
+      const isDraft = process.env.PUBLISH_MODE === 'draft';
+      const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
+
+      // Find or create the release
+      let rel;
+      try {
+        const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+        rel = r.data;
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        const r = await github.rest.repos.createRelease({
+          owner, repo,
+          tag_name: tag,
+          name: `Windows build ${tag}`,
+          target_commitish: context.sha,
+          draft: isDraft,
+          prerelease: isPrerelease,
+          generate_release_notes: true,
+        });
+        rel = r.data;
+      }
+
+      // If the existing release's draft/prerelease flags changed, update them
+      if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
+        const r = await github.rest.repos.updateRelease({
+          owner, repo, release_id: rel.id,
+          draft: isDraft, prerelease: isPrerelease,
+          name: `Windows build ${tag}`,
+          target_commitish: context.sha,
+        });
+        rel = r.data;
+      }
+
+      // Helper to (re)upload one file
+      async function upload(file) {
+        if (!file || !fs.existsSync(file)) {
+          core.warning(`Missing file: ${file}`);
+          return;
+        }
+        const name = path.basename(file);
+        // Delete same-named asset if it exists
+        const assets = await github.paginate(
+          github.rest.repos.listReleaseAssets,
+          { owner, repo, release_id: rel.id, per_page: 100 }
+        );
+        const existing = assets.find(a => a.name === name);
+        if (existing) {
+          await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+        }
+        const data = fs.readFileSync(file);
+        await github.rest.repos.uploadReleaseAsset({
+          owner, repo, release_id: rel.id,
+          name,
+          headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
+          data,
+        });
+        core.info(`Uploaded ${name}`);
+      }
+
+      const files = [
+        process.env.MIRRORD_EXE,
+        `${process.env.MIRRORD_EXE}.sha256`,
+        process.env.MIRRORD_LAYER_FILE,
+        `${process.env.MIRRORD_LAYER_FILE}.sha256`,
+      ];
+
+      for (const f of files) { await upload(f); }
+
 
       # ==================================
       # === Pretty summary to step tab ===
