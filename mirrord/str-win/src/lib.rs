@@ -87,12 +87,10 @@ pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> 
             0
         };
 
-        if len > 0 {
-            if let Some(slice) = buffer.get(start..start + len) {
-                let substring = T::slice_to_string(slice);
-                if !substring.is_empty() {
-                    result.push(substring);
-                }
+        if len > 0 && let Some(slice) = buffer.get(start..start + len) {
+            let substring = T::slice_to_string(slice);
+            if !substring.is_empty() {
+                result.push(substring);
             }
         }
 
