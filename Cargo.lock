@@ -4376,7 +4376,6 @@ dependencies = [
  "is_ci",
  "k8s-openapi",
  "kube",
- "libc",
  "local-ip-address",
  "mid",
  "miette",
