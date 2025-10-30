@@ -17,7 +17,9 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
 };
-use mirrord_config::{LayerConfig, target::Target};
+use mirrord_config::{
+    LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
+};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -1288,8 +1290,24 @@ impl OperatorApi<PreparedClientCert> {
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
 
         create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
+
+        // Get the maximum timeout from all DB branch configs
+        let timeout_secs = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
+                    mysql_config,
+                ) => mysql_config.base.creation_timeout_secs,
+            })
+            .max()
+            .unwrap_or(default_creation_timeout_secs());
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
         let created_mysql_branches =
-            create_mysql_branches(&mysql_branch_api, create_mysql_params, &subtask).await?;
+            create_mysql_branches(&mysql_branch_api, create_mysql_params, timeout, &subtask)
+                .await?;
         subtask.success(None);
 
         let mysql_branch_names = reusable_mysql_branches
