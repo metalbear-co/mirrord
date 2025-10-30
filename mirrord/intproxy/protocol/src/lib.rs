@@ -81,6 +81,7 @@ pub struct LayerId(pub u64);
 ///
 /// # Note
 ///
+/// ## Unix
 /// Sharing state between [`exec`](https://man7.org/linux/man-pages/man3/exec.3.html) calls is currently not supported.
 /// Therefore, when the layer initializes, it has empty [`NewSessionRequest::parent_layer`] and does
 /// not inherit any state.
@@ -89,7 +90,13 @@ pub struct NewSessionRequest {
     /// If the layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour,
     /// this is its parent layer id.
     ///
+    /// # Note
+    ///
+    /// ## Unix
     /// The layer inherits state from its parent.
+    ///
+    /// ## Windows
+    /// The layer inherits environment variables from its parent.
     pub parent_layer: Option<LayerId>,
     pub process_info: ProcessInfo,
 }

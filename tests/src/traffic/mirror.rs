@@ -60,7 +60,7 @@ async fn mirror_with_http_header_filter(
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
     serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
 
-    let mirror_process = application
+    let mut mirror_process = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -69,9 +69,7 @@ async fn mirror_with_http_header_filter(
         )
         .await;
 
-    mirror_process
-        .wait_for_line(Duration::from_secs(120), "daemon subscribed")
-        .await;
+    application.wait_until_listening(&mirror_process).await;
 
     // Send request that SHOULD be mirrored
     let client = reqwest::Client::new();
@@ -135,4 +133,10 @@ async fn mirror_with_http_header_filter(
     })
     .await
     .expect("local mirroring app did not receive exactly the expected number of requests on time");
+
+    // Wait for the process to exit after the DELETE request
+    #[cfg(not(target_os = "windows"))]
+    tokio::time::timeout(Duration::from_secs(40), mirror_process.wait())
+        .await
+        .unwrap();
 }
