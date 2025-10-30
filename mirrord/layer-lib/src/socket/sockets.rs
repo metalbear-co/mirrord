@@ -18,62 +18,72 @@ pub type SocketDescriptor = i32;
 #[cfg(windows)]
 pub type SocketDescriptor = SOCKET;
 
-/// Environment variable used to share sockets between parent and child processes via exec (Unix
-/// only)
+/// Environment variable used to share sockets between parent and child processes
 pub const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 
 /// Unified socket collection that can be used by both Unix and Windows layers
 /// This replaces the platform-specific SOCKETS collections
 ///
-/// For Unix: includes shared socket initialization from environment variables
-/// For Windows: starts with empty collection
+/// Initializes from SHARED_SOCKETS_ENV_VAR environment variable if present
 pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> =
     LazyLock::new(|| {
-        #[cfg(unix)]
-        {
-            use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
+        use base64::{Engine, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
 
-            std::env::var(SHARED_SOCKETS_ENV_VAR)
-                .ok()
-                .and_then(|encoded| {
-                    BASE64_URL_SAFE
-                        .decode(encoded.as_bytes())
-                        .inspect_err(|error| {
-                            tracing::warn!(
-                                ?error,
-                                "failed decoding base64 value from {SHARED_SOCKETS_ENV_VAR}"
-                            )
-                        })
-                        .ok()
-                })
-                .and_then(|decoded| {
-                    bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
-                        &decoded,
-                        bincode::config::standard(),
-                    )
+        std::env::var(SHARED_SOCKETS_ENV_VAR)
+            .ok()
+            .and_then(|encoded| {
+                BASE64_URL_SAFE
+                    .decode(encoded.as_bytes())
                     .inspect_err(|error| {
-                        tracing::warn!(?error, "failed parsing shared sockets env value")
+                        tracing::warn!(
+                            ?error,
+                            "failed decoding base64 value from {SHARED_SOCKETS_ENV_VAR}"
+                        )
                     })
                     .ok()
-                })
-                .map(|(fds_and_sockets, _)| {
-                    // Note: FD_CLOEXEC filtering needs to be done by the Unix layer
-                    // since we don't have access to FN_FCNTL here
-                    Mutex::new(HashMap::from_iter(
-                        fds_and_sockets
-                            .into_iter()
-                            .map(|(fd, socket)| (fd, Arc::new(socket))),
-                    ))
-                })
-                .unwrap_or_else(|| Mutex::new(HashMap::new()))
-        }
+            })
+            .and_then(|decoded| {
+                #[cfg(unix)]
+                type SocketHandle = i32;
+                #[cfg(windows)]
+                type SocketHandle = u64;
 
-        #[cfg(windows)]
-        {
-            // Windows doesn't support shared sockets via environment variables
-            Mutex::new(HashMap::new())
-        }
+                bincode::decode_from_slice::<Vec<(SocketHandle, UserSocket)>, _>(
+                    &decoded,
+                    bincode::config::standard(),
+                )
+                .inspect_err(|error| {
+                    tracing::warn!(?error, "failed parsing shared sockets env value")
+                })
+                .ok()
+            })
+            .map(|(fds_and_sockets, _)| {
+                let filtered_sockets = fds_and_sockets.into_iter().map(|(fd, socket)| {
+                    // Do not inherit sockets that are FD_CLOEXEC on Unix
+                    // This requires access to FN_FCNTL which is not available in layer-lib
+                    // Unix layer will need to handle this filtering
+                    (fd as SocketDescriptor, Arc::new(socket))
+                });
+
+                Mutex::new(HashMap::from_iter(filtered_sockets))
+            })
+            .unwrap_or_else(|| Mutex::new(HashMap::new()))
     });
+
+/// Converts the SOCKETS map into a vector of pairs (SOCKET, UserSocket) for serialization.
+/// Used primarily for sharing socket state between parent and child processes.
+///
+/// # Returns
+///
+/// A Result containing a vector of socket pairs, or an error if the lock fails
+pub fn shared_sockets() -> Result<Vec<(u64, UserSocket)>, Box<dyn std::error::Error>> {
+    Ok(SOCKETS
+        .lock()
+        .map_err(|e| format!("Failed to lock sockets: {}", e))?
+        .iter()
+        .map(|(socket, user_socket)| (*socket as u64, user_socket.as_ref().clone()))
+        .collect())
+}
 
 /// Helper function to safely convert socket descriptors to i64 for error handling and logging
 pub fn socket_descriptor_to_i64(socket: SocketDescriptor) -> i64 {
@@ -236,10 +246,21 @@ pub fn is_socket_in_state(
 }
 
 /// Get bound address for a socket if it's in bound state
+///
+/// For localhost addresses that were bound to port 0 (let OS choose), returns the actual
+/// bound address so that local clients can connect to it. For other addresses, returns
+/// the requested address to maintain the mirrord illusion.
 pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
     get_socket_state(socket).and_then(|state| match state {
-        SocketState::Bound(bound) => Some(bound.requested_address),
-        SocketState::Listening(bound) => Some(bound.requested_address),
+        SocketState::Bound(bound) | SocketState::Listening(bound) => {
+            // For localhost binds to port 0, return the actual bound address
+            // so that local clients (like Python's socketpair()) can connect
+            if bound.requested_address.ip().is_loopback() && bound.requested_address.port() == 0 {
+                Some(bound.address)
+            } else {
+                Some(bound.requested_address)
+            }
+        }
         _ => None,
     })
 }

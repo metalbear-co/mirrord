@@ -29,8 +29,6 @@ use thiserror::Error;
 use tracing::{error, info};
 
 use crate::graceful_exit;
-#[cfg(windows)]
-use crate::windows::ConsoleError;
 
 mod ignore_codes {
     //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
@@ -346,8 +344,36 @@ pub enum LayerError {
     GlobalAlreadyInitialized(&'static str),
 
     #[cfg(target_os = "windows")]
-    #[error("Console failure")]
-    WindowsConsoleError(#[from] ConsoleError),
+    #[error("Environment variable for layer id not present")]
+    MissingLayerIdEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Environment variable for layer id not valid u64")]
+    MalformedLayerIdEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Environment variable for config not present")]
+    MissingConfigEnv,
+
+    #[cfg(target_os = "windows")]
+    #[error("Windows process creation failed: {0}")]
+    WindowsProcessCreation(#[from] crate::error::windows::WindowsError),
+
+    #[cfg(target_os = "windows")]
+    #[error("DLL injection failed: {0}")]
+    DllInjection(String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Process synchronization failed: {0}")]
+    ProcessSynchronization(String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Process with PID {0} not found")]
+    ProcessNotFound(u32),
+
+    #[cfg(target_os = "windows")]
+    #[error("Internal error: missing required function pointer for {0}")]
+    MissingFunctionPointer(String),
 }
 
 impl From<SerializationError> for LayerError {
@@ -576,14 +602,21 @@ impl From<HookError> for i64 {
                     }
                     err => format!("Proxy error, connectivity issue or a bug: {err}"),
                 };
+                #[cfg(target_os = "windows")]
                 graceful_exit!(
                     r"{reason}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
                     You can find the `mirrord-intproxy` logs in {}.",
-                    crate::setup::layer_config()
+                    crate::setup::layer_setup()
+                        .layer_config()
                         .internal_proxy
                         .log_destination
                         .display()
+                );
+                #[cfg(not(target_os = "windows"))]
+                graceful_exit!(
+                    r"{reason}.
+                    Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"
                 );
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
