@@ -244,6 +244,14 @@ pub(super) fn bind(
             })?
     };
 
+    // Optional guard: allow disabling incoming UDP interception via env toggle.
+    // When set, UDP binds bypass mirrord and proceed natively.
+    // let disable_udp_incoming = std::env::var("MIRRORD_DISABLE_INCOMING_UDP").is_ok();
+    if socket.kind.is_udp() {
+        tracing::trace!("Skipping incoming UDP interception (MIRRORD_DISABLE_INCOMING_UDP)");
+        return Detour::Bypass(Bypass::DisabledIncoming);
+    }
+
     // we don't use `is_localhost` here since unspecified means to listen
     // on all IPs.
     if incoming_config.ignore_localhost && requested_address.ip().is_loopback() {
