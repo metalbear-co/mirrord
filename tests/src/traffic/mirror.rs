@@ -60,7 +60,7 @@ async fn mirror_with_http_header_filter(
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
     serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
 
-    let mut mirror_process = application
+    let mirror_process = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -139,10 +139,4 @@ async fn mirror_with_http_header_filter(
     })
     .await
     .expect("local mirroring app did not receive exactly the expected number of requests on time");
-
-    // Wait for the process to exit after the DELETE request
-    #[cfg(not(target_os = "windows"))]
-    tokio::time::timeout(Duration::from_secs(40), mirror_process.wait())
-        .await
-        .unwrap();
 }
