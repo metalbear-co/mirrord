@@ -69,7 +69,13 @@ async fn mirror_with_http_header_filter(
         )
         .await;
 
+    #[cfg(target_os = "windows")]
     application.wait_until_listening(&mirror_process).await;
+
+    #[cfg(not(target_os = "windows"))]
+    mirror_process
+        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        .await;
 
     // Send request that SHOULD be mirrored
     let client = reqwest::Client::new();
