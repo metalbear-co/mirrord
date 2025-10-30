@@ -91,13 +91,6 @@ pub(super) struct ConnectResult {
     error: Option<i32>,
 }
 
-impl ConnectResult {
-    pub(super) fn is_failure(&self) -> bool {
-        self.error
-            .is_some_and(|error| error != libc::EINTR && error != libc::EINPROGRESS)
-    }
-}
-
 impl From<i32> for ConnectResult {
     fn from(result: i32) -> Self {
         if result == -1 {
@@ -500,7 +493,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
             in_cluster_address,
         } = response;
 
-        // Connect to the interceptor socket that is listening.
+        // Connect to the socket prepared by the internal proxy.
         let connect_result: ConnectResult = if CALL_CONNECT {
             let layer_address = SockAddr::try_from(layer_address.clone())?;
 
@@ -512,12 +505,43 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
             }
         };
 
-        if connect_result.is_failure() {
+        if let Some(raw_error) = connect_result.error
+            && raw_error != libc::EINTR
+            && raw_error != libc::EINPROGRESS
+        {
+            // We failed to connect to the internal proxy socket.
+            // This is most likely a bug,
+            // so let's try and include here as much info as possible.
+
+            let error = io::Error::from_raw_os_error(raw_error);
+            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+            let socket_name =
+                nix::sys::socket::getsockname::<SockaddrStorage>(sockfd).map(|sockaddr| {
+                    // `Debug` implementation is not very helpful, `ToString` produces a nice
+                    // address.
+                    sockaddr.to_string()
+                });
+            let socket_type = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType);
             error!(
-                "connect -> Failed call to libc::connect with {:#?}",
-                connect_result,
+                sockfd,
+                ?user_socket_info,
+                ?socket_type,
+                socket_addr = ?socket_name,
+
+                outgoing_connect_request_id = connection_id,
+                internal_proxy_socket_address = %layer_address,
+                agent_peer_address = %remote_address,
+                agent_local_address = in_cluster_address.as_ref().map(ToString::to_string),
+
+                raw_error,
+                %error,
+
+                ?SOCKETS,
+
+                "Failed to connect to an internal proxy socket. \
+                This is most likely a bug, please report it.",
             );
-            Err(io::Error::last_os_error())?
+            return Detour::Error(error.into());
         }
 
         let connected = Connected {
