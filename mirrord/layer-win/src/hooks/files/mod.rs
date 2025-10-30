@@ -13,9 +13,9 @@
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::proxy_connection::{
+use mirrord_layer_lib::{proxy_connection::{
     make_proxy_request_no_response, make_proxy_request_with_response,
-};
+}, setup::layer_setup};
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
@@ -251,6 +251,9 @@ unsafe extern "system" fn nt_create_file_hook(
 
         // This is usually the case when a Linux path is provided.
         if ret == STATUS_OBJECT_PATH_NOT_FOUND {
+            // Layer settings.
+            let setup = layer_setup();
+
             // Try to get path.
             let linux_path = remove_root_dir_from_path(name);
 
