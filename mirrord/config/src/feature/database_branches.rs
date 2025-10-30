@@ -173,6 +173,14 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
 
+    /// ### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+    ///
+    /// The timeout in seconds to wait for a database branch to become ready after creation.
+    /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
+    /// performance.
+    #[serde(default = "default_creation_timeout_secs")]
+    pub creation_timeout_secs: u64,
+
     /// ### feature.db_branches.base.version {#feature-db_branches-base-version}
     ///
     /// Mirrord operator uses a default version of the database image unless `version` is given.
@@ -242,4 +250,8 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
 
 fn default_ttl_secs() -> u64 {
     300
+}
+
+pub fn default_creation_timeout_secs() -> u64 {
+    60
 }

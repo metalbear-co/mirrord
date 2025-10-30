@@ -823,6 +823,14 @@
                 }
               ]
             },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
             "id": {
               "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
