@@ -195,6 +195,7 @@ impl MirrordCi {
     /// Very similar to to how `mirrord exec` behaves, except that here we `spawn` a child process
     /// that'll keep running, and we store the pid of this process in [`MirrordCiStore`] so we can
     /// kill it later.
+    #[cfg_attr(target_os = "windows", allow(unused))]
     #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
     pub(super) async fn prepare_command<P: Progress>(
         self,
@@ -282,6 +283,7 @@ impl MirrordCi {
     ///
     /// If one of these files remains available, `mirrord ci start` may fail to execute, as you
     /// always need to match a `mirrord ci start` with a `mirrord ci stop`.
+    #[cfg_attr(target_os = "windows", allow(unused))]
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn clear(self) -> CiResult<()> {
         MirrordCiStore::remove_file().await
