@@ -60,8 +60,6 @@ fn release_detour_guard() -> anyhow::Result<()> {
 }
 
 fn initialize_windows_proxy_connection() -> LayerResult<()> {
-    // init_tracing();
-
     let process_context = detect_process_context()?;
     let connection = create_proxy_connection(&process_context)?;
 

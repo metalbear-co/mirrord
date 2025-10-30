@@ -6,6 +6,7 @@ pub mod process;
 pub mod proxy_connection;
 pub mod setup;
 pub mod socket;
+pub mod file;
 
 pub use error::*;
 pub use proxy_connection::ProxyConnection;

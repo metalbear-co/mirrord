@@ -27,6 +27,7 @@ layer-hook-execution = []
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-progress = { path = "../progress" }
+mirrord-layer = { path = "../layer" }
 mirrord-layer-macro = { path = "../layer/macro" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 
@@ -35,6 +36,7 @@ bincode.workspace = true
 socket2.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+regex.workspace = true
 
 # Tokio for async pipe operations
 tokio = { workspace = true, features = ["rt", "macros"] }
