@@ -75,7 +75,7 @@ mod steal_tests {
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
-        
+
         send_requests(&url, true, Default::default()).await;
 
         application.assert(&process).await;
