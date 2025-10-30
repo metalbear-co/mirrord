@@ -68,7 +68,14 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&process).await;
+
+        #[cfg(not(target_os = "windows"))]
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+        
         send_requests(&url, true, Default::default()).await;
 
         application.assert(&process).await;
