@@ -101,7 +101,13 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let api = Api::<Pod>::namespaced(kube_client.clone(), &service.namespace);
         portforward_http_requests(&api, service).await;
@@ -153,7 +159,13 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
         send_requests(&url, true, Default::default()).await;
 
         application.assert(&process).await;
@@ -186,7 +198,13 @@ mod steal_tests {
             .await;
 
         // Verify that we hooked the socket operations and the agent started stealing.
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Wait for the test app to close the socket and tell us about it.
         process
@@ -306,7 +324,13 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
 
         // Wait for the app to start listening for stolen data before connecting.
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let mut tcp_stream = TcpStream::connect(portforwarder.address()).await.unwrap();
 
@@ -383,8 +407,14 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&client).await;
-
+        
+        #[cfg(not(target_os = "windows"))]
+        client
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+        
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
@@ -425,8 +455,14 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&client).await;
-
+        
+        #[cfg(not(target_os = "windows"))]
+        client
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+        
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
@@ -467,8 +503,15 @@ mod steal_tests {
             )
             .await;
 
-        application.wait_until_listening(&client).await;
 
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&client).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        client
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+        
         // Send a GET that should go through to remote.
         // We retry when we get 502, because the remote app has no readiness probe configured.
         // 502 from a port with an active filtered subscription means that the agent failed to
@@ -545,7 +588,13 @@ mod steal_tests {
             )
             .await;
 
+        #[cfg(target_os = "windows")]
         application.wait_until_listening(&mirrored_process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        mirrored_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Send a GET that should be matched and stolen.
         // And a DELETE that closes the app.
@@ -621,7 +670,13 @@ mod steal_tests {
             )
             .await;
 
-        application.wait_until_listening(&mirrorded_process).await;
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrored_process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        mirrored_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Send a GET that should be matched and stolen.
         let client = reqwest::Client::new();
@@ -683,7 +738,13 @@ mod steal_tests {
             )
             .await;
 
-        application.wait_until_listening(&mirrorded_process).await;
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrored_process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        mirrored_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let mut stream = TcpStream::connect(portforwarder.address()).await.unwrap();
         stream.write_all(tcp_data.as_bytes()).await.unwrap();
@@ -752,7 +813,13 @@ mod steal_tests {
             )
             .await;
 
-        application.wait_until_listening(&mirrorded_process).await;
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrored_process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        mirrored_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Create a websocket connection to test the HTTP upgrade bypass.
         let (ws_stream, _) = connect_async(format!("ws://{}", portforwarder.address()))
@@ -829,7 +896,13 @@ mod steal_tests {
             )
             .await;
 
-        application.wait_until_listening(&mirrorded_process).await;
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrored_process).await;
+        
+        #[cfg(not(target_os = "windows"))]
+        mirrored_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Create a websocket connection to test the HTTP upgrade steal.
         // Add a header so that the request matches the filter.
