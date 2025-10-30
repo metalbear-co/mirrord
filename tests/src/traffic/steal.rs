@@ -670,10 +670,10 @@ mod steal_tests {
             .await;
 
         #[cfg(target_os = "windows")]
-        application.wait_until_listening(&mirrored_process).await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         #[cfg(not(target_os = "windows"))]
-        mirrored_process
+        mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
@@ -738,10 +738,10 @@ mod steal_tests {
             .await;
 
         #[cfg(target_os = "windows")]
-        application.wait_until_listening(&mirrored_process).await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         #[cfg(not(target_os = "windows"))]
-        mirrored_process
+        mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
@@ -813,10 +813,10 @@ mod steal_tests {
             .await;
 
         #[cfg(target_os = "windows")]
-        application.wait_until_listening(&mirrored_process).await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         #[cfg(not(target_os = "windows"))]
-        mirrored_process
+        mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
@@ -896,10 +896,10 @@ mod steal_tests {
             .await;
 
         #[cfg(target_os = "windows")]
-        application.wait_until_listening(&mirrored_process).await;
+        application.wait_until_listening(&mirrorded_process).await;
 
         #[cfg(not(target_os = "windows"))]
-        mirrored_process
+        mirrorded_process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
