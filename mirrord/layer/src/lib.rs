@@ -18,7 +18,7 @@
 // TODO(alex): Get a big `Box` for the big variants.
 #![allow(clippy::result_large_err)]
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 mod layer {
     //! Loaded dynamically with your local process.
     //!
@@ -946,5 +946,5 @@ mod layer {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 pub use layer::*;
