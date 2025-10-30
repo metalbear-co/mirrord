@@ -102,6 +102,10 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
+                udp: FromEnv::new("MIRRORD_UDP_INCOMING")
+                    .source_value(context)
+                    .transpose()?
+                    .unwrap_or(true),
                 ..Default::default()
             },
             IncomingFileConfig::Advanced(advanced) => IncomingConfig {
@@ -136,6 +140,11 @@ impl MirrordConfig for IncomingFileConfig {
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
                 https_delivery: advanced.https_delivery,
                 tls_delivery: advanced.tls_delivery,
+                udp: FromEnv::new("MIRRORD_UDP_INCOMING")
+                    .or(advanced.udp)
+                    .source_value(context)
+                    .transpose()?
+                    .unwrap_or(true),
             },
         };
 
@@ -319,6 +328,13 @@ pub struct IncomingAdvancedFileConfig {
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
     pub tls_delivery: Option<LocalTlsDelivery>,
+
+    /// ### udp
+    ///
+    /// Enable or disable handling of incoming UDP sockets.
+    ///
+    /// Defaults to `true` if not specified.
+    pub udp: Option<bool>,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -494,6 +510,13 @@ pub struct IncomingConfig {
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
     pub tls_delivery: Option<LocalTlsDelivery>,
+
+    /// #### feature.network.incoming.udp {#feature-network-incoming-udp}
+    ///
+    /// Enable or disable handling of incoming UDP sockets.
+    ///
+    /// Defaults to `true`.
+    pub udp: bool,
 }
 
 impl IncomingConfig {

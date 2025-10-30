@@ -244,11 +244,9 @@ pub(super) fn bind(
             })?
     };
 
-    // Optional guard: allow disabling incoming UDP interception via env toggle.
-    // When set, UDP binds bypass mirrord and proceed natively.
-    // let disable_udp_incoming = std::env::var("MIRRORD_DISABLE_INCOMING_UDP").is_ok();
-    if socket.kind.is_udp() {
-        tracing::trace!("Skipping incoming UDP interception (MIRRORD_DISABLE_INCOMING_UDP)");
+    // Config guard: allow disabling incoming UDP interception via config.
+    if socket.kind.is_udp() && crate::setup().incoming_config().udp.not() {
+        tracing::trace!("Skipping incoming UDP interception (incoming.udp = false)");
         return Detour::Bypass(Bypass::DisabledIncoming);
     }
 
