@@ -237,6 +237,12 @@ pub(super) fn bind(
             })?
     };
 
+    // Config guard: allow disabling incoming UDP interception via config.
+    if socket.kind.is_udp() && crate::setup().incoming_config().udp.not() {
+        tracing::trace!("Skipping incoming UDP interception (incoming.udp = false)");
+        return Detour::Bypass(Bypass::DisabledIncoming);
+    }
+
     // we don't use `is_localhost` here since unspecified means to listen
     // on all IPs.
     if incoming_config.ignore_localhost && requested_address.ip().is_loopback() {
