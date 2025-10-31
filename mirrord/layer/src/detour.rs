@@ -10,7 +10,8 @@ use core::{
     ops::{FromResidual, Residual, Try},
 };
 use std::{
-    cell::RefCell, ffi::CString, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock,
+    cell::RefCell, ffi::CString, net::SocketAddr, ops::Deref, os::unix::prelude::*, path::PathBuf,
+    sync::OnceLock,
 };
 
 #[cfg(target_os = "macos")]
@@ -119,8 +120,9 @@ impl<T> HookFn<T> {
 /// Soft-errors that can be recovered from by calling the raw FFI function.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Bypass {
-    /// We're dealing with a socket port value that should be ignored.
-    Port(u16),
+    /// We're dealing with a socket port value that should be ignored, according to the incoming
+    /// config.
+    IgnoredInIncoming(SocketAddr),
 
     /// The socket type does not match one of our handled
     /// [`SocketKind`](crate::socket::SocketKind)s.
@@ -140,7 +142,7 @@ pub(crate) enum Bypass {
     LocalDirStreamNotFound(usize),
 
     /// A conversion from [`SockAddr`](socket2::SockAddr) to
-    /// [`SocketAddr`](std::net::SocketAddr) failed.
+    /// [`SocketAddr`] failed.
     AddressConversion,
 
     /// The socket [`RawFd`] is in an invalid state for the operation.
@@ -198,9 +200,6 @@ pub(crate) enum Bypass {
     #[cfg(target_os = "macos")]
     TooManyArgs,
 
-    /// Socket is connecting to localhots and we're asked to ignore it.
-    IgnoreLocalhost(u16),
-
     /// Application is binding a port, while mirrord is running targetless. A targetless agent does
     /// is not exposed by a service, so bind locally.
     BindWhenTargetless,
@@ -212,7 +211,7 @@ pub(crate) enum Bypass {
     DisabledIncoming,
 
     /// Hostname should be resolved locally.
-    /// Currently this is the case only when the layer operates in the `trace only` mode.
+    /// Currently, this is the case only when the layer operates in the `trace only` mode.
     LocalHostname,
 
     /// DNS query should be done locally.
