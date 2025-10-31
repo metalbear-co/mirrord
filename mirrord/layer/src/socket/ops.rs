@@ -270,6 +270,8 @@ pub(super) fn bind(
         .get_by_left(&requested_address.port())
         .is_some();
 
+    // we don't use `is_localhost` here since unspecified means to listen
+    // on all IPs.
     let will_not_trigger_subscription = (incoming_config.ignore_localhost
         && requested_address.ip().is_loopback())
         || ((matches!(socket.kind, SocketKind::Tcp(_)))
@@ -277,8 +279,6 @@ pub(super) fn bind(
             || crate::setup().is_debugger_port(&requested_address)
             || incoming_config.ignore_ports.contains(&requested_port));
 
-    // we don't use `is_localhost` here since unspecified means to listen
-    // on all IPs.
     if will_not_trigger_subscription && is_requested_in_listen.not() {
         return Detour::Bypass(Bypass::IgnoredInIncoming(requested_address));
     }
@@ -627,19 +627,14 @@ fn connect_to_local_address(
                 .lock()?
                 .iter()
                 .find_map(|(_, socket)| match socket.state {
-                    SocketState::Bound {
-                        bound:
-                            Bound {
-                                requested_address,
-                                address,
-                            },
-                        is_only_bound,
-                    } if is_only_bound.not() => (requested_address.port() == ip_address.port()
+                    SocketState::Listening(Bound {
+                        requested_address,
+                        address,
+                    }) => (requested_address.port() == ip_address.port()
                         && socket.protocol == user_socket_info.protocol)
                         .then(|| SockAddr::from(address)),
                     SocketState::Bound { .. }
                     | SocketState::Initialized
-                    | SocketState::Listening(_)
                     | SocketState::Connected(_) => None,
                 })
                 .map(|rawish_remote_address| unsafe {
