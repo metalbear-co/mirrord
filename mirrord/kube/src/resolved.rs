@@ -209,6 +209,36 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             false
         }
     }
+
+    /// Return the kind of the underlying [`Resource`].
+    pub fn kind(&self) -> Option<String> {
+        match self {
+            ResolvedTarget::Deployment(_) => Some(Deployment::kind(&()).to_string()),
+            ResolvedTarget::Rollout(_) => Some(Rollout::kind(&()).to_string()),
+            ResolvedTarget::Pod(_) => Some(Pod::kind(&()).to_string()),
+            ResolvedTarget::Job(_) => Some(Job::kind(&()).to_string()),
+            ResolvedTarget::CronJob(_) => Some(CronJob::kind(&()).to_string()),
+            ResolvedTarget::StatefulSet(_) => Some(StatefulSet::kind(&()).to_string()),
+            ResolvedTarget::Service(_) => Some(Service::kind(&()).to_string()),
+            ResolvedTarget::ReplicaSet(_) => Some(ReplicaSet::kind(&()).to_string()),
+            ResolvedTarget::Targetless(_) => None,
+        }
+    }
+
+    /// Return the api version of the underlying [`Resource`].
+    pub fn api_version(&self) -> Option<String> {
+        match self {
+            ResolvedTarget::Deployment(_) => Some(Deployment::api_version(&()).to_string()),
+            ResolvedTarget::Rollout(_) => Some(Rollout::api_version(&()).to_string()),
+            ResolvedTarget::Pod(_) => Some(Pod::api_version(&()).to_string()),
+            ResolvedTarget::Job(_) => Some(Job::api_version(&()).to_string()),
+            ResolvedTarget::CronJob(_) => Some(CronJob::api_version(&()).to_string()),
+            ResolvedTarget::StatefulSet(_) => Some(StatefulSet::api_version(&()).to_string()),
+            ResolvedTarget::Service(_) => Some(Service::api_version(&()).to_string()),
+            ResolvedTarget::ReplicaSet(_) => Some(ReplicaSet::api_version(&()).to_string()),
+            ResolvedTarget::Targetless(_) => None,
+        }
+    }
 }
 
 impl ResolvedTarget<false> {
