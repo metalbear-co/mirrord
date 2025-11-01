@@ -116,6 +116,10 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
     pub method_filter: Option<String>,
 
+
+	// REVIEW docs, env
+	pub body_filter: Option<BodyFilter>,
+
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// An array of HTTP filters.
@@ -242,6 +246,19 @@ pub enum InnerFilter {
     Method {
         method: String,
     },
+
+	/// REVIEW docs
+	Body(BodyFilter)
+}
+
+
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum BodyFilter {
+	Json {
+		query: String,
+		matches: String,
+	}
 }
 
 /// <!--${internal}-->
@@ -272,6 +289,9 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         let all_of = None;
         let any_of = None;
 
+		// REVIEW
+		let body_filter = None;
+
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
             .transpose()?;
@@ -280,6 +300,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             header_filter,
             path_filter,
             method_filter,
+			body_filter,
             all_of,
             any_of,
             ports,

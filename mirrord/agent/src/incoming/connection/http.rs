@@ -1,17 +1,20 @@
-use std::fmt;
+use std::{cmp::Ordering, fmt, str::FromStr, time::Duration};
 
 use bytes::Bytes;
 use futures::StreamExt;
-use http_body_util::{StreamBody, combinators::BoxBody};
+use http::header::CONTENT_LENGTH;
+use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
-use mirrord_protocol::tcp::InternalHttpBodyFrame;
+use mirrord_protocol::{batched_body::BatchedBody, tcp::InternalHttpBodyFrame};
 use tokio::{
     runtime::Handle,
+    select,
     sync::{broadcast, mpsc, oneshot},
+    time::error::Elapsed,
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
@@ -177,6 +180,94 @@ impl RedirectedHttp {
         );
         self.runtime_handle.spawn(task.run());
     }
+
+    pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        // TODO(areg) configurable
+        const MAX_BODY_SIZE: usize = 1024 * 64;
+
+        let content_length = self
+            .request
+            .parts
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|t| t.to_str().ok())
+            .and_then(|t| usize::from_str(t).ok());
+
+        if content_length.is_some_and(|l| l > MAX_BODY_SIZE) {
+            return Err(BufferBodyError::BodyTooBig);
+        }
+
+        let mut current_size: usize = self
+            .request
+            .body_head
+            .iter()
+            .take_while(|t| t.is_data())
+            .map(|t| t.data_ref().unwrap().len())
+            .sum();
+
+        if let Some(expected_len) = content_length
+            && expected_len < current_size
+        {
+            tracing::warn!(
+                content_len = expected_len,
+                actual = current_size,
+                "http actual body size exceeded content-length",
+            );
+            return Err(BufferBodyError::BodyTooBig);
+        }
+
+        let Some(tail) = self.request.body_tail.as_mut() else {
+            return Ok(());
+        };
+
+        let rx_until = content_length.unwrap_or(MAX_BODY_SIZE);
+
+        // TODO(areg): make cfgurable
+        tokio::time::timeout(Duration::from_millis(1000), async {
+            while let Some(frame) = tail.frame().await {
+                let frame = frame?;
+                self.request.body_head.push(frame);
+                let frame = self.request.body_head.last().unwrap();
+
+                let Some(data) = frame.data_ref() else {
+                    return Err(BufferBodyError::UnexpectedEOB);
+                };
+
+                current_size += data.len();
+
+                match current_size.cmp(&rx_until) {
+                    Ordering::Less => {}
+                    Ordering::Equal => return Ok(()),
+                    Ordering::Greater => return Err(BufferBodyError::BodyTooBig),
+                }
+            }
+
+            Err(BufferBodyError::UnexpectedEOB)
+        })
+        .await?
+    }
+
+    pub fn body_head(&self) -> Vec<u8> {
+        let mut vec = Vec::new();
+
+        for part in self.request.body_head.iter().take_while(|t| t.is_data()) {
+            vec.extend_from_slice(part.data_ref().unwrap())
+        }
+
+        vec
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BufferBodyError {
+    #[error("io error while receiving http body: {0}")]
+    Hyper(#[from] hyper::Error),
+    #[error("body size was less than content-length")]
+    UnexpectedEOB,
+    #[error("body size exceeded max configured size")]
+    BodyTooBig,
+    #[error("timeout")]
+    Timeout(#[from] Elapsed),
 }
 
 impl fmt::Debug for RedirectedHttp {

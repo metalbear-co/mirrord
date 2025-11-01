@@ -241,6 +241,12 @@ pub enum HttpMethodFilter {
     Other(String),
 }
 
+// REVIEW docs
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
+pub enum HttpBodyFilter {
+    Json { query: String, matches: Filter },
+}
+
 /// Describes different types of HTTP filtering available
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HttpFilter {
@@ -257,6 +263,9 @@ pub enum HttpFilter {
     },
     /// Filter by method ("POST")
     Method(HttpMethodFilter),
+
+    /// Filter by body
+    Body(HttpBodyFilter),
 }
 
 impl Display for HttpFilter {
@@ -293,6 +302,7 @@ impl Display for HttpFilter {
                     Ok(())
                 }
             },
+            HttpFilter::Body(filter) => write!(f, "body={filter}"),
         }
     }
 }

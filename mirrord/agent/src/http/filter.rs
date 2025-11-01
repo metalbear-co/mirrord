@@ -20,6 +20,9 @@ pub enum HttpFilter {
         filters: Vec<HttpFilter>,
     },
     Method(HttpMethodFilter),
+
+    /// Filter based on request body
+    Body(HttpBodyFilter),
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -42,14 +45,35 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Self::Composite { all, filters })
             }
+            mirrord_protocol::tcp::HttpFilter::Body(http_body_filter) => {
+                Ok(Self::Body(http_body_filter.try_into()?))
+            }
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum HttpBodyFilter {
+    Json { query: String, matches: Regex },
+}
+
+impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
+    type Error = fancy_regex::Error;
+
+    fn try_from(value: &mirrord_protocol::tcp::HttpBodyFilter) -> Result<Self, Self::Error> {
+        Ok(match value {
+            mirrord_protocol::tcp::HttpBodyFilter::Json { query, matches } => Self::Json {
+                query: query.clone(),
+                matches: Regex::new(&format!("(?i){matches}"))?,
+            },
+        })
     }
 }
 
 impl HttpFilter {
     /// Checks whether the given request [`Parts`] match this filter.
     #[tracing::instrument(level = Level::DEBUG, skip(parts), ret)]
-    pub fn matches(&self, parts: &mut Parts) -> bool {
+    pub fn matches(&self, parts: &mut Parts, body: Option<&[u8]>) -> bool {
         match self {
             Self::Header(filter) => {
                 let headers = parts.extensions.get_or_insert_with(|| {
@@ -95,11 +119,25 @@ impl HttpFilter {
 
             Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
 
-            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(parts)),
+            Self::Composite { all: true, filters } => {
+                filters.iter().all(|f| f.matches(parts, body))
+            }
             Self::Composite {
                 all: false,
                 filters,
-            } => filters.iter().any(|f| f.matches(parts)),
+            } => filters.iter().any(|f| f.matches(parts, body)),
+            Self::Body(_) => body
+                .and_then(|b| str::from_utf8(b).ok())
+                .and_then(|t| t.find("ligma"))
+                .is_some(),
+        }
+    }
+
+    pub fn needs_body(&self) -> bool {
+        match self {
+            HttpFilter::Composite { filters, .. } => filters.iter().any(|t| t.needs_body()),
+            HttpFilter::Body(_) => true,
+            _ => false,
         }
     }
 }
