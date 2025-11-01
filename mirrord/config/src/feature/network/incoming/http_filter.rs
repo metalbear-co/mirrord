@@ -253,7 +253,7 @@ pub enum InnerFilter {
 
 
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum BodyFilter {
 	Json {
 		query: String,
