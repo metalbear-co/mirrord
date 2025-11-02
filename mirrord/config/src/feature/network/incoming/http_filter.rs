@@ -185,6 +185,7 @@ impl HttpFilterConfig {
             || self.method_filter.is_some()
             || self.all_of.is_some()
             || self.any_of.is_some()
+            || self.body_filter.is_some()
     }
 
     pub fn is_composite(&self) -> bool {
