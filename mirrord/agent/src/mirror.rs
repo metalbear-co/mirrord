@@ -246,7 +246,7 @@ impl TcpMirrorApi {
                             }
 
                             MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                if let Some(filter) = port_filters.get(&http.info.original_destination.port()) &&  !filter.matches(http.parts_mut(), None) {
+                                if let Some(filter) = port_filters.get(&http.info.original_destination.port()) && !filter.matches(http.parts_mut(), None) {
                                    continue;
                                 }
 
