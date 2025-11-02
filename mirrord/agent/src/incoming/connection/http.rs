@@ -9,10 +9,9 @@ use hyper::{
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
-use mirrord_protocol::{batched_body::BatchedBody, tcp::InternalHttpBodyFrame};
+use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
-    select,
     sync::{broadcast, mpsc, oneshot},
     time::error::Elapsed,
 };

@@ -22,7 +22,8 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    incoming::{BufferBodyError, RedirectorTaskError, StealHandle, StolenTraffic},
+    http::filter::HttpFilter,
+    incoming::{BufferBodyError, RedirectedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -184,19 +185,22 @@ impl TcpStealerTask {
             }
         };
 
-        // REVIEW
-        let clients = clients.clone();
-        let filters = filters.clone();
-        // ----
-
-        tokio::spawn(async move {
-            let mut send_to = None; // the client that will receive the request
-            let mut preempted = vec![]; // other clients that could receive the request as well
-            let mut blocked_on_protocol = vec![]; // clients that cannot receive the request due to their protocol version
-
-            let body = if filters.values().any(|f| f.needs_body()) {
+        // Optimize the fast path, no need to spawn a new task and clone clients and filters.
+        if filters.values().all(|f| f.needs_body().not()) {
+            Self::finish_handling_stolen_traffic(
+                filters,
+                clients,
+                http,
+                None,
+                protocol_version_req,
+            )
+            .await;
+        } else {
+            let clients = clients.clone();
+            let filters = filters.clone();
+            tokio::spawn(async move {
                 let result = http.buffer_body().await;
-                match result {
+                let body = match result {
                     Ok(()) => Some(http.body_head()),
                     Err(e) => match e {
                         BufferBodyError::Hyper(err) => {
@@ -207,12 +211,31 @@ impl TcpStealerTask {
                         | BufferBodyError::BodyTooBig
                         | BufferBodyError::Timeout(_) => None,
                     },
-                }
-            } else {
-                None
-            };
+                };
+                Self::finish_handling_stolen_traffic(
+                    &filters,
+                    &clients,
+                    http,
+                    body.as_deref(),
+                    protocol_version_req,
+                )
+                .await;
+            });
+        };
+    }
 
-            filters
+    async fn finish_handling_stolen_traffic(
+        filters: &HashMap<ClientId, HttpFilter>,
+        clients: &HashMap<ClientId, Client>,
+        mut http: RedirectedHttp,
+        body: Option<&[u8]>,
+        protocol_version_req: Cow<'_, semver::VersionReq>,
+    ) {
+        let mut send_to = None; // the client that will receive the request
+        let mut preempted = vec![]; // other clients that could receive the request as well
+        let mut blocked_on_protocol = vec![]; // clients that cannot receive the request due to their protocol version
+
+        filters
             .iter()
 				.filter(|(_, filter)| filter.matches(http.parts_mut(), body.as_deref()))
             .filter_map(|(client_id, _)| {
@@ -235,22 +258,22 @@ impl TcpStealerTask {
                 }
             });
 
-            for client in preempted {
-                let _ = client
-                    .message_tx
-                    .send(StealerMessage::Log(LogMessage::warn(format!(
-                        "An HTTP request was stolen by another user. \
+        for client in preempted {
+            let _ = client
+                .message_tx
+                .send(StealerMessage::Log(LogMessage::warn(format!(
+                    "An HTTP request was stolen by another user. \
                     METHOD=({}) URI=({}), HEADERS=({:?}) PORT=({})",
-                        http.parts().method,
-                        http.parts().uri,
-                        http.parts().headers,
-                        http.info().original_destination.port(),
-                    ))))
-                    .await;
-            }
+                    http.parts().method,
+                    http.parts().uri,
+                    http.parts().headers,
+                    http.info().original_destination.port(),
+                ))))
+                .await;
+        }
 
-            for client in blocked_on_protocol {
-                let _ = client.message_tx.send(StealerMessage::Log(LogMessage::error(format!(
+        for client in blocked_on_protocol {
+            let _ = client.message_tx.send(StealerMessage::Log(LogMessage::error(format!(
                     "An HTTP request was not stolen due to mirrord-protocol version requirement: {}. \
                     METHOD=({}) URI=({}), HEADERS=({:?}) PORT=({})",
                     protocol_version_req,
@@ -259,17 +282,16 @@ impl TcpStealerTask {
                     http.parts().headers,
                     http.info().original_destination.port(),
             )))).await;
-            }
+        }
 
-            if let Some(client) = send_to {
-                let _ = client
-                    .message_tx
-                    .send(StealerMessage::StolenHttp(http.steal()))
-                    .await;
-            } else {
-                http.pass_through();
-            }
-        });
+        if let Some(client) = send_to {
+            let _ = client
+                .message_tx
+                .send(StealerMessage::StolenHttp(http.steal()))
+                .await;
+        } else {
+            http.pass_through();
+        }
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::ERROR))]
