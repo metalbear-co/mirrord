@@ -199,8 +199,10 @@ impl TcpStealerTask {
                 match result {
                     Ok(()) => Some(http.body_head()),
                     Err(e) => match e {
-						// REVIEW
-                        BufferBodyError::Hyper(err) => None,
+                        BufferBodyError::Hyper(err) => {
+                            tracing::trace!(?err, "error while receiving http body for filter");
+                            None
+                        }
                         BufferBodyError::UnexpectedEOB
                         | BufferBodyError::BodyTooBig
                         | BufferBodyError::Timeout(_) => None,

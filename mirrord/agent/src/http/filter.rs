@@ -133,18 +133,21 @@ impl HttpFilter {
             Self::Body(filter) => {
                 let Some(body) = body else { return false };
 
-                // TODO(areg): err handling and logs
                 match filter {
                     HttpBodyFilter::Json { query, matches } => {
-                        let Ok(json) = serde_json::from_slice::<Value>(body) else {
-                            return false;
+                        let json = match serde_json::from_slice::<Value>(body) {
+                            Ok(json) => json,
+                            Err(error) => {
+                                tracing::trace!(?error, "json filter failed to parse body json");
+                                return false;
+                            }
                         };
                         let Ok(results) = json.query(&query) else {
                             return false;
                         };
 
-                        // TODO(areg): ask Liron how we should handle multiple values.
-                        // REVIEW: how should we handle non-string values?
+                        // TODO(areg): ask Liron about the exact semantics of this. How do we handle
+                        // no matches? multiple matches? nonstring matches?
 
                         results.is_empty().not()
                             && results.iter().all(|v| {
