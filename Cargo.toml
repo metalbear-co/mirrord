@@ -116,6 +116,9 @@ fancy-regex = { version = "0.14" }
 enum_dispatch = "0.3"
 dotenvy = "0.15"
 
+# Used by `agent`
+jsonpath-rust = "1.0.4"
+
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
 # There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
 hyper = { version = "1", features = ["full"] }

@@ -74,6 +74,7 @@ axum = { version = "0.7", features = ["macros"] }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git", rev = "86bba7dbe971e166d5153227dd0099fe47da4489" }
 procfs = "0.17.0"
 rcgen.workspace = true
+jsonpath-rust.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pem.workspace = true

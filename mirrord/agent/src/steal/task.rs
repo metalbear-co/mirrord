@@ -196,10 +196,10 @@ impl TcpStealerTask {
 
             let body = if filters.values().any(|f| f.needs_body()) {
                 let result = http.buffer_body().await;
-                tracing::error!(?result, "found body filter");
                 match result {
                     Ok(()) => Some(http.body_head()),
                     Err(e) => match e {
+						// REVIEW
                         BufferBodyError::Hyper(err) => None,
                         BufferBodyError::UnexpectedEOB
                         | BufferBodyError::BodyTooBig

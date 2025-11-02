@@ -1,6 +1,10 @@
+use std::ops::Not;
+
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
+use jsonpath_rust::JsonPath;
 use mirrord_protocol::tcp::HttpMethodFilter;
+use serde_json::Value;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
@@ -64,7 +68,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
         Ok(match value {
             mirrord_protocol::tcp::HttpBodyFilter::Json { query, matches } => Self::Json {
                 query: query.clone(),
-                matches: Regex::new(&format!("(?i){matches}"))?,
+                matches: Regex::new(matches)?,
             },
         })
     }
@@ -72,7 +76,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
 
 impl HttpFilter {
     /// Checks whether the given request [`Parts`] match this filter.
-    #[tracing::instrument(level = Level::DEBUG, skip(parts), ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip(parts, body), ret)]
     pub fn matches(&self, parts: &mut Parts, body: Option<&[u8]>) -> bool {
         match self {
             Self::Header(filter) => {
@@ -126,10 +130,33 @@ impl HttpFilter {
                 all: false,
                 filters,
             } => filters.iter().any(|f| f.matches(parts, body)),
-            Self::Body(_) => body
-                .and_then(|b| str::from_utf8(b).ok())
-                .and_then(|t| t.find("ligma"))
-                .is_some(),
+            Self::Body(filter) => {
+                let Some(body) = body else { return false };
+
+                // TODO(areg): err handling and logs
+                match filter {
+                    HttpBodyFilter::Json { query, matches } => {
+                        let Ok(json) = serde_json::from_slice::<Value>(body) else {
+                            return false;
+                        };
+                        let Ok(results) = json.query(&query) else {
+                            return false;
+                        };
+
+                        // TODO(areg): ask Liron how we should handle multiple values.
+                        // REVIEW: how should we handle non-string values?
+
+                        results.is_empty().not()
+                            && results.iter().all(|v| {
+                                match v {
+                                    Value::String(s) => matches.is_match(s),
+                                    other => matches.is_match(&other.to_string()),
+                                }
+                                .is_ok_and(|t| t)
+                            })
+                    }
+                }
+            }
         }
     }
 
