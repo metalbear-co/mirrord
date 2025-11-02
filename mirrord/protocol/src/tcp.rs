@@ -241,7 +241,7 @@ pub enum HttpMethodFilter {
     Other(String),
 }
 
-// REVIEW docs
+/// Filter based on the contents of the body.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
 pub enum HttpBodyFilter {
     Json { query: String, matches: Filter },

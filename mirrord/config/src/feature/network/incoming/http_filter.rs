@@ -116,7 +116,11 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
     pub method_filter: Option<String>,
 
-    // REVIEW docs, env
+    // TODO(areg): read from env?
+    /// ##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
+    ///
+    /// Matches the request based on the contents of its body. Currently only JSON body filtering
+    /// is supported.
     pub body_filter: Option<BodyFilter>,
 
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
@@ -247,13 +251,65 @@ pub enum InnerFilter {
         method: String,
     },
 
-    /// REVIEW docs
+    /// ##### feature.network.incoming.inner_filter.body_filter {#feature-network-incoming-inner-body-filter}
+    ///
+    /// Matches the request based on the contents of its body. Currently only JSON body filtering is
+    /// supported.
     Body(BodyFilter),
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum BodyFilter {
+    /// ##### feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}
+    ///
+    /// Tries to parse the body as a JSON object and find (a) matching subobjects(s).
+    ///
+    /// `query` should be a valid JSONPath (RFC 9535) query string.
+    //
+    /// `matches` should be a regex. Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate
+    ///
+    /// Example:
+    /// ```json
+    /// "http_filter": {
+    ///   "body_filter": {
+    ///     "type": "json",
+    ///     "query": "$.library.books[*]",
+    ///     "matches": "^\\d{3,5}$"
+    ///   }
+    /// }
+    /// ```
+    /// will match
+    /// ```json
+    /// {
+    ///   "library": {
+    ///     "books": [
+    ///       34555,
+    ///       1233,
+    ///       234
+    ///       23432
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    /// TODO(areg): Specify how edge cases (ask Liron) are handled
+    ///
+    /// To use with with `all_of` or `any_of`, use the following syntax:
+    /// ```json
+    /// "http_filter": {
+    ///   "all_of": [
+    ///     {
+    ///       "path": "/buildings"
+    ///     },
+    ///     {
+    ///       "type": "json",
+    ///       "query": "$.library.books[*]",
+    ///       "matches": "^\\d{3,5}$"
+    ///     }
+    ///   ]
+    /// }
+    /// ```
     Json { query: String, matches: String },
 }
 
@@ -285,7 +341,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         let all_of = None;
         let any_of = None;
 
-        // REVIEW
+        // TODO(areg) read from env?
         let body_filter = None;
 
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
