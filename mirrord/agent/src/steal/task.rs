@@ -15,7 +15,7 @@ use mirrord_protocol::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::Level;
+use tracing::{Instrument, Level};
 
 use super::{
     Command, StealerCommand, StealerMessage,
@@ -187,6 +187,7 @@ impl TcpStealerTask {
 
         // Optimize the fast path, no need to spawn a new task and clone clients and filters.
         if filters.values().all(|f| f.needs_body().not()) {
+            tracing::trace!("have no body filters, using fast path");
             Self::finish_handling_stolen_traffic(
                 filters,
                 clients,
@@ -196,31 +197,35 @@ impl TcpStealerTask {
             )
             .await;
         } else {
+            let span = tracing::trace_span!("have body filters, spawning new task to buffer request body");
             let clients = clients.clone();
             let filters = filters.clone();
-            tokio::spawn(async move {
-                let result = http.buffer_body().await;
-                let body = match result {
-                    Ok(()) => Some(http.body_head()),
-                    Err(e) => match e {
-                        BufferBodyError::Hyper(err) => {
-                            tracing::trace!(?err, "error while receiving http body for filter");
-                            None
-                        }
-                        BufferBodyError::UnexpectedEOB
-                        | BufferBodyError::BodyTooBig
-                        | BufferBodyError::Timeout(_) => None,
-                    },
-                };
-                Self::finish_handling_stolen_traffic(
-                    &filters,
-                    &clients,
-                    http,
-                    body.as_deref(),
-                    protocol_version_req,
-                )
-                .await;
-            });
+            tokio::spawn(
+                async move {
+                    let result = http.buffer_body().await;
+                    let body = match result {
+                        Ok(()) => Some(http.body_head()),
+                        Err(e) => match e {
+                            BufferBodyError::Hyper(err) => {
+                                tracing::warn!(?err, "error while receiving http body for filter");
+                                None
+                            }
+                            BufferBodyError::UnexpectedEOB
+                            | BufferBodyError::BodyTooBig
+                            | BufferBodyError::Timeout(_) => None,
+                        },
+                    };
+                    Self::finish_handling_stolen_traffic(
+                        &filters,
+                        &clients,
+                        http,
+                        body.as_deref(),
+                        protocol_version_req,
+                    )
+                    .await;
+                }
+                .instrument(span),
+            );
         };
     }
 
