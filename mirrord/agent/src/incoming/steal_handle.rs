@@ -43,7 +43,7 @@ impl StealHandle {
     /// If this method returns [`Ok`], it means that the port redirection
     /// was done in the [`RedirectorTask`](super::RedirectorTask),
     /// and incoming connections are now being stolen.
-    pub async fn steal(&mut self, port: u16) -> Result<(), RedirectorTaskError> {
+    pub async fn steal(&mut self, port: u16, needs_body: bool) -> Result<(), RedirectorTaskError> {
         if self.stolen_ports.contains_key(&port) {
             return Ok(());
         };
@@ -51,7 +51,11 @@ impl StealHandle {
         let (receiver_tx, receiver_rx) = oneshot::channel();
         if self
             .message_tx
-            .send(RedirectRequest::Steal { port, receiver_tx })
+            .send(RedirectRequest::Steal {
+                port,
+                receiver_tx,
+                needs_body,
+            })
             .await
             .is_err()
         {

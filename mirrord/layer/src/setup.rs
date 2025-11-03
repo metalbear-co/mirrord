@@ -327,7 +327,9 @@ impl IncomingMode {
                 InnerFilter::Method { method } => HttpFilter::Method(
                     HttpMethodFilter::from_str(method).expect("invalid method filter string"),
                 ),
-                InnerFilter::Body(body_filter) => HttpFilter::Body(Self::parse_body_filter(body_filter)),
+                InnerFilter::Body(body_filter) => {
+                    HttpFilter::Body(Self::parse_body_filter(body_filter))
+                }
             })
             .collect();
 

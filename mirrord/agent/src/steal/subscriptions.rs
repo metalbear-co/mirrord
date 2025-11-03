@@ -118,7 +118,9 @@ impl PortSubscriptions {
             },
 
             Entry::Vacant(e) => {
-                self.handle.steal(port).await?;
+                self.handle
+                    .steal(port, filter.as_ref().is_some_and(|f| f.needs_body()))
+                    .await?;
                 if filter.is_some() {
                     STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
                 } else {

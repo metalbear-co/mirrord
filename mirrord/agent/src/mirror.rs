@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     error::Report,
-    ops::RangeInclusive,
+    ops::{Not, RangeInclusive},
 };
 
 use futures::StreamExt;
@@ -90,16 +90,20 @@ impl TcpMirrorApi {
                     incoming_streams.remove(&id);
                 }
                 LayerTcp::PortSubscribe(port) => {
-                    mirror_handle.mirror(port).await?;
+                    mirror_handle.mirror(port, false).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
                 LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
                     // Convert from protocol HttpFilter to agent HttpFilter
                     let agent_filter =
                         HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
+
+                    mirror_handle
+                        .mirror(port, agent_filter.needs_body())
+                        .await?;
+
                     port_filters.insert(port, agent_filter);
 
-                    mirror_handle.mirror(port).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
                 LayerTcp::PortUnsubscribe(port) => {
@@ -246,8 +250,10 @@ impl TcpMirrorApi {
                             }
 
                             MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                if let Some(filter) = port_filters.get(&http.info.original_destination.port()) && !filter.matches(http.parts_mut(), None) {
-                                   continue;
+                                let port = http.info.original_destination.port();
+                                let (parts, body) = http.parts_and_body();
+                                if let Some(filter) = port_filters.get(&port) && filter.matches(parts, body).not() {
+                                    continue;
                                 }
 
                                 let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;

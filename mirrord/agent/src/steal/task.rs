@@ -15,15 +15,14 @@ use mirrord_protocol::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, Level};
+use tracing::Level;
 
 use super::{
     Command, StealerCommand, StealerMessage,
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    http::filter::HttpFilter,
-    incoming::{BufferBodyError, RedirectedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
+    incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -185,64 +184,15 @@ impl TcpStealerTask {
             }
         };
 
-        // Optimize the fast path, no need to spawn a new task and clone clients and filters.
-        if filters.values().all(|f| f.needs_body().not()) {
-            tracing::trace!("have no body filters, using fast path");
-            Self::finish_handling_stolen_traffic(
-                filters,
-                clients,
-                http,
-                None,
-                protocol_version_req,
-            )
-            .await;
-        } else {
-            let span = tracing::trace_span!("have body filters, spawning new task to buffer request body");
-            let clients = clients.clone();
-            let filters = filters.clone();
-            tokio::spawn(
-                async move {
-                    let result = http.buffer_body().await;
-                    let body = match result {
-                        Ok(()) => Some(http.body_head()),
-                        Err(e) => match e {
-                            BufferBodyError::Hyper(err) => {
-                                tracing::warn!(?err, "error while receiving http body for filter");
-                                None
-                            }
-                            BufferBodyError::UnexpectedEOB
-                            | BufferBodyError::BodyTooBig
-                            | BufferBodyError::Timeout(_) => None,
-                        },
-                    };
-                    Self::finish_handling_stolen_traffic(
-                        &filters,
-                        &clients,
-                        http,
-                        body.as_deref(),
-                        protocol_version_req,
-                    )
-                    .await;
-                }
-                .instrument(span),
-            );
-        };
-    }
-
-    async fn finish_handling_stolen_traffic(
-        filters: &HashMap<ClientId, HttpFilter>,
-        clients: &HashMap<ClientId, Client>,
-        mut http: RedirectedHttp,
-        body: Option<&[u8]>,
-        protocol_version_req: Cow<'_, semver::VersionReq>,
-    ) {
         let mut send_to = None; // the client that will receive the request
         let mut preempted = vec![]; // other clients that could receive the request as well
         let mut blocked_on_protocol = vec![]; // clients that cannot receive the request due to their protocol version
 
+        let (parts, body) = http.parts_and_body();
+
         filters
             .iter()
-				.filter(|(_, filter)| filter.matches(http.parts_mut(), body.as_deref()))
+            .filter(|(_, filter)| filter.matches(parts, body))
             .filter_map(|(client_id, _)| {
                 clients.get(client_id).or_else(|| {
                     tracing::error!(
@@ -358,7 +308,7 @@ impl fmt::Debug for TcpStealerTask {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Client {
     message_tx: mpsc::Sender<StealerMessage>,
     protocol_version: ClientProtocolVersion,

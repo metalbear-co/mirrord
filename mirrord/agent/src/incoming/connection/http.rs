@@ -1,4 +1,11 @@
-use std::{cmp::Ordering, fmt, str::FromStr, time::Duration};
+use std::{
+    cmp::Ordering,
+    fmt::{self, Debug},
+    ops::Not,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -16,6 +23,7 @@ use tokio::{
     time::error::Elapsed,
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
+use tracing::{Instrument, Span, instrument};
 
 use super::{ConnectionInfo, IncomingStream};
 use crate::{
@@ -25,6 +33,41 @@ use crate::{
         connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
     },
 };
+
+#[derive(Clone)]
+enum BufferedBody {
+    Empty,
+    Full(Arc<Vec<u8>>),
+    Partial(Arc<Vec<u8>>),
+}
+
+impl Debug for BufferedBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "Empty"),
+            Self::Full(buf) => f.debug_struct("Full").field("length", &buf.len()).finish(),
+            Self::Partial(buf) => f
+                .debug_struct("Partial")
+                .field("length", &buf.len())
+                .finish(),
+        }
+    }
+}
+
+impl BufferedBody {
+    #[inline]
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    #[inline]
+    fn as_full(&self) -> Option<&[u8]> {
+        match self {
+            BufferedBody::Full(full) => Some(&full),
+            _ => None,
+        }
+    }
+}
 
 /// A redirected HTTP request.
 ///
@@ -43,6 +86,8 @@ pub struct RedirectedHttp {
 
     /// Configuration of the RedirectorTask that created this
     redirector_config: RedirectorTaskConfig,
+
+    buffered_body: BufferedBody,
 }
 
 impl RedirectedHttp {
@@ -60,6 +105,7 @@ impl RedirectedHttp {
             mirror_tx: None,
             runtime_handle: Handle::current(),
             redirector_config,
+            buffered_body: BufferedBody::Empty,
         }
     }
 
@@ -71,8 +117,8 @@ impl RedirectedHttp {
         &self.request.parts
     }
 
-    pub fn parts_mut(&mut self) -> &mut request::Parts {
-        &mut self.request.parts
+    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<&[u8]>) {
+        (&mut self.request.parts, self.buffered_body.as_full())
     }
 
     /// Acquires a mirror handle to this request.
@@ -119,6 +165,7 @@ impl RedirectedHttp {
             },
             parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
+            buffered_body: self.buffered_body.clone(),
         }
     }
 
@@ -180,7 +227,16 @@ impl RedirectedHttp {
         self.runtime_handle.spawn(task.run());
     }
 
+    #[instrument(level = "trace", ret, err)]
     pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        if self.buffered_body.is_empty().not() {
+            tracing::error!(
+                buffered_body = ?self.buffered_body,
+                "buffer_body called more than once. This is a bug, please report."
+            );
+            return Ok(());
+        }
+
         // TODO(areg) configurable
         const MAX_BODY_SIZE: usize = 1024 * 64;
 
@@ -196,64 +252,84 @@ impl RedirectedHttp {
             return Err(BufferBodyError::BodyTooBig);
         }
 
-        let mut current_size: usize = self
+        let mut buffered = Vec::new();
+
+        // This is not nice because it could be done with a single
+        // scan but drain_while isn't a thing :(
+        let data_frame_count = self
             .request
             .body_head
             .iter()
-            .take_while(|t| t.is_data())
-            .map(|t| t.data_ref().unwrap().len())
-            .sum();
+            .position(|t| t.is_data().not())
+            .unwrap_or(self.request.body_head.len());
 
-        if let Some(expected_len) = content_length
-            && expected_len < current_size
-        {
-            tracing::warn!(
-                content_len = expected_len,
-                actual = current_size,
-                "http actual body size exceeded content-length",
-            );
-            return Err(BufferBodyError::BodyTooBig);
+        for frame in self.request.body_head.drain(..data_frame_count) {
+            // We take only the data frames
+            let frame = frame.into_data().unwrap();
+
+            buffered.extend_from_slice(&frame);
+
+            if let Some(expected_len) = content_length
+                && expected_len < buffered.len()
+            {
+                tracing::warn!(
+                    content_len = expected_len,
+                    actual_at_least = buffered.len(),
+                    "http actual body size exceeded content-length",
+                );
+                self.buffered_body = BufferedBody::Partial(Arc::new(buffered));
+                return Err(BufferBodyError::BodyTooBig);
+            }
         }
-
-        let Some(tail) = self.request.body_tail.as_mut() else {
-            return Ok(());
-        };
 
         let rx_until = content_length.unwrap_or(MAX_BODY_SIZE);
 
+        let Some(tail) = self.request.body_tail.as_mut() else {
+            tracing::debug!("request has no tail, bailing early");
+            self.buffered_body = BufferedBody::Full(Arc::new(buffered));
+            return Ok(());
+        };
+
         // TODO(areg): make cfgurable
-        tokio::time::timeout(Duration::from_millis(1000), async {
-            while let Some(frame) = tail.frame().await {
-                let frame = frame?;
-                self.request.body_head.push(frame);
-                let frame = self.request.body_head.last().unwrap();
+        let buffered = tokio::time::timeout(
+            Duration::from_millis(1000),
+            async {
+                while let Some(frame) = tail.frame().await {
+                    let frame = match frame {
+                        Ok(f) => f,
+                        Err(err) => return Err((err.into(), buffered)),
+                    };
 
-                let Some(data) = frame.data_ref() else {
-                    return Err(BufferBodyError::UnexpectedEOB);
-                };
+                    let Some(data) = frame.data_ref() else {
+                        return Err((BufferBodyError::UnexpectedEOB, buffered));
+                    };
 
-                current_size += data.len();
+                    buffered.extend_from_slice(&data);
 
-                match current_size.cmp(&rx_until) {
-                    Ordering::Less => {}
-                    Ordering::Equal => return Ok(()),
-                    Ordering::Greater => return Err(BufferBodyError::BodyTooBig),
+                    match buffered.len().cmp(&rx_until) {
+                        Ordering::Less => {}
+                        Ordering::Equal => return Ok(buffered),
+                        Ordering::Greater => return Err((BufferBodyError::BodyTooBig, buffered)),
+                    }
                 }
+
+                Err((BufferBodyError::UnexpectedEOB, buffered))
             }
+            .instrument(Span::current()),
+        )
+        .await?;
 
-            Err(BufferBodyError::UnexpectedEOB)
-        })
-        .await?
-    }
-
-    pub fn body_head(&self) -> Vec<u8> {
-        let mut vec = Vec::new();
-
-        for part in self.request.body_head.iter().take_while(|t| t.is_data()) {
-            vec.extend_from_slice(part.data_ref().unwrap())
+        match buffered {
+            Ok(buffered) => {
+                self.buffered_body = BufferedBody::Full(Arc::new(buffered));
+                Ok(())
+            }
+            Err((error, buffered)) => {
+                tracing::warn!(?error, "failed to buffer request body");
+                self.buffered_body = BufferedBody::Partial(Arc::new(buffered));
+                Err(error) // will be logged by #[instrument]
+            }
         }
-
-        vec
     }
 }
 
@@ -269,11 +345,12 @@ pub enum BufferBodyError {
     Timeout(#[from] Elapsed),
 }
 
-impl fmt::Debug for RedirectedHttp {
+impl Debug for RedirectedHttp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedirectedHttp")
             .field("info", &self.info)
             .field("request", &self.request)
+            .field("buffered_body", &self.buffered_body)
             .finish()
     }
 }
@@ -288,7 +365,7 @@ pub struct StolenHttp {
     pub redirector_config: RedirectorTaskConfig,
 }
 
-impl fmt::Debug for StolenHttp {
+impl Debug for StolenHttp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StolenHttp")
             .field("info", &self.info)
@@ -394,16 +471,19 @@ pub struct MirroredHttp {
     pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
+
+    buffered_body: BufferedBody,
 }
 
 impl MirroredHttp {
-    /// Returns a mutable reference to the request parts
-    pub fn parts_mut(&mut self) -> &mut request::Parts {
-        &mut self.parts
+    /// Returns a mutable reference to the request parts and a shared
+    /// reference to buffered body, if any.
+    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<&[u8]>) {
+        (&mut self.parts, self.buffered_body.as_full())
     }
 }
 
-impl fmt::Debug for MirroredHttp {
+impl Debug for MirroredHttp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MirroredHttp")
             .field("info", &self.info)
