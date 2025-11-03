@@ -170,8 +170,8 @@ We're available on [Slack](https://metalbear.co/slack) for any questions.
 Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
 
 We always appreciate hearing how mirrord has made a difference for our users.  
-Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord — and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization!
-
+Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
+and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
 
 ## Code of Conduct
 
