@@ -442,7 +442,7 @@ jobs:
         run: csrutil status
       # Build layer before linting because the `mirrord` crate expects `MIRRORD_LAYER_FILE_MACOS_ARM64` to point to an existing file.
       - name: build universal layer
-        run: ./scripts/build_fat_mac.sh
+        run: ./scripts/build_layer_mac.sh
       - name: lint
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord-sip UT
