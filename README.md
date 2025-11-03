@@ -169,6 +169,10 @@ We're available on [Slack](https://metalbear.co/slack) for any questions.
 
 Join our [Slack](https://metalbear.co/slack) for questions, support and fun.
 
+We love hearing from teams using mirrord and how it has helped them.  
+Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord — and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization!
+
+
 ## Code of Conduct
 
 We take our community seriously and we are dedicated to providing a safe and welcoming environment for everyone.
