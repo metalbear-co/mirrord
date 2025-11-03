@@ -7,8 +7,7 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-"$SCRIPT_DIR/build_layer_mac.sh" "$@"
+./scripts/build_layer_mac.sh "$@"
 
 # build mirrord package - both targets require MIRRORD_LAYER_FILE_MACOS_ARM64 var
 MIRRORD_LAYER_FILE_MACOS_ARM64=../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib MIRRORD_LAYER_FILE=../../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo build "$@" -p mirrord --target=aarch64-apple-darwin
