@@ -2,7 +2,7 @@
 
 We're proud to be used by the most innovative teams around the world! If you're using mirrord, feel free to open a pull request and add your organization below.
 
-| Company | More Info |
+| Company | More Info* |
 |--------|----------|
 | [Vivint](https://www.vivint.com) | [User Story](https://metalbear.com/mirrord/stories/vivint/) |
 | [Carousell](https://www.carousell.sg) | [User Story](https://metalbear.com/mirrord/stories/carousell/) |
@@ -17,6 +17,8 @@ We're proud to be used by the most innovative teams around the world! If you're 
 | [BforeAI](https://bfore.ai) | [User Story](https://metalbear.com/mirrord/stories/bfore-ai/) |
 | [Utila](https://utila.io) | [User Story](https://metalbear.com/mirrord/stories/utila/) |
 | [Savvy Security](https://www.savvy.security) | [User Story](https://metalbear.com/mirrord/stories/savvy/) |
+
+\* Optional: link to a blog post, tweet, internal write-up, or leave blank.
 
 ---
 
