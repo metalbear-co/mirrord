@@ -24,6 +24,7 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},
@@ -100,6 +101,9 @@ pub struct IntProxy {
 
     /// Interval for logging connected process information
     process_logging_interval: Interval,
+
+    /// Send handle for the agent connection
+    agent_tx: TxHandle<Client>,
 }
 
 impl IntProxy {
@@ -122,20 +126,16 @@ impl IntProxy {
         experimental: &ExperimentalConfig,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
-            Default::default();
+            BackgroundTasks::new(agent_conn.connection.tx_handle());
 
-        let agent_conn_reconnectable = agent_conn.reconnectable();
-
-        let agent = background_tasks.register_restartable(
-            agent_conn,
-            MainTaskId::AgentConnection,
-            Self::CHANNEL_SIZE,
-        );
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
             MainTaskId::LayerInitializer,
             Self::CHANNEL_SIZE,
         );
+
+        let agent_conn_reconnectable = agent_conn.reconnectable();
+
         // We need to negotiate mirrord-protocol version
         // before we can process layers' requests.
         //
@@ -178,6 +178,14 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
+        let agent_tx = agent_conn.connection.tx_handle();
+
+        let agent = background_tasks.register_restartable(
+            agent_conn,
+            MainTaskId::AgentConnection,
+            Self::CHANNEL_SIZE,
+        );
+
         let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -204,6 +212,7 @@ impl IntProxy {
             ping_pong_update_allowed: false,
             connected_layers: HashMap::new(),
             process_logging_interval,
+            agent_tx,
         }
     }
 
@@ -246,8 +255,7 @@ impl IntProxy {
         first_timeout: Duration,
         idle_timeout: Duration,
     ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
-        self.task_txs
-            .agent
+        self.agent_tx
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
@@ -314,7 +322,7 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), ProxyRuntimeError> {
         match msg {
-            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_) | ProxyMessage::ToAgent(_)
+            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_)
                 if self.reconnect_task_queue.is_some() =>
             {
                 // We are in reconnect state so should queue this message.
@@ -369,7 +377,6 @@ impl IntProxy {
                 }
                 self.handle_layer_message(msg).await?
             }
-            ProxyMessage::ToAgent(msg) => self.task_txs.agent.send(msg).await,
             ProxyMessage::ToLayer(msg) => {
                 let ToLayer {
                     message,
@@ -474,10 +481,7 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::OperatorPing(id) => {
-                self.task_txs
-                    .agent
-                    .send(ClientMessage::OperatorPong(id))
-                    .await
+                self.agent_tx.send(ClientMessage::OperatorPong(id)).await
             }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
             DaemonMessage::TcpOutgoing(msg) => {
@@ -525,7 +529,7 @@ impl IntProxy {
                 }
 
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-                    self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
+                    self.agent_tx.send(ClientMessage::ReadyForLogs).await;
                 }
 
                 self.task_txs
@@ -659,8 +663,7 @@ impl IntProxy {
                     panic!("agent reconnect finished without correctly initializing a reconnect");
                 });
 
-                self.task_txs
-                    .agent
+                self.agent_tx
                     .send(ClientMessage::SwitchProtocolVersion(
                         self.protocol_version
                             .as_ref()
@@ -711,10 +714,8 @@ mod test {
         LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
     };
     use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
-    use tokio::{
-        net::{TcpListener, TcpStream},
-        sync::mpsc,
-    };
+    use mirrord_protocol_io::Connection;
+    use tokio::net::{TcpListener, TcpStream};
 
     use crate::{
         IntProxy,
@@ -730,17 +731,15 @@ mod test {
     /// Once intproxy exposes its state in some way, we can remove it.
     #[tokio::test]
     async fn intproxy_waits_for_protocol_version() {
-        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
-
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
         let proxy_addr = listener.local_addr().unwrap();
 
+        let (connection, proxy_tx, proxy_rx) = Connection::dummy();
+
         let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
+            connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
         let proxy = IntProxy::new_with_connection(
@@ -755,7 +754,7 @@ mod test {
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
-        match proxy_rx.recv().await.unwrap() {
+        match proxy_rx.next().await.unwrap() {
             ClientMessage::SwitchProtocolVersion(version) => {
                 assert_eq!(version, *mirrord_protocol::VERSION)
             }
@@ -810,7 +809,7 @@ mod test {
         // it would surely respond to our previous request here.
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                match proxy_rx.recv().await.unwrap() {
+                match proxy_rx.next().await.unwrap() {
                     ClientMessage::Ping => {
                         proxy_tx.send(DaemonMessage::Pong).await.unwrap();
                     }
@@ -829,7 +828,7 @@ mod test {
             .unwrap();
 
         loop {
-            match proxy_rx.recv().await.unwrap() {
+            match proxy_rx.next().await.unwrap() {
                 ClientMessage::Ping => {
                     proxy_tx.send(DaemonMessage::Pong).await.unwrap();
                 }
@@ -849,19 +848,18 @@ mod test {
     /// Verifies that [`IntProxy`] goes in failover state when a runtime error happens
     #[tokio::test]
     async fn switch_to_failover() {
-        let (agent_tx, _proxy_rx) = mpsc::channel(12);
-        let (proxy_tx, agent_rx) = mpsc::channel(12);
-
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
         let proxy_addr = listener.local_addr().unwrap();
 
+        let (connection, proxy_tx, _proxy_rx) = Connection::dummy();
+
         let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
+            connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -944,18 +942,17 @@ mod test {
     /// Verifies that [`IntProxy`] run method return an error on a startup error
     #[tokio::test]
     async fn startup_fail() {
-        let (agent_tx, _proxy_rx) = mpsc::channel(12);
-        let (_proxy_tx, agent_rx) = mpsc::channel(12);
-
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
 
+        let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
+
         let agent_conn = AgentConnection {
-            agent_rx,
-            agent_tx,
+            connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,

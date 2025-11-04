@@ -499,8 +499,8 @@ impl FilesProxy {
         for fd in self.remote_files.remove_all(closed.id) {
             self.buffered_files.remove(&fd);
             message_bus
-                .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
-                    FileRequest::Close(CloseFileRequest { fd }),
+                .send_agent(ClientMessage::FileRequest(FileRequest::Close(
+                    CloseFileRequest { fd },
                 )))
                 .await;
         }
@@ -508,8 +508,8 @@ impl FilesProxy {
         for remote_fd in self.remote_dirs.remove_all(closed.id) {
             self.buffered_dirs.remove(&remote_fd);
             message_bus
-                .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
-                    FileRequest::CloseDir(CloseDirRequest { remote_fd }),
+                .send_agent(ClientMessage::FileRequest(FileRequest::CloseDir(
+                    CloseDirRequest { remote_fd },
                 )))
                 .await;
         }
@@ -591,7 +591,7 @@ impl FilesProxy {
                 if self.remote_files.remove(layer_id, close.fd) {
                     self.buffered_files.remove(&close.fd);
                     message_bus
-                        .send(ClientMessage::FileRequest(FileRequest::Close(close)))
+                        .send_agent(ClientMessage::FileRequest(FileRequest::Close(close)))
                         .await;
                 }
             }
@@ -601,7 +601,7 @@ impl FilesProxy {
                 if self.remote_dirs.remove(layer_id, close.remote_fd) {
                     self.buffered_dirs.remove(&close.remote_fd);
                     message_bus
-                        .send(ClientMessage::FileRequest(FileRequest::CloseDir(close)))
+                        .send_agent(ClientMessage::FileRequest(FileRequest::CloseDir(close)))
                         .await;
                 }
             }
@@ -616,7 +616,7 @@ impl FilesProxy {
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
-                    .send(ClientMessage::FileRequest(FileRequest::Open(open)))
+                    .send_agent(ClientMessage::FileRequest(FileRequest::Open(open)))
                     .await;
             }
 
@@ -630,7 +630,7 @@ impl FilesProxy {
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
-                    .send(ClientMessage::FileRequest(FileRequest::OpenRelative(open)))
+                    .send_agent(ClientMessage::FileRequest(FileRequest::OpenRelative(open)))
                     .await;
             }
 
@@ -666,7 +666,7 @@ impl FilesProxy {
                             additional_data,
                         );
                         message_bus
-                            .send(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                            .send_agent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                                 ReadLimitedFileRequest {
                                     remote_fd: read.remote_fd,
                                     buffer_size: std::cmp::max(
@@ -684,7 +684,7 @@ impl FilesProxy {
                 None => {
                     self.request_queue.push_back(message_id, layer_id);
                     message_bus
-                        .send(ClientMessage::FileRequest(FileRequest::Read(read)))
+                        .send_agent(ClientMessage::FileRequest(FileRequest::Read(read)))
                         .await;
                 }
             },
@@ -720,7 +720,7 @@ impl FilesProxy {
                             additional_data,
                         );
                         message_bus
-                            .send(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                            .send_agent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                                 ReadLimitedFileRequest {
                                     remote_fd: read.remote_fd,
                                     buffer_size: std::cmp::max(
@@ -738,7 +738,7 @@ impl FilesProxy {
                 None => {
                     self.request_queue.push_back(message_id, layer_id);
                     message_bus
-                        .send(ClientMessage::FileRequest(FileRequest::ReadLimited(read)))
+                        .send_agent(ClientMessage::FileRequest(FileRequest::ReadLimited(read)))
                         .await;
                 }
             },
@@ -763,7 +763,7 @@ impl FilesProxy {
                     } else {
                         self.request_queue.push_back(message_id, layer_id);
                         message_bus
-                            .send(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
+                            .send_agent(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
                                 ReadDirBatchRequest {
                                     remote_fd: read_dir.remote_fd,
                                     amount: Self::READDIR_BATCH_SIZE,
@@ -777,7 +777,7 @@ impl FilesProxy {
                 None => {
                     self.request_queue.push_back(message_id, layer_id);
                     message_bus
-                        .send(ClientMessage::FileRequest(FileRequest::ReadDir(read_dir)))
+                        .send_agent(ClientMessage::FileRequest(FileRequest::ReadDir(read_dir)))
                         .await;
                 }
             },
@@ -821,7 +821,7 @@ impl FilesProxy {
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
-                    .send(ClientMessage::FileRequest(FileRequest::Seek(seek)))
+                    .send_agent(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
             }
             FileRequest::StatFsV2(statfs_v2)
@@ -832,7 +832,7 @@ impl FilesProxy {
             {
                 self.request_queue.push_back(message_id, layer_id);
                 message_bus
-                    .send(ClientMessage::FileRequest(FileRequest::StatFs(
+                    .send_agent(ClientMessage::FileRequest(FileRequest::StatFs(
                         statfs_v2.into(),
                     )))
                     .await;
@@ -845,7 +845,7 @@ impl FilesProxy {
             {
                 self.request_queue.push_back(message_id, layer_id);
                 message_bus
-                    .send(ClientMessage::FileRequest(FileRequest::XstatFs(
+                    .send_agent(ClientMessage::FileRequest(FileRequest::XstatFs(
                         xstatfs_v2.into(),
                     )))
                     .await;
@@ -854,7 +854,9 @@ impl FilesProxy {
             // Doesn't require any special logic.
             other => {
                 self.request_queue.push_back(message_id, layer_id);
-                message_bus.send(ClientMessage::FileRequest(other)).await;
+                message_bus
+                    .send_agent(ClientMessage::FileRequest(other))
+                    .await;
             }
         }
     }
@@ -1207,8 +1209,10 @@ mod tests {
             SeekFileRequest, SeekFileResponse, SeekFromInternal,
         },
     };
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use rstest::rstest;
     use semver::Version;
+    use tokio::select;
 
     use super::{FilesProxy, FilesProxyMessage};
     use crate::{
@@ -1216,6 +1220,28 @@ mod tests {
         error::ProxyRuntimeError,
         main_tasks::{MainTaskId, ProxyMessage, ToLayer},
     };
+
+    #[derive(Debug, PartialEq)]
+    enum Either<A, B> {
+        Left(A),
+        Right(B),
+    }
+
+    impl<A, B> Either<A, B> {
+        fn unwrap_left(self) -> A {
+            match self {
+                Either::Left(l) => l,
+                _ => panic!("Expected left, got right"),
+            }
+        }
+
+        fn unwrap_right(self) -> B {
+            match self {
+                Either::Right(r) => r,
+                _ => panic!("Expected right, got left"),
+            }
+        }
+    }
 
     /// Sets up a [`TaskSender`] and [`BackgroundTasks`] for a functioning [`FilesProxy`].
     ///
@@ -1228,9 +1254,12 @@ mod tests {
     ) -> (
         TaskSender<FilesProxy>,
         BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
+        ConnectionOutput<Client>,
     ) {
+        let (connection, _, out) = Connection::dummy();
+
         let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
-            Default::default();
+            BackgroundTasks::new(connection.tx_handle());
 
         let proxy = tasks.register(
             FilesProxy::new(file_buffer_size),
@@ -1242,36 +1271,34 @@ mod tests {
             .send(FilesProxyMessage::ProtocolVersion(protocol_version))
             .await;
 
-        (proxy, tasks)
+        (proxy, tasks, out)
     }
 
     /// Convenience for opening a dir.
     async fn prepare_dir(
         proxy: &TaskSender<FilesProxy>,
         tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
+        out: &ConnectionOutput<Client>,
     ) {
         let request = FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 0xdad });
         proxy
             .send(FilesProxyMessage::FileReq(0xbad, LayerId(0xa55), request))
             .await;
-        let (_, update) = tasks.next().await.unzip();
+        let message = out.next().await;
 
         assert!(
             matches!(
-                update,
-                Some(TaskUpdate::Message(ProxyMessage::ToAgent(
-                    ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest {
-                        remote_fd: 0xdad
-                    }),)
-                )))
+                message,
+                Some(ClientMessage::FileRequest(FileRequest::FdOpenDir(
+                    FdOpenDirRequest { remote_fd: 0xdad }
+                ),))
             ),
-            "Mismatched message for `FdOpenDirRequest` {update:?}!"
+            "Mismatched message for `FdOpenDirRequest` {message:?}!"
         );
 
         let response = FileResponse::OpenDir(Ok(OpenDirResponse { fd: 0xdad }));
         proxy.send(FilesProxyMessage::FileRes(response)).await;
         let (_, update) = tasks.next().await.unzip();
-
         assert!(
             matches!(
                 update,
@@ -1289,9 +1316,9 @@ mod tests {
 
     #[tokio::test]
     async fn old_protocol_uses_read_dir_request() {
-        let (proxy, mut tasks) = setup_proxy(Version::new(0, 1, 0), 0).await;
+        let (proxy, mut tasks, out) = setup_proxy(Version::new(0, 1, 0), 0).await;
 
-        prepare_dir(&proxy, &mut tasks).await;
+        prepare_dir(&proxy, &mut tasks, &out).await;
 
         let readdir_request = FileRequest::ReadDir(ReadDirRequest { remote_fd: 0xdad });
         proxy
@@ -1301,13 +1328,13 @@ mod tests {
                 readdir_request,
             ))
             .await;
-        let (_, update) = tasks.next().await.unzip();
+        let update = out.next().await;
 
         assert!(
             matches!(
                 update,
-                Some(TaskUpdate::Message(ProxyMessage::ToAgent(
-                    ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { .. }))
+                Some(ClientMessage::FileRequest(FileRequest::ReadDir(
+                    ReadDirRequest { .. }
                 )))
             ),
             "Mismatched message for `ReadDirRequest` {update:?}!"
@@ -1342,24 +1369,24 @@ mod tests {
 
     #[tokio::test]
     async fn new_protocol_uses_read_dir_batch_request() {
-        let (proxy, mut tasks) = setup_proxy(Version::new(1, 9, 0), 0).await;
+        let (proxy, mut tasks, out) = setup_proxy(Version::new(1, 9, 0), 0).await;
 
-        prepare_dir(&proxy, &mut tasks).await;
+        prepare_dir(&proxy, &mut tasks, &out).await;
 
         let request = FileRequest::ReadDir(ReadDirRequest { remote_fd: 0xdad });
         proxy
             .send(FilesProxyMessage::FileReq(0xbad, LayerId(0xa55), request))
             .await;
-        let (_, update) = tasks.next().await.unzip();
+        let update = out.next().await;
 
         assert!(
             matches!(
                 update,
-                Some(TaskUpdate::Message(ProxyMessage::ToAgent(
-                    ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+                Some(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
+                    ReadDirBatchRequest {
                         remote_fd: 0xdad,
                         amount: FilesProxy::READDIR_BATCH_SIZE,
-                    }))
+                    }
                 )))
             ),
             "Mismatched message for `ReadDirBatchRequest` {update:?}!"
@@ -1397,6 +1424,7 @@ mod tests {
     async fn open_file(
         proxy: &TaskSender<FilesProxy>,
         tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
+        out: &ConnectionOutput<Client>,
         readonly: bool,
     ) -> u64 {
         let message_id = rand::random();
@@ -1417,11 +1445,9 @@ mod tests {
                 request.clone(),
             ))
             .await;
-        let update = tasks.next().await.unwrap().1.unwrap_message();
-        assert_eq!(
-            update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(request)),
-        );
+
+        let update = out.next().await.unwrap();
+        assert_eq!(update, ClientMessage::FileRequest(request),);
 
         let response = FileResponse::Open(Ok(OpenFileResponse { fd }));
         proxy
@@ -1443,10 +1469,11 @@ mod tests {
     async fn make_read_request(
         proxy: &TaskSender<FilesProxy>,
         tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
+        out: &ConnectionOutput<Client>,
         remote_fd: u64,
         buffer_size: u64,
         start_from: Option<u64>,
-    ) -> ProxyMessage {
+    ) -> Either<ClientMessage, ProxyMessage> {
         let message_id = rand::random();
         let request = if let Some(start_from) = start_from {
             FileRequest::ReadLimited(ReadLimitedFileRequest {
@@ -1464,7 +1491,11 @@ mod tests {
         proxy
             .send(FilesProxyMessage::FileReq(message_id, LayerId(0), request))
             .await;
-        tasks.next().await.unwrap().1.unwrap_message()
+
+        select! {
+            a = out.next() => Either::Left(a.unwrap()),
+            b = tasks.next() => Either::Right(b.unwrap().1.unwrap_message()),
+        }
     }
 
     async fn respond_to_read_request(
@@ -1509,7 +1540,7 @@ mod tests {
     #[case(false, false)]
     #[tokio::test]
     async fn reading_from_unbuffered_file(#[case] readonly: bool, #[case] buffering_enabled: bool) {
-        let (proxy, mut tasks) = setup_proxy(
+        let (proxy, mut tasks, out) = setup_proxy(
             mirrord_protocol::VERSION.clone(),
             if buffering_enabled {
                 4096
@@ -1519,22 +1550,23 @@ mod tests {
         )
         .await;
 
-        let fd = open_file(&proxy, &mut tasks, readonly).await;
+        let fd = open_file(&proxy, &mut tasks, &out, readonly).await;
 
-        let update = make_read_request(&proxy, &mut tasks, fd, 10, None).await;
+        let msg = make_read_request(&proxy, &mut tasks, &out, fd, 10, None)
+            .await
+            .unwrap_left();
         assert_eq!(
-            update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::Read(
-                ReadFileRequest {
-                    remote_fd: fd,
-                    buffer_size: 10,
-                }
-            ))),
+            msg,
+            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                remote_fd: fd,
+                buffer_size: 10,
+            })),
         );
 
         let update = respond_to_read_request(&proxy, &mut tasks, vec![0; 10], false)
             .await
             .unwrap_proxy_to_layer_message();
+
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
@@ -1543,16 +1575,16 @@ mod tests {
             }))),
         );
 
-        let update = make_read_request(&proxy, &mut tasks, fd, 1, Some(13)).await;
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 1, Some(13))
+            .await
+            .unwrap_left();
         assert_eq!(
             update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
-                ReadLimitedFileRequest {
-                    remote_fd: fd,
-                    buffer_size: 1,
-                    start_from: 13,
-                }
-            ))),
+            ClientMessage::FileRequest(FileRequest::ReadLimited(ReadLimitedFileRequest {
+                remote_fd: fd,
+                buffer_size: 1,
+                start_from: 13,
+            })),
         );
 
         let update = respond_to_read_request(&proxy, &mut tasks, vec![2], true)
@@ -1569,21 +1601,22 @@ mod tests {
 
     #[tokio::test]
     async fn reading_from_buffered_file() {
-        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
+        let (proxy, mut tasks, out) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
 
-        let fd = open_file(&proxy, &mut tasks, true).await;
+        let fd = open_file(&proxy, &mut tasks, &out, true).await;
         let contents = std::iter::repeat(0_u8..=255).flatten();
 
-        let update = make_read_request(&proxy, &mut tasks, fd, 1, None).await;
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 1, None)
+            .await
+            .unwrap_left();
+
         assert_eq!(
             update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
-                ReadLimitedFileRequest {
-                    remote_fd: fd,
-                    buffer_size: 4096,
-                    start_from: 0,
-                }
-            ))),
+            ClientMessage::FileRequest(FileRequest::ReadLimited(ReadLimitedFileRequest {
+                remote_fd: fd,
+                buffer_size: 4096,
+                start_from: 0,
+            })),
         );
 
         let data = contents.clone().take(4096).collect::<Vec<_>>();
@@ -1599,9 +1632,11 @@ mod tests {
         );
 
         for i in 1..=3 {
-            let update = make_read_request(&proxy, &mut tasks, fd, 1, None)
+            let update = make_read_request(&proxy, &mut tasks, &out, fd, 1, None)
                 .await
+                .unwrap_right()
                 .unwrap_proxy_to_layer_message();
+
             assert_eq!(
                 update,
                 ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
@@ -1612,9 +1647,11 @@ mod tests {
         }
 
         let expected = contents.clone().skip(256).take(512).collect::<Vec<_>>();
-        let update = make_read_request(&proxy, &mut tasks, fd, 512, Some(256))
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 512, Some(256))
             .await
+            .unwrap_right()
             .unwrap_proxy_to_layer_message();
+
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::ReadLimited(Ok(ReadFileResponse {
@@ -1623,22 +1660,25 @@ mod tests {
             }))),
         );
 
-        let update = make_read_request(&proxy, &mut tasks, fd, 4096 * 2, None).await;
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 4096 * 2, None)
+            .await
+            .unwrap_left();
+
         assert_eq!(
             update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
-                ReadLimitedFileRequest {
-                    remote_fd: fd,
-                    buffer_size: 4096 * 2,
-                    start_from: 4,
-                }
-            ))),
+            ClientMessage::FileRequest(FileRequest::ReadLimited(ReadLimitedFileRequest {
+                remote_fd: fd,
+                buffer_size: 4096 * 2,
+                start_from: 4,
+            })),
         );
 
         let data = contents.clone().skip(4).take(4096).collect::<Vec<_>>();
+
         let update = respond_to_read_request(&proxy, &mut tasks, data.clone(), true)
             .await
             .unwrap_proxy_to_layer_message();
+
         assert_eq!(
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
@@ -1658,11 +1698,9 @@ mod tests {
                 seek_request.clone(),
             ))
             .await;
-        let update = tasks.next().await.unwrap().1.unwrap_message();
-        assert_eq!(
-            update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(seek_request)),
-        );
+
+        let update = out.next().await;
+        assert_eq!(update, Some(ClientMessage::FileRequest(seek_request)));
         let seek_response = FileResponse::Seek(Ok(SeekFileResponse { result_offset: 444 }));
         proxy
             .send(FilesProxyMessage::FileRes(seek_response.clone()))
@@ -1677,8 +1715,9 @@ mod tests {
         assert_eq!(update, ProxyToLayerMessage::File(seek_response),);
 
         let expected = contents.clone().skip(444).take(10).collect::<Vec<_>>();
-        let update = make_read_request(&proxy, &mut tasks, fd, 10, None)
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 10, None)
             .await
+            .unwrap_right()
             .unwrap_proxy_to_layer_message();
         assert_eq!(
             update,
@@ -1691,21 +1730,22 @@ mod tests {
 
     #[tokio::test]
     async fn seeking_in_buffered_file() {
-        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
+        let (proxy, mut tasks, out) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
 
-        let fd = open_file(&proxy, &mut tasks, true).await;
+        let fd = open_file(&proxy, &mut tasks, &out, true).await;
         let contents = std::iter::repeat(0_u8..=255).flatten();
 
-        let update = make_read_request(&proxy, &mut tasks, fd, 20, None).await;
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 20, None)
+            .await
+            .unwrap_left();
+
         assert_eq!(
             update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
-                ReadLimitedFileRequest {
-                    remote_fd: fd,
-                    buffer_size: 4096,
-                    start_from: 0,
-                }
-            ))),
+            ClientMessage::FileRequest(FileRequest::ReadLimited(ReadLimitedFileRequest {
+                remote_fd: fd,
+                buffer_size: 4096,
+                start_from: 0,
+            })),
         );
 
         let data = contents.clone().take(4096).collect::<Vec<_>>();
@@ -1760,10 +1800,12 @@ mod tests {
                 seek_request.clone(),
             ))
             .await;
-        let update = tasks.next().await.unwrap().1.unwrap_message();
+
+        let update = out.next().await;
+
         assert_eq!(
             update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::Seek(
+            Some(ClientMessage::FileRequest(FileRequest::Seek(
                 SeekFileRequest {
                     fd,
                     seek_from: SeekFromInternal::Start(10),
@@ -1789,22 +1831,23 @@ mod tests {
         // relevant ticket: MBE-717: intproxy crashes when attempting to `cat` a remote dir
         // test that a ReadLimited response from agent is sent to the layer the same variant as the
         // original request type
-        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
+        let (proxy, mut tasks, out) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
 
         // create dir - use empty file
-        let fd = open_file(&proxy, &mut tasks, true).await;
+        let fd = open_file(&proxy, &mut tasks, &out, true).await;
 
         // send read request from layer, check that proxy sends readlimited request to agent
-        let update = make_read_request(&proxy, &mut tasks, fd, 1, None).await;
+        let update = make_read_request(&proxy, &mut tasks, &out, fd, 1, None)
+            .await
+            .unwrap_left();
+
         assert_eq!(
             update,
-            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
-                ReadLimitedFileRequest {
-                    remote_fd: fd,
-                    buffer_size: 4096,
-                    start_from: 0,
-                }
-            ))),
+            ClientMessage::FileRequest(FileRequest::ReadLimited(ReadLimitedFileRequest {
+                remote_fd: fd,
+                buffer_size: 4096,
+                start_from: 0,
+            })),
         );
 
         // reply from agent with readlimited error, check that proxy sends read response to layer
