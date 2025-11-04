@@ -1,1 +1,2 @@
+Added a github action to build windows builds, now supporting windows
 Added optional signing for windows builds
