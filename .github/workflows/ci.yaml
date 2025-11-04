@@ -133,7 +133,9 @@ jobs:
           target: x86_64-unknown-linux-gnu
 
       - uses: actions/setup-python@v5
-      - run: pip3 install flask fastapi "uvicorn[standard]"
+      - run: |
+          python -m venv .venv && source .venv/bin/activate && pip install flask fastapi "uvicorn[standard]"
+          pip3 install flask fastapi "uvicorn[standard]"
 
       - uses: actions/setup-node@v4
         with:
