@@ -1,15 +1,15 @@
-name: CI (lint only)
+name: CI (tests only)
 
 on:
   workflow_dispatch:
   push:
     paths-ignore:
-      - '**/*.md'         # don't run if only markdown changed
+      - '**/*.md'
   pull_request:
     branches: [main, "*staging*"]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
-      - '**/*.md'         # don't run if only markdown changed
+      - '**/*.md'
 
 concurrency:
   group: ${{ github.head_ref || github.run_id }}
@@ -18,62 +18,361 @@ concurrency:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
-  RUSTFLAGS: -D warnings
 
 jobs:
-  lint:
+  # ======================
+  # Agent unit tests (Linux)
+  # ======================
+  test_agent:
     runs-on: ubuntu-24.04
-    env:
-      CARGO_TERM_COLOR: always
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
-      CARGO_UNSTABLE_SPARSE_REGISTRY: "true"
+    container:
+      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
       - uses: actions/checkout@v4
-      - run: rm -f rust-toolchain.toml
-
-      - name: Install aarch64 cross toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-        # Optional: if some crates use pkg-config, you may also need:
-        # sudo apt-get install -y pkg-config
-
-      - name: Setup env for aarch64 linker
-        run: |
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+        with:
+          fetch-depth: 1
 
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ensure CI toolchain, not repo-pinned one
+      - run: rm -f rust-toolchain.toml
+      - run: rustup default nightly-2025-08-01
+
+      # sccache (faster incremental compiles)
+      - name: Install sccache
+        run: |
+          curl -sSL https://github.com/mozilla/sccache/releases/latest/download/sccache-v0.7.4-x86_64-unknown-linux-musl.tar.gz \
+          | tar -xz --strip-components=1 -C /usr/local/bin sccache-v0.7.4-x86_64-unknown-linux-musl/sccache
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/sccache
+          key: sccache-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            sccache-${{ runner.os }}-
+      - name: Speedy test profile
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_CACHE_SIZE=2G" >> $GITHUB_ENV
+          echo "CARGO_PROFILE_TEST_DEBUG=0" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-Cdebuginfo=0" >> $GITHUB_ENV
+
+      # Cargo target/registry cache
+      - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
+        with:
+          prefix-key: v1-tests
+          cache-on-failure: true
+          cache-targets: true
+          save-if: true
+          cache-provider: github
+
+      # Compile & run once for all 3 crates to reuse the same build graph
+      - name: Agent unit tests (single compile)
+        run: |
+          cargo test --locked --target x86_64-unknown-linux-gnu \
+            -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables
+
+  # ======================
+  # Build agent image tar (for e2e)
+  # ======================
+  test_agent_image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build and export (agent)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: mirrord/agent/Dockerfile
+          tags: test
+          outputs: type=docker,dest=/tmp/test.tar
+          cache-from: |
+            type=gha
+          cache-to: |
+            type=gha,mode=max
+          provenance: false    # faster
+          sbom: false          # faster
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: test
+          path: /tmp/test.tar
+
+  # ======================
+  # Build CLI image tar (optional artifact; useful for local/manual checks)
+  # ======================
+  test_cli_image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build and export (cli)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: mirrord/cli/Dockerfile
+          tags: cli_image
+          outputs: type=docker,dest=/tmp/cli_image.tar
+          cache-from: |
+            type=gha
+          cache-to: |
+            type=gha,mode=max
+          provenance: false
+          sbom: false
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: upload CLI image
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli_image
+          path: /tmp/cli_image.tar
+
+  # ======================
+  # Integration tests (Linux)
+  # ======================
+  integration_tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
-          toolchain: nightly-2025-08-01
-          components: rustfmt, clippy
-          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-          cache: true
-          cache-on-failure: true
-          cache-bin: true
-          matcher: true
-          rustflags: -D warnings
-          override: true
+          target: x86_64-unknown-linux-gnu
 
+      # Cargo cache
       - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
-        with: { cache-on-failure: true, cache-bin: true, cache-targets: true, save-if: true, cache-provider: github, prefix-key: v0-rust-lint }
+        with:
+          prefix-key: v1-integ
+          cache-on-failure: true
+          cache-targets: true
+          save-if: true
+          cache-provider: github
 
-      - name: rustfmt (check)
-        run: cargo fmt --all -- --check
+      # Python deps cache + install
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-flaskfastapi-uvicorn
+      - uses: actions/setup-python@v5
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
 
-      - name: clippy (x86_64 host)
-        run: cargo clippy --workspace --all-targets --all-features -- -W clippy::indexing_slicing -D warnings
+      # Node deps cache + install
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-express
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm install express
 
-      - name: clippy (aarch64 target)
-        run: cargo clippy --workspace --all-targets --all-features --target aarch64-unknown-linux-gnu -- -W clippy::indexing_slicing -D warnings
+      # Prefer a single Go version for speed (adjust if truly version-specific)
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: go version
+      - run: |
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 23
 
-      - name: cargo check (mirrord-operator)
-        run: cargo check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+      # Pre-compile tiny Rust fixtures in one shot
+      - name: Pre-compile rust fixtures
+        run: |
+          for p in \
+            issue1123 issue1054 issue1458 issue1458portnot53 \
+            issue2058 issue2204 ; do
+            pushd mirrord/layer/tests/apps/$p
+            rustc $p.rs --out-dir target
+            popd
+          done
+
+      - run: ./scripts/build_c_apps.sh
+
+      # Actual Rust tests
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: intproxy_logs_linux
+          path: /tmp/intproxy_logs/linux
+
+  # ======================
+  # macOS tests
+  # ======================
+  macos_tests:
+    runs-on: macos-latest
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/universal-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - run: rm -f rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+        with:
+          components: rustfmt, clippy
+          target: x86_64-apple-darwin, aarch64-apple-darwin
+          toolchain: nightly-2025-08-01
+
+      - name: Install Protoc
+        uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Cargo cache (macOS)
+      - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
+        with:
+          prefix-key: v1-mac
+          cache-on-failure: true
+          cache-targets: true
+          save-if: true
+          cache-provider: github
+
+      - name: build universal layer
+        run: ./scripts/build_layer_mac.sh
+
+      - name: mirrord-sip UT
+        run: cargo test -p mirrord-sip
+      - name: mirrord-intproxy UT
+        run: cargo test -p mirrord-intproxy
+
+      # Node/Python caches (small but consistent wins)
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: mac-npm-express
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+      - run: npm install express
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: mac-pip-flaskfastapi-uvicorn
+      - uses: actions/setup-python@v5
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
+
+      # Build tiny rust fixtures used by tests
+      - run: |
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+
+      - name: mirrord layer tests
+        run: cargo test -p mirrord-layer
+
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: intproxy_logs_macos
+          path: /tmp/intproxy_logs/macos
+
+  # ======================
+  # E2E (Linux, minikube)
+  # ======================
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [test_agent_image]
+    strategy:
+      matrix:
+        container-runtime: ["docker", "containerd"]
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+
+      - uses: metalbear-co/ci/e2e-setup-action@main
+        with:
+          container-runtime: ${{ matrix.container-runtime }}
+
+      - name: download agent image
+        uses: actions/download-artifact@v4
+        with:
+          name: test
+          path: /tmp
+
+      - run: minikube image load /tmp/test.tar
+
+      # run the cli tests only once (docker runtime)
+      - name: Run cli E2E tests
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+
+      - name: Run targetless E2E test
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
+
+      - run: kubectl create namespace argo-rollouts
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+
+      - name: Run remaining E2E tests
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
+
+      - name: Collect logs on failure
+        if: ${{ failure() }}
+        run: |
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
+          kubectl get all
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;
+
 
 
 
