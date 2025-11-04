@@ -1,0 +1,1 @@
+Added ADOPTERS.md

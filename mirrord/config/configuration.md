@@ -516,6 +516,24 @@ Can be useful for collecting logs.
 
 Defaults to `1`.
 
+## ci {#root-ci}
+
+Configuration for mirrord for CI.
+
+```json
+{
+  "ci": {
+    "output_dir": "/tmp/mirrord/",
+  }
+}
+```
+
+### ci.output_dir{#ci-output_dir}
+
+Path to a directory where `mirrord ci` will flush application's stdout and stderr.
+
+Defaults to `/tmp/mirrord/`.
+
 ## container {#root-container}
 
 Unstable: `mirrord container` command specific config.
@@ -669,6 +687,9 @@ Disables any system wide proxy configuration for affecting the running applicati
 ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
 
 Enables better support for outgoing connections using non-blocking TCP sockets.
+
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ readlink {#experimental-readlink}
 
@@ -889,6 +910,7 @@ A list of configurations for database branches.
       {
         "name": "my-database-name",
         "ttl_secs": 120,
+        "creation_timeout_secs": 60,
         "type": "mysql",
         "version": "8.0",
         "connection": {
@@ -912,6 +934,7 @@ Example:
   "id": "my-branch-db",
   "name": "my-database-name",
   "ttl_secs": 120,
+  "creation_timeout_secs": 60,
   "type": "mysql",
   "version": "8.0",
   "connection": {
@@ -970,9 +993,52 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
+### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.
+If branch creation takes longer than expected, increase this value to prevent timeout errors.
+
 ### feature.db_branches.base.version {#feature-db_branches-base-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
+
+Users can choose from the following copy mode to bootstrap their MySQL branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- Schema
+
+  Creates an empty database and copies schema of all tables.
+
+- All
+
+  Copies both schema and data of all tables. This option shall only be used
+  when the data volume of the source database is minimal.
+
+In addition to copying an empty database or all tables' schema, mirrord operator
+will copy data from the source DB when an array of table configs are specified.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
+  },
+  "orders": {
+    "filter": "my_db.orders.created_at > 1759948761"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` table and orders
+created after the given timestamp will be copied.
 
 ## feature.env {#feature-env}
 

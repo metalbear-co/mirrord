@@ -8,6 +8,49 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.170.0](https://github.com/metalbear-co/mirrord/tree/3.170.0) - 2025-10-29
+
+
+### Added
+
+- Added copy mode configuration for MySQL branching.
+
+
+### Changed
+
+- `experimental.non_blocking_tcp_connect` now defaults to `true` in OSS.
+
+
+### Fixed
+
+- Fixed a bogus error reported by `mirrord ci stop` when the application has
+  already exited.
+
+
+### Internal
+
+- Fixed `update_latest` CI job with write permission.
+- Don't publish buildcache in release workflow.
+
+
+## [3.169.0](https://github.com/metalbear-co/mirrord/tree/3.169.0) - 2025-10-27
+
+
+### Added
+
+- `mirrord ci start` now pipes application's stdout and stderr to files in a
+  temporary directory (`/tmp/mirrord/{binary-name}-{timestamp}-{random}` by
+  default). This can be configured with the `ci.output_dir` option in your
+  mirrord config.
+
+
+### Internal
+
+- Add TypedHeader like extractor to mirrord-kube for axum like extraction from
+  kubernetes resources.
+- When reconnecting to an operator session, the CLI now checks for a fatal 410
+  error.
+
 ## [3.168.1](https://github.com/metalbear-co/mirrord/tree/3.168.1) - 2025-10-24
 
 

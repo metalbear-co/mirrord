@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{collections::HashMap, ops::Deref};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
@@ -79,6 +79,71 @@ pub enum DatabaseBranchConfig {
 pub struct MysqlBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
+
+    #[serde(default)]
+    pub copy: MysqlBranchCopyConfig,
+}
+
+/// Users can choose from the following copy mode to bootstrap their MySQL branch database:
+///
+/// - Empty
+///
+///   Creates an empty database. If the source DB connection options are found from the chosen
+///   target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+///   operator looks for the `name` field from the branch DB config object. This option is useful
+///   for users that run DB migrations themselves before starting the application.
+///
+/// - Schema
+///
+///   Creates an empty database and copies schema of all tables.
+///
+/// - All
+///
+///   Copies both schema and data of all tables. This option shall only be used
+///   when the data volume of the source database is minimal.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum MysqlBranchCopyConfig {
+    Empty {
+        tables: Option<HashMap<String, MysqlBranchTableCopyConfig>>,
+    },
+
+    Schema {
+        tables: Option<HashMap<String, MysqlBranchTableCopyConfig>>,
+    },
+
+    All,
+}
+
+impl Default for MysqlBranchCopyConfig {
+    fn default() -> Self {
+        MysqlBranchCopyConfig::Empty {
+            tables: Default::default(),
+        }
+    }
+}
+
+/// In addition to copying an empty database or all tables' schema, mirrord operator
+/// will copy data from the source DB when an array of table configs are specified.
+///
+/// Example:
+///
+/// ```json
+/// {
+///   "users": {
+///     "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
+///   },
+///   "orders": {
+///     "filter": "my_db.orders.created_at > 1759948761"
+///   }
+/// }
+/// ```
+///
+/// With the config above, only alice and bob from the `users` table and orders
+/// created after the given timestamp will be copied.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+pub struct MysqlBranchTableCopyConfig {
+    pub filter: Option<String>,
 }
 
 /// Despite the database type, all database branch config objects share the following fields.
@@ -107,6 +172,14 @@ pub struct DatabaseBranchBaseConfig {
     /// resource usage. For this reason, branch database TTL caps out at 15 min.
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
+
+    /// ### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+    ///
+    /// The timeout in seconds to wait for a database branch to become ready after creation.
+    /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
+    /// performance.
+    #[serde(default = "default_creation_timeout_secs")]
+    pub creation_timeout_secs: u64,
 
     /// ### feature.db_branches.base.version {#feature-db_branches-base-version}
     ///
@@ -177,4 +250,8 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
 
 fn default_ttl_secs() -> u64 {
     300
+}
+
+pub fn default_creation_timeout_secs() -> u64 {
+    60
 }

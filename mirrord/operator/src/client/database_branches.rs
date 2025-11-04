@@ -29,15 +29,14 @@ use crate::{
     },
 };
 
-const MYSQL_BRANCH_CREATION_TIMEOUT: Duration = Duration::from_secs(10);
-
 /// Create MySQL branch databases and wait for their readiness.
 ///
-/// Timeout after [`MYSQL_BRANCH_CREATION_TIMEOUT`].
+/// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
 pub(crate) async fn create_mysql_branches<P: Progress>(
     api: &Api<MysqlBranchDatabase>,
     params: HashMap<BranchDatabaseId, MysqlBranchParams>,
+    timeout: Duration,
     progress: &P,
 ) -> Result<HashMap<BranchDatabaseId, MysqlBranchDatabase>, OperatorApiError> {
     if params.is_empty() {
@@ -97,14 +96,11 @@ pub(crate) async fn create_mysql_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(
-        MYSQL_BRANCH_CREATION_TIMEOUT,
-        futures::future::join_all(ready),
-    )
-    .await
-    .map_err(|_| OperatorApiError::OperationTimeout {
-        operation: OperatorOperation::MysqlBranching,
-    })?;
+    tokio::time::timeout(timeout, futures::future::join_all(ready))
+        .await
+        .map_err(|_| OperatorApiError::OperationTimeout {
+            operation: OperatorOperation::MysqlBranching,
+        })?;
     subtask.success(Some("new MySQL branch databases ready"));
 
     Ok(created_branches)
@@ -268,6 +264,7 @@ impl MysqlBranchParams {
             target: target.clone(),
             ttl_secs: config.base.ttl_secs,
             mysql_version: config.base.version.clone(),
+            copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),

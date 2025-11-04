@@ -437,6 +437,7 @@ where
         _did_sip_patch,
         sub_progress,
         analytics,
+        &config,
         #[cfg(not(target_os = "windows"))]
         mirrord_for_ci,
     )
@@ -447,6 +448,7 @@ fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
     which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[cfg(not(target_os = "windows"))]
 async fn run_process_with_mirrord<P: Progress>(
     binary: String,
@@ -455,6 +457,7 @@ async fn run_process_with_mirrord<P: Progress>(
     _did_sip_patch: bool,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
+    config: &LayerConfig,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
@@ -485,6 +488,7 @@ async fn run_process_with_mirrord<P: Progress>(
                 &binary_path,
                 &binary_args,
                 &env_vars,
+                &config.ci,
             )
             .await
             .map_err(From::from),
@@ -520,6 +524,7 @@ async fn run_process_with_mirrord<P>(
     _did_sip_patch: bool,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
+    _config: &LayerConfig,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -920,11 +925,10 @@ async fn port_forward(
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
-    let connection_2 = connection::AgentConnection {
-        sender: agent_conn.agent_tx,
-        receiver: agent_conn.agent_rx,
-    };
+
+    let connection_2 = agent_conn.connection;
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(
