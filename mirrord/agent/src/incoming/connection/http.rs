@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt::{self, Debug},
+    io::Read,
     ops::Not,
     str::FromStr,
     sync::Arc,
@@ -35,20 +36,30 @@ use crate::{
 };
 
 #[derive(Clone)]
-enum BufferedBody {
+pub(super) enum BufferedBody {
     Empty,
-    Full(Arc<Vec<u8>>),
-    Partial(Arc<Vec<u8>>),
+
+    // Since we only store data frames and one optional trailer frame
+    // at the end, we could save a couple hundred bytes by storing raw
+    // `Bytes` objects instead of `Frame<Bytes>`-es, (32 vs 96 bytes
+    // on 64bit) and having an optional `first_nondata_frame` field.
+    // We go with this approach because it's a little simpler to
+    // implement.
+    Full(Arc<Vec<Frame<Bytes>>>),
+    Partial(Arc<Vec<Frame<Bytes>>>),
 }
 
 impl Debug for BufferedBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "Empty"),
-            Self::Full(buf) => f.debug_struct("Full").field("length", &buf.len()).finish(),
+            Self::Full(buf) => f
+                .debug_struct("Full")
+                .field("frame_count", &buf.len())
+                .finish(),
             Self::Partial(buf) => f
                 .debug_struct("Partial")
-                .field("length", &buf.len())
+                .field("frame_count", &buf.len())
                 .finish(),
         }
     }
@@ -56,15 +67,62 @@ impl Debug for BufferedBody {
 
 impl BufferedBody {
     #[inline]
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
     }
 
+    /// When full, returns an [`Read`] impl that returns the
+    /// buffered data.
     #[inline]
-    fn as_full(&self) -> Option<&[u8]> {
+    fn reader(&self) -> Option<impl Read + Copy> {
+        #[derive(Clone, Copy)]
+        struct Reader<'a> {
+            remaining: &'a [Frame<Bytes>],
+            read_from_current: usize,
+        }
+
+        impl<'a> Read for Reader<'a> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let Some(frame) = self.remaining.first() else {
+                    return Ok(0);
+                };
+
+                let Some(frame) = frame.data_ref() else {
+                    return Ok(0);
+                };
+
+                let until = Ord::min(frame.len(), self.read_from_current + buf.len());
+                let range = self.read_from_current..until;
+
+                buf.copy_from_slice(&frame[range.clone()]);
+
+                if until == frame.len() {
+                    self.remaining = &self.remaining[1..];
+                    self.read_from_current = 0;
+                } else {
+                    self.read_from_current = until;
+                }
+
+                Ok(range.len())
+            }
+        }
+
         match self {
-            BufferedBody::Full(full) => Some(&full),
+            BufferedBody::Full(full) => Some(Reader {
+                remaining: &full,
+                read_from_current: 0,
+            }),
             _ => None,
+        }
+    }
+
+    /// Returns the buffered data if we have anything, regardless of
+    /// whether it's full or partial.
+    #[inline]
+    pub(super) fn buffered_data(self) -> Option<Arc<Vec<Frame<Bytes>>>> {
+        match self {
+            BufferedBody::Empty => None,
+            BufferedBody::Full(frames) | BufferedBody::Partial(frames) => Some(frames),
         }
     }
 }
@@ -117,8 +175,8 @@ impl RedirectedHttp {
         &self.request.parts
     }
 
-    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<&[u8]>) {
-        (&mut self.request.parts, self.buffered_body.as_full())
+    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<impl Read + Copy>) {
+        (&mut self.request.parts, self.buffered_body.reader())
     }
 
     /// Acquires a mirror handle to this request.
@@ -161,7 +219,7 @@ impl RedirectedHttp {
                             .expect("malformed frame")
                     })
                     .collect(),
-                body_finished: self.request.body_tail.is_none(),
+                body_finished: self.request.body_tail.is_none() && self.buffered_body.is_empty(),
             },
             parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
@@ -188,7 +246,7 @@ impl RedirectedHttp {
                 .into_iter()
                 .map(InternalHttpBodyFrame::from)
                 .collect(),
-            body_finished: self.request.body_tail.is_none(),
+            body_finished: self.request.body_tail.is_none() && self.buffered_body.is_empty(),
         };
 
         let task = HttpTask {
@@ -199,6 +257,7 @@ impl RedirectedHttp {
                 mirror_data_tx: self.mirror_tx.into(),
                 upgrade_rx,
             },
+            buffered_body: self.buffered_body,
         };
         self.runtime_handle.spawn(task.run());
 
@@ -223,6 +282,7 @@ impl RedirectedHttp {
             self.mirror_tx.into(),
             self.request,
             self.redirector_config,
+            self.buffered_body,
         );
         self.runtime_handle.spawn(task.run());
     }
@@ -238,7 +298,7 @@ impl RedirectedHttp {
         }
 
         // TODO(areg) configurable
-        const MAX_BODY_SIZE: usize = 1024 * 64;
+        const MAX_BODY_SIZE: usize = 64 * 1024;
 
         let content_length = self
             .request
@@ -253,33 +313,30 @@ impl RedirectedHttp {
         }
 
         let mut buffered = Vec::new();
+        let mut total_size = 0;
 
-        // This is not nice because it could be done with a single
-        // scan but drain_while isn't a thing :(
-        let data_frame_count = self
-            .request
-            .body_head
-            .iter()
-            .position(|t| t.is_data().not())
-            .unwrap_or(self.request.body_head.len());
+        // We are forced to drain all of `body_head` regardless of its
+        // size because it will be sent *before* the buffered body so
+        // if we leave any trailing frames the order will get messed
+        // up :(
+        // In any case the body head is unlikely to be longer than `MAX_BODY_SIZE`
+        // so it shouldn't matter :D
 
-        for frame in self.request.body_head.drain(..data_frame_count) {
-            // We take only the data frames
-            let frame = frame.into_data().unwrap();
+        for frame in self.request.body_head.drain(..) {
+            total_size += frame.data_ref().unwrap().len();
+            buffered.push(frame);
+        }
 
-            buffered.extend_from_slice(&frame);
-
-            if let Some(expected_len) = content_length
-                && expected_len < buffered.len()
-            {
-                tracing::warn!(
-                    content_len = expected_len,
-                    actual_at_least = buffered.len(),
-                    "http actual body size exceeded content-length",
-                );
-                self.buffered_body = BufferedBody::Partial(Arc::new(buffered));
-                return Err(BufferBodyError::BodyTooBig);
-            }
+        if let Some(expected_len) = content_length
+            && expected_len < total_size
+        {
+            tracing::warn!(
+                content_len = expected_len,
+                actual_at_least = total_size,
+                "http actual body size exceeded content-length",
+            );
+            self.buffered_body = BufferedBody::Partial(Arc::new(buffered));
+            return Err(BufferBodyError::BodyTooBig);
         }
 
         let rx_until = content_length.unwrap_or(MAX_BODY_SIZE);
@@ -300,13 +357,15 @@ impl RedirectedHttp {
                         Err(err) => return Err((err.into(), buffered)),
                     };
 
-                    let Some(data) = frame.data_ref() else {
+                    buffered.push(frame);
+
+                    let Some(data) = buffered.last().unwrap().data_ref() else {
                         return Err((BufferBodyError::UnexpectedEOB, buffered));
                     };
 
-                    buffered.extend_from_slice(&data);
+                    total_size += data.len();
 
-                    match buffered.len().cmp(&rx_until) {
+                    match total_size.cmp(&rx_until) {
                         Ordering::Less => {}
                         Ordering::Equal => return Ok(buffered),
                         Ordering::Greater => return Err((BufferBodyError::BodyTooBig, buffered)),
@@ -478,8 +537,8 @@ pub struct MirroredHttp {
 impl MirroredHttp {
     /// Returns a mutable reference to the request parts and a shared
     /// reference to buffered body, if any.
-    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<&[u8]>) {
-        (&mut self.parts, self.buffered_body.as_full())
+    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<impl Read + Copy>) {
+        (&mut self.parts, self.buffered_body.reader())
     }
 }
 

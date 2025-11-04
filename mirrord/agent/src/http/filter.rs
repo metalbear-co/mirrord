@@ -1,4 +1,4 @@
-use std::ops::Not;
+use std::{io::Read, ops::Not};
 
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
@@ -77,7 +77,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
 impl HttpFilter {
     /// Checks whether the given request [`Parts`] match this filter.
     #[tracing::instrument(level = Level::DEBUG, skip_all, fields(has_body = body.is_some()), ret)]
-    pub fn matches(&self, parts: &mut Parts, body: Option<&[u8]>) -> bool {
+    pub fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
         match self {
             Self::Header(filter) => {
                 let headers = parts.extensions.get_or_insert_with(|| {
@@ -135,7 +135,7 @@ impl HttpFilter {
 
                 match filter {
                     HttpBodyFilter::Json { query, matches } => {
-                        let json = match serde_json::from_slice::<Value>(body) {
+                        let json = match serde_json::from_reader::<_, Value>(body) {
                             Ok(json) => json,
                             Err(error) => {
                                 tracing::trace!(?error, "json filter failed to parse body json");

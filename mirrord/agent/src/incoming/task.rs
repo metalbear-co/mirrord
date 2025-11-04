@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     http::extract_requests::{ExtractedRequest, ExtractedRequests},
-    incoming::{BufferBodyError, MirroredTraffic, mirror_handle::MirrorHandle},
+    incoming::{MirroredTraffic, mirror_handle::MirrorHandle},
 };
 
 /// A task responsible for redirecting incoming connections.
