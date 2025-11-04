@@ -169,42 +169,99 @@ impl MirrordClusterSessionSpec {
             (Deployment::API_VERSION, Deployment::KIND) => {
                 Ok(Target::Deployment(DeploymentTarget {
                     deployment: target.name.clone(),
-                    container: Some(target.container.clone()),
+                    container: target.container.clone(),
                 }))
             }
             (Pod::API_VERSION, Pod::KIND) => Ok(Target::Pod(PodTarget {
                 pod: target.name.clone(),
-                container: Some(target.container.clone()),
+                container: target.container.clone(),
             })),
             (Rollout::API_VERSION, Rollout::KIND) => Ok(Target::Rollout(RolloutTarget {
                 rollout: target.name.clone(),
-                container: Some(target.container.clone()),
+                container: target.container.clone(),
             })),
             (Job::API_VERSION, Job::KIND) => Ok(Target::Job(JobTarget {
                 job: target.name.clone(),
-                container: Some(target.container.clone()),
+                container: target.container.clone(),
             })),
             (CronJob::API_VERSION, CronJob::KIND) => Ok(Target::CronJob(CronJobTarget {
                 cron_job: target.name.clone(),
-                container: Some(target.container.clone()),
+                container: target.container.clone(),
             })),
             (StatefulSet::API_VERSION, StatefulSet::KIND) => {
                 Ok(Target::StatefulSet(StatefulSetTarget {
                     stateful_set: target.name.clone(),
-                    container: Some(target.container.clone()),
+                    container: target.container.clone(),
                 }))
             }
             (Service::API_VERSION, Service::KIND) => Ok(Target::Service(ServiceTarget {
                 service: target.name.clone(),
-                container: Some(target.container.clone()),
+                container: target.container.clone(),
             })),
             (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
                 Ok(Target::ReplicaSet(ReplicaSetTarget {
                     replica_set: target.name.clone(),
-                    container: Some(target.container.clone()),
+                    container: target.container.clone(),
                 }))
             }
             _ => Err(target.clone()),
+        }
+    }
+
+    pub fn with_target(self, target: Target) -> Self {
+        MirrordClusterSessionSpec {
+            target: match target {
+                Target::Deployment(target) => Some(SessionTarget {
+                    api_version: Deployment::API_VERSION.to_owned(),
+                    kind: Deployment::KIND.to_owned(),
+                    name: target.deployment,
+                    container: target.container,
+                }),
+                Target::Pod(target) => Some(SessionTarget {
+                    api_version: Pod::API_VERSION.to_owned(),
+                    kind: Pod::KIND.to_owned(),
+                    name: target.pod,
+                    container: target.container,
+                }),
+                Target::Rollout(target) => Some(SessionTarget {
+                    api_version: Rollout::API_VERSION.to_owned(),
+                    kind: Rollout::KIND.to_owned(),
+                    name: target.rollout,
+                    container: target.container,
+                }),
+                Target::Job(target) => Some(SessionTarget {
+                    api_version: Job::API_VERSION.to_owned(),
+                    kind: Job::KIND.to_owned(),
+                    name: target.job,
+                    container: target.container,
+                }),
+                Target::CronJob(target) => Some(SessionTarget {
+                    api_version: CronJob::API_VERSION.to_owned(),
+                    kind: CronJob::KIND.to_owned(),
+                    name: target.cron_job,
+                    container: target.container,
+                }),
+                Target::StatefulSet(target) => Some(SessionTarget {
+                    api_version: StatefulSet::API_VERSION.to_owned(),
+                    kind: StatefulSet::KIND.to_owned(),
+                    name: target.stateful_set,
+                    container: target.container,
+                }),
+                Target::Service(target) => Some(SessionTarget {
+                    api_version: Service::API_VERSION.to_owned(),
+                    kind: Service::KIND.to_owned(),
+                    name: target.service,
+                    container: target.container,
+                }),
+                Target::ReplicaSet(target) => Some(SessionTarget {
+                    api_version: ReplicaSet::API_VERSION.to_owned(),
+                    kind: ReplicaSet::KIND.to_owned(),
+                    name: target.replica_set,
+                    container: target.container,
+                }),
+                Target::Targetless => None,
+            },
+            ..self
         }
     }
 }
@@ -234,7 +291,7 @@ pub struct SessionTarget {
     /// Kubernetes resource name.
     pub name: String,
     /// Name of the container defined in the Pod spec.
-    pub container: String,
+    pub container: Option<String>,
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app.
