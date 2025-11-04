@@ -160,44 +160,64 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
+    if: ${{ needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true' }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -D warnings
+      MIRRORD_TELEMETRY: false
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+      CARGO_UNSTABLE_SPARSE_REGISTRY: "true"
     steps:
       - uses: actions/checkout@v4
+
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      # Otherwise the arguments to the setup-rust-toolchain action are ignored.
-      - run: rm rust-toolchain.toml
+          version: 26.x
+
+      # Ensure the CI toolchain is the authority
+      - run: rm -f rust-toolchain.toml
+
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           toolchain: nightly-2025-08-01
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
-      # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
-      - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
-      - run: cargo fmt --all -- --check
-      # x64
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-      # Check that compiles for the supported linux targets (aarch64)
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-      # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+          cache: true
+          cache-on-failure: true
+          cache-bin: true
+          matcher: true
+          rustflags: -D warnings
+          override: true
 
-  # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
-  # the output of this test is a boolean indicating if it's a release branch
-  # which is then used by `build_mirrord_on_release_branch`
-  check_if_release_branch:
-    runs-on: ubuntu-24.04
-    outputs:
-      release_branch: ${{ steps.release-branch.outputs.branch }}
-    steps:
-      - id: release-branch
-        run: |
-          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
-      - name: output test
-        run: |
-          echo ${{ steps.release-branch.outputs.branch }}
+      - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
+        with:
+          cache-on-failure: true
+          cache-bin: true
+          cache-targets: true
+          save-if: true
+          cache-provider: github
+          prefix-key: v0-rust
+
+      # Formatting
+      - name: rustfmt (check)
+        run: cargo fmt --all -- --check
+
+      # Clippy on host target
+      - name: clippy (x86_64 host)
+        run: cargo clippy --workspace --all-targets --all-features -- -W clippy::indexing_slicing -D warnings
+
+      # Cross-target clippy (no Zig needed; clippy doesn't link)
+      - name: clippy (aarch64 target)
+        run: cargo clippy --workspace --all-targets --all-features --target aarch64-unknown-linux-gnu -- -W clippy::indexing_slicing -D warnings
+
+      # Make sure the operator compiles the way it's used
+      - name: cargo check (mirrord-operator)
+        run: cargo check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+
 
   cargo-deny:
     needs: changed_files
