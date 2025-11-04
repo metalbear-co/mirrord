@@ -116,7 +116,6 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_METHOD_FILTER")]
     pub method_filter: Option<String>,
 
-    // TODO(areg): read from env?
     /// ##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
     ///
     /// Matches the request based on the contents of its body. Currently only JSON body filtering
@@ -341,7 +340,6 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         let all_of = None;
         let any_of = None;
 
-        // TODO(areg) read from env?
         let body_filter = None;
 
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
