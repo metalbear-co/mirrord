@@ -186,9 +186,14 @@ jobs:
           cargo build --manifest-path mirrord/layer/tests/apps/dns_resolve/Cargo.toml
           mkdir -p target/debug
           SRC="mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve"
-          if [ ! -f "$SRC" ]; then SRC="target/debug/dns_resolve"; fi
-          cp -f "$SRC" target/debug/dns_resolve
-          chmod +x target/debug/dns_resolve
+          DEST="target/debug/dns_resolve"
+          if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
+            cp -f "$SRC" "$DEST"
+          else
+            echo "No copy needed (already at $DEST)."
+          fi
+          test -f "$DEST"
+          chmod +x "$DEST"
 
       - name: Build Rust fileops/outgoing/recv_from/rebind0
         run: |
@@ -265,16 +270,21 @@ jobs:
       - name: build universal layer
         run: ./scripts/build_layer_mac.sh
 
-      # Ensure dns_resolve test app exists where tests expect it
+      # Ensure dns_resolve test app exists where tests expect it (no-fail if identical)
       - name: Build dns_resolve test app (macOS)
         run: |
           set -euxo pipefail
           cargo build --manifest-path mirrord/layer/tests/apps/dns_resolve/Cargo.toml
           mkdir -p target/debug
           SRC_BIN="mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve"
-          test -f "$SRC_BIN" || SRC_BIN="target/debug/dns_resolve"
-          cp "$SRC_BIN" target/debug/dns_resolve
-          chmod +x target/debug/dns_resolve
+          DEST_BIN="target/debug/dns_resolve"
+          if [ -f "$SRC_BIN" ] && [ "$SRC_BIN" != "$DEST_BIN" ]; then
+            cp -f "$SRC_BIN" "$DEST_BIN"
+          else
+            echo "No copy needed (already at $DEST_BIN)."
+          fi
+          test -f "$DEST_BIN"
+          chmod +x "$DEST_BIN"
 
       - name: lint
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
@@ -326,7 +336,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-        continue-on-error: false
+          cache: false
       - run: |
           set -euxo pipefail
           go version
