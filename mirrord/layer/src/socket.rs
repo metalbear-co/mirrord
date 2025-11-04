@@ -158,7 +158,12 @@ pub struct Bound {
 pub enum SocketState {
     #[default]
     Initialized,
-    Bound(Bound),
+    Bound {
+        bound: Bound,
+        // if true, the socket has a mapped BUT should not be used to make port subscriptions
+        // used for listen_ports (COR-1014).
+        is_only_bound: bool,
+    },
     Listening(Bound),
     Connected(Connected),
 }
