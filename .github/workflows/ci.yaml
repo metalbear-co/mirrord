@@ -214,7 +214,6 @@ jobs:
       - name: clippy (aarch64 target)
         run: cargo clippy --workspace --all-targets --all-features --target aarch64-unknown-linux-gnu -- -W clippy::indexing_slicing -D warnings
 
-      # Make sure the operator compiles the way it's used
       - name: cargo check (mirrord-operator)
         run: cargo check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
 
