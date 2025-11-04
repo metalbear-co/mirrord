@@ -3,13 +3,11 @@ name: CI (tests only)
 on:
   workflow_dispatch:
   push:
-    paths-ignore:
-      - '**/*.md'
+    paths-ignore: ['**/*.md']
   pull_request:
     branches: [main, "*staging*"]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - '**/*.md'
+    paths-ignore: ['**/*.md']
 
 concurrency:
   group: ${{ github.head_ref || github.run_id }}
@@ -83,6 +81,8 @@ jobs:
         with:
           name: test
           path: /tmp/test.tar
+          retention-days: 7
+          compression-level: 6
 
   # ======================
   # Build CLI image tar (optional artifact)
@@ -115,6 +115,8 @@ jobs:
         with:
           name: cli_image
           path: /tmp/cli_image.tar
+          retention-days: 7
+          compression-level: 6
 
   # ======================
   # Integration tests (Linux)
@@ -131,11 +133,11 @@ jobs:
           target: x86_64-unknown-linux-gnu
 
       - uses: actions/setup-python@v5
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
+      - run: pip3 install flask fastapi "uvicorn[standard]"
 
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '22'
       - run: |
           test -f package.json || npm init -y
           npm set fund false
@@ -145,24 +147,26 @@ jobs:
       # Build Go fixtures (three versions)
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.23.x"
           cache: true
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           set -euxo pipefail
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.24.x"
           cache: false
       - run: |
           set -euxo pipefail
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.x"
           cache: false
       - run: |
           set -euxo pipefail
@@ -209,7 +213,6 @@ jobs:
           fi
           chmod +x "$DEST"
 
-      # Build the Linux helper for tests/apps/issue1054
       - name: Build issue1054 helper (Linux)
         run: |
           set -euxo pipefail
@@ -252,6 +255,7 @@ jobs:
         with:
           name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux
+          retention-days: 7
 
   # ======================
   # macOS tests
@@ -331,25 +335,27 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.23.x"
           cache: false
       - run: |
           set -euxo pipefail
           go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.24.x"
           cache: false
       - run: |
           set -euxo pipefail
           go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.x"
           cache: false
       - run: |
           set -euxo pipefail
@@ -394,10 +400,10 @@ jobs:
       - run: java -version
 
       - uses: actions/setup-python@v5
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      - uses: actions/setup-node@v3
+      - run: pip3 install flask fastapi "uvicorn[standard]"
+      - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: '22'
       - run: npm install express
       - run: npm install portfinder
 
@@ -411,6 +417,7 @@ jobs:
         with:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
+          retention-days: 7
 
   # ======================
   # E2E (Linux, minikube)
@@ -430,7 +437,8 @@ jobs:
 
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
 
-      - uses: metalbear-co/ci/e2e-setup-action@main
+      # Pin your internal action by commit for supply-chain safety
+      - uses: metalbear-co/ci/e2e-setup-action@<PIN_COMMIT_SHA>
         with:
           container-runtime: ${{ matrix.container-runtime }}
 
@@ -452,7 +460,8 @@ jobs:
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
 
       - run: kubectl create namespace argo-rollouts
-      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+      # Pin Argo Rollouts version; avoid 'latest' for stability
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.7.6/install.yaml
 
       - name: Run remaining E2E tests
         run: |
@@ -465,4 +474,6 @@ jobs:
           find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
           kubectl get all
           kubectl describe pods
-          docker exec minikube find /var/log/pods -print -exec cat {} \;
+          if [ "${{ matrix.container-runtime }}" = "docker" ]; then
+            docker exec minikube find /var/log/pods -type f -print -exec cat {} \;
+          fi
