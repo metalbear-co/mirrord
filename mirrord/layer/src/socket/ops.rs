@@ -265,10 +265,10 @@ pub(super) fn bind(
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
 
-    let is_requested_in_listen = incoming_config
+    let listen_port = incoming_config
         .listen_ports
         .get_by_left(&requested_address.port())
-        .is_some();
+        .copied();
 
     // we don't use `is_localhost` here since unspecified means to listen
     // on all IPs.
@@ -279,7 +279,7 @@ pub(super) fn bind(
             || crate::setup().is_debugger_port(&requested_address)
             || incoming_config.ignore_ports.contains(&requested_port));
 
-    if will_not_trigger_subscription && is_requested_in_listen.not() {
+    if will_not_trigger_subscription && listen_port.is_none() {
         return Detour::Bypass(Bypass::IgnoredInIncoming(requested_address));
     }
 
@@ -304,10 +304,6 @@ pub(super) fn bind(
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
     // we return address not available and not fallback to a random port.
-    let listen_port = incoming_config
-        .listen_ports
-        .get_by_left(&requested_address.port())
-        .copied();
     if let Some(port) = listen_port {
         // Listen port was specified. If we fail to bind, we should fail the whole operation.
         bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), port))
@@ -336,22 +332,12 @@ pub(super) fn bind(
         .and_then(|(_, address)| address.as_socket())
         .bypass(Bypass::AddressConversion)?;
 
-    Arc::get_mut(&mut socket).unwrap().state = if will_not_trigger_subscription {
-        SocketState::Bound {
-            bound: Bound {
-                requested_address,
-                address,
-            },
-            is_only_bound: true,
-        }
-    } else {
-        SocketState::Bound {
-            bound: Bound {
-                requested_address,
-                address,
-            },
-            is_only_bound: false,
-        }
+    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound {
+        bound: Bound {
+            requested_address,
+            address,
+        },
+        is_only_bound: will_not_trigger_subscription,
     };
 
     SOCKETS.lock()?.insert(sockfd, socket);
