@@ -10,6 +10,7 @@ import {
   PortMapping,
   Target,
   TargetFileConfig,
+  ToggleableConfigFor_IncomingFileConfig,
 } from "@/mirrord-schema";
 import { DefaultConfig } from "./UserDataContext";
 
@@ -154,7 +155,7 @@ export const readCurrentFilters = (
           filter.any_of?.filter((innerFilter) => {
             "header" in innerFilter;
           })
-        );
+        ) ?? [];
       pathGenType = filter.all_of
         ?.filter((innerFilter) => {
           "path" in innerFilter;
@@ -163,7 +164,7 @@ export const readCurrentFilters = (
           filter.any_of?.filter((innerFilter) => {
             "path" in innerFilter;
           })
-        );
+        ) ?? [];
 
       if (filter.all_of) operator = "all";
       else if (filter.any_of) operator = "any";
@@ -210,23 +211,69 @@ export const readCurrentPorts = (config: LayerFileConfig): number[] => {
     typeof config.feature?.network === "object" &&
     typeof config.feature?.network.incoming === "object" &&
     config.feature?.network.incoming.ports
-  ){
+  ) {
     return config.feature?.network.incoming.ports;
   }
 
   return [];
 };
 
-export const readCurrentPortMapping = (config: LayerFileConfig): PortMapping => {
+export const readCurrentPortMapping = (
+  config: LayerFileConfig
+): PortMapping => {
   if (
     typeof config.feature?.network === "object" &&
     typeof config.feature?.network.incoming === "object" &&
     config.feature?.network.incoming.port_mapping
-  ){
+  ) {
     return config.feature?.network.incoming.port_mapping;
   }
-  
+
   return [];
+};
+
+export const readIncoming = (
+  config: LayerFileConfig
+): ToggleableConfigFor_IncomingFileConfig => {
+  if (typeof config.feature?.network === "object") {
+    return config.feature?.network.incoming;
+  }
+
+  return false;
+};
+
+export const updateIncoming = (
+  config: LayerFileConfig,
+  newIncoming: ToggleableConfigFor_IncomingFileConfig
+) => {
+  if (typeof config !== "object") {
+    throw "config badly formed";
+  }
+
+  // If config is not in the right shape, insert from default config
+  if (!("feature" in config) || typeof config.feature !== "object") {
+    config.feature = DefaultConfig.feature;
+  }
+
+  if (
+    !("network" in config.feature) ||
+    typeof config.feature.network !== "object"
+  ) {
+    config.feature.network = DefaultConfig.feature.network as NetworkFileConfig;
+  }
+
+  const newConfig = {
+    ...config,
+    feature: {
+      ...config.feature,
+      network: {
+        ...config.feature.network,
+        incoming: newIncoming,
+      },
+    },
+  };
+
+  return newConfig;
 };
 
 // Returns an updated config with new config.target according to parameters.
@@ -348,11 +395,29 @@ export const updateConfigCopyTarget = (
   return newConfig;
 };
 
+// Sets filters to null
+// export const turnOffConfigFilter = (config: LayerFileConfig) => {
+//   if (
+//     typeof config.feature?.network === "object" &&
+//     typeof config.feature?.network.incoming === "object"
+//   ) {
+//     const newIncoming = {
+//       ...config.feature.network.incoming,
+//       http_filter: null,
+//     };
+//     return updateIncoming(config, newIncoming);
+//   }
+
+//   return config;
+// };
+
 // Returns an updated config with new config.feature.network.filter according to parameters.
 export const updateConfigFilter = (
-  headerFilters: string[],
-  pathFilters: string[],
-  operator: "any" | "all",
+  filters: {
+    headerFilters: string[];
+    pathFilters: string[];
+    operator: "any" | "all";
+  },
   config: LayerFileConfig
 ) => {
   if (typeof config !== "object") {
@@ -400,15 +465,15 @@ export const updateConfigFilter = (
 
   // create new value for config.feature.network.incoming.http_filter
   let http_filter: HTTPFilter;
-  switch (operator) {
+  switch (filters.operator) {
     case "any":
       http_filter = {
-        any_of: headerFilters
+        any_of: filters.headerFilters
           .map((headerFilter) => {
             return { header: headerFilter } as any;
           })
           .concat(
-            pathFilters.map((pathFilter) => {
+            filters.pathFilters.map((pathFilter) => {
               return { path: pathFilter };
             })
           ),
@@ -416,12 +481,12 @@ export const updateConfigFilter = (
       break;
     case "all":
       http_filter = {
-        all_of: headerFilters
+        all_of: filters.headerFilters
           .map((headerFilter) => {
             return { header: headerFilter } as any;
           })
           .concat(
-            pathFilters.map((pathFilter) => {
+            filters.pathFilters.map((pathFilter) => {
               return { path: pathFilter };
             })
           ),
@@ -446,10 +511,7 @@ export const updateConfigFilter = (
   return newConfig;
 };
 
-export const updateConfigPorts = (
-  ports: number[],
-  config: LayerFileConfig
-) => {
+export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
   if (typeof config !== "object") {
     throw "config badly formed";
   }
@@ -507,7 +569,7 @@ export const updateConfigPorts = (
   };
 
   return newConfig;
-}
+};
 
 // Returns an updated config with new config.feature.network.incoming.port_mapping according
 // to parameters.
