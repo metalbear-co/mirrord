@@ -36,30 +36,11 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ensure CI toolchain, not repo-pinned one
+      # ensure CI toolchain (ignore repo-pinned one)
       - run: rm -f rust-toolchain.toml
       - run: rustup default nightly-2025-08-01
 
-      # sccache (faster incremental compiles)
-      - name: Install sccache
-        run: |
-          curl -sSL https://github.com/mozilla/sccache/releases/latest/download/sccache-v0.7.4-x86_64-unknown-linux-musl.tar.gz \
-          | tar -xz --strip-components=1 -C /usr/local/bin sccache-v0.7.4-x86_64-unknown-linux-musl/sccache
-      - name: Cache sccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/sccache
-          key: sccache-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-
-      - name: Speedy test profile
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "SCCACHE_CACHE_SIZE=2G" >> $GITHUB_ENV
-          echo "CARGO_PROFILE_TEST_DEBUG=0" >> $GITHUB_ENV
-          echo "RUSTFLAGS=-Cdebuginfo=0" >> $GITHUB_ENV
-
-      # Cargo target/registry cache
+      # Cargo cache
       - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
         with:
           prefix-key: v1-tests
@@ -69,7 +50,7 @@ jobs:
           cache-provider: github
 
       # Compile & run once for all 3 crates to reuse the same build graph
-      - name: Agent unit tests (single compile)
+      - name: Agent unit tests
         run: |
           cargo test --locked --target x86_64-unknown-linux-gnu \
             -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables
@@ -97,8 +78,8 @@ jobs:
             type=gha
           cache-to: |
             type=gha,mode=max
-          provenance: false    # faster
-          sbom: false          # faster
+          provenance: false
+          sbom: false
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
@@ -165,28 +146,22 @@ jobs:
           save-if: true
           cache-provider: github
 
-      # Python deps cache + install
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-flaskfastapi-uvicorn
+      # Python deps
       - uses: actions/setup-python@v5
       - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
 
-      # Node deps cache + install
-      - name: Cache npm
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-express
+      # Node (no caching that requires a lockfile)
       - uses: actions/setup-node@v3
         with:
           node-version: 24
-          cache: 'npm'
-      - run: npm install express
+      - name: Init package.json for express fixture
+        run: |
+          test -f package.json || npm init -y
+          npm set fund false
+          npm set audit false
+          npm install express
 
-      # Prefer a single Go version for speed (adjust if truly version-specific)
+      # Prefer a single Go version for speed
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
@@ -242,6 +217,7 @@ jobs:
         with:
           fetch-depth: 1
       - run: rm -f rust-toolchain.toml
+
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           components: rustfmt, clippy
@@ -270,22 +246,18 @@ jobs:
       - name: mirrord-intproxy UT
         run: cargo test -p mirrord-intproxy
 
-      # Node/Python caches (small but consistent wins)
-      - name: Cache npm
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: mac-npm-express
+      # Node (no caching that requires a lockfile)
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-          cache: 'npm'
-      - run: npm install express
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/pip
-          key: mac-pip-flaskfastapi-uvicorn
+      - name: Init package.json for express fixture
+        run: |
+          test -f package.json || npm init -y
+          npm set fund false
+          npm set audit false
+          npm install express
+
+      # Python deps
       - uses: actions/setup-python@v5
       - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
 
@@ -372,6 +344,7 @@ jobs:
           kubectl get all
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
+
 
 
 
