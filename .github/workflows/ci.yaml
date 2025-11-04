@@ -193,16 +193,14 @@ jobs:
   
   macos_tests:
     runs-on: macos-latest
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/universal-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v4
 
-      # Ensure the toolchain action parameters take effect
-      - run: rm rust-toolchain.toml || true
+      # Ensure the toolchain action parameters take effect even if a file exists
+      - run: rm -f rust-toolchain.toml || true
 
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
@@ -216,13 +214,13 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: verify SIP status
-        run: csrutil status
+        run: csrutil status || true
 
       # Build the universal layer so MIRRORD_* envs point to an existing file
       - name: build universal layer
         run: ./scripts/build_layer_mac.sh
 
-      # --- FIX: ensure dns_resolve test app exists where tests expect it ---
+      # --- Ensure dns_resolve test app exists where tests expect it ---
       - name: Build dns_resolve test app (macOS)
         run: |
           set -euxo pipefail
@@ -232,7 +230,7 @@ jobs:
           test -f "$SRC_BIN" || SRC_BIN="target/debug/dns_resolve"
           cp "$SRC_BIN" target/debug/dns_resolve
           chmod +x target/debug/dns_resolve
-      # ---------------------------------------------------------------------
+      # ----------------------------------------------------------------
 
       - name: lint
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
@@ -264,44 +262,41 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: go version
+          cache: false
       - run: |
+          go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
           cache: false
-      - run: go version
       - run: |
+          go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
           cache: false
-      - run: go version
       - run: |
+          go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 25
 
       # Cargo-built fixtures
       - run: |
-          cd mirrord/layer/tests/apps/fileops
-          cargo build
+          cd mirrord/layer/tests/apps/fileops && cargo build
       - run: |
-          cd mirrord/layer/tests/apps/outgoing
-          cargo build
+          cd mirrord/layer/tests/apps/outgoing && cargo build
       - run: |
-          cd mirrord/layer/tests/apps/recv_from
-          cargo build
+          cd mirrord/layer/tests/apps/recv_from && cargo build
       - run: |
-          cd mirrord/layer/tests/apps/dns_resolve
-          cargo build
+          cd mirrord/layer/tests/apps/dns_resolve && cargo build
       - run: |
-          cd mirrord/layer/tests/apps/rebind0
-          cargo build
+          cd mirrord/layer/tests/apps/rebind0 && cargo build
 
       # Java for the temurin SIP test
       - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
@@ -330,6 +325,7 @@ jobs:
         with:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
+
 
   # ======================
   # E2E (Linux, minikube)
