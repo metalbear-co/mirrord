@@ -179,10 +179,10 @@ jobs:
           DEST="target/debug/dns_resolve"
           if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
             cp -f "$SRC" "$DEST"
-          else
-            echo "No copy needed (already at $DEST) or source missing."
           fi
-          [ -f "$DEST" ] || { cp -f target/debug/dns_resolve "$DEST"; }
+          if [ ! -f "$DEST" ]; then
+            cp -f target/debug/dns_resolve "$DEST"
+          fi
           test -f "$DEST"
           chmod +x "$DEST"
 
@@ -201,15 +201,15 @@ jobs:
           SRC="mirrord/layer/tests/apps/fileops/target/debug/fileops"
           DEST="target/debug/fileops"
           mkdir -p "$(dirname "$DEST")"
-          if [ -f "$SRC" ]; then
-            if [ "$SRC" != "$DEST" ]; then cp -f "$SRC" "$DEST"; fi
-            chmod +x "$DEST"
+          if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
+            cp -f "$SRC" "$DEST"
           else
             echo "ERROR: $SRC not found after build" >&2
             exit 1
           fi
+          chmod +x "$DEST"
 
-      # 🔧 NEW: build the Linux helper for tests/apps/issue1054
+      # Build the Linux helper for tests/apps/issue1054
       - name: Build issue1054 helper (Linux)
         run: |
           set -euxo pipefail
@@ -290,5 +290,179 @@ jobs:
           mkdir -p target/debug
           SRC_BIN="mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve"
           DEST_BIN="target/debug/dns_resolve"
-          if [ -f "$SRC_BIN" ] && [ "$SRC_BIN" != "$DEST_BIN" ]; then cp -f "$SRC_BIN" "$DEST_BIN"; fi
-          [ -f "$DEST_BIN" ] || { cp -f target/debug/dns_resolve "$DEST_BIN"; }_]()
+          if [ -f "$SRC_BIN" ] && [ "$SRC_BIN" != "$DEST_BIN" ]; then
+            cp -f "$SRC_BIN" "$DEST_BIN"
+          fi
+          if [ ! -f "$DEST_BIN" ]; then
+            cp -f target/debug/dns_resolve "$DEST_BIN"
+          fi
+          test -f "$DEST_BIN"
+          chmod +x "$DEST_BIN"
+
+      - name: lint
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
+
+      - name: mirrord-sip UT
+        run: cargo test -p mirrord-sip
+
+      - name: mirrord-intproxy UT
+        run: cargo test -p mirrord-intproxy
+
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+      - run: |
+          set -euxo pipefail
+          go version
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 23
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+      - run: |
+          set -euxo pipefail
+          go version
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          set -euxo pipefail
+          go version
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 25
+
+      - run: |
+          set -euxo pipefail
+          cargo build --manifest-path mirrord/layer/tests/apps/fileops/Cargo.toml \
+                      --target-dir mirrord/layer/tests/apps/fileops/target
+          SRC="mirrord/layer/tests/apps/fileops/target/debug/fileops"
+          DEST="target/debug/fileops"
+          mkdir -p "$(dirname "$DEST")"
+          if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
+            cp -f "$SRC" "$DEST"
+          fi
+          if [ ! -f "$DEST" ]; then
+            echo "ERROR: $DEST not found" >&2
+            exit 1
+          fi
+          chmod +x "$DEST"
+
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/outgoing && cargo build
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/recv_from && cargo build
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/dns_resolve && cargo build
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/rebind0 && cargo build
+
+      - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
+        id: sdkman
+        with:
+          candidate: java
+          version: 17.0.6-tem
+      - run: java -version
+
+      - uses: actions/setup-python@v5
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm install express
+      - run: npm install portfinder
+
+      - name: mirrord layer tests
+        run: cargo test -p mirrord-layer
+
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: intproxy_logs_macos
+          path: /tmp/intproxy_logs/macos
+
+  # ======================
+  # E2E (Linux, minikube)
+  # ======================
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [test_agent_image]
+    strategy:
+      matrix:
+        container-runtime: ["docker", "containerd"]
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
+
+      - uses: metalbear-co/ci/e2e-setup-action@main
+        with:
+          container-runtime: ${{ matrix.container-runtime }}
+
+      - name: download agent image
+        uses: actions/download-artifact@v4
+        with:
+          name: test
+          path: /tmp
+
+      - run: minikube image load /tmp/test.tar
+
+      - name: Run cli E2E tests
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+
+      - name: Run targetless E2E test
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
+
+      - run: kubectl create namespace argo-rollouts
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+
+      - name: Run remaining E2E tests
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
+
+      - name: Collect logs on failure
+        if: ${{ failure() }}
+        run: |
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
+          kubectl get all
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;
