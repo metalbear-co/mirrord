@@ -20,12 +20,20 @@ on:
       sign_artifacts:
         description: "Code-sign EXE & DLL (uses limited signing tokens)"
         type: choice
-        options: [false, true]
+        options: ["false", "true"]
         default: false
+  
   push:
+    paths-ignore:
+      - '*.md'
+      - '**/*.md'
+
   pull_request:
-    branches: [main, "*staging*"]
+    branches: ["main", "*staging*"]
     types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "*.md"
+      - "**/*.md"
 
 permissions:
   contents: write   # needed for GitHub Releases
