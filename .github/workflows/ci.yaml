@@ -90,7 +90,7 @@ jobs:
           path: /tmp/test.tar
 
   # ======================
-  # Build CLI image tar (optional artifact; useful for local/manual checks)
+  # Build CLI image tar (optional artifact)
   # ======================
   test_cli_image:
     runs-on: ubuntu-24.04
@@ -203,6 +203,24 @@ jobs:
           cargo build --manifest-path mirrord/layer/tests/apps/recv_from/Cargo.toml
           cargo build --manifest-path mirrord/layer/tests/apps/rebind0/Cargo.toml
 
+      - name: Copy fileops to repo target (expected by tests)
+        run: |
+          set -euxo pipefail
+          SRC="mirrord/layer/tests/apps/fileops/target/debug/fileops"
+          DEST="target/debug/fileops"
+          if [ -f "$SRC" ]; then
+            mkdir -p "$(dirname "$DEST")"
+            if [ "$SRC" != "$DEST" ]; then
+              cp -f "$SRC" "$DEST"
+            else
+              echo "fileops already in place."
+            fi
+            chmod +x "$DEST"
+          else
+            echo "ERROR: $SRC not found after build" >&2
+            exit 1
+          fi
+
       - name: Build C apps
         run: ./scripts/build_c_apps.sh
 
@@ -216,7 +234,7 @@ jobs:
           ls -l mirrord/layer/tests/apps/lseek_go/*go_test_app
           ls -l mirrord/layer/tests/apps/read_go/*go_test_app
           ls -l mirrord/layer/tests/apps/write_go/*go_test_app
-          ls -l mirrord/layer/tests/apps/fileops/target/debug/fileops
+          ls -l target/debug/fileops
       # ----------------------------------------------------------------
 
       # Run the layer + the rest
@@ -347,6 +365,16 @@ jobs:
       - run: |
           set -euxo pipefail
           cd mirrord/layer/tests/apps/fileops && cargo build
+          # copy fileops to repo target where tests look for it
+          SRC="target/debug/fileops"
+          DEST="../../../target/debug/fileops"
+          mkdir -p "$(dirname "$DEST")"
+          if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
+            cp -f "$SRC" "$DEST"
+          else
+            echo "fileops already in place or missing; will verify below."
+          fi
+          test -f "$DEST" && chmod +x "$DEST" || (echo "ERROR: $DEST not found" >&2; exit 1)
       - run: |
           set -euxo pipefail
           cd mirrord/layer/tests/apps/outgoing && cargo build
@@ -443,6 +471,7 @@ jobs:
           kubectl get all
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
+
 
 
 
