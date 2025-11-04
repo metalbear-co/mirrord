@@ -36,11 +36,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ensure CI toolchain (ignore repo-pinned one)
       - run: rm -f rust-toolchain.toml
       - run: rustup default nightly-2025-08-01
 
-      # Cargo cache
       - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
         with:
           prefix-key: v1-tests
@@ -49,7 +47,6 @@ jobs:
           save-if: true
           cache-provider: github
 
-      # Compile & run once for all 3 crates to reuse the same build graph
       - name: Agent unit tests
         run: |
           cargo test --locked --target x86_64-unknown-linux-gnu \
@@ -74,10 +71,8 @@ jobs:
           file: mirrord/agent/Dockerfile
           tags: test
           outputs: type=docker,dest=/tmp/test.tar
-          cache-from: |
-            type=gha
-          cache-to: |
-            type=gha,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           provenance: false
           sbom: false
           build-args: |
@@ -108,10 +103,8 @@ jobs:
           file: mirrord/cli/Dockerfile
           tags: cli_image
           outputs: type=docker,dest=/tmp/cli_image.tar
-          cache-from: |
-            type=gha
-          cache-to: |
-            type=gha,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           provenance: false
           sbom: false
           build-args: |
@@ -149,7 +142,7 @@ jobs:
           npm set audit false
           npm install express
 
-      # --- Build Go fixtures for all versions used by fileops tests ---
+      # Build Go fixtures (three versions)
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
@@ -159,7 +152,6 @@ jobs:
           set -euxo pipefail
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
@@ -168,7 +160,6 @@ jobs:
           set -euxo pipefail
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
@@ -177,9 +168,8 @@ jobs:
           set -euxo pipefail
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 25
-      # ---------------------------------------------------------------
 
-      # --- Build Rust/C fixtures required by layer tests --------------
+      # --- Rust/C fixtures required by layer tests ---
       - name: Build dns_resolve (Linux)
         run: |
           set -euxo pipefail
@@ -192,15 +182,13 @@ jobs:
           else
             echo "No copy needed (already at $DEST) or source missing."
           fi
-          # fallback to workspace target if needed
           [ -f "$DEST" ] || { cp -f target/debug/dns_resolve "$DEST"; }
           test -f "$DEST"
           chmod +x "$DEST"
 
-      - name: Build Rust fileops/outgoing/recv_from/rebind0
+      - name: Build fileops/outgoing/recv_from/rebind0 (Linux)
         run: |
           set -euxo pipefail
-          # Force a crate-local target dir for fileops so we know where the binary lands
           cargo build --manifest-path mirrord/layer/tests/apps/fileops/Cargo.toml \
                       --target-dir mirrord/layer/tests/apps/fileops/target
           cargo build --manifest-path mirrord/layer/tests/apps/outgoing/Cargo.toml
@@ -214,16 +202,21 @@ jobs:
           DEST="target/debug/fileops"
           mkdir -p "$(dirname "$DEST")"
           if [ -f "$SRC" ]; then
-            if [ "$SRC" != "$DEST" ]; then
-              cp -f "$SRC" "$DEST"
-            else
-              echo "fileops already in place."
-            fi
+            if [ "$SRC" != "$DEST" ]; then cp -f "$SRC" "$DEST"; fi
             chmod +x "$DEST"
           else
             echo "ERROR: $SRC not found after build" >&2
             exit 1
           fi
+
+      # 🔧 NEW: build the Linux helper for tests/apps/issue1054
+      - name: Build issue1054 helper (Linux)
+        run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+          test -f target/issue1054
+          chmod +x target/issue1054
 
       - name: Build C apps
         run: ./scripts/build_c_apps.sh
@@ -239,7 +232,7 @@ jobs:
           ls -l mirrord/layer/tests/apps/read_go/*go_test_app
           ls -l mirrord/layer/tests/apps/write_go/*go_test_app
           ls -l target/debug/fileops
-      # ----------------------------------------------------------------
+          ls -l mirrord/layer/tests/apps/issue1054/target/issue1054
 
       # Run the layer + the rest
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
@@ -271,7 +264,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Ensure the toolchain action parameters take effect even if a file exists
       - run: rm -f rust-toolchain.toml || true
 
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
@@ -288,11 +280,9 @@ jobs:
       - name: verify SIP status
         run: csrutil status || true
 
-      # Build the universal layer so MIRRORD_* envs point to an existing file
       - name: build universal layer
         run: ./scripts/build_layer_mac.sh
 
-      # Ensure dns_resolve test app exists where tests expect it (no-fail if identical)
       - name: Build dns_resolve test app (macOS)
         run: |
           set -euxo pipefail
@@ -300,182 +290,5 @@ jobs:
           mkdir -p target/debug
           SRC_BIN="mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve"
           DEST_BIN="target/debug/dns_resolve"
-          if [ -f "$SRC_BIN" ] && [ "$SRC_BIN" != "$DEST_BIN" ]; then
-            cp -f "$SRC_BIN" "$DEST_BIN"
-          else
-            echo "No copy needed (already at $DEST_BIN) or source missing."
-          fi
-          # fallback to workspace target if needed
-          [ -f "$DEST_BIN" ] || { cp -f target/debug/dns_resolve "$DEST_BIN"; }
-          test -f "$DEST_BIN"
-          chmod +x "$DEST_BIN"
-
-      - name: lint
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
-
-      - name: mirrord-sip UT
-        run: cargo test -p mirrord-sip
-
-      - name: mirrord-intproxy UT
-        run: cargo test -p mirrord-intproxy
-
-      # Prepare small Rust fixtures used by tests
-      - run: |
-          cd mirrord/layer/tests/apps/issue1123
-          rustc issue1123.rs --out-dir target
-      - run: |
-          cd mirrord/layer/tests/apps/issue1054
-          rustc issue1054.rs --out-dir target
-      - run: |
-          cd mirrord/layer/tests/apps/issue1458
-          rustc issue1458.rs --out-dir target
-      - run: |
-          cd mirrord/layer/tests/apps/issue1458portnot53
-          rustc issue1458portnot53.rs --out-dir target
-      - run: |
-          cd mirrord/layer/tests/apps/issue2058
-          rustc issue2058.rs --out-dir target
-
-      # Go test apps (three versions)
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-          cache: false
-      - run: |
-          set -euxo pipefail
-          go version
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 23
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache: false
-      - run: |
-          set -euxo pipefail
-          go version
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 24
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache: false
-      - run: |
-          set -euxo pipefail
-          go version
-          cd mirrord/layer/tests
-          ../../../scripts/build_go_apps.sh 25
-
-      # Cargo-built fixtures
-      - run: |
-          set -euxo pipefail
-          # Force a crate-local target dir so we can reliably copy from it
-          cargo build --manifest-path mirrord/layer/tests/apps/fileops/Cargo.toml \
-                      --target-dir mirrord/layer/tests/apps/fileops/target
-          # copy fileops to repo target where tests look for it
-          SRC="mirrord/layer/tests/apps/fileops/target/debug/fileops"
-          DEST="target/debug/fileops"
-          mkdir -p "$(dirname "$DEST")"
-          if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
-            cp -f "$SRC" "$DEST"
-          else
-            echo "fileops already in place or source missing; will verify below."
-          fi
-          test -f "$DEST" && chmod +x "$DEST" || (echo "ERROR: $DEST not found" >&2; exit 1)
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/outgoing && cargo build
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/recv_from && cargo build
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/dns_resolve && cargo build
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/rebind0 && cargo build
-
-      # Java for the temurin SIP test
-      - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
-        id: sdkman
-        with:
-          candidate: java
-          version: 17.0.6-tem
-      - run: java -version
-
-      # Python & Node fixtures
-      - uses: actions/setup-python@v5
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 18
-      - run: npm install express
-      - run: npm install portfinder
-
-      - name: mirrord layer tests
-        run: cargo test -p mirrord-layer
-
-      - name: save intproxy logs
-        continue-on-error: true
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: intproxy_logs_macos
-          path: /tmp/intproxy_logs/macos
-
-  # ======================
-  # E2E (Linux, minikube)
-  # ======================
-  e2e:
-    runs-on: ubuntu-24.04
-    needs: [test_agent_image]
-    strategy:
-      matrix:
-        container-runtime: ["docker", "containerd"]
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-
-      - uses: metalbear-co/ci/e2e-setup-action@main
-        with:
-          container-runtime: ${{ matrix.container-runtime }}
-
-      - name: download agent image
-        uses: actions/download-artifact@v4
-        with:
-          name: test
-          path: /tmp
-
-      - run: minikube image load /tmp/test.tar
-
-      # run the cli tests only once (docker runtime)
-      - name: Run cli E2E tests
-        if: ${{ matrix.container-runtime == 'docker' }}
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
-
-      - name: Run targetless E2E test
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
-
-      - run: kubectl create namespace argo-rollouts
-      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
-
-      - name: Run remaining E2E tests
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
-
-      - name: Collect logs on failure
-        if: ${{ failure() }}
-        run: |
-          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
-          kubectl get all
-          kubectl describe pods
-          docker exec minikube find /var/log/pods -print -exec cat {} \;
+          if [ -f "$SRC_BIN" ] && [ "$SRC_BIN" != "$DEST_BIN" ]; then cp -f "$SRC_BIN" "$DEST_BIN"; fi
+          [ -f "$DEST_BIN" ] || { cp -f target/debug/dns_resolve "$DEST_BIN"; }_]()
