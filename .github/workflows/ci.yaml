@@ -56,7 +56,7 @@ jobs:
             -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables
 
   # ======================
-  # Build agent image tar (for e2e)
+  # Build agent image tar (for E2E)
   # ======================
   test_agent_image:
     runs-on: ubuntu-24.04
@@ -149,26 +149,72 @@ jobs:
           npm set audit false
           npm install express
 
+      # --- Build Go fixtures for all versions used by fileops tests ---
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache: true
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
+          set -euxo pipefail
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
 
-      # --- add back the Rust/C fixtures needed by layer tests ---
-      - name: Build Rust test apps required by layer tests
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 24
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: |
+          set -euxo pipefail
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 25
+      # ---------------------------------------------------------------
+
+      # --- Build Rust/C fixtures required by layer tests --------------
+      - name: Build dns_resolve (Linux)
         run: |
-          # dns_resolve is required for tests/dns_resolve.rs
-          cd mirrord/layer/tests/apps/dns_resolve
-          cargo build
+          set -euxo pipefail
+          cargo build --manifest-path mirrord/layer/tests/apps/dns_resolve/Cargo.toml
+          mkdir -p target/debug
+          SRC="mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve"
+          if [ ! -f "$SRC" ]; then SRC="target/debug/dns_resolve"; fi
+          cp -f "$SRC" target/debug/dns_resolve
+          chmod +x target/debug/dns_resolve
+
+      - name: Build Rust fileops/outgoing/recv_from/rebind0
+        run: |
+          set -euxo pipefail
+          cargo build --manifest-path mirrord/layer/tests/apps/fileops/Cargo.toml
+          cargo build --manifest-path mirrord/layer/tests/apps/outgoing/Cargo.toml
+          cargo build --manifest-path mirrord/layer/tests/apps/recv_from/Cargo.toml
+          cargo build --manifest-path mirrord/layer/tests/apps/rebind0/Cargo.toml
+
       - name: Build C apps
         run: ./scripts/build_c_apps.sh
-      # ----------------------------------------------------------
 
-      # run the layer + the rest
+      - name: Verify fixture binaries exist
+        run: |
+          set -euxo pipefail
+          ls -l target/debug/dns_resolve
+          ls -l mirrord/layer/tests/apps/faccessat_go/*go_test_app
+          ls -l mirrord/layer/tests/apps/dir_go/*go_test_app
+          ls -l mirrord/layer/tests/apps/dir_go_bypass/*go_test_app
+          ls -l mirrord/layer/tests/apps/lseek_go/*go_test_app
+          ls -l mirrord/layer/tests/apps/read_go/*go_test_app
+          ls -l mirrord/layer/tests/apps/write_go/*go_test_app
+          ls -l mirrord/layer/tests/apps/fileops/target/debug/fileops
+      # ----------------------------------------------------------------
+
+      # Run the layer + the rest
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
@@ -190,7 +236,6 @@ jobs:
   # ======================
   # macOS tests
   # ======================
-  
   macos_tests:
     runs-on: macos-latest
     env:
@@ -220,7 +265,7 @@ jobs:
       - name: build universal layer
         run: ./scripts/build_layer_mac.sh
 
-      # --- Ensure dns_resolve test app exists where tests expect it ---
+      # Ensure dns_resolve test app exists where tests expect it
       - name: Build dns_resolve test app (macOS)
         run: |
           set -euxo pipefail
@@ -230,7 +275,6 @@ jobs:
           test -f "$SRC_BIN" || SRC_BIN="target/debug/dns_resolve"
           cp "$SRC_BIN" target/debug/dns_resolve
           chmod +x target/debug/dns_resolve
-      # ----------------------------------------------------------------
 
       - name: lint
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
@@ -264,6 +308,7 @@ jobs:
           go-version: "1.23"
           cache: false
       - run: |
+          set -euxo pipefail
           go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 23
@@ -273,6 +318,7 @@ jobs:
           go-version: "1.24"
           cache: false
       - run: |
+          set -euxo pipefail
           go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 24
@@ -280,22 +326,28 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-          cache: false
+        continue-on-error: false
       - run: |
+          set -euxo pipefail
           go version
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 25
 
       # Cargo-built fixtures
       - run: |
+          set -euxo pipefail
           cd mirrord/layer/tests/apps/fileops && cargo build
       - run: |
+          set -euxo pipefail
           cd mirrord/layer/tests/apps/outgoing && cargo build
       - run: |
+          set -euxo pipefail
           cd mirrord/layer/tests/apps/recv_from && cargo build
       - run: |
+          set -euxo pipefail
           cd mirrord/layer/tests/apps/dns_resolve && cargo build
       - run: |
+          set -euxo pipefail
           cd mirrord/layer/tests/apps/rebind0 && cargo build
 
       # Java for the temurin SIP test
@@ -325,7 +377,6 @@ jobs:
         with:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
-
 
   # ======================
   # E2E (Linux, minikube)
@@ -382,6 +433,7 @@ jobs:
           kubectl get all
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
+
 
 
 
