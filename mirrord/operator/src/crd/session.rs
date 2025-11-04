@@ -39,6 +39,22 @@ pub struct MirrordClusterSessionSpec {
     pub ci_info: Option<MirrordCiInfo>,
 }
 
+impl MirrordClusterSession {
+    pub fn clone_owned(&self) -> Self {
+        let Self {
+            metadata,
+            spec,
+            status,
+        } = self;
+
+        Self {
+            metadata: metadata.clone(),
+            spec: spec.clone(),
+            status: status.clone(),
+        }
+    }
+}
+
 /// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
