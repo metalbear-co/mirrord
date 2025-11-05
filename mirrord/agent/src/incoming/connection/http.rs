@@ -25,7 +25,7 @@ use tokio::{
     time::{Instant, error::Elapsed},
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
-use tracing::{Instrument, Span, instrument};
+use tracing::instrument;
 
 use super::{ConnectionInfo, IncomingStream};
 use crate::{
