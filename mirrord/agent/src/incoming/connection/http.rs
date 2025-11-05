@@ -349,7 +349,7 @@ impl RedirectedHttp {
 
         let timeout = envs::MAX_BODY_BUFFER_TIMEOUT.from_env_or_default();
         let buffered = tokio::time::timeout(
-            Duration::from_millis(timeout),
+            Duration::from_millis(timeout.into()),
             async {
                 while let Some(frame) = tail.frame().await {
                     let frame = match frame {
