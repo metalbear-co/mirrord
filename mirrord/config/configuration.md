@@ -162,6 +162,8 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "flush_connections": false,
     "exclude_from_mesh": false
     "inject_headers": false,
+    "max_body_buffer_size": 65535,
+    "max_body_buffer_timeout": 1000
   }
 }
 ```

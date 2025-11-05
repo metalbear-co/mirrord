@@ -83,3 +83,7 @@ pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL")
 /// Sets whether `Mirrord-Agent` headers are injected into HTTP
 /// responses that went through the agent.
 pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJECT_HEADERS");
+
+pub const MAX_BODY_BUFFER_SIZE: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_SIZE");
+pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
+    CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_TIMEOUT");

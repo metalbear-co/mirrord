@@ -17,6 +17,7 @@ use hyper::{
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
+use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
@@ -297,8 +298,7 @@ impl RedirectedHttp {
             return Ok(());
         }
 
-        // TODO(areg) configurable
-        const MAX_BODY_SIZE: usize = 64 * 1024;
+        let max_body_size = envs::MAX_BODY_BUFFER_SIZE.from_env_or_default() as usize;
 
         let content_length = self
             .request
@@ -308,7 +308,7 @@ impl RedirectedHttp {
             .and_then(|t| t.to_str().ok())
             .and_then(|t| usize::from_str(t).ok());
 
-        if content_length.is_some_and(|l| l > MAX_BODY_SIZE) {
+        if content_length.is_some_and(|l| l > max_body_size) {
             return Err(BufferBodyError::BodyTooBig);
         }
 
@@ -339,7 +339,7 @@ impl RedirectedHttp {
             return Err(BufferBodyError::BodyTooBig);
         }
 
-        let rx_until = content_length.unwrap_or(MAX_BODY_SIZE);
+        let rx_until = content_length.unwrap_or(max_body_size);
 
         let Some(tail) = self.request.body_tail.as_mut() else {
             tracing::debug!("request has no tail, bailing early");
@@ -347,9 +347,9 @@ impl RedirectedHttp {
             return Ok(());
         };
 
-        // TODO(areg): make cfgurable
+        let timeout = envs::MAX_BODY_BUFFER_TIMEOUT.from_env_or_default();
         let buffered = tokio::time::timeout(
-            Duration::from_millis(1000),
+            Duration::from_millis(timeout),
             async {
                 while let Some(frame) = tail.frame().await {
                     let frame = match frame {
