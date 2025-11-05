@@ -78,7 +78,7 @@ impl BusyListenerMethod {
     ///
     /// If the method fails the check, returns [`Err`].
     async fn check_if_works(self) -> io::Result<()> {
-        let prepared = self.prepare_socket(false).await?;
+        let prepared = self.prepare_socket(true).await?;
         let addr = prepared.local_addr()?;
 
         let mut conn_fut = Box::pin(TcpStream::connect(addr));

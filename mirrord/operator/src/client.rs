@@ -2,9 +2,9 @@ use std::{fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
+use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderMap, HeaderName, HeaderValue, request::Request};
 use kube::{
     Api, Client, Config, Resource,
@@ -17,7 +17,9 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
 };
-use mirrord_config::{LayerConfig, target::Target};
+use mirrord_config::{
+    LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
+};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -26,9 +28,10 @@ use mirrord_kube::{
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol_io::{Client as ProtocolClient, Connection};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_tungstenite::tungstenite;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
@@ -49,7 +52,6 @@ use crate::{
     },
 };
 
-mod conn_wrapper;
 mod connect_params;
 mod credentials;
 mod database_branches;
@@ -124,7 +126,7 @@ pub struct OperatorSession {
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
     operator_license_fingerprint: Option<String>,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`ConnectionWrapper`].
+    /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
 
     /// Allow the layer to attempt reconnection
@@ -153,23 +155,15 @@ impl fmt::Debug for OperatorSession {
 pub struct OperatorSessionConnection {
     /// Session of this connection.
     pub session: OperatorSession,
-    /// Used to send [`ClientMessage`]s to the operator.
-    pub tx: Sender<ClientMessage>,
-    /// Used to receive [`DaemonMessage`]s from the operator.
-    pub rx: Receiver<DaemonMessage>,
+
+    pub conn: Connection<ProtocolClient>,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let tx_queued_messages = self.tx.max_capacity() - self.tx.capacity();
-        let rx_queued_messages = self.rx.len();
-
         f.debug_struct("OperatorSessionConnection")
             .field("session", &self.session)
-            .field("tx_closed", &self.tx.is_closed())
-            .field("tx_queued_messages", &tx_queued_messages)
-            .field("rx_closed", &self.rx.is_closed())
-            .field("rx_queued_messages", &rx_queued_messages)
+            .field("closed", &self.conn.is_closed())
             .finish()
     }
 }
@@ -833,10 +827,10 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx, session) = match Self::connect_target(&self.client, &session).await {
-            Ok((tx, rx)) => {
+        let (conn, session) = match Self::connect_target(&self.client, &session).await {
+            Ok(conn) => {
                 connection_subtask.success(Some("connected to the target"));
-                (tx, rx, session)
+                (conn, session)
             }
             Err(OperatorApiError::KubeError {
                 error: kube::Error::Api(response),
@@ -860,14 +854,14 @@ impl OperatorApi<PreparedClientCert> {
                     self.make_operator_session(session_id, connect_url, mirrord_ci_info)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
-                let (tx, rx) = Self::connect_target(&self.client, &session).await?;
+                let conn = Self::connect_target(&self.client, &session).await?;
                 connection_subtask.success(Some("connected to the target"));
-                (tx, rx, session)
+                (conn, session)
             }
             Err(error) => return Err(error),
         };
 
-        Ok(OperatorSessionConnection { session, tx, rx })
+        Ok(OperatorSessionConnection { session, conn })
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -1235,9 +1229,9 @@ impl OperatorApi<PreparedClientCert> {
             )?))
             .build();
 
-        let (tx, rx) = Self::connect_target(&client, &session).await?;
+        let conn = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection { tx, rx, session })
+        Ok(OperatorSessionConnection { conn, session })
     }
 
     /// Creates websocket connection to the operator target.
@@ -1245,8 +1239,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
-        // TODO(alex) [high] 4: But then, do we add it as a header? Feels weird, could it be body?
+    ) -> OperatorApiResult<Connection<ProtocolClient>> {
         // It doesn't really belong in the `connect_url`, it's too much info for that...
         //
         // TODO(alex) [high] 5: It's in the header as a type, and in the operator we get it from
@@ -1270,19 +1263,52 @@ impl OperatorApi<PreparedClientCert> {
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        tracing::Span::current().record("headers", format!("{:?}", request.headers()));
+        #[derive(thiserror::Error, Debug)]
+        enum OperatorClientError {
+            #[error(transparent)]
+            DecodeError(#[from] bincode::error::DecodeError),
+            #[error(transparent)]
+            WsError(#[from] tungstenite::Error),
+            #[error("invalid message: {0:?}")]
+            InvalidMessage(tungstenite::Message),
+        }
 
-        let connection = upgrade::connect_ws(client, request)
+        let ws = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
-            })?;
+            })?
+            .with(|e: Vec<u8>| async {
+                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
+            })
+            .map(|i| match i.map_err(OperatorClientError::from)? {
+                tungstenite::Message::Binary(pl) => Ok(pl),
+                other => Err(OperatorClientError::InvalidMessage(other)),
+            });
 
-        Ok(ConnectionWrapper::wrap(
-            connection,
-            session.operator_protocol_version.clone(),
-        ))
+        let operator_protocol_version = session.operator_protocol_version.clone();
+
+        let conn = Connection::<ProtocolClient>::from_channel(
+            ws,
+            // Mock protocol version negotiation if the operator does not support it.
+            Some(move |msg| match msg {
+                ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
+                    Some(operator_protocol_version) => {
+                        Either::Left(ClientMessage::SwitchProtocolVersion(
+                            operator_protocol_version.min(&version).clone(),
+                        ))
+                    }
+                    _ => Either::Right(DaemonMessage::SwitchProtocolVersionResponse(
+                        semver::Version::new(1, 2, 1),
+                    )),
+                },
+                other => Either::Left(other),
+            }),
+        )
+        .await?;
+
+        Ok(conn)
     }
 
     /// Prepare branch databases, and return database resource names.
@@ -1318,8 +1344,24 @@ impl OperatorApi<PreparedClientCert> {
             list_reusable_mysql_branches(&mysql_branch_api, &create_mysql_params, &subtask).await?;
 
         create_mysql_params.retain(|id, _| !reusable_mysql_branches.contains_key(id));
+
+        // Get the maximum timeout from all DB branch configs
+        let timeout_secs = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
+                    mysql_config,
+                ) => mysql_config.base.creation_timeout_secs,
+            })
+            .max()
+            .unwrap_or(default_creation_timeout_secs());
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
         let created_mysql_branches =
-            create_mysql_branches(&mysql_branch_api, create_mysql_params, &subtask).await?;
+            create_mysql_branches(&mysql_branch_api, create_mysql_params, timeout, &subtask)
+                .await?;
         subtask.success(None);
 
         let mysql_branch_names = reusable_mysql_branches

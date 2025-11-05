@@ -407,6 +407,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord
+      - name: mirrord protocol-io UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -421,8 +423,8 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/debug/libmirrord_layer.dylib
+      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/universal-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -439,10 +441,8 @@ jobs:
       - name: verify SIP status
         run: csrutil status
       # Build layer before linting because the `mirrord` crate expects `MIRRORD_LAYER_FILE_MACOS_ARM64` to point to an existing file.
-      - name: build layer
-        run: cargo build -p mirrord-layer
-      - name: build layer x86
-        run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build universal layer
+        run: ./scripts/build_layer_mac.sh
       - name: lint
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord-sip UT

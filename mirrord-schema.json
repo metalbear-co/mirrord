@@ -812,6 +812,25 @@
                 }
               ]
             },
+            "copy": {
+              "default": {
+                "mode": "empty",
+                "tables": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MysqlBranchCopyConfig"
+                }
+              ]
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
             "id": {
               "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
               "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
@@ -1889,6 +1908,83 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "MysqlBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreates an empty database and copies schema of all tables.\n\n- All\n\nCopies both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MysqlBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "schema"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MysqlBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "MysqlBranchTableCopyConfig": {
+      "description": "In addition to copying an empty database or all tables' schema, mirrord operator will copy data from the source DB when an array of table configs are specified.\n\nExample:\n\n```json { \"users\": { \"filter\": \"my_db.users.name = 'alice' OR my_db.users.name = 'bob'\" }, \"orders\": { \"filter\": \"my_db.orders.created_at > 1759948761\" } } ```\n\nWith the config above, only alice and bob from the `users` table and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
