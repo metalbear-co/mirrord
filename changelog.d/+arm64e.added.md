@@ -1,1 +1,0 @@
-mirrord can now run arm64e binaries, both when inside a universal binary and standalone. In practice, this means running arm64e+x86_64 universal binaries no longer has to go through the Rosetta emulation layer.
