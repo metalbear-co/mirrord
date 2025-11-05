@@ -3,7 +3,7 @@ use core::{ffi::CStr, mem};
 use std::{
     collections::HashMap,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
     ops::Not,
     os::{
         fd::{BorrowedFd, FromRawFd, IntoRawFd},
@@ -146,32 +146,72 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-/// Tries to bind the given socket to a loopback or an unspecified address similar to the given
-/// `requested_address`.
+/// Tries to bind the given socket to the requested address, with fallbacks.
 ///
-/// If the given `requested_address` is not a loopback and is specified, binds to either
-/// [`Ipv4Addr::LOCALHOST`] or [`Ipv6Addr::UNSPECIFIED`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour<()> {
-    let addr = requested_address.ip();
-    let port = requested_address.port();
-
-    let address = if addr.is_loopback() || addr.is_unspecified() {
-        *requested_address
-    } else if addr.is_ipv4() {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
-    } else {
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)
+/// Tried addresses, in order:
+/// 1. Requested ip + requested port.
+/// 2. Requested ip + port 0, if `can_use_random_port`.
+/// 3. IPv4 localhost / IPv6 unspecified + requested port, if the requested ip is not
+///    loopback/unspecified.
+/// 3. IPv4 localhost / IPv6 unspecified + port 0, if the requested ip is not loopback/unspecified,
+///    and `can_use_random_port`.
+///
+/// # Rationale
+///
+/// ## Why fallback to port 0?
+///
+/// Because, most of the time, the app will want to listen on a restricted low port, like 80 or 443.
+/// This is fine when the app is deployed in a container, but will most likely fail if we try to do
+/// it locally on the user machine.
+///
+/// ## Why fallback to localhost/unspecified?
+///
+/// The app might be attempting to bind to an address fetched from the remote target.
+/// In other words, to an interface of the target pod.
+///
+/// ## Why fallback to localhost for IPv4 and unspecified for IPv6?
+///
+/// <https://www.visitourchina.com/special/china-great-wall/stories-and-legends-03.html>
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+fn bind_similar_address(
+    sockfd: c_int,
+    requested: SocketAddr,
+    can_use_random_port: bool,
+) -> Detour<()> {
+    let address = SockaddrStorage::from(requested);
+    if nix::sys::socket::bind(sockfd, &address).is_ok() {
+        return Detour::Success(());
     };
 
-    let address = SockAddr::from(address);
-
-    let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
-    if bind_result != 0 {
-        Detour::Error(io::Error::last_os_error().into())
-    } else {
-        Detour::Success(())
+    if can_use_random_port {
+        let address = SockaddrStorage::from(SocketAddr::new(requested.ip(), 0));
+        if nix::sys::socket::bind(sockfd, &address).is_ok() {
+            return Detour::Success(());
+        };
     }
+
+    if requested.ip().is_loopback() || requested.ip().is_unspecified() {
+        return Detour::Error(io::Error::last_os_error().into());
+    }
+
+    let new_ip = if requested.ip().is_ipv4() {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    } else {
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+    };
+    let address = SockaddrStorage::from(SocketAddr::new(new_ip, requested.port()));
+    if nix::sys::socket::bind(sockfd, &address).is_ok() {
+        return Detour::Success(());
+    }
+
+    if can_use_random_port {
+        let address = SockaddrStorage::from(SocketAddr::new(new_ip, 0));
+        if nix::sys::socket::bind(sockfd, &address).is_ok() {
+            return Detour::Success(());
+        }
+    }
+
+    Detour::Error(io::Error::last_os_error().into())
 }
 
 /// Checks if given TCP port needs to be ignored
@@ -306,31 +346,38 @@ pub(super) fn bind(
     // we return address not available and not fallback to a random port.
     if let Some(port) = listen_port {
         // Listen port was specified. If we fail to bind, we should fail the whole operation.
-        bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), port))
+        let mut address = requested_address;
+        address.set_port(port);
+        bind_similar_address(sockfd, address, false)
     } else {
         // Listen port was not specified. If we fail to bind, it's ok to fall back to a random port.
-        bind_similar_address(sockfd, &requested_address).or_else(|error| {
-            trace!(%error, %requested_address, "bind failed, trying to bind to on a random port");
-            bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), 0))
-        })
+        bind_similar_address(sockfd, requested_address, true)
     }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
     // connect to.
-    let address = unsafe {
-        SockAddr::try_init(|storage, len| {
-            if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
-                let error = io::Error::last_os_error();
-                error!(%error, sockfd, "`getsockname` failed to get address of a socket after bind");
-                Err(error)
-            } else {
-                Ok(())
-            }
-        })
-    }
-        .ok()
-        .and_then(|(_, address)| address.as_socket())
-        .bypass(Bypass::AddressConversion)?;
+    let Ok(address) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd) else {
+        let error = io::Error::last_os_error();
+        tracing::error!(
+            sockfd,
+            %error,
+            "Failed to retrieve socket local address after intercepted bind."
+        );
+        return Detour::Error(error.into());
+    };
+    let address: SocketAddr = if let Some(ipv4) = address.as_sockaddr_in() {
+        SocketAddrV4::from(*ipv4).into()
+    } else if let Some(ipv6) = address.as_sockaddr_in6() {
+        SocketAddrV6::from(*ipv6).into()
+    } else {
+        tracing::error!(
+            %address,
+            sockfd,
+            "Failed to retrieve socket local address after intercepted bind. \
+            Should be an IPv4 or IPv6 address.",
+        );
+        return Detour::Bypass(Bypass::AddressConversion);
+    };
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound {
         bound: Bound {
