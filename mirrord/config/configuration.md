@@ -356,6 +356,19 @@ with `RUST_LOG`.
 }
 ```
 
+### agent.max_body_buffer_size {#agent-max_body_buffer_size}
+
+Maximum size, in bytes, of HTTP request body buffers. Used for
+temporarily storing bodies of incoming HTTP requests to run
+body filters. HTTP body filters will not match any requests
+with bodies larger than this.
+
+### agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}
+
+Maximum timeout, in milliseconds, for receiving HTTP request
+bodies. HTTP body filters will not match any requests whose
+bodies do not arrive within this timeout.
+
 ### agent.metrics {#agent-metrics}
 
 Enables prometheus metrics for the agent pod.
@@ -1605,6 +1618,11 @@ Example:
   ]
 }
 ```
+
+##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
+
+Matches the request based on the contents of its body. Currently only JSON body filtering
+is supported.
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 
