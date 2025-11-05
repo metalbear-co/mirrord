@@ -1132,7 +1132,7 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                 );
                 progress.success(Some(&format!("update to {latest_version} available")));
             } else {
-                progress.success(Some(&format!("running on latest!")));
+                progress.success(Some("running on latest!"));
             }
         };
 
