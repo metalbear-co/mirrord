@@ -84,21 +84,21 @@ impl BufferedBody {
 
         impl<'a> Read for Reader<'a> {
             fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                let Some(frame) = self.remaining.first() else {
+                let [first, rest @ ..] = self.remaining else {
                     return Ok(0);
                 };
 
-                let Some(frame) = frame.data_ref() else {
+                let Some(frame) = first.data_ref() else {
                     return Ok(0);
                 };
 
                 let until = Ord::min(frame.len(), self.read_from_current + buf.len());
                 let range = self.read_from_current..until;
 
-                buf.copy_from_slice(&frame[range.clone()]);
+                buf.copy_from_slice(frame.get(range.clone()).unwrap());
 
                 if until == frame.len() {
-                    self.remaining = &self.remaining[1..];
+                    self.remaining = rest;
                     self.read_from_current = 0;
                 } else {
                     self.read_from_current = until;
@@ -110,7 +110,7 @@ impl BufferedBody {
 
         match self {
             BufferedBody::Successful(full) => Some(Reader {
-                remaining: &full,
+                remaining: full,
                 read_from_current: 0,
             }),
             _ => None,

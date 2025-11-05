@@ -142,7 +142,7 @@ impl HttpFilter {
                                 return false;
                             }
                         };
-                        let Ok(results) = json.query(&query) else {
+                        let Ok(results) = json.query(query) else {
                             return false;
                         };
 
