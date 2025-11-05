@@ -1,0 +1,1 @@
+Changed incoming proxy's `BusyTcpListener` check to use IPv4 instead of IPv6.

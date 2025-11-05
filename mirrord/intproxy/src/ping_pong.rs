@@ -98,7 +98,7 @@ impl BackgroundTask for PingPong {
                         break Err(PingPongError::PongTimeout);
                     } else {
                         tracing::debug!("Sending ping to the agent");
-                        let _ = message_bus.send(ProxyMessage::ToAgent(ClientMessage::Ping)).await;
+                        message_bus.send_agent(ClientMessage::Ping).await;
                         self.awaiting_pongs += 1;
                     }
                 },
