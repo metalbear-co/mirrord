@@ -43,19 +43,26 @@ enum EventRole {
 ///
 /// ## Parent Process (creates event for child)
 /// ```rust
-/// let event = LayerInitEvent::for_parent()?;
+/// use mirrord_layer_lib::process::windows::sync::LayerInitEvent;
+/// let mut env = std::collections::HashMap::new();
+/// let event = LayerInitEvent::for_parent().expect("failed to create init event");
 /// // Set environment variable for child
 /// env.insert("MIRRORD_LAYER_INIT_EVENT_NAME", event.name().to_string());
 /// // ... create child process ...
-/// let success = event.wait_for_signal(Some(30000))?; // 30 second timeout
+/// let success = event
+///     .wait_for_signal(Some(30000))
+///     .expect("Failed to wait for signal"); // 30 second timeout
 /// // Event automatically cleaned up when dropped
 /// ```
 ///
 /// ## Child Process (opens parent's event)
-/// ```rust
-/// let event = LayerInitEvent::for_child()?;
+/// ```rust, no_run
+/// use mirrord_layer_lib::process::windows::sync::LayerInitEvent;
+/// let event = LayerInitEvent::for_child().expect("failed to open parent init event");
 /// // ... initialize layer ...
-/// event.signal_complete()?;
+/// event
+///     .signal_complete()
+///     .expect("Failed to signal completion");
 /// // Event automatically cleaned up when dropped
 /// ```
 pub struct LayerInitEvent {

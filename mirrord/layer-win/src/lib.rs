@@ -40,19 +40,22 @@ use crate::{
 };
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
-fn initialize_detour_guard() -> anyhow::Result<()> {
+fn initialize_detour_guard() -> LayerResult<()> {
     unsafe {
-        DETOUR_GUARD = Some(DetourGuard::new()?);
+        DETOUR_GUARD =
+            Some(DetourGuard::new().map_err(|err| LayerError::DetourGuard(err.to_string()))?);
     }
 
     Ok(())
 }
 
-fn release_detour_guard() -> anyhow::Result<()> {
+fn release_detour_guard() -> LayerResult<()> {
     unsafe {
         // This will release the hooking engine, removing all hooks.
         if let Some(guard) = DETOUR_GUARD.as_mut() {
-            guard.try_close()?;
+            guard
+                .try_close()
+                .map_err(|err| LayerError::DetourGuard(err.to_string()))?;
         }
     }
 
@@ -94,21 +97,18 @@ fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
     Ok(())
 }
 
-fn mirrord_start() -> anyhow::Result<()> {
+fn mirrord_start() -> LayerResult<()> {
     // Create layer initialization event first
-    let init_event = LayerInitEvent::for_child()
-        .map_err(|e| anyhow::anyhow!("Failed to create layer initialization event: {}", e))?;
+    let init_event = LayerInitEvent::for_child()?;
 
     // Check for trace-only mode and initialize accordingly
     if is_trace_only_mode() {
         tracing::info!("Running in trace-only mode - skipping proxy connection");
 
         // In trace-only mode, we still need to set up configuration but skip proxy connection
-        let process_context = detect_process_context()
-            .map_err(|e| anyhow::anyhow!("Failed to detect process context: {}", e))?;
+        let process_context = detect_process_context()?;
 
-        setup_layer_config(&process_context)
-            .map_err(|e| anyhow::anyhow!("Failed to setup layer config: {}", e))?;
+        setup_layer_config(&process_context)?;
 
         tracing::info!("Configuration setup completed in trace-only mode");
     } else {
@@ -125,9 +125,7 @@ fn mirrord_start() -> anyhow::Result<()> {
     tracing::info!("Hooks initialized");
 
     // Signal that initialization is complete
-    init_event
-        .signal_complete()
-        .map_err(|e| anyhow::anyhow!("Failed to signal initialization complete: {}", e))?;
+    init_event.signal_complete()?;
 
     if is_trace_only_mode() {
         tracing::info!("mirrord-layer-win fully initialized in trace-only mode");

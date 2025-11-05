@@ -143,7 +143,7 @@ pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
 /// # Returns
 ///
 /// A Rust String containing the converted text, or an empty string if the pointer is null.
-pub unsafe fn c_string_ptr_to_string(ptr: *const i8) -> String {
+pub unsafe fn u8_ptr_to_string(ptr: *const i8) -> String {
     if ptr.is_null() {
         return String::new();
     }
@@ -181,7 +181,7 @@ pub unsafe fn c_string_ptr_to_string(ptr: *const i8) -> String {
 /// # Returns
 ///
 /// A Rust String containing the converted text, or an empty string if the pointer is null.
-pub unsafe fn wide_string_ptr_to_string(ptr: *const u16) -> String {
+pub unsafe fn u16_ptr_to_string(ptr: *const u16) -> String {
     if ptr.is_null() {
         return String::new();
     }

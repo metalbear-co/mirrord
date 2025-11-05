@@ -13,8 +13,9 @@
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
+use mirrord_layer_lib::{
+    error::LayerResult,
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
 };
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
@@ -1299,7 +1300,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     // ----------------------------------------------------------------------------
     // ~NOTE(gabriela):
     //
