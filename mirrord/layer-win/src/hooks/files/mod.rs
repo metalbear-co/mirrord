@@ -13,7 +13,7 @@
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::{proxy_connection::{
+use mirrord_layer_lib::{file::filter::{FileFilter, FileMode}, proxy_connection::{
     make_proxy_request_no_response, make_proxy_request_with_response,
 }, setup::layer_setup};
 use mirrord_protocol::file::{
@@ -68,7 +68,7 @@ type NtCreateFileType = unsafe extern "system" fn(
     PHANDLE,
     ACCESS_MASK,
     POBJECT_ATTRIBUTES,
-    *mut c_void,
+    *mut _IO_STATUS_BLOCK,
     PLARGE_INTEGER,
     ULONG,
     ULONG,
@@ -222,7 +222,7 @@ unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes: POBJECT_ATTRIBUTES,
-    io_status_block: *mut c_void,
+    io_status_block: *mut _IO_STATUS_BLOCK,
     allocation_size: PLARGE_INTEGER,
     file_attributes: ULONG,
     share_access: ULONG,
@@ -232,120 +232,226 @@ unsafe extern "system" fn nt_create_file_hook(
     ea_size: ULONG,
 ) -> NTSTATUS {
     unsafe {
+        let setup = layer_setup();
         let original = NT_CREATE_FILE_ORIGINAL.get().unwrap();
-        let ret = original(
-            file_handle,
-            desired_access,
-            object_attributes,
-            io_status_block,
-            allocation_size,
-            file_attributes,
-            share_access,
-            create_disposition,
-            create_options,
-            ea_buf,
-            ea_size,
-        );
+        // If file-system hooks are enabled, don't proceed with logic for mirrord handles.
+        // NOTE(gabriela): this is the only place, realistically, where this logic handling
+        // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
+        // to all functions which rely on expecting one!
+        if !setup.fs_hooks_enabled() {
+            return original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            );
+        }
 
         let name = read_object_attributes_name(object_attributes);
 
-        // This is usually the case when a Linux path is provided.
-        if ret == STATUS_OBJECT_PATH_NOT_FOUND {
-            // Layer settings.
-            let setup = layer_setup();
+        // Try to create a Linux path from the provided Windows UNC path.
+        let Some(parsed_linux_path) = remove_root_dir_from_path(name) else {
+            return original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            );
+        };
 
-            // Try to get path.
-            let linux_path = remove_root_dir_from_path(name);
+        let mapper = setup.file_remapper();
+        let linux_path = String::from(mapper.change_path_str(parsed_linux_path.as_str()));
 
-            // If no path, return.
-            if linux_path.is_none() {
-                return ret;
-            }
-            let linux_path = linux_path.unwrap();
-            if desired_access & FILE_WRITE_DATA != 0
-                || desired_access & FILE_APPEND_DATA != 0
-                || desired_access & GENERIC_WRITE != 0
-            {
-                // TODO(gabriela): edit when supported!
+        // NOTE(gabriela): print when a file mapping is found.
+        if parsed_linux_path != linux_path {
+            tracing::info!("nt_create_file_hook: mapping detected, \"{}\" -> \"{}\"", parsed_linux_path, linux_path);
+        }
+
+        // NOTE(gabriela): not happy about the clone, research implications!
+        let filter = setup.file_filter();
+
+        // NOTE(gabriela): look up if there are any filter settings for the path.
+        // see how it collides with desired_access.
+        let matched_filter = filter.check(&linux_path);
+        match matched_filter {
+            Some(FileMode::Local) => {
+                return original(
+                    file_handle,
+                    desired_access,
+                    object_attributes,
+                    io_status_block,
+                    allocation_size,
+                    file_attributes,
+                    share_access,
+                    create_disposition,
+                    create_options,
+                    ea_buf,
+                    ea_size,
+                );
+            },
+            Some(FileMode::NotFound) => {
+                *file_handle = std::ptr::null_mut();
+                *io_status_block = _IO_STATUS_BLOCK::default();
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
-
-            // Check if pointer to handle is valid.
-            if file_handle.is_null() {
-                tracing::warn!(
-                    "nt_create_file_hook: Invalid memory for file_handle variable in hook"
-                );
-                return STATUS_ACCESS_VIOLATION;
-            }
-
-            if !is_memory_valid(io_status_block) {
-                tracing::warn!(
-                    "nt_create_file_hook: Invalid memory for io_status_block variable in hook"
-                );
-                return STATUS_ACCESS_VIOLATION;
-            }
-
-            // Get open options.
-            let open_options = OpenOptionsInternal {
-                read: true,
-                ..Default::default()
-            };
-
-            // Try to open the file on the pod.
-            let Ok(req) = make_proxy_request_with_response(OpenFileRequest {
-                path: PathBuf::from(&linux_path),
-                open_options,
-            }) else {
-                tracing::error!("nt_create_file_hook: Request for open file failed!");
-                return STATUS_UNEXPECTED_NETWORK_ERROR;
-            };
-
-            let managed_handle = match req {
-                Ok(file) => {
-                    let current_time = WindowsTime::current().as_file_time();
-
-                    try_insert_handle(HandleContext {
-                        path: linux_path.clone(),
-                        fd: file.fd,
+            // TODO(gabriela): edit when supported!
+            Some(FileMode::ReadOnly) | Some(FileMode::ReadWrite) | None => {
+                if desired_access & FILE_WRITE_DATA != 0
+                    || desired_access & FILE_APPEND_DATA != 0
+                    || desired_access & GENERIC_WRITE != 0
+                {
+                    return original(
+                        file_handle,
                         desired_access,
+                        object_attributes,
+                        io_status_block,
+                        allocation_size,
                         file_attributes,
                         share_access,
                         create_disposition,
                         create_options,
-                        creation_time: current_time,
-                        access_time: current_time,
-                        write_time: current_time,
-                        change_time: current_time,
-                    })
+                        ea_buf,
+                        ea_size,
+                    );
                 }
-                Err(e) => {
-                    tracing::warn!("nt_create_file_hook: {:?} {}", e, linux_path.clone());
-                    None
-                }
-            };
-
-            if let Some(handle) = managed_handle {
-                // Write managed handle at the provided pointer
-                *file_handle = *handle;
-                tracing::info!(
-                    "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
-                    linux_path,
-                    *file_handle as usize
-                );
-                return STATUS_SUCCESS;
-            } else {
-                // File could not be obtained for reasons, even if the
-                // network operation succeeded.
-
-                tracing::info!(
-                    "nt_create_file_hook: Failed opening remote file handle for {}",
-                    linux_path
-                );
-                return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
 
-        ret
+        // Check if pointer to handle is valid.
+        if file_handle.is_null() {
+            tracing::warn!(
+                "nt_create_file_hook: Invalid memory for file_handle variable in hook"
+            );
+            return original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            );
+        }
+
+        if !is_memory_valid(io_status_block) {
+            tracing::warn!(
+                "nt_create_file_hook: Invalid memory for io_status_block variable in hook"
+            );
+            return original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            );
+        }
+
+        // Get open options.
+        let open_options = OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        };
+
+        // Try to open the file on the pod.
+        let Ok(req) = make_proxy_request_with_response(OpenFileRequest {
+            path: PathBuf::from(&linux_path),
+            open_options,
+        }) else {
+            tracing::error!("nt_create_file_hook: Request for open file failed!");
+            return original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            );
+        };
+
+        let managed_handle = match req {
+            Ok(file) => {
+                let current_time = WindowsTime::current().as_file_time();
+
+                try_insert_handle(HandleContext {
+                    path: linux_path.clone(),
+                    fd: file.fd,
+                    desired_access,
+                    file_attributes,
+                    share_access,
+                    create_disposition,
+                    create_options,
+                    creation_time: current_time,
+                    access_time: current_time,
+                    write_time: current_time,
+                    change_time: current_time,
+                })
+            }
+            Err(e) => {
+                tracing::warn!("nt_create_file_hook: {:?} {}", e, linux_path.clone());
+                None
+            }
+        };
+
+        if let Some(handle) = managed_handle {
+            // Write managed handle at the provided pointer
+            *file_handle = *handle;
+            tracing::info!(
+                "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
+                linux_path,
+                *file_handle as usize
+            );
+            return STATUS_SUCCESS;
+        } else {
+            // File could not be obtained for reasons, even if the
+            // network operation succeeded.
+
+            tracing::info!(
+                "nt_create_file_hook: Failed opening remote file handle for {}",
+                linux_path
+            );
+            return original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            );
+        }
     }
 }
 

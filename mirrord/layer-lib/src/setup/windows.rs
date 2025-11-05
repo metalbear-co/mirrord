@@ -21,7 +21,7 @@ use mirrord_protocol::{
     tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
 };
 
-use crate::socket::{DnsSelector, OutgoingSelector};
+use crate::{file::{filter::FileFilter, mapper::FileRemapper}, socket::{DnsSelector, OutgoingSelector}};
 
 /// Helper trait for network hook decisions
 pub trait NetworkHookConfig {
@@ -55,6 +55,8 @@ impl NetworkHookConfig for NetworkConfig {
 #[derive(Debug)]
 pub struct LayerSetup {
     config: LayerConfig,
+    file_filter: FileFilter,
+    file_remapper: FileRemapper,
     outgoing_selector: OutgoingSelector,
     dns_selector: DnsSelector,
     proxy_address: SocketAddr,
@@ -64,6 +66,10 @@ pub struct LayerSetup {
 
 impl LayerSetup {
     pub fn new(mut config: LayerConfig, proxy_address: SocketAddr) -> Self {
+        let file_filter = FileFilter::new(config.feature.fs.clone());
+        let file_remapper =
+            FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
+
         let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
 
         let dns_selector = DnsSelector::from(&config.feature.network.dns);
@@ -74,6 +80,8 @@ impl LayerSetup {
         tracing::info!(?incoming_mode, ?config, "incoming has changed");
         Self {
             config,
+            file_filter,
+            file_remapper,
             outgoing_selector,
             dns_selector,
             proxy_address,
@@ -84,6 +92,14 @@ impl LayerSetup {
 
     pub fn layer_config(&self) -> &LayerConfig {
         &self.config
+    }
+
+    pub fn file_filter(&self) -> &FileFilter {
+        &self.file_filter
+    }
+
+    pub fn file_remapper(&self) -> &FileRemapper {
+        &self.file_remapper
     }
 
     pub fn incoming_config(&self) -> &IncomingConfig {

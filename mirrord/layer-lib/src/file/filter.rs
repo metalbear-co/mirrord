@@ -27,6 +27,7 @@ use super::unix::*;
 #[cfg(windows)]
 use super::windows::*;
 
+#[derive(Debug, PartialEq)]
 pub enum FileMode {
     Local,
     NotFound,

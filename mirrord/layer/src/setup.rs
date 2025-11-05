@@ -25,11 +25,13 @@ use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
-    file::{mapper::FileRemapper},
     socket::{OutgoingSelector, dns_selector::DnsSelector},
 };
 
-use mirrord_layer_lib::file::filter::FileFilter;
+use mirrord_layer_lib::file::{
+    filter::FileFilter,
+    mapper::FileRemapper
+};
 
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
