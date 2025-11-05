@@ -146,17 +146,13 @@ impl HttpFilter {
                             return false;
                         };
 
-                        // TODO(areg): ask Liron about the exact semantics of this. How do we handle
-                        // no matches? multiple matches? nonstring matches?
-
-                        results.is_empty().not()
-                            && results.iter().all(|v| {
-                                match v {
-                                    Value::String(s) => matches.is_match(s),
-                                    other => matches.is_match(&other.to_string()),
-                                }
-                                .is_ok_and(|t| t)
-                            })
+                        results.iter().any(|v| {
+                            match v {
+                                Value::String(s) => matches.is_match(s),
+                                other => matches.is_match(&other.to_string()),
+                            }
+                            .is_ok_and(|t| t)
+                        })
                     }
                 }
             }
