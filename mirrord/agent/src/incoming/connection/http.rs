@@ -22,7 +22,7 @@ use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
     sync::{broadcast, mpsc, oneshot},
-    time::error::Elapsed,
+    time::{Instant, error::Elapsed},
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tracing::{Instrument, Span, instrument};
@@ -46,19 +46,19 @@ pub(super) enum BufferedBody {
     // on 64bit) and having an optional `first_nondata_frame` field.
     // We go with this approach because it's a little simpler to
     // implement.
-    Full(Arc<Vec<Frame<Bytes>>>),
-    Partial(Arc<Vec<Frame<Bytes>>>),
+    Successful(Arc<Vec<Frame<Bytes>>>),
+    Failed(Arc<Vec<Frame<Bytes>>>),
 }
 
 impl Debug for BufferedBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "Empty"),
-            Self::Full(buf) => f
+            Self::Successful(buf) => f
                 .debug_struct("Full")
                 .field("frame_count", &buf.len())
                 .finish(),
-            Self::Partial(buf) => f
+            Self::Failed(buf) => f
                 .debug_struct("Partial")
                 .field("frame_count", &buf.len())
                 .finish(),
@@ -109,7 +109,7 @@ impl BufferedBody {
         }
 
         match self {
-            BufferedBody::Full(full) => Some(Reader {
+            BufferedBody::Successful(full) => Some(Reader {
                 remaining: &full,
                 read_from_current: 0,
             }),
@@ -123,7 +123,7 @@ impl BufferedBody {
     pub(super) fn buffered_data(self) -> Option<Arc<Vec<Frame<Bytes>>>> {
         match self {
             BufferedBody::Empty => None,
-            BufferedBody::Full(frames) | BufferedBody::Partial(frames) => Some(frames),
+            BufferedBody::Successful(frames) | BufferedBody::Failed(frames) => Some(frames),
         }
     }
 }
@@ -288,7 +288,7 @@ impl RedirectedHttp {
         self.runtime_handle.spawn(task.run());
     }
 
-    #[instrument(level = "trace", ret, err)]
+    #[instrument(level = "trace", ret)]
     pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
         if self.buffered_body.is_empty().not() {
             tracing::error!(
@@ -335,7 +335,7 @@ impl RedirectedHttp {
                 actual_at_least = total_size,
                 "http actual body size exceeded content-length",
             );
-            self.buffered_body = BufferedBody::Partial(Arc::new(buffered));
+            self.buffered_body = BufferedBody::Failed(Arc::new(buffered));
             return Err(BufferBodyError::BodyTooBig);
         }
 
@@ -343,52 +343,49 @@ impl RedirectedHttp {
 
         let Some(tail) = self.request.body_tail.as_mut() else {
             tracing::debug!("request has no tail, bailing early");
-            self.buffered_body = BufferedBody::Full(Arc::new(buffered));
+            self.buffered_body = BufferedBody::Successful(Arc::new(buffered));
             return Ok(());
         };
 
-        let timeout = envs::MAX_BODY_BUFFER_TIMEOUT.from_env_or_default();
-        let buffered = tokio::time::timeout(
-            Duration::from_millis(timeout.into()),
-            async {
-                while let Some(frame) = tail.frame().await {
-                    let frame = match frame {
-                        Ok(f) => f,
-                        Err(err) => return Err((err.into(), buffered)),
-                    };
+        let until = Instant::now()
+            + Duration::from_millis(envs::MAX_BODY_BUFFER_TIMEOUT.from_env_or_default().into());
 
-                    buffered.push(frame);
+        let result = loop {
+            let frame = tokio::time::timeout_at(until, tail.frame()).await;
 
-                    let Some(data) = buffered.last().unwrap().data_ref() else {
-                        return Err((BufferBodyError::UnexpectedEOB, buffered));
-                    };
+            let frame = match frame {
+                Ok(Some(Ok(f))) => f,
+                Err(elapsed) => break Err(elapsed.into()),
+                Ok(Some(Err(err))) => break Err(err.into()),
+                Ok(None) => break Err(BufferBodyError::UnexpectedEOB),
+            };
 
-                    total_size += data.len();
+            buffered.push(frame);
 
-                    match total_size.cmp(&rx_until) {
-                        Ordering::Less => {}
-                        Ordering::Equal => return Ok(buffered),
-                        Ordering::Greater => return Err((BufferBodyError::BodyTooBig, buffered)),
-                    }
-                }
+            let Some(data) = buffered.last().unwrap().data_ref() else {
+                break Err(BufferBodyError::UnexpectedEOB);
+            };
 
-                Err((BufferBodyError::UnexpectedEOB, buffered))
+            total_size += data.len();
+
+            match total_size.cmp(&rx_until) {
+                Ordering::Less => {}
+                Ordering::Equal => break Ok(()),
+                Ordering::Greater => break Err(BufferBodyError::BodyTooBig),
             }
-            .instrument(Span::current()),
-        )
-        .await?;
+        };
 
-        match buffered {
-            Ok(buffered) => {
-                self.buffered_body = BufferedBody::Full(Arc::new(buffered));
-                Ok(())
+        match &result {
+            Ok(()) => {
+                self.buffered_body = BufferedBody::Successful(Arc::new(buffered));
             }
-            Err((error, buffered)) => {
+            Err(error) => {
                 tracing::warn!(?error, "failed to buffer request body");
-                self.buffered_body = BufferedBody::Partial(Arc::new(buffered));
-                Err(error) // will be logged by #[instrument]
+                self.buffered_body = BufferedBody::Failed(Arc::new(buffered));
             }
-        }
+        };
+
+        result
     }
 }
 
