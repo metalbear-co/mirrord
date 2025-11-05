@@ -397,7 +397,7 @@ pub enum BufferBodyError {
     UnexpectedEOB,
     #[error("body size exceeded max configured size")]
     BodyTooBig,
-    #[error("timeout")]
+    #[error("receiving body took too long")]
     Timeout(#[from] Elapsed),
 }
 
