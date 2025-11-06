@@ -1,10 +1,13 @@
-use std::{io::Read, ops::Not};
+use std::{fmt::Debug, io::Read};
 
 use fancy_regex::Regex;
 use hyper::http::request::Parts;
-use jsonpath_rust::JsonPath;
 use mirrord_protocol::tcp::HttpMethodFilter;
 use serde_json::Value;
+use serde_json_path::{
+    JsonPath,
+    functions::{NodesType, ValueType},
+};
 use tracing::Level;
 
 /// Currently supported filtering criterias.
@@ -29,8 +32,17 @@ pub enum HttpFilter {
     Body(HttpBodyFilter),
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum FilterCreationError {
+    #[error("error compiling regex: {0}")]
+    Regex(#[from] fancy_regex::Error),
+
+    #[error("error compiling jsonpath query: {0}")]
+    JsonPath(#[from] serde_json_path::ParseError),
+}
+
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
-    type Error = fancy_regex::Error;
+    type Error = FilterCreationError;
 
     fn try_from(filter: &mirrord_protocol::tcp::HttpFilter) -> Result<Self, Self::Error> {
         match filter {
@@ -58,20 +70,73 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
 
 #[derive(Debug, Clone)]
 pub enum HttpBodyFilter {
-    Json { query: String, matches: Regex },
+    Json { query: JsonPath, matches: Regex },
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
-    type Error = fancy_regex::Error;
+    type Error = FilterCreationError;
 
     fn try_from(value: &mirrord_protocol::tcp::HttpBodyFilter) -> Result<Self, Self::Error> {
         Ok(match value {
             mirrord_protocol::tcp::HttpBodyFilter::Json { query, matches } => Self::Json {
-                query: query.clone(),
+                query: JsonPath::parse(&query)?,
                 matches: Regex::new(matches)?,
             },
         })
     }
+}
+
+#[serde_json_path::function(name = "typeof")]
+fn type_of(nodes: NodesType) -> ValueType {
+    #[derive(PartialEq, strum_macros::Display)]
+    #[strum(serialize_all = "lowercase")]
+    enum Types {
+        Null,
+        Bool,
+        Number,
+        String,
+        Array,
+        Object,
+    }
+
+    impl From<Types> for ValueType<'static> {
+        fn from(t: Types) -> Self {
+            ValueType::Value(Value::String(t.to_string()))
+        }
+    }
+
+    impl From<&Value> for Types {
+        fn from(v: &Value) -> Self {
+            match v {
+                Value::Null => Self::Null,
+                Value::Bool(_) => Self::Bool,
+                Value::Number(_) => Self::Number,
+                Value::String(_) => Self::String,
+                Value::Array(_) => Self::Array,
+                Value::Object(_) => Self::Object,
+            }
+        }
+    }
+
+    let mut iter = nodes.iter();
+
+    tracing::error!(?nodes, "lol");
+
+    let first_type = match iter.next() {
+        Some(first) => Types::from(*first),
+        None => return ValueType::Nothing,
+    };
+
+    tracing::error!(%first_type, "not undefined");
+
+    for v in iter {
+        tracing::error!(?v, "json match");
+        if Types::from(*v) != first_type {
+            return ValueType::Nothing;
+        }
+    }
+
+    first_type.into()
 }
 
 impl HttpFilter {
@@ -142,9 +207,8 @@ impl HttpFilter {
                                 return false;
                             }
                         };
-                        let Ok(results) = json.query(query) else {
-                            return false;
-                        };
+
+                        let results = query.query(&json);
 
                         results.iter().any(|v| {
                             match v {
