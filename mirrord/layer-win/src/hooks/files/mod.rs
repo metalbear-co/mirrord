@@ -1,10 +1,21 @@
 //! Module responsible for registering hooks targetting file operations syscalls.
+//!
+//! NOTE(gabriela): this is SUPER unsafe to instrument, as printing in the context
+//! of hooks for writing to files/handles (includes stdout/stderr in scope) naturally
+//! overlaps with the functions that would be called while tracing. As a result, there's no
+//! instrumenting over the hooks!
+//!
+//! This is also a problem on the Unix end: https://github.com/metalbear-co/mirrord/issues/425
+//!
+//! In general, you must be careful about your printing in this scope. We should rethink
+//! this approach to logging completely, if I'm honest. But how?
 
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
+use mirrord_layer_lib::{
+    error::LayerResult,
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
 };
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
@@ -208,7 +219,6 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
@@ -312,9 +322,9 @@ unsafe extern "system" fn nt_create_file_hook(
                 }
             };
 
-            if managed_handle.is_some() {
+            if let Some(handle) = managed_handle {
                 // Write managed handle at the provided pointer
-                *file_handle = *managed_handle.unwrap();
+                *file_handle = *handle;
                 tracing::info!(
                     "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
                     linux_path,
@@ -356,7 +366,6 @@ unsafe extern "system" fn nt_create_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -466,7 +475,6 @@ unsafe extern "system" fn nt_read_file_hook(
     }
 }
 
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_write_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -510,7 +518,6 @@ unsafe extern "system" fn nt_write_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -627,7 +634,6 @@ unsafe extern "system" fn nt_set_information_file_hook(
 }
 
 /// [`nt_set_volume_information_file_hook`] is not implemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -659,7 +665,6 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
 }
 
 /// [`nt_set_quota_information_file_hook`] is not implemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_quota_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -709,7 +714,6 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1001,7 +1005,6 @@ unsafe extern "system" fn nt_query_information_file_hook(
 }
 
 /// [`nt_query_attributes_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_attributes_file_hook(
     object_attributes: POBJECT_ATTRIBUTES,
     file_basic_info: PFILE_BASIC_INFORMATION,
@@ -1027,7 +1030,6 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
 /// - [`FSINFOCLASS::FileFsDeviceInformation`]
 ///
 /// This is responsible to support functions such as `kernelbase!GetFileType`.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1102,7 +1104,6 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 }
 
 /// [`nt_query_quota_information_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_quota_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1141,7 +1142,6 @@ unsafe extern "system" fn nt_query_quota_information_file_hook(
 }
 
 /// [`nt_delete_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBUTES) -> NTSTATUS {
     unsafe {
         for_each_handle_with_path(object_attributes, |handle, handle_context| {
@@ -1158,7 +1158,7 @@ unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBU
 }
 
 /// [`nt_device_io_control_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+/// NOTE(gabriela): SUPER unsafe to print in!
 unsafe extern "system" fn nt_device_io_control_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -1174,13 +1174,8 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
             && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
-        {
-            tracing::warn!(
-                "nt_device_io_control_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
-            );
-        }
+            && let Ok(_handle_context) = managed_handle.clone().try_read()
+        {}
 
         let original = NT_DEVICE_IO_CONTROL_FILE_ORIGINAL.get().unwrap();
         original(
@@ -1199,7 +1194,6 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
 }
 
 /// [`nt_lock_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_lock_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -1240,7 +1234,6 @@ unsafe extern "system" fn nt_lock_file_hook(
 }
 
 /// [`nt_unlock_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_unlock_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1275,7 +1268,6 @@ unsafe extern "system" fn nt_unlock_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write()
@@ -1308,7 +1300,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     // ----------------------------------------------------------------------------
     // ~NOTE(gabriela):
     //
@@ -1335,6 +1327,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     // wraps around it, and depends on specific returns, etc.
     // ----------------------------------------------------------------------------
 
+    // Core file operation hooks
     apply_hook!(
         guard,
         "ntdll",
@@ -1347,10 +1340,10 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     apply_hook!(
         guard,
         "ntdll",
-        "NtReadFile",
-        nt_read_file_hook,
-        NtReadFileType,
-        NT_READ_FILE_ORIGINAL
+        "NtClose",
+        nt_close_hook,
+        NtCloseType,
+        NT_CLOSE_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1380,20 +1373,17 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
     )?;
 
+    // Read hooks
     apply_hook!(
         guard,
         "ntdll",
-        "NtClose",
-        nt_close_hook,
-        NtCloseType,
-        NT_CLOSE_ORIGINAL
+        "NtReadFile",
+        nt_read_file_hook,
+        NtReadFileType,
+        NT_READ_FILE_ORIGINAL
     )?;
 
-    // ----------------------------------------------------------------------------
-    // NOTE(gabriela): the following hooks are unimplemented!
-    // They're only here to trace missing logic! Please move above once they're
-    // implemented!
-
+    // Write hooks
     apply_hook!(
         guard,
         "ntdll",
@@ -1402,6 +1392,13 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         NtWriteFileType,
         NT_WRITE_FILE_ORIGINAL
     )?;
+
+    // Metadata and directory hooks
+
+    // ----------------------------------------------------------------------------
+    // NOTE(gabriela): the following hooks are unimplemented!
+    // They're only here to trace missing logic! Please move above once they're
+    // implemented!
 
     apply_hook!(
         guard,
@@ -1475,7 +1472,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         NT_UNLOCK_FILE_ORIGINAL
     )?;
 
-    // ----------------------------------------------------------------------------
-
+    tracing::info!("File hooks initialization completed");
     Ok(())
 }

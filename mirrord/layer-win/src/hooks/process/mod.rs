@@ -1,181 +1,257 @@
-//! Module responsible for registering hooks targetting process creation syscalls.
+//! Windows process creation hooks module.
+//!
+//! This module provides hooks for intercepting Windows process creation
+//! and injecting the mirrord layer DLL into child processes for transparent
+//! system call interception.
 
-use std::{ffi::c_void, sync::OnceLock};
+use std::sync::OnceLock;
 
 use minhook_detours_rs::guard::DetourGuard;
+use mirrord_layer_lib::{
+    error::{LayerError, LayerResult, windows::WindowsError},
+    process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
+};
 use winapi::{
-    shared::ntdef::{BOOLEAN, NTSTATUS, PCOBJECT_ATTRIBUTES, PHANDLE, ULONG},
-    um::winnt::{ACCESS_MASK, HANDLE},
+    ctypes::c_void,
+    shared::{
+        minwindef::{BOOL, DWORD, HMODULE, LPVOID, TRUE},
+        ntdef::{HANDLE, LPCWSTR, LPWSTR},
+    },
+    um::{
+        minwinbase::LPSECURITY_ATTRIBUTES,
+        processthreadsapi::{
+            LPPROCESS_INFORMATION, LPSTARTUPINFOW, PROCESS_INFORMATION, STARTUPINFOW,
+        },
+        winnt::PHANDLE,
+    },
 };
 
-use crate::{apply_hook, layer_setup};
+use crate::{apply_hook, process::environment::parse_environment_block};
 
-// https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1890
-type NtCreateProcessType = unsafe extern "system" fn(
-    PHANDLE,
-    ACCESS_MASK,
-    PCOBJECT_ATTRIBUTES,
-    HANDLE,
-    BOOLEAN,
-    HANDLE,
-    HANDLE,
-    HANDLE,
-) -> NTSTATUS;
-static NT_CREATE_PROCESS_ORIGINAL: OnceLock<&NtCreateProcessType> = OnceLock::new();
+static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
 
-unsafe extern "system" fn nt_create_process_hook(
-    process_handle_ptr: PHANDLE,
-    desired_access: ACCESS_MASK,
-    object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_process: HANDLE,
-    inherit_object_table: BOOLEAN,
-    section_handle: HANDLE,
-    debug_port: HANDLE,
-    token_handle: HANDLE,
-) -> NTSTATUS {
-    unsafe {
-        let original = NT_CREATE_PROCESS_ORIGINAL.get().unwrap();
-        original(
-            process_handle_ptr,
-            desired_access,
-            object_attributes_ptr,
-            parent_process,
-            inherit_object_table,
-            section_handle,
-            debug_port,
-            token_handle,
-        )
+// LoadLibrary hook to detect module loading during injection
+type LoadLibraryWType = unsafe extern "system" fn(lpLibFileName: *const u16) -> HMODULE;
+static LOAD_LIBRARY_W_ORIGINAL: OnceLock<&LoadLibraryWType> = OnceLock::new();
+
+// GetProcAddress hook to detect API usage during injection
+type GetProcAddressType =
+    unsafe extern "system" fn(hModule: HMODULE, lpProcName: *const i8) -> *mut c_void;
+static GET_PROC_ADDRESS_ORIGINAL: OnceLock<&GetProcAddressType> = OnceLock::new();
+
+/// Windows API hook for CreateProcessInternalW function.
+///
+/// This function intercepts calls to the internal Windows process creation API
+/// and redirects them through our unified mirrord process creation system.
+/// Falls back to the original implementation if unified creation fails.
+unsafe extern "system" fn create_process_internal_w_hook(
+    user_token: HANDLE,
+    application_name: LPCWSTR,
+    command_line: LPWSTR,
+    process_attributes: LPSECURITY_ATTRIBUTES,
+    thread_attributes: LPSECURITY_ATTRIBUTES,
+    inherit_handles: BOOL,
+    creation_flags: DWORD,
+    environment: LPVOID,
+    current_directory: LPCWSTR,
+    startup_info: LPSTARTUPINFOW,
+    process_information: LPPROCESS_INFORMATION,
+    restricted_user_token: PHANDLE,
+) -> BOOL {
+    tracing::debug!("CreateProcessInternalW hook intercepted process creation");
+
+    // Get the original function pointer
+    let original = CREATE_PROCESS_INTERNAL_W_ORIGINAL.get().unwrap();
+
+    // Parse environment from Windows API call - check creation flags for format
+    let env_vars = unsafe { parse_environment_block(environment as *mut _, creation_flags) };
+
+    tracing::debug!(
+        "Windows CreateProcess parameters: parent_pid={}, env_count={}",
+        std::process::id(),
+        env_vars.len()
+    );
+
+    // Execute process using closure to preserve all original parameters
+    // This ensures perfect fidelity to the original CreateProcessInternalW call
+    let create_process_fn = |adjusted_creation_flags,
+                             adjusted_environment,
+                             adjusted_startup_info: &mut STARTUPINFOW| {
+        // Create the process suspended with all original and processed parameters
+        let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+        let success = unsafe {
+            original(
+                user_token,
+                application_name,
+                command_line,
+                process_attributes,
+                thread_attributes,
+                inherit_handles,
+                adjusted_creation_flags,
+                adjusted_environment,
+                current_directory,
+                adjusted_startup_info,
+                &mut process_info,
+                restricted_user_token,
+            )
+        };
+
+        if success != 0 {
+            Ok(process_info)
+        } else {
+            Err(LayerError::WindowsProcessCreation(
+                WindowsError::last_error(),
+            ))
+        }
+    };
+
+    match LayerManagedProcess::execute_with_closure(
+        env_vars,
+        creation_flags,
+        unsafe { &mut *startup_info },
+        create_process_fn,
+        None::<mirrord_progress::NullProgress>, // No progress in hook context
+    )
+    .map(|managed_process| managed_process.release())
+    {
+        Ok(proc_info) => {
+            // Success: populate output parameter and return TRUE
+            unsafe {
+                *process_information = proc_info;
+            }
+            tracing::debug!("Hook succeeded via unified creation");
+            TRUE
+        }
+        Err(e) => {
+            // Failure: log error and fall back to original implementation
+            tracing::error!("Unified process creation failed: {}", e);
+            // Fallback to original Windows API implementation
+            tracing::warn!("Falling back to original CreateProcessInternalW");
+
+            let result = unsafe {
+                original(
+                    user_token,
+                    application_name,
+                    command_line,
+                    process_attributes,
+                    thread_attributes,
+                    inherit_handles,
+                    creation_flags,
+                    environment,
+                    current_directory,
+                    startup_info,
+                    process_information,
+                    restricted_user_token,
+                )
+            };
+
+            if result != 0 {
+                tracing::debug!("Fallback to original API succeeded");
+            } else {
+                tracing::error!("Both unified creation and fallback failed");
+            }
+
+            result
+        }
     }
 }
 
-// https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L1928
-type NtCreateProcessExType = unsafe extern "system" fn(
-    PHANDLE,
-    ACCESS_MASK,
-    PCOBJECT_ATTRIBUTES,
-    HANDLE,
-    ULONG,
-    HANDLE,
-    HANDLE,
-    HANDLE,
-    ULONG,
-) -> NTSTATUS;
-static NT_CREATE_PROCESS_EX_ORIGINAL: OnceLock<&NtCreateProcessExType> = OnceLock::new();
+/// Hook LoadLibraryW for API monitoring during injection
+///
+/// This detour monitors DLL loading to provide comprehensive visibility into
+/// what modules are being loaded during process injection. Useful for debugging
+/// complex injection scenarios and understanding the full API landscape.
+unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMODULE {
+    // Call the original LoadLibraryW first
+    let original = LOAD_LIBRARY_W_ORIGINAL.get().unwrap();
+    let result = unsafe { original(lpLibFileName) };
 
-unsafe extern "system" fn nt_create_process_ex_hook(
-    process_handle_ptr: PHANDLE,
-    desired_access: ACCESS_MASK,
-    object_attributes_ptr: PCOBJECT_ATTRIBUTES,
-    parent_process: HANDLE,
-    flags: ULONG,
-    section_handle: HANDLE,
-    debug_port: HANDLE,
-    token_handle: HANDLE,
-    reserved: ULONG,
-) -> NTSTATUS {
-    // Configuration check for future use
-    let _env_enabled = &layer_setup().layer_config().feature.env;
-    let _fs_enabled = &layer_setup().layer_config().feature.fs;
-    let _network_enabled = &layer_setup().layer_config().feature.network;
+    // Log LoadLibrary calls for debugging
+    if !lpLibFileName.is_null() {
+        // Convert the wide string to a Rust string for logging
+        let lib_name = unsafe { str_win::u16_ptr_to_string(lpLibFileName) };
 
-    // TODO: Implement process creation interception based on configuration
-    // For now, call the original function
-    let original = NT_CREATE_PROCESS_EX_ORIGINAL.get().unwrap();
-    unsafe {
-        original(
-            process_handle_ptr,
-            desired_access,
-            object_attributes_ptr,
-            parent_process,
-            flags,
-            section_handle,
-            debug_port,
-            token_handle,
-            reserved,
-        )
+        if !lib_name.is_empty() {
+            // Trace library loading for debugging
+            tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result);
+        }
     }
+
+    result
 }
 
-// https://github.com/winsiderss/systeminformer/blob/f9c238893e0b1c8c82c2e4a3c8d26e871c8f09fe/phnt/include/ntpsapi.h#L3284
-type NtCreateUserProcessType = unsafe extern "system" fn(
-    PHANDLE,
-    PHANDLE,
-    ACCESS_MASK,
-    ACCESS_MASK,
-    PCOBJECT_ATTRIBUTES,
-    PCOBJECT_ATTRIBUTES,
-    ULONG,
-    ULONG,
-    *mut c_void,
-    *mut c_void,
-    *mut c_void,
-) -> NTSTATUS;
-static NT_CREATE_USER_PROCESS_ORIGINAL: OnceLock<&NtCreateUserProcessType> = OnceLock::new();
+/// Hook GetProcAddress for API monitoring during injection
+///
+/// This detour monitors function pointer acquisition to provide comprehensive
+/// visibility into what APIs are being resolved during process injection.
+/// Essential for understanding the complete API usage pattern.
+unsafe extern "system" fn getprocaddress_detour(
+    hModule: HMODULE,
+    lpProcName: *const i8,
+) -> *mut c_void {
+    let original = GET_PROC_ADDRESS_ORIGINAL.get().unwrap();
 
-unsafe extern "system" fn nt_create_user_process_hook(
-    process_handle_ptr: PHANDLE,
-    thread_handle_ptr: PHANDLE,
-    process_desired_access: ACCESS_MASK,
-    thread_desired_access: ACCESS_MASK,
-    process_object_attributes: PCOBJECT_ATTRIBUTES,
-    thread_object_attributes: PCOBJECT_ATTRIBUTES,
-    process_flags: ULONG,
-    thread_flags: ULONG,
-    unk1: *mut c_void,
-    unk2: *mut c_void,
-    unk3: *mut c_void,
-) -> NTSTATUS {
-    unsafe {
-        // TODO:
-        // - get current DLL handle
-        // - get full path to handle
-        // - make process start suspended
-        // - inject dll into process
-        // - resume process
+    // Always call original first to get the function address
+    let original_result = unsafe { original(hModule, lpProcName) };
 
-        let original = NT_CREATE_USER_PROCESS_ORIGINAL.get().unwrap();
-        original(
-            process_handle_ptr,
-            thread_handle_ptr,
-            process_desired_access,
-            thread_desired_access,
-            process_object_attributes,
-            thread_object_attributes,
-            process_flags,
-            thread_flags,
-            unk1,
-            unk2,
-            unk3,
-        )
+    // Only process if we have a valid function name pointer
+    if !lpProcName.is_null() {
+        // Convert the function name to a string for logging
+        let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
+
+        if !function_name.is_empty() {
+            // Trace function resolution for debugging
+            tracing::trace!(
+                "GetProcAddress: module={:?} function='{}' address={:?}",
+                hModule,
+                function_name,
+                original_result
+            );
+        }
     }
+
+    original_result
 }
 
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
+/// Initialize process creation hooks.
+///
+/// Installs the CreateProcessInternalW hook using the detours library to intercept
+/// all process creation calls and redirect them through our unified mirrord system.
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
+    // NOTE(gabriela): handling this at syscall level is super cumbersome
+    // and undocumented, so I'd have to reverse engineer CreateProcessInternalW
+    // which is like, 3000-ish lines without type fixups, and we shipped this before
+    // and in like, 5 years, we had no issues (previous job).
+    // so it should work here too.
     apply_hook!(
         guard,
-        "ntdll",
-        "NtCreateProcess",
-        nt_create_process_hook,
-        NtCreateProcessType,
-        NT_CREATE_PROCESS_ORIGINAL
+        "kernelbase",
+        "CreateProcessInternalW",
+        create_process_internal_w_hook,
+        CreateProcessInternalWType,
+        CREATE_PROCESS_INTERNAL_W_ORIGINAL
+    )?;
+
+    // API monitoring hooks for debugging injection scenarios
+    tracing::debug!("Installing API tracing hooks for LoadLibraryW and GetProcAddress");
+
+    apply_hook!(
+        guard,
+        "kernel32",
+        "LoadLibraryW",
+        loadlibrary_w_detour,
+        LoadLibraryWType,
+        LOAD_LIBRARY_W_ORIGINAL
     )?;
 
     apply_hook!(
         guard,
-        "ntdll",
-        "NtCreateProcessEx",
-        nt_create_process_ex_hook,
-        NtCreateProcessExType,
-        NT_CREATE_PROCESS_EX_ORIGINAL
-    )?;
-
-    apply_hook!(
-        guard,
-        "ntdll",
-        "NtCreateUserProcess",
-        nt_create_user_process_hook,
-        NtCreateUserProcessType,
-        NT_CREATE_USER_PROCESS_ORIGINAL
+        "kernel32",
+        "GetProcAddress",
+        getprocaddress_detour,
+        GetProcAddressType,
+        GET_PROC_ADDRESS_ORIGINAL
     )?;
 
     Ok(())

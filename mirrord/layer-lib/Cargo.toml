@@ -16,9 +16,17 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["cli-execution", "layer-hook-execution"]
+# CLI-specific process execution (for mirrord CLI spawning processes)
+cli-execution = []
+# Layer hook-specific process execution (for intercepted process creation)
+layer-hook-execution = []
+
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-progress = { path = "../progress" }
 mirrord-layer-macro = { path = "../layer/macro" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 
@@ -27,6 +35,9 @@ bincode.workspace = true
 socket2.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+
+# Tokio for async pipe operations
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -40,5 +51,14 @@ exec.workspace = true
 [target.'cfg(windows)'.dependencies]
 str-win = { path = "../str-win" }
 winapi.workspace = true
-windows.workspace = true
+dll-syringe.workspace = true
 anyhow.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[dev-dependencies]
+mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+serde_json.workspace = true
+rstest.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tempfile.workspace = true
+rand.workspace = true

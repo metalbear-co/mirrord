@@ -260,8 +260,6 @@ use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-#[cfg(target_os = "windows")]
-use libc::EXIT_FAILURE;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -317,10 +315,12 @@ mod vpn;
 mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
+#[cfg(target_os = "windows")]
+use mirrord_layer_lib::process::windows::{
+    console::enable_virtual_terminal_processing, execution::LayerManagedProcess,
+};
 use verify_config::verify_config;
 
-#[cfg(target_os = "windows")]
-use crate::execution::windows::command::WindowsCommand;
 use crate::{
     ci::MirrordCi, newsletter::suggest_newsletter_signup, user_data::UserData,
     util::get_user_git_branch,
@@ -522,7 +522,7 @@ async fn run_process_with_mirrord<P>(
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
-    mut progress: P,
+    progress: P,
     analytics: &mut AnalyticsReporter,
     _config: &LayerConfig,
 ) -> CliResult<()>
@@ -538,45 +538,30 @@ where
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         e
     })?;
+    let binary_path_str = binary_path.to_string_lossy().to_string();
 
-    let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
-        .and_then(|os_str| os_str.into_string().ok())
-        .ok_or_else(|| {
-            CliError::LayerFilePathMissing(
-                binary.clone(),
-                binary_args.clone(),
-                std::env::vars().collect(),
-            )
-        })?;
+    // Create CLI executor and configure it
+    // For Windows, include the full command line with executable name
+    let command_line = binary_args.join(" ");
 
-    let mut env_vars = env_vars.clone();
-    env_vars
-        .entry("MIRRORD_LAYER_FILE".to_string())
-        .or_insert(layer_path.clone());
-
-    let cmd = WindowsCommand::new(&binary_path)
-        .args(&binary_args)
-        .envs(env_vars)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    // On Windows, we need to manually handle process replacement
-    let mut process = cmd.inject_and_spawn(layer_path).map_err(|e| {
+    // spawn the process (including mirrord layer injection and wait for initialization)
+    let exit_code = LayerManagedProcess::execute(
+        Some(binary_path_str),
+        command_line,
+        // current_directory (inherit from parent)
+        None,
+        env_vars,
+        Some(progress),
+    )
+    .and_then(|managed_process| managed_process.wait_until_exit())
+    .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
     })?;
 
-    progress.success(Some("Ready!"));
-
-    // Wait for process and handle I/O
-    let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
-        error!("Process failed: {:?}", e);
-        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        EXIT_FAILURE
-    });
-    std::process::exit(exit_code);
+    // Exit with the same code as the child process
+    std::process::exit(exit_code as i32);
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -959,6 +944,10 @@ fn main() -> miette::Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
+    // Enable Windows virtual terminal processing for proper ANSI sequence support
+    #[cfg(target_os = "windows")]
+    enable_virtual_terminal_processing();
+
     let cli = Cli::parse();
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1052,7 +1041,9 @@ fn main() -> miette::Result<()> {
                 windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
             }
             Commands::Newsletter => newsletter::newsletter_command().await,
-            Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
+            Commands::Ci(args) => windows_unsupported!(args, "ci", {
+                ci::ci_command(*args, watch, &mut user_data).await?
+            }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
         };
 

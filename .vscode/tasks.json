@@ -29,7 +29,7 @@
 			"options": {
 				"env": {
 					"MIRRORD_DISABLE_VERSION_CHECK": "true",
-					"MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/layer_win.dll"
+					"MIRRORD_LAYER_FILE": "${workspaceFolder}/target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll"
 				}
 			},
 			"problemMatcher": "$rustc",

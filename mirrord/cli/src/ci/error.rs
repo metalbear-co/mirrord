@@ -31,6 +31,7 @@ pub(crate) enum CiError {
         the running mirrord session, and we could not retrieve this pid. You can manually stop mirrord \
         by searching for the pid with `ps | grep mirrord` and calling `kill [pid]`."
     ))]
+    #[cfg(not(target_os = "windows"))]
     IntproxyPidMissing,
 
     #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
@@ -39,6 +40,7 @@ pub(crate) enum CiError {
         the running mirrord session, and we could not retrieve this pid. You can manually stop mirrord \
         by searching for the pid with `ps | grep mirrord` and calling `kill [pid]`."
     ))]
+    #[cfg(not(target_os = "windows"))]
     UserPidMissing,
 
     #[error("Failed to execute binary `{0}` with args {1:?}")]
