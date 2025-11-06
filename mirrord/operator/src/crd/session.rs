@@ -131,6 +131,7 @@ impl fmt::Display for AgentLimit {
     printcolumn = r#"{"name":"HOSTNAME", "type":"string", "description":"User hostname.", "jsonPath":".spec.owner.hostname"}"#,
     printcolumn = r#"{"name":"K8S USER", "type":"string", "description":"User Kubernetes name.", "jsonPath":".spec.owner.k8sUsername"}"#,
     printcolumn = r#"{"name":"NAMESPACE", "type":"string", "description":"Namespace of the session.", "jsonPath":".spec.namespace"}"#,
+    printcolumn = r#"{"name":"AGENT_LIMIT", "type":"string", "description":"Relative or absolute limit of agents spawns.", "jsonPath":".spec.agentLimit"}"#,
     printcolumn = r#"{"name":"TARGET", "type":"string", "description":"Target of the session.", "jsonPath":".spec.target"}"#,
     printcolumn = r#"{"name":"STARTED AT", "type":"date", "description":"Time when the session was started.", "jsonPath":".metadata.creationTimestamp"}"#,
     printcolumn = r#"{"name":"CLOSED AT", "type":"date", "description":"Time when the session was closed.", "jsonPath":".metadata.deletionTimestamp"}"#,
@@ -309,8 +310,10 @@ pub struct MirrordClusterSessionAgent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_info: Option<AgentKubernetesConnectInfo>,
     /// Agent spawn error if there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<SessionError>,
     /// The phase of agent's pod.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
     /// Resolved agent target.
     pub target: SessionTarget,
