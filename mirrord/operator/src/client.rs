@@ -1255,7 +1255,7 @@ impl OperatorApi<PreparedClientCert> {
             .map(serde_json::to_vec)
             .transpose()?
         {
-            Some(ci_info) => request_builder.header("x-foo", ci_info),
+            Some(ci_info) => request_builder.header("x-ci-info", ci_info),
             None => request_builder,
         };
 
