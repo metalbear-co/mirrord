@@ -224,13 +224,6 @@ pub struct ProtocolCodec<I, O> {
     _phantom_outgoing_message: PhantomData<O>,
 }
 
-impl<I, O> Copy for ProtocolCodec<I, O> {}
-impl<I, O> Clone for ProtocolCodec<I, O> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
 // Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
 // `ClientMessage`s to the agent.
 pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;

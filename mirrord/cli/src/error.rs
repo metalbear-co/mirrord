@@ -13,7 +13,6 @@ use mirrord_intproxy::{
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
-use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
@@ -586,15 +585,8 @@ impl From<OperatorApiError> for CliError {
                 operation: operation.to_string(),
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
-            OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
         }
-    }
-}
-
-impl From<ProtocolError> for CliError {
-    fn from(e: ProtocolError) -> Self {
-        Self::InitialAgentCommFailed(e.to_string())
     }
 }
 
