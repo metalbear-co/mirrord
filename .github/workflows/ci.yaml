@@ -45,7 +45,7 @@ jobs:
       
       - run: rm -f rust-toolchain.toml
       
-      - run: rustup default nightly-2024-12-15
+      - run: rustup default nightly-2025-01-15
       
       - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
         with:
@@ -321,7 +321,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
-          toolchain: nightly-2024-12-15
+          toolchain: nightly-2025-01-15
       
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
