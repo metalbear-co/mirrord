@@ -269,6 +269,11 @@ jobs:
           ls -l target/debug/fileops
           ls -l mirrord/layer/tests/apps/issue1054/target/issue1054
           ls -l mirrord/layer/tests/apps/fork/out.c_test_app
+      - name: Allow unprivileged processes to bind low ports (Linux)
+        run: |
+          set -euxo pipefail
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0
+          sudo sysctl -w net.ipv6.ip_unprivileged_port_start=0 || true
       # Run the layer + the rest
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
