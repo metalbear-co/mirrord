@@ -1,0 +1,1 @@
+mirrord CLI progress messages now always include the binary version.
