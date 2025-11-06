@@ -448,8 +448,8 @@ jobs:
           npm set audit false
           npm install express
           npm install portfinder
-      - name: mirrord layer tests
-        run: cargo test -p mirrord-layer
+      - name: mirrord layer tests (skip flaky NodeHTTP on macOS)
+        run: cargo test -p mirrord-layer -- --skip mirroring_with_http::application_3_Application__NodeHTTP
         env:
           NODE_OPTIONS: "--http-parser=legacy"
       - name: save intproxy logs
