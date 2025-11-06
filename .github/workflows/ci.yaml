@@ -133,15 +133,19 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
 
-      # ---- Python (PEP 668-safe via venv)
+      # ---- Python (PEP 668-safe via venv) — binary wheels only; skip C speedups
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Create venv & install py deps
+      - name: Create venv & install py deps (binary-only, no C build)
+        env:
+          PIP_PREFER_BINARY: "1"
+          WEBSOCKETS_NO_SPEEDUPS: "1"
         run: |
+          set -euxo pipefail
           python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install flask fastapi "uvicorn[standard]"
+          .venv/bin/python -m pip install --upgrade pip wheel
+          .venv/bin/pip install --only-binary=:all: flask fastapi "uvicorn[standard]"
 
       # ---- Node
       - uses: actions/setup-node@v4
