@@ -276,6 +276,8 @@ jobs:
           sudo sysctl -w net.ipv6.ip_unprivileged_port_start=0 || true
       # Run the layer + the rest
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+        env:
+          NODE_OPTIONS: "--http-parser=legacy"
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
