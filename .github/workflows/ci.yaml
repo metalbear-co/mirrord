@@ -167,6 +167,7 @@ jobs:
           npm set fund false
           npm set audit false
           npm install express
+          npm install portfinder
       # Build Go fixtures (three versions)
       - uses: actions/setup-go@v5
         with:
