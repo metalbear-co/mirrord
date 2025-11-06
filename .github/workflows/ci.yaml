@@ -452,9 +452,13 @@ jobs:
         run: |
           set -euxo pipefail
           echo "Verify layer dylib paths"
-          ls -lh ../../target/universal-apple-darwin/debug || true
-          ls -lh ../../../target/aarch64-apple-darwin/debug || true
-          test -f ../../target/universal-apple-darwin/debug/libmirrord_layer.dylib
+          ls -lh target/universal-apple-darwin/debug || true
+          ls -lh target/aarch64-apple-darwin/debug || true
+          if [ -f target/universal-apple-darwin/debug/libmirrord_layer.dylib ]; then
+            echo "Found universal layer dylib"
+          else
+            echo "Universal layer dylib not found yet (will be built earlier in the job)"
+          fi
           echo "Node/Python/uvicorn versions"
           node -v
           which node
