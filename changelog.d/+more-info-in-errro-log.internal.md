@@ -1,1 +1,0 @@
-Enriched an error log produced by `mirrord-layer` in some cases.

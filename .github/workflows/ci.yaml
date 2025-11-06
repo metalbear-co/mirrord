@@ -16,6 +16,7 @@ concurrency:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   # ======================
@@ -132,11 +133,17 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
 
+      # ---- Python (PEP 668-safe via venv)
       - uses: actions/setup-python@v5
-      - run: |
-          python -m venv .venv && source .venv/bin/activate && pip install flask fastapi "uvicorn[standard]"
-          pip3 install flask fastapi "uvicorn[standard]"
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Create venv & install py deps
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install flask fastapi "uvicorn[standard]"
 
+      # ---- Node
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -401,13 +408,24 @@ jobs:
           version: 17.0.6-tem
       - run: java -version
 
+      # ---- Python (PEP 668-safe via venv)
       - uses: actions/setup-python@v5
-      - run: pip3 install flask fastapi "uvicorn[standard]"
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Create venv & install py deps (macOS)
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install flask fastapi "uvicorn[standard]"
+
+      # ---- Node
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install express
-      - run: npm install portfinder
+      - run: |
+          npm init -y
+          npm install express
+          npm install portfinder
 
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
