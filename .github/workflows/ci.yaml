@@ -449,7 +449,6 @@ jobs:
         with:
           node-version: '22'
       - run: |
-        # keep separate from the Linux job so lockfiles don't collide
           set -euxo pipefail
           npm init -y
           npm set fund false
