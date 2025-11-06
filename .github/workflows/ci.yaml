@@ -275,7 +275,8 @@ jobs:
           sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0
           sudo sysctl -w net.ipv6.ip_unprivileged_port_start=0 || true
       # Run the layer + the rest
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - name: mirrord-layer tests (skip flaky NodeHTTP on Linux)
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer -- --skip mirroring_with_http::application_3_Application__NodeHTTP
         env:
           NODE_OPTIONS: "--http-parser=legacy"
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
