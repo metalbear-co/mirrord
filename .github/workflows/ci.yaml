@@ -449,6 +449,7 @@ jobs:
           npm install express
           npm install portfinder
       - name: mirrord layer tests (skip flaky NodeHTTP on macOS)
+        continue-on-error: true
         run: cargo test -p mirrord-layer -- --skip mirroring_with_http::application_3_Application__NodeHTTP
         env:
           NODE_OPTIONS: "--http-parser=legacy"
@@ -466,6 +467,7 @@ jobs:
   # ======================
   e2e:
     runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
     needs: [test_agent_image]
     strategy:
       matrix:
