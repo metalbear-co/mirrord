@@ -7,7 +7,7 @@ import Panel from "./Panel";
 import BoilerplateStep from "./steps/BoilerplateStep";
 import IntroStep from "./steps/IntroStep";
 import ConfigStep from "./steps/ConfigStep";
-import LearningSteps from "./steps/LearningSteps";
+import {LearningStepsNewUser} from "./steps/LearningSteps";
 
 const HomepageNewUser = () => {
   const titleCreateConfig = (
@@ -27,7 +27,7 @@ const HomepageNewUser = () => {
 
   const configSteps: WizardStep[] = [boilerplateStep, configStep];
   const learnSteps: WizardStep[] = [introStep].concat(
-    LearningSteps,
+    LearningStepsNewUser,
     configSteps
   );
 
