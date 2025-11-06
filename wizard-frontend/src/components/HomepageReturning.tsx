@@ -3,7 +3,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import Panel from "./Panel";
-import LearningSteps from "./steps/LearningSteps";
+import {LearningStepsReturning} from "./steps/LearningSteps";
 import { WizardStep } from "./Wizard";
 import IntroStep from "./steps/IntroStep";
 import BoilerplateStep from "./steps/BoilerplateStep";
@@ -21,13 +21,11 @@ const HomepageReturning = () => {
     </CardTitle>
   );
 
-  const introStep = IntroStep();
   const boilerplateStep = BoilerplateStep();
   const configStep = ConfigStep();
 
   const configSteps: WizardStep[] = [boilerplateStep, configStep];
-  const learnSteps: WizardStep[] = [introStep].concat(
-    LearningSteps,
+  const learnSteps: WizardStep[] = LearningStepsReturning.concat(
     configSteps
   );
 
