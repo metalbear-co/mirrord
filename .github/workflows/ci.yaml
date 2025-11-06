@@ -448,8 +448,24 @@ jobs:
           npm set audit false
           npm install express
           npm install portfinder
+      - name: diagnostics (macOS)
+        run: |
+          set -euxo pipefail
+          echo "Verify layer dylib paths"
+          ls -lh ../../target/universal-apple-darwin/debug || true
+          ls -lh ../../../target/aarch64-apple-darwin/debug || true
+          test -f ../../target/universal-apple-darwin/debug/libmirrord_layer.dylib
+          echo "Node/Python/uvicorn versions"
+          node -v
+          which node
+          python3 --version || true
+          .venv/bin/python --version || true
+          .venv/bin/uvicorn --version || true
       - name: mirrord layer tests
-        run: cargo test -p mirrord-layer
+        env:
+          RUST_BACKTRACE: full
+          RUST_LOG: mirrord=trace
+        run: cargo test -p mirrord-layer -- --nocapture --test-threads=1
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
