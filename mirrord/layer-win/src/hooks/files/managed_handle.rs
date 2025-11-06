@@ -20,7 +20,7 @@ use winapi::{
     um::winnt::ACCESS_MASK,
 };
 
-use crate::hooks::files::util::{read_object_attributes_name, remove_root_dir_from_path};
+use crate::hooks::files::util::{path_to_unix_path, read_object_attributes_name};
 
 /// This is a [`HANDLE`] type. The values start with [`MIRRORD_FIRST_MANAGED_HANDLE`].
 /// To know what data is held behind this, look at [`HandleContext`].
@@ -123,7 +123,7 @@ pub fn for_each_handle_with_path(
     let mut any = false;
 
     let name = read_object_attributes_name(object_attributes);
-    if let Some(linux_name) = remove_root_dir_from_path(name)
+    if let Some(linux_name) = path_to_unix_path(name)
         && let Ok(handles) = MANAGED_HANDLES.try_read()
     {
         for (handle, handle_context) in handles.iter() {

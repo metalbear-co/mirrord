@@ -21,7 +21,10 @@ use mirrord_protocol::{
     tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
 };
 
-use crate::{file::{filter::FileFilter, mapper::FileRemapper}, socket::{DnsSelector, OutgoingSelector}};
+use crate::{
+    file::{filter::FileFilter, mapper::FileRemapper},
+    socket::{DnsSelector, OutgoingSelector},
+};
 
 /// Helper trait for network hook decisions
 pub trait NetworkHookConfig {

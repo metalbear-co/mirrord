@@ -3,4 +3,3 @@
 /// `feature.fs.read_only` or `feature.fs.read_write` pattern sets (and not in the
 /// `feature.fs.not_found` set).
 pub const PATHS: [&str; 0] = [];
-

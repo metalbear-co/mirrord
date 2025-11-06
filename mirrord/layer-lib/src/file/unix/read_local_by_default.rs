@@ -108,4 +108,3 @@ pub fn regex_set_builder() -> RegexSetBuilder {
 
     RegexSetBuilder::new(patterns)
 }
-

@@ -13,9 +13,11 @@
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::{file::filter::{FileFilter, FileMode}, proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
-}, setup::layer_setup};
+use mirrord_layer_lib::{
+    file::filter::FileMode,
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    setup::layer_setup,
+};
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
 };
@@ -52,10 +54,7 @@ use crate::{
         managed_handle::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
         },
-        util::{
-            WindowsTime, read_object_attributes_name, remove_root_dir_from_path, try_seek,
-            try_xstat,
-        },
+        util::{WindowsTime, path_to_unix_path, read_object_attributes_name, try_seek, try_xstat},
     },
     process::memory::is_memory_valid,
 };
@@ -257,7 +256,7 @@ unsafe extern "system" fn nt_create_file_hook(
         let name = read_object_attributes_name(object_attributes);
 
         // Try to create a Linux path from the provided Windows UNC path.
-        let Some(parsed_linux_path) = remove_root_dir_from_path(name) else {
+        let Some(parsed_linux_path) = path_to_unix_path(name) else {
             return original(
                 file_handle,
                 desired_access,
@@ -273,17 +272,26 @@ unsafe extern "system" fn nt_create_file_hook(
             );
         };
 
+        // NOTE(gabriela): (fs config) - we must make sure to follow the same routine
+        // as Unix fs config handling does.
+
+        // NOTE(gabriela): (fs config)[1] - take original path, run through mapper
         let mapper = setup.file_remapper();
         let linux_path = String::from(mapper.change_path_str(parsed_linux_path.as_str()));
 
         // NOTE(gabriela): print when a file mapping is found.
         if parsed_linux_path != linux_path {
-            tracing::info!("nt_create_file_hook: mapping detected, \"{}\" -> \"{}\"", parsed_linux_path, linux_path);
+            tracing::info!(
+                "nt_create_file_hook: mapping matched, \"{}\" -> \"{}\"",
+                parsed_linux_path,
+                linux_path
+            );
         }
 
         // NOTE(gabriela): not happy about the clone, research implications!
         let filter = setup.file_filter();
 
+        // NOTE(gabriela): (fs config)[2] - take mapped path, apply filters
         // NOTE(gabriela): look up if there are any filter settings for the path.
         // see how it collides with desired_access.
         let matched_filter = filter.check(&linux_path);
@@ -302,7 +310,7 @@ unsafe extern "system" fn nt_create_file_hook(
                     ea_buf,
                     ea_size,
                 );
-            },
+            }
             Some(FileMode::NotFound) => {
                 *file_handle = std::ptr::null_mut();
                 *io_status_block = _IO_STATUS_BLOCK::default();
@@ -333,9 +341,7 @@ unsafe extern "system" fn nt_create_file_hook(
 
         // Check if pointer to handle is valid.
         if file_handle.is_null() {
-            tracing::warn!(
-                "nt_create_file_hook: Invalid memory for file_handle variable in hook"
-            );
+            tracing::warn!("nt_create_file_hook: Invalid memory for file_handle variable in hook");
             return original(
                 file_handle,
                 desired_access,
@@ -377,28 +383,13 @@ unsafe extern "system" fn nt_create_file_hook(
         };
 
         // Try to open the file on the pod.
-        let Ok(req) = make_proxy_request_with_response(OpenFileRequest {
+        let req = make_proxy_request_with_response(OpenFileRequest {
             path: PathBuf::from(&linux_path),
             open_options,
-        }) else {
-            tracing::error!("nt_create_file_hook: Request for open file failed!");
-            return original(
-                file_handle,
-                desired_access,
-                object_attributes,
-                io_status_block,
-                allocation_size,
-                file_attributes,
-                share_access,
-                create_disposition,
-                create_options,
-                ea_buf,
-                ea_size,
-            );
-        };
+        });
 
         let managed_handle = match req {
-            Ok(file) => {
+            Ok(Ok(file)) => {
                 let current_time = WindowsTime::current().as_file_time();
 
                 try_insert_handle(HandleContext {
@@ -415,8 +406,20 @@ unsafe extern "system" fn nt_create_file_hook(
                     change_time: current_time,
                 })
             }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    ?e,
+                    ?linux_path,
+                    "nt_create_file_hook: Request for open file failed!",
+                );
+                None
+            }
             Err(e) => {
-                tracing::warn!("nt_create_file_hook: {:?} {}", e, linux_path.clone());
+                tracing::warn!(
+                    ?e,
+                    ?linux_path,
+                    "nt_create_file_hook: Request for open file failed!",
+                );
                 None
             }
         };
@@ -429,7 +432,7 @@ unsafe extern "system" fn nt_create_file_hook(
                 linux_path,
                 *file_handle as usize
             );
-            return STATUS_SUCCESS;
+            STATUS_SUCCESS
         } else {
             // File could not be obtained for reasons, even if the
             // network operation succeeded.
@@ -438,6 +441,7 @@ unsafe extern "system" fn nt_create_file_hook(
                 "nt_create_file_hook: Failed opening remote file handle for {}",
                 linux_path
             );
+
             return original(
                 file_handle,
                 desired_access,
@@ -512,7 +516,16 @@ unsafe extern "system" fn nt_read_file_hook(
                     SeekFromInternal::Start(*(*byte_offset).QuadPart() as _)
                 },
             ) else {
-                tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
+                tracing::error!(
+                    "nt_read_file_hook: Failed seeking when reading file! (fd: {}, path: \"{}\" byte_offset: {})",
+                    handle_context.fd,
+                    handle_context.path,
+                    if byte_offset.is_null() {
+                        "null".to_string()
+                    } else {
+                        (*byte_offset).QuadPart().to_string()
+                    }
+                );
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             };
 
@@ -558,7 +571,16 @@ unsafe extern "system" fn nt_read_file_hook(
                 {
                     return STATUS_SUCCESS;
                 } else {
-                    tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
+                    tracing::error!(
+                        "nt_read_file_hook: Failed seeking when reading file! (handle: {}, path: \"{}\" byte_offset: {})",
+                        handle_context.fd,
+                        handle_context.path,
+                        if byte_offset.is_null() {
+                            "null".to_string()
+                        } else {
+                            (*byte_offset).QuadPart().to_string()
+                        }
+                    );
                     return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
             }

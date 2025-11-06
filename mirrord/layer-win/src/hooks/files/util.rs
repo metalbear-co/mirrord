@@ -22,7 +22,7 @@ use winapi::{
 const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
 
 /// Responsible for turning global namespace, default volume paths into Linux paths.
-pub fn remove_root_dir_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
+pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
     let mut path = path.as_ref();
 
     if !path.has_root() {
@@ -56,7 +56,14 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
     // If the response contains the `XstatResponse`, return the metadata.
     match req {
         Ok(Ok(res)) => Some(res.metadata),
-        _ => None,
+        Ok(Err(e)) => {
+            tracing::error!(?e, "Error trying to xstat into file!");
+            None
+        }
+        Err(e) => {
+            tracing::error!(?e, "Error trying to xstat file!");
+            None
+        }
     }
 }
 
@@ -74,7 +81,14 @@ pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
 
     match seek {
         Ok(Ok(res)) => Some(res.result_offset),
-        _ => None,
+        Ok(Err(e)) => {
+            tracing::error!(?e, "Error trying to seek into file!");
+            None
+        }
+        Err(e) => {
+            tracing::error!(?e, "Error trying to seek into file!");
+            None
+        }
     }
 }
 

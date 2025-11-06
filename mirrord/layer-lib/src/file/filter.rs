@@ -1,3 +1,6 @@
+#[cfg(unix)]
+use std::{env, path::Path};
+
 /// Controls which files are ignored (opened locally) by mirrord file operations.
 ///
 /// There are 2 ways of setting this up:
@@ -10,20 +13,15 @@ use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
     util::VecOrSingle,
 };
-use regex::{RegexSet, RegexSetBuilder};
-
 #[cfg(unix)]
 use mirrord_layer::{
     detour::{Bypass, Detour},
     error::HookError,
 };
-
-#[cfg(unix)]
-use std::{env, path::Path};
+use regex::{RegexSet, RegexSetBuilder};
 
 #[cfg(unix)]
 use super::unix::*;
-
 #[cfg(windows)]
 use super::windows::*;
 
@@ -125,17 +123,16 @@ impl FileFilter {
     pub fn check<T: AsRef<str>>(&self, path: T) -> Option<FileMode> {
         let path = path.as_ref();
 
-        let may_write = self.mode == FsModeConfig::Write || self.mode == FsModeConfig::LocalWithOverrides;
+        let may_write =
+            self.mode == FsModeConfig::Write || self.mode == FsModeConfig::LocalWithOverrides;
         match self.mode {
             FsModeConfig::Local => Some(FileMode::Local),
             FsModeConfig::Read | FsModeConfig::Write | FsModeConfig::LocalWithOverrides => {
                 if self.not_found.is_match(path) {
                     Some(FileMode::NotFound)
-                }
-                else if may_write && self.read_write.is_match(path) {
+                } else if may_write && self.read_write.is_match(path) {
                     Some(FileMode::ReadWrite)
-                }
-                else if self.read_only.is_match(path) {
+                } else if self.read_only.is_match(path) {
                     Some(FileMode::ReadOnly)
                 } else if self.local.is_match(path) {
                     Some(FileMode::Local)

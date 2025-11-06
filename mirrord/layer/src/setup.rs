@@ -17,6 +17,7 @@ use mirrord_config::{
     target::Target,
 };
 use mirrord_intproxy_protocol::PortSubscription;
+use mirrord_layer_lib::file::{filter::FileFilter, mapper::FileRemapper};
 use mirrord_protocol::{
     Port,
     tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
@@ -26,11 +27,6 @@ use regex::RegexSet;
 use crate::{
     debugger_ports::DebuggerPorts,
     socket::{OutgoingSelector, dns_selector::DnsSelector},
-};
-
-use mirrord_layer_lib::file::{
-    filter::FileFilter,
-    mapper::FileRemapper
 };
 
 /// Complete layer setup.

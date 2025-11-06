@@ -28,9 +28,6 @@ mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-progress = { path = "../progress" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
-
-[target.`cfg(unix)`.dependencies]
-mirrord-layer = { path = "../layer" }
 mirrord-layer-macro = { path = "../layer/macro" }
 
 base64.workspace = true
@@ -44,6 +41,7 @@ regex.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [target.'cfg(unix)'.dependencies]
+mirrord-layer = { path = "../layer" }
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
