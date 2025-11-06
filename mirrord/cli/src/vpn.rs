@@ -71,7 +71,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
 
     sub_progress.success(None);
 
-    let mut vpn_agnet = VpnAgent::try_create(connection).await?;
+    let mut vpn_agnet = VpnAgent::try_create(connection.sender, connection.receiver).await?;
 
     let network = vpn_agnet.get_network_configuration().await?;
 
