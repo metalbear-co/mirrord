@@ -106,9 +106,9 @@ impl BusyListenerMethod {
     /// Creates a new [`BusyTcpListener`].
     pub async fn prepare_socket(self, ipv4: bool) -> io::Result<BusyTcpListener> {
         let bind_to = if ipv4 {
-            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
+            SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)
         } else {
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0)
+            SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
         };
         let socket = if ipv4 {
             TcpSocket::new_v4()?

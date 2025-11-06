@@ -544,9 +544,27 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
         let OutgoingConnectResponse {
             connection_id,
-            layer_address,
+            mut layer_address,
             in_cluster_address,
         } = response;
+
+        if let SocketAddress::Ip(interceptor_addr) = &mut layer_address {
+            // Our socket can be bound to any local interface,
+            // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
+            // We need to fill the exact IP here.
+            match &user_socket_info.state {
+                SocketState::Bound {
+                    bound: Bound { address, .. },
+                    ..
+                } => {
+                    interceptor_addr.set_ip(address.ip());
+                }
+                _ if interceptor_addr.is_ipv4() => {
+                    interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
+                }
+                _ => interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into()),
+            }
+        }
 
         // Connect to the socket prepared by the internal proxy.
         let connect_result: ConnectResult = if CALL_CONNECT {
