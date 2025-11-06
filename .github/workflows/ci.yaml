@@ -13,10 +13,18 @@ concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+# Minimal global perms; override per-job if needed
+permissions:
+  contents: read
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   PYTHON_VERSION: "3.12"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   # ======================
@@ -48,6 +56,7 @@ jobs:
 
       - name: Agent unit tests
         run: |
+          set -euxo pipefail
           cargo test --locked --target x86_64-unknown-linux-gnu \
             -p mirrord-agent -p mirrord-agent-env -p mirrord-agent-iptables
 
@@ -140,6 +149,9 @@ jobs:
       - name: Create venv & install py deps (binary-only, no C build)
         env:
           PIP_PREFER_BINARY: "1"
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+          PIP_NO_BUILD_ISOLATION: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
           WEBSOCKETS_NO_SPEEDUPS: "1"
         run: |
           set -euxo pipefail
@@ -152,6 +164,7 @@ jobs:
         with:
           node-version: '22'
       - run: |
+          set -euxo pipefail
           test -f package.json || npm init -y
           npm set fund false
           npm set audit false
@@ -235,7 +248,9 @@ jobs:
           chmod +x target/issue1054
 
       - name: Build C apps
-        run: ./scripts/build_c_apps.sh
+        run: |
+          set -euxo pipefail
+          ./scripts/build_c_apps.sh
 
       - name: Verify fixture binaries exist
         run: |
@@ -412,22 +427,33 @@ jobs:
           version: 17.0.6-tem
       - run: java -version
 
-      # ---- Python (PEP 668-safe via venv)
+      # ---- Python (PEP 668-safe via venv) — make macOS consistent with Linux (binary-only)
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Create venv & install py deps (macOS)
+      - name: Create venv & install py deps (macOS, binary-only)
+        env:
+          PIP_PREFER_BINARY: "1"
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+          PIP_NO_BUILD_ISOLATION: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+          WEBSOCKETS_NO_SPEEDUPS: "1"
         run: |
+          set -euxo pipefail
           python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install flask fastapi "uvicorn[standard]"
+          .venv/bin/python -m pip install --upgrade pip wheel
+          .venv/bin/pip install --only-binary=:all: flask fastapi "uvicorn[standard]"
 
       # ---- Node
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: |
+        # keep separate from the Linux job so lockfiles don't collide
+          set -euxo pipefail
           npm init -y
+          npm set fund false
+          npm set audit false
           npm install express
           npm install portfinder
 
@@ -477,10 +503,12 @@ jobs:
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
+          set -euxo pipefail
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
 
       - name: Run targetless E2E test
         run: |
+          set -euxo pipefail
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
 
       - run: kubectl create namespace argo-rollouts
@@ -489,12 +517,14 @@ jobs:
 
       - name: Run remaining E2E tests
         run: |
+          set -euxo pipefail
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
 
       - name: Collect logs on failure
         if: ${{ failure() }}
         run: |
+          set -euxo pipefail
           find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
           kubectl get all
           kubectl describe pods
