@@ -261,9 +261,17 @@ jobs:
       - name: Build C apps (excluding venv)
         run: |
           set -euxo pipefail
-          # Ensure we only compile C apps in mirrord/layer/tests/apps
           cd mirrord/layer/tests/apps
-          for c_file in $(find . -maxdepth 2 -name "*.c" -type f); do
+          
+          # Special case for fork (expects out.c_test_app)
+          if [ -f ./fork/fork.c ]; then
+            echo "Building C app: ./fork/fork.c -> ./fork/out.c_test_app"
+            gcc -o ./fork/out.c_test_app ./fork/fork.c
+            chmod +x ./fork/out.c_test_app
+          fi
+          
+          # Build other C apps with standard naming
+          for c_file in $(find . -maxdepth 2 -name "*.c" -type f ! -path "./fork/*"); do
             app_name=$(basename "$c_file" .c)
             app_dir=$(dirname "$c_file")
             echo "Building C app: $c_file -> $app_dir/${app_name}"
