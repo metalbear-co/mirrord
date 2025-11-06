@@ -160,7 +160,7 @@ jobs:
       # ---- Node
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
       - run: |
           set -euxo pipefail
           test -f package.json || npm init -y
