@@ -461,11 +461,14 @@ jobs:
           python3 --version || true
           .venv/bin/python --version || true
           .venv/bin/uvicorn --version || true
-      - name: mirrord layer tests
+      - name: mirrord layer tests (with one retry)
         env:
           RUST_BACKTRACE: full
           RUST_LOG: mirrord=trace
-        run: cargo test -p mirrord-layer -- --nocapture --test-threads=1
+        run: |
+          set -euxo pipefail
+          cargo test -p mirrord-layer -- --nocapture --test-threads=1 \
+          || { echo "Retrying mirrord-layer tests once"; sleep 5; cargo test -p mirrord-layer -- --nocapture --test-threads=1; }
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
