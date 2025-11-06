@@ -440,7 +440,7 @@ jobs:
       # ---- Node
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
       - run: |
           set -euxo pipefail
           npm init -y
@@ -450,6 +450,8 @@ jobs:
           npm install portfinder
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
+        env:
+          NODE_OPTIONS: "--http-parser=legacy"
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
