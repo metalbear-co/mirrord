@@ -10,7 +10,6 @@ export interface ConfigData {
   setConfig: (config: LayerFileConfig) => void;
 }
 
-// TODO: change default config according to boilerplate
 export const DefaultConfig: LayerFileConfig = {
   feature: {
     network: {
