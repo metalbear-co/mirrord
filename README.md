@@ -15,7 +15,7 @@ It’s meant to provide the benefits of running your service on a cloud environm
 going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
 It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://metalbear.co/mirrord/docs/overview/introduction/).
 
-Looking for the KubeCon Atlanta password? Go [here](#kubecon-atlanta-raffle).
+Looking for the KubeCon Atlanta raffle password? Go [here](#kubecon-atlanta-raffle).
 
 # Contents
 
