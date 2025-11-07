@@ -110,7 +110,6 @@ jobs:
           sbom: false
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-          platforms: linux/amd64
       - name: upload CLI image
         uses: actions/upload-artifact@v4
         with:
