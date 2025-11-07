@@ -177,7 +177,8 @@ and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add 
 
 ## KubeCon Atlanta Raffle
 
-We're raffling off two pairs of Ray-Ban Meta glasses at KubeCon. To enter, you need to whisper this secret password to someone from the MetalBear team at Booth #1560. 
+The password is: **"The blind rooster crows at midnight."**
+Say it to one of our team members at Booth #1560.
 
 **The secret password is: "The blind rooster crows at midnight."**
 
