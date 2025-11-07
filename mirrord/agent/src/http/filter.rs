@@ -282,7 +282,7 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches(&mut input));
+        assert!(filter.matches::<&[u8]>(&mut input, None));
 
         // should fail
         let mut input = Request::builder()
@@ -293,7 +293,7 @@ mod test {
             .unwrap()
             .into_parts()
             .0;
-        assert!(filter.matches(&mut input).not());
+        assert!(filter.matches::<&[u8]>(&mut input, None).not());
     }
 
     #[test]
@@ -319,7 +319,7 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches(&mut input));
+        assert!(filter.matches::<&[u8]>(&mut input, None));
 
         // should fail
         let mut input = Request::builder()
@@ -331,6 +331,6 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(!filter.matches(&mut input));
+        assert!(!filter.matches::<&[u8]>(&mut input, None));
     }
 }
