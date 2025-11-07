@@ -292,7 +292,51 @@ pub enum BodyFilter {
     ///   }
     /// }
     /// ```
-    /// TODO(areg): Specify how edge cases (ask Liron) are handled
+	///
+	/// The filter will match if there is at least one query result.
+	///
+	/// Non-string matches are stringified before being compared to
+	/// the regex. To filter query results by type, the `typeof`
+	/// [function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)
+	/// is provided. It takes in a single `NodesType` parameter and
+	/// returns `"null" | "bool" | "number" | "string" | "array" | "object"`,
+	/// depending on the type of the argument. If not all nodes in the
+	/// argument have the same type, it returns `nothing`.
+	///
+	/// Example:
+    ///
+	/// ```json
+    /// "body_filter": {
+    ///   "type": "json",
+    ///   "query": "$.books[?(typeof(@) == 'number')]",
+    ///   "matches": "4$"
+    /// }
+	/// ```
+	/// will match
+	///
+    /// ```json
+    /// {
+    ///   "books": [
+    ///     1111,
+    ///     2222,
+    ///     4444
+    ///   ]
+    /// }
+    /// ```
+	///
+	/// but not
+	///
+    /// ```json
+    /// {
+    ///   "books": [
+    ///     "1111",
+    ///     "2222",
+    ///     "4444"
+    ///   ]
+    /// }
+    /// ```
+	///
+    ///
     ///
     /// To use with with `all_of` or `any_of`, use the following syntax:
     /// ```json
