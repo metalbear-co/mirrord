@@ -173,6 +173,12 @@ We always appreciate hearing how mirrord has made a difference for our users.
 Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
 and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
 
+## KubeCon Atlanta Raffle
+
+We're raffling off two pairs of Ray-Ban Meta glasses at KubeCon. To enter, you need to whisper this secret password to someone from the MetalBear team at Booth #1560. 
+
+**The secret password is: "The blind rooster crows at midnight."**
+
 ## Code of Conduct
 
 We take our community seriously and we are dedicated to providing a safe and welcoming environment for everyone.
