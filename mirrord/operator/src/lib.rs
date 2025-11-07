@@ -27,11 +27,10 @@ pub enum CiTrigger {
 }
 
 // TODO(alex) [mid] 6: Move this to /operator/crd/session, probably.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 pub struct MirrordCiInfo {
     pub vendor: Option<String>,
-    pub target: u64,
-    pub branch_name: Option<u64>,
+    pub branch_name: Option<String>,
 }
 
 #[cfg(feature = "client")]
