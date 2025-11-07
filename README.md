@@ -180,8 +180,6 @@ and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add 
 The password is: **"The blind rooster crows at midnight."**
 Say it to one of our team members at Booth #1560.
 
-**The secret password is: "The blind rooster crows at midnight."**
-
 ## Code of Conduct
 
 We take our community seriously and we are dedicated to providing a safe and welcoming environment for everyone.
