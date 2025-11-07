@@ -308,42 +308,42 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
           toolchain: nightly-2025-08-01
+      - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
+        with:
+          prefix-key: v0-rust-macos
+          cache-on-failure: true
+          cache-targets: true
+          save-if: true
+          cache-provider: github
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: verify SIP status
         run: csrutil status
-      - name: build layer
-        run: cargo build -p mirrord-layer
-      - name: build layer x86
-        run: cargo build -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build layer (parallel)
+        run: |
+          set -euxo pipefail
+          cargo build -p mirrord-layer &
+          cargo build -p mirrord-layer --target=x86_64-apple-darwin &
+          wait
       - name: lint
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --tests -- -Wclippy::indexing_slicing -D warnings
-      - name: mirrord-sip UT
-        run: cargo test -p mirrord-sip
-      - name: mirrord-intproxy UT
-        run: cargo test -p mirrord-intproxy
-      - run: |
+      - name: Unit tests (parallel)
+        run: |
           set -euxo pipefail
-          cd mirrord/layer/tests/apps/issue1123
-          rustc issue1123.rs --out-dir target
-      - run: |
+          cargo test -p mirrord-sip &
+          cargo test -p mirrord-intproxy &
+          wait
+      - name: Build rustc test apps (parallel)
+        run: |
           set -euxo pipefail
-          cd mirrord/layer/tests/apps/issue1054
-          rustc issue1054.rs --out-dir target
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/issue1458
-          rustc issue1458.rs --out-dir target
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/issue1458portnot53
-          rustc issue1458portnot53.rs --out-dir target
-      - run: |
-          set -euxo pipefail
-          cd mirrord/layer/tests/apps/issue2058
-          rustc issue2058.rs --out-dir target
+          (cd mirrord/layer/tests/apps/issue1123 && rustc issue1123.rs --out-dir target) &
+          (cd mirrord/layer/tests/apps/issue1054 && rustc issue1054.rs --out-dir target) &
+          (cd mirrord/layer/tests/apps/issue1458 && rustc issue1458.rs --out-dir target) &
+          (cd mirrord/layer/tests/apps/issue1458portnot53 && rustc issue1458portnot53.rs --out-dir target) &
+          (cd mirrord/layer/tests/apps/issue2058 && rustc issue2058.rs --out-dir target) &
+          wait
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
@@ -371,39 +371,21 @@ jobs:
       - run: | # Build Go test apps.
           cd mirrord/layer/tests
           ../../../scripts/build_go_apps.sh 25
-      - run: |
-          cd mirrord/layer/tests/apps/fileops
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/outgoing
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/recv_from
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/dns_resolve
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/issue1776
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/issue1776portnot53
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/issue1899
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/issue2001
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/issue2438
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/issue3248
-          cargo build
-      - run: |
-          cd mirrord/layer/tests/apps/rebind0
-          cargo build
+      - name: Build Rust test apps (parallel)
+        run: |
+          set -euxo pipefail
+          (cd mirrord/layer/tests/apps/fileops && cargo build) &
+          (cd mirrord/layer/tests/apps/outgoing && cargo build) &
+          (cd mirrord/layer/tests/apps/recv_from && cargo build) &
+          (cd mirrord/layer/tests/apps/dns_resolve && cargo build) &
+          (cd mirrord/layer/tests/apps/issue1776 && cargo build) &
+          (cd mirrord/layer/tests/apps/issue1776portnot53 && cargo build) &
+          (cd mirrord/layer/tests/apps/issue1899 && cargo build) &
+          (cd mirrord/layer/tests/apps/issue2001 && cargo build) &
+          (cd mirrord/layer/tests/apps/issue2438 && cargo build) &
+          (cd mirrord/layer/tests/apps/issue3248 && cargo build) &
+          (cd mirrord/layer/tests/apps/rebind0 && cargo build) &
+          wait
       - run: ./scripts/build_c_apps.sh
       - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
         id: sdkman
@@ -412,12 +394,13 @@ jobs:
           version: 17.0.6-tem
       - run: java -version
       - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
       - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-      - run: npm install express
-      - run: npm install portfinder
+      - run: npm install express portfinder
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
       - name: save intproxy logs
