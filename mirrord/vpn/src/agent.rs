@@ -9,9 +9,8 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage, LogLevel,
     vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
 };
-use mirrord_protocol_io::{Client, Connection};
 use semver::VersionReq;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::error::VpnError;
 
@@ -22,13 +21,18 @@ pub static MINIMAL_PROTOCOL_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
 });
 
 pub struct VpnAgent {
-    connection: Connection<Client>,
+    tx: mpsc::Sender<ClientMessage>,
+    rx: mpsc::Receiver<DaemonMessage>,
+
     pong: Option<oneshot::Sender<()>>,
 }
 
 impl VpnAgent {
-    pub async fn try_create(connection: Connection<Client>) -> Result<Self, VpnError> {
-        let mut vpn_agnet = VpnAgent::new(connection);
+    pub async fn try_create(
+        tx: mpsc::Sender<ClientMessage>,
+        rx: mpsc::Receiver<DaemonMessage>,
+    ) -> Result<Self, VpnError> {
+        let mut vpn_agnet = VpnAgent::new(tx, rx);
 
         let Some(agent_protocol_version) = vpn_agnet
             .send_and_get_response(
@@ -52,18 +56,15 @@ impl VpnAgent {
         Ok(vpn_agnet)
     }
 
-    fn new(connection: Connection<Client>) -> Self {
-        VpnAgent {
-            connection,
-            pong: None,
-        }
+    fn new(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<DaemonMessage>) -> Self {
+        VpnAgent { tx, rx, pong: None }
     }
 
     pub async fn ping(&mut self) -> Result<oneshot::Receiver<()>, VpnError> {
         let (tx, rx) = oneshot::channel();
         self.pong = Some(tx);
 
-        self.send(ClientMessage::Ping).await;
+        self.send(ClientMessage::Ping).await?;
 
         Ok(rx)
     }
@@ -85,17 +86,20 @@ impl VpnAgent {
         }
     }
 
-    pub async fn open_socket(&self) {
+    pub async fn open_socket(&self) -> Result<(), VpnError> {
         self.send(ClientMessage::Vpn(ClientVpn::OpenSocket)).await
     }
 
-    pub async fn send_packet(&self, packet: Vec<u8>) {
+    pub async fn send_packet(&self, packet: Vec<u8>) -> Result<(), VpnError> {
         self.send(ClientMessage::Vpn(ClientVpn::Packet(packet.into())))
             .await
     }
 
-    pub async fn send(&self, request: ClientMessage) {
-        self.connection.send(request).await
+    pub async fn send(&self, request: ClientMessage) -> Result<(), VpnError> {
+        self.tx
+            .send(request)
+            .await
+            .map_err(|_| VpnError::ClientMessageDropped)
     }
 
     pub async fn send_and_get_response<T>(
@@ -103,7 +107,10 @@ impl VpnAgent {
         request: ClientMessage,
         response_filter: impl Fn(DaemonMessage) -> Option<T>,
     ) -> Result<Option<T>, VpnError> {
-        self.send(request).await;
+        self.tx
+            .send(request)
+            .await
+            .map_err(|_| VpnError::ClientMessageDropped)?;
 
         self.next()
             .await
@@ -116,7 +123,7 @@ impl Stream for VpnAgent {
     type Item = DaemonMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let result = ready!(self.connection.poll_recv(cx));
+        let result = ready!(self.rx.poll_recv(cx));
 
         match result {
             Some(DaemonMessage::LogMessage(message)) => {
