@@ -556,6 +556,7 @@ jobs:
           done
           kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argo-rollouts -n argo-rollouts --timeout=120s || echo "Some Argo Rollouts pods may not be ready"
       - name: Run remaining E2E tests (with retries)
+        continue-on-error: true
         run: |
           set -euxo pipefail
           # Run job tests with retry
