@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.172.0](https://github.com/metalbear-co/mirrord/tree/3.172.0) - 2025-11-06
+
+
+### Removed
+
+- Reverted arm64e support in mirrord-sip.
+
+
+### Changed
+
+- When possible, mirrord now binds application socket to the requested address
+  (instead of always to localhost or unspecified).
+  [#3693](https://github.com/metalbear-co/mirrord/issues/3693)
+- Reverted independent send handles for intproxy tasks.
+- The `fs.not_found` filesystem filter is now checked *before* bypassing
+  relative files, meaning you can now ignore relative files instead of always
+  reading them locally
+- `incoming.listen_ports` mappings now always apply, regardless of whether the
+  port is stolen or not.
+- mirrord CLI progress messages now always include the binary version.
+
 ## [3.171.0](https://github.com/metalbear-co/mirrord/tree/3.171.0) - 2025-11-04
 
 
