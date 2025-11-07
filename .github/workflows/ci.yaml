@@ -104,12 +104,13 @@ jobs:
           file: mirrord/cli/Dockerfile
           tags: cli_image
           outputs: type=docker,dest=/tmp/cli_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=cli
+          cache-to: type=gha,mode=max,scope=cli
           provenance: false
           sbom: false
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+          platforms: linux/amd64
       - name: upload CLI image
         uses: actions/upload-artifact@v4
         with:
@@ -135,6 +136,13 @@ jobs:
           toolchain: nightly-2025-08-01
           components: rustfmt, clippy
           override: true
+      - uses: metalbear-co/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
+        with:
+          prefix-key: v0-rust-integration
+          cache-on-failure: true
+          cache-targets: true
+          save-if: true
+          cache-provider: github
       # ---- Python (PEP 668-safe via venv) — binary wheels only; skip C speedups
       - uses: actions/setup-python@v5
         with:
@@ -166,8 +174,7 @@ jobs:
           test -f package.json || npm init -y
           npm set fund false
           npm set audit false
-          npm install express
-          npm install portfinder
+          npm install express portfinder
       # Build Go fixtures (three versions)
       - uses: actions/setup-go@v5
         with:
@@ -210,14 +217,15 @@ jobs:
           fi
           test -f "$DEST"
           chmod +x "$DEST"
-      - name: Build fileops/outgoing/recv_from/rebind0 (Linux)
+      - name: Build fileops/outgoing/recv_from/rebind0 (Linux, parallel)
         run: |
           set -euxo pipefail
           cargo build --manifest-path mirrord/layer/tests/apps/fileops/Cargo.toml \
-                      --target-dir mirrord/layer/tests/apps/fileops/target
-          cargo build --manifest-path mirrord/layer/tests/apps/outgoing/Cargo.toml
-          cargo build --manifest-path mirrord/layer/tests/apps/recv_from/Cargo.toml
-          cargo build --manifest-path mirrord/layer/tests/apps/rebind0/Cargo.toml
+                      --target-dir mirrord/layer/tests/apps/fileops/target &
+          cargo build --manifest-path mirrord/layer/tests/apps/outgoing/Cargo.toml &
+          cargo build --manifest-path mirrord/layer/tests/apps/recv_from/Cargo.toml &
+          cargo build --manifest-path mirrord/layer/tests/apps/rebind0/Cargo.toml &
+          wait
       - name: Copy fileops to repo target (expected by tests)
         run: |
           set -euxo pipefail
@@ -275,14 +283,22 @@ jobs:
           sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0
           sudo sysctl -w net.ipv6.ip_unprivileged_port_start=0 || true
       # Run the rest (layer tests run on macOS only, like main)
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+      - name: Run package tests (parallel batches)
+        run: |
+          set -euxo pipefail
+          # Batch 1: Smaller/faster packages
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol &
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-config &
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth &
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io &
+          wait
+          # Batch 2: Medium packages
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy &
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client" &
+          wait
+          # Batch 3: Larger packages (run separately to avoid resource contention)
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+          cargo test --target x86_64-unknown-linux-gnu -p mirrord
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
