@@ -478,10 +478,10 @@ jobs:
           cargo nextest run -p mirrord-layer \
             --retries 2 \
             --failure-output=immediate-final \
-            --junit-target target/nextest/junit \
+            --junit-xml target/nextest/junit/junit.xml \
             --status-level=all \
             --test-threads=1 \
-            --skip mirroring_with_http::application_3_Application__NodeHTTP
+            --exclude mirroring_with_http::application_3_Application__NodeHTTP
       - name: upload layer junit (macOS)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -539,9 +539,22 @@ jobs:
         run: |
           set -euxo pipefail
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features targetless -- --test-threads=6 targetless
-      - run: kubectl create namespace argo-rollouts
-      # Pin Argo Rollouts version; avoid 'latest' for stability
-      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.7.6/install.yaml
+      - name: Setup Argo Rollouts
+        run: |
+          set -euxo pipefail
+          kubectl create namespace argo-rollouts || kubectl get namespace argo-rollouts
+          # Retry Argo Rollouts installation with timeout
+          for i in {1..3}; do
+            if kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.7.6/install.yaml; then
+              echo "Argo Rollouts installed successfully"
+              break
+            else
+              echo "Attempt $i failed, waiting 10s before retry..."
+              sleep 10
+              kubectl get nodes || echo "Cluster may not be ready"
+            fi
+          done
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argo-rollouts -n argo-rollouts --timeout=120s || echo "Some Argo Rollouts pods may not be ready"
       - name: Run remaining E2E tests
         run: |
           set -euxo pipefail
@@ -549,11 +562,14 @@ jobs:
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
       - name: Collect logs on failure
         if: ${{ failure() }}
+        continue-on-error: true
         run: |
-          set -euxo pipefail
-          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
-          kubectl get all
-          kubectl describe pods
+          set -euxo pipefail || true
+          echo "Collecting diagnostic logs..."
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \; || echo "No intproxy logs found"
+          kubectl get all || echo "kubectl get all failed"
+          kubectl describe pods || echo "kubectl describe pods failed"
+          kubectl get events --sort-by='.lastTimestamp' | tail -20 || echo "kubectl get events failed"
           if [ "${{ matrix.container-runtime }}" = "docker" ]; then
-            docker exec minikube find /var/log/pods -type f -print -exec cat {} \;
+            docker exec minikube find /var/log/pods -type f -print -exec cat {} \; || echo "Failed to collect pod logs from minikube"
           fi
