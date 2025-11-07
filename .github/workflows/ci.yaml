@@ -92,12 +92,24 @@ jobs:
   # ======================
   test_cli_image:
     runs-on: ubuntu-24.04
+    # Optional artifact - don't block workflow on failure
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+      - name: Check if CLI files changed
+        id: changed
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            cli:
+              - 'mirrord/cli/**'
+              - 'mirrord/cli/Dockerfile'
       - uses: docker/setup-buildx-action@v3
+        if: steps.changed.outputs.cli == 'true'
       - name: build and export (cli)
+        if: steps.changed.outputs.cli == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -111,6 +123,7 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
       - name: upload CLI image
+        if: steps.changed.outputs.cli == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: cli_image
