@@ -56,7 +56,7 @@ impl MirrordClusterSession {
 }
 
 /// Describes an owner of a mirrord session.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionOwner {
     /// Unique ID.
@@ -70,7 +70,7 @@ pub struct SessionOwner {
 }
 
 /// Describes a target of a mirrord session.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
     /// Kubernetes resource apiVersion.
@@ -84,7 +84,7 @@ pub struct SessionTarget {
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionJiraMetrics {
     /// The user's current git branch.
