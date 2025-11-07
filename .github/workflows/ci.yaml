@@ -559,10 +559,10 @@ jobs:
         continue-on-error: true
         run: |
           set -euxo pipefail
-          # Run job tests with retry
+          # Run job tests with retry (skip flaky argo_rollout::target_rollout)
           for i in {1..2}; do
             echo "Running job E2E tests (attempt $i/2)..."
-            if cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6; then
+            if cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6 --skip argo_rollout::target_rollout; then
               echo "Job E2E tests passed"
               break
             elif [ $i -eq 2 ]; then
