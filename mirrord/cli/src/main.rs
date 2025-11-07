@@ -943,7 +943,8 @@ fn main() -> miette::Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
-    // Ensure Windows consoles have VT enabled or fall back to dumb progress before we start logging.
+    // Ensure Windows consoles have VT enabled or fall back to dumb progress before we start
+    // logging.
     #[cfg(target_os = "windows")]
     console::ensure_vt_or_dumb_progress();
 
