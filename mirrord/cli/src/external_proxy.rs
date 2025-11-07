@@ -183,13 +183,13 @@ pub async fn proxy(
                 }}
             }
 
-            message = own_agent_conn.connection.recv() => {
+            message = own_agent_conn.agent_rx.recv() => {
                 tracing::debug!(?message, "received message on own connection");
 
                 match message {
                     Some(DaemonMessage::Pong) => continue,
                     Some(DaemonMessage::OperatorPing(id)) => {
-                        own_agent_conn.connection.send(ClientMessage::OperatorPong(id)).await;
+                        own_agent_conn.agent_tx.send(ClientMessage::OperatorPong(id)).await.ok();
                     }
                     Some(DaemonMessage::LogMessage(LogMessage {
                         level: LogLevel::Error,
@@ -240,7 +240,7 @@ pub async fn proxy(
             _ = ping_pong_ticker.tick() => {
                 tracing::debug!("sending ping");
 
-                own_agent_conn.connection.send(ClientMessage::Ping).await;
+                let _ = own_agent_conn.agent_tx.send(ClientMessage::Ping).await;
             }
 
             _ = initial_connection_timeout.as_mut(), if connections.load(Ordering::Relaxed) == 0 => {
@@ -274,7 +274,11 @@ async fn handle_connection(
             client_message = stream.next() => {
                 match client_message {
                     Some(Ok(client_message)) => {
-                        agent_conn.connection.send(client_message).await;
+                        if let Err(error) = agent_conn.agent_tx.send(client_message).await {
+                            tracing::error!(?peer_addr, %error, "unable to send message to agent");
+
+                            break;
+                        }
                     }
                     Some(Err(error)) => {
                         tracing::error!(?peer_addr, %error, "unable to recive message from intproxy");
@@ -286,7 +290,7 @@ async fn handle_connection(
                     }
                 }
             }
-            daemon_message = agent_conn.connection.recv() => {
+            daemon_message = agent_conn.agent_rx.recv() => {
                 match daemon_message { Some(daemon_message) => {
                     if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(?peer_addr, %error, "unable to send message to intproxy");

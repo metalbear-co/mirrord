@@ -7,7 +7,11 @@ use std::{
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
-use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError, kube};
+use mirrord_kube::{
+    api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
+    error::KubeApiError,
+    kube,
+};
 use mirrord_operator::{
     client::{
         OperatorApi, OperatorSession,
@@ -15,13 +19,16 @@ use mirrord_operator::{
     },
     types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
-use mirrord_protocol_io::{Client, Connection, ProtocolError};
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 pub use tls::ConnectionTlsError;
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::{
+    net::{TcpSocket, TcpStream},
+    sync::mpsc::{Receiver, Sender},
+};
 use tokio_retry::{RetryIf, strategy::ExponentialBackoff};
 use tracing::Level;
 
@@ -48,9 +55,6 @@ pub enum AgentConnectionError {
     /// Making a TLS connection to the mirrord-extproxy failed.
     #[error("failed to prepare TLS communication with mirrord-extproxy: {0}")]
     Tls(#[from] ConnectionTlsError),
-    /// An error happened while communicating with the agent
-    #[error("protocol error: {0}")]
-    ProtocolError(#[from] ProtocolError),
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -118,19 +122,27 @@ impl fmt::Debug for ReconnectFlow {
 
 #[derive(Debug)]
 pub enum AgentConnectionMessage {
+    ClientMessage(ClientMessage),
     RequestReconnect,
+}
+
+impl From<ClientMessage> for AgentConnectionMessage {
+    fn from(message: ClientMessage) -> Self {
+        AgentConnectionMessage::ClientMessage(message)
+    }
 }
 
 /// Handles logic of the `proxy <-> agent` connection as a [`BackgroundTask`].
 ///
 /// # Note
-/// The raw IO is managed in a separate [`tokio::task`] created in mirrord_protocol_io.
+/// The raw IO is managed in a separate [`tokio::task`] created in a different mirrord crate.
 /// This differs from the [`LayerConnection`](crate::layer_conn::LayerConnection) implementation,
 /// but this logic was already implemented elsewhere. This struct simply wraps the
 /// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
 /// [`BackgroundTask`] trait.
 pub struct AgentConnection {
-    pub connection: Connection<Client>,
+    pub agent_tx: Sender<ClientMessage>,
+    pub agent_rx: Receiver<DaemonMessage>,
     pub reconnect: ReconnectFlow,
 }
 
@@ -145,13 +157,14 @@ impl AgentConnection {
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
 
-        let (connection, reconnect) = match connect_info {
+        let (agent_tx, agent_rx, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
                 let connection =
                     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
                         .await?;
                 (
-                    connection.conn,
+                    connection.tx,
+                    connection.rx,
                     if session.allow_reconnect {
                         ReconnectFlow::ConnectInfo {
                             config: config.clone(),
@@ -173,34 +186,44 @@ impl AgentConnection {
 
                 let stream = socket.connect(proxy_addr).await?;
 
-                let conn = match tls_pem {
+                let (tx, rx) = match tls_pem {
                     Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
-                    None => Connection::from_stream(stream).await?,
+                    None => wrap_raw_connection(stream),
                 };
 
-                (conn, ReconnectFlow::Break(kind))
+                (tx, rx, ReconnectFlow::Break(kind))
             }
 
             AgentConnectInfo::DirectKubernetes(connect_info) => {
-                let conn = portforward::create_connection(config, connect_info.clone()).await?;
-                (conn, ReconnectFlow::Break(kind))
+                let (tx, rx) = portforward::create_connection(config, connect_info.clone()).await?;
+                (tx, rx, ReconnectFlow::Break(kind))
             }
         };
 
         Ok(Self {
-            connection,
+            agent_tx,
+            agent_rx,
             reconnect,
         })
     }
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
-        let connection = Connection::<Client>::from_stream(stream).await?;
+        let (agent_tx, agent_rx) = wrap_raw_connection(stream);
 
         Ok(Self {
-            connection,
+            agent_tx,
+            agent_rx,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         })
+    }
+
+    #[tracing::instrument(level = Level::TRACE, name = "send_message_to_agent", skip(self), ret, err(level = Level::TRACE))]
+    async fn send(&self, msg: ClientMessage) -> Result<(), AgentConnectionTaskError> {
+        self.agent_tx
+            .send(msg)
+            .await
+            .map_err(|_| AgentConnectionTaskError::ChannelError(self.reconnect.kind()))
     }
 
     pub fn reconnectable(&self) -> bool {
@@ -243,9 +266,15 @@ impl BackgroundTask for AgentConnection {
                     Some(AgentConnectionMessage::RequestReconnect) => {
                         break Err(AgentConnectionTaskError::RequestedReconnect(self.reconnect.kind()))
                     }
+                    Some(AgentConnectionMessage::ClientMessage(msg)) => {
+                        if let Err(error) = self.send(msg).await {
+                            tracing::error!(%error, "failed to send message to the {}", self.reconnect.kind());
+                            break Err(error);
+                        }
+                    }
                 },
 
-                msg = self.connection.recv() => match msg {
+                msg = self.agent_rx.recv() => match msg {
                     None => {
                         tracing::error!("failed to receive message from the {}, inner task down", self.reconnect.kind());
                         break Err(AgentConnectionTaskError::ChannelError(self.reconnect.kind()));

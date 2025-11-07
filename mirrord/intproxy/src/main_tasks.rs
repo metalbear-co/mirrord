@@ -3,7 +3,7 @@ use std::fmt;
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, MessageId, ProcessInfo, ProxyToLayerMessage,
 };
-use mirrord_protocol::DaemonMessage;
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::net::TcpStream;
 
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
@@ -11,6 +11,8 @@ use tokio::net::TcpStream;
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum ProxyMessage {
+    /// Message to be sent to the agent.
+    ToAgent(ClientMessage),
     /// Message to be sent to a layer instance.
     ToLayer(ToLayer),
     /// Message received from the agent.
@@ -68,6 +70,12 @@ impl PartialEq for NewLayer {
 
 #[cfg(test)]
 impl Eq for NewLayer {}
+
+impl From<ClientMessage> for ProxyMessage {
+    fn from(value: ClientMessage) -> Self {
+        Self::ToAgent(value)
+    }
+}
 
 impl From<ToLayer> for ProxyMessage {
     fn from(value: ToLayer) -> Self {

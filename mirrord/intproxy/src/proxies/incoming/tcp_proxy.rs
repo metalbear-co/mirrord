@@ -3,10 +3,7 @@ use std::{io::ErrorKind, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{
-    ClientMessage, ConnectionId,
-    tcp::{IncomingTrafficTransportType, LayerTcpSteal, TcpData},
-};
+use mirrord_protocol::{ConnectionId, tcp::IncomingTrafficTransportType};
 use mirrord_tls_util::MaybeTls;
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -103,14 +100,13 @@ pub struct TcpProxyTask {
     /// ID of the remote connection this task handles.
     ///
     /// Saved for [`std::fmt::Debug`] implementation.
-    connection_id: ConnectionId,
+    _connection_id: ConnectionId,
     /// The local connection between this task and the user application.
     connection: Option<LocalTcpConnection>,
-
-    /// Whether this task is running for a mirrored connection. When
-    /// `true`, the task will silently discard all outbound traffic
-    /// from the application.
-    mirror: bool,
+    /// Whether this task should silently discard data coming from the user application.
+    ///
+    /// The data is discarded only when the remote connection is mirrored.
+    discard_data: bool,
 }
 
 impl TcpProxyTask {
@@ -123,11 +119,15 @@ impl TcpProxyTask {
     /// * This task will talk with the user application using the given [`LocalTcpConnection`].
     /// * If `discard_data` is set, this task will silently discard all data coming from the user
     ///   application.
-    pub fn new(connection_id: ConnectionId, connection: LocalTcpConnection, mirror: bool) -> Self {
+    pub fn new(
+        connection_id: ConnectionId,
+        connection: LocalTcpConnection,
+        discard_data: bool,
+    ) -> Self {
         Self {
-            connection_id,
+            _connection_id: connection_id,
             connection: Some(connection),
-            mirror,
+            discard_data,
         }
     }
 }
@@ -150,14 +150,10 @@ impl BackgroundTask for TcpProxyTask {
 
         let (mut stream, read_buf) = connection.connect().await?;
 
-        if self.mirror.not() && read_buf.is_empty().not() {
+        if self.discard_data.not() && read_buf.is_empty().not() {
             // We don't send empty data,
             // because the agent recognizes it as a shutdown from the user application.
-            let msg = ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                connection_id: self.connection_id,
-                bytes: read_buf.into(),
-            }));
-            message_bus.send_agent(msg).await;
+            message_bus.send(read_buf).await;
         }
 
         let peer_addr = stream.as_ref().peer_addr()?;
@@ -190,13 +186,8 @@ impl BackgroundTask for TcpProxyTask {
                             );
                         }
 
-                        if !self.mirror {
-                            let msg =
-                                ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                                    connection_id: self.connection_id,
-                                    bytes: buf.clone().into(),
-                                }));
-                            message_bus.send_agent(msg).await;
+                        if !self.discard_data {
+                            message_bus.send(buf.to_vec()).await;
                         }
 
                         buf.clear();
@@ -204,7 +195,7 @@ impl BackgroundTask for TcpProxyTask {
                 },
 
                 msg = message_bus.recv(), if !is_lingering => match msg {
-                    None if self.mirror => {
+                    None if self.discard_data => {
                         tracing::trace!(
                             peer_addr = %peer_addr,
                             self_addr = %self_addr,
