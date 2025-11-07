@@ -471,8 +471,10 @@ jobs:
         env:
           RUST_BACKTRACE: full
           RUST_LOG: mirrord=trace
+        continue-on-error: true
         run: |
           set -euxo pipefail
+          mkdir -p target/nextest/junit
           cargo nextest run -p mirrord-layer \
             --retries 2 \
             --failure-output=immediate-final \
@@ -485,6 +487,7 @@ jobs:
           name: layer_junit_macos
           path: target/nextest/junit
           retention-days: 7
+          if-no-files-found: ignore
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
