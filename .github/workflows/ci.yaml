@@ -474,22 +474,12 @@ jobs:
         continue-on-error: true
         run: |
           set -euxo pipefail
-          mkdir -p target/nextest/junit
           cargo nextest run -p mirrord-layer \
             --retries 2 \
             --failure-output=immediate-final \
-            --junit-xml target/nextest/junit/junit.xml \
             --status-level=all \
             --test-threads=1 \
             --exclude mirroring_with_http::application_3_Application__NodeHTTP
-      - name: upload layer junit (macOS)
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: layer_junit_macos
-          path: target/nextest/junit
-          retention-days: 7
-          if-no-files-found: ignore
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
