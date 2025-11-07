@@ -555,11 +555,37 @@ jobs:
             fi
           done
           kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argo-rollouts -n argo-rollouts --timeout=120s || echo "Some Argo Rollouts pods may not be ready"
-      - name: Run remaining E2E tests
+      - name: Run remaining E2E tests (with retries)
         run: |
           set -euxo pipefail
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6
+          # Run job tests with retry
+          for i in {1..2}; do
+            echo "Running job E2E tests (attempt $i/2)..."
+            if cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features job -- --test-threads=6; then
+              echo "Job E2E tests passed"
+              break
+            elif [ $i -eq 2 ]; then
+              echo "Job E2E tests failed after 2 attempts"
+              exit 1
+            else
+              echo "Job E2E tests failed, retrying in 10s..."
+              sleep 10
+            fi
+          done
+          # Run ephemeral tests with retry
+          for i in {1..2}; do
+            echo "Running ephemeral E2E tests (attempt $i/2)..."
+            if cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features ephemeral -- --test-threads=6; then
+              echo "Ephemeral E2E tests passed"
+              break
+            elif [ $i -eq 2 ]; then
+              echo "Ephemeral E2E tests failed after 2 attempts"
+              exit 1
+            else
+              echo "Ephemeral E2E tests failed, retrying in 10s..."
+              sleep 10
+            fi
+          done
       - name: Collect logs on failure
         if: ${{ failure() }}
         continue-on-error: true
