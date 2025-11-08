@@ -94,6 +94,7 @@ where
         }
 
         let Some(mut body) = self.body_tail.take() else {
+            self.destination.no_more_frames().await?;
             return Ok(());
         };
 
