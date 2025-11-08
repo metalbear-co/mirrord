@@ -79,7 +79,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
     fn try_from(value: &mirrord_protocol::tcp::HttpBodyFilter) -> Result<Self, Self::Error> {
         Ok(match value {
             mirrord_protocol::tcp::HttpBodyFilter::Json { query, matches } => Self::Json {
-                query: JsonPath::parse(&query)?,
+                query: JsonPath::parse(query)?,
                 matches: Regex::new(matches)?,
             },
         })
