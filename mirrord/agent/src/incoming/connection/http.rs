@@ -17,7 +17,7 @@ use hyper::{
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
-use mirrord_agent_env::envs;
+use mirrord_agent_env::envs::{self, MAX_BODY_BUFFER_SIZE};
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
@@ -298,7 +298,22 @@ impl RedirectedHttp {
             return Ok(());
         }
 
-        let max_body_size = envs::MAX_BODY_BUFFER_SIZE.from_env_or_default() as usize;
+        let max_body_size = match envs::MAX_BODY_BUFFER_SIZE.try_from_env() {
+            Ok(Some(t)) => Some(t as usize),
+            Ok(None) => {
+                tracing::warn!("{} not set, using default", envs::MAX_BODY_BUFFER_SIZE.name);
+                None
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "failed to parse {}, using default",
+                    envs::MAX_BODY_BUFFER_SIZE.name
+                );
+                None
+            }
+        }
+        .unwrap_or(64 * 1024);
 
         let content_length = self
             .request
@@ -347,8 +362,27 @@ impl RedirectedHttp {
             return Ok(());
         };
 
-        let until = Instant::now()
-            + Duration::from_millis(envs::MAX_BODY_BUFFER_TIMEOUT.from_env_or_default().into());
+        let timeout = match envs::MAX_BODY_BUFFER_TIMEOUT.try_from_env() {
+            Ok(Some(t)) => Some(t),
+            Ok(None) => {
+                tracing::warn!(
+                    "{} not set, using default",
+                    envs::MAX_BODY_BUFFER_TIMEOUT.name
+                );
+                None
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "failed to parse {}, using default",
+                    envs::MAX_BODY_BUFFER_TIMEOUT.name
+                );
+                None
+            }
+        }
+        .unwrap_or(1000);
+
+        let until = Instant::now() + Duration::from_millis(timeout.into());
 
         let result = loop {
             let frame = tokio::time::timeout_at(until, tail.frame()).await;
