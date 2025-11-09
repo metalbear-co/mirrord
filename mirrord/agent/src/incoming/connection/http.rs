@@ -17,7 +17,7 @@ use hyper::{
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
-use mirrord_agent_env::envs::{self, MAX_BODY_BUFFER_SIZE};
+use mirrord_agent_env::envs::{self};
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
@@ -391,7 +391,16 @@ impl RedirectedHttp {
                 Ok(Some(Ok(f))) => f,
                 Err(elapsed) => break Err(elapsed.into()),
                 Ok(Some(Err(err))) => break Err(err.into()),
-                Ok(None) => break Err(BufferBodyError::UnexpectedEOB),
+                Ok(None) => {
+					// If content_length is Some, us being at this
+					// point implies that there's still more stuff to
+					// receive.
+                    break if content_length.is_some() {
+                        Err(BufferBodyError::UnexpectedEOB)
+                    } else {
+                        Ok(())
+                    };
+                }
             };
 
             buffered.push(frame);
