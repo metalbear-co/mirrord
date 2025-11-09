@@ -72,7 +72,7 @@ pub enum ProxyError {
     #[error("connection closed")]
     ConnectionClosed,
     #[error("unexpected response: {0:?}")]
-    UnexpectedResponse(ProxyToLayerMessage),
+    UnexpectedResponse(Box<ProxyToLayerMessage>),
     #[error("critical error: {0}")]
     ProxyFailure(String),
     #[error("connection lock poisoned")]
