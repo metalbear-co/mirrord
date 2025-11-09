@@ -17,7 +17,7 @@ use mirrord_tls_util::MaybeTls;
 use rand::distr::{Alphanumeric, SampleString};
 use rstest::rstest;
 use rustls::pki_types::ServerName;
-use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc};
+use tokio::{net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -559,7 +559,6 @@ impl SizeHintType {
     }
 }
 
-
 /// Verifies that when buffering the body fails (for whatever reason),
 /// the request is correctly forwarded to the original destination
 /// *unmodified*.
@@ -663,7 +662,7 @@ async fn body_filters_fail(
         )),
     };
 
-    let mut client = StealingClient::new(
+    let _client = StealingClient::new(
         0,
         setup.stealer_tx.clone(),
         "1.22.1",
@@ -750,9 +749,7 @@ async fn body_filters_pass(
             move |_parts, mut body| {
                 let mut remaining = payload_2.clone();
                 Box::pin(async move {
-                    while let Some(frame) = {
-                        body.frame().await
-                    } {
+                    while let Some(frame) = { body.frame().await } {
                         let frame = frame
                             .expect("invalid frame")
                             .into_data()

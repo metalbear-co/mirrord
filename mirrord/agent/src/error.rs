@@ -3,7 +3,9 @@ use std::{process::ExitStatus, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    client_connection::TlsSetupError, http::filter::FilterCreationError, incoming::RedirectorTaskError, namespace::NamespaceError, runtime, util::error::AgentRuntimeError
+    client_connection::TlsSetupError, http::filter::FilterCreationError,
+    incoming::RedirectorTaskError, namespace::NamespaceError, runtime,
+    util::error::AgentRuntimeError,
 };
 
 #[derive(Debug, Error)]
