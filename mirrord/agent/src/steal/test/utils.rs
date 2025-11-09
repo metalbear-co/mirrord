@@ -176,7 +176,7 @@ impl TestHttpKind {
 pub struct TestBody {
     body_gen: Box<dyn Fn() -> BoxBody<Bytes, hyper::Error> + Send + Sync>,
 
-	#[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     verifier: Box<
         dyn Fn(
                 &request::Parts,
