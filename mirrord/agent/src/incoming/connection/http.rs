@@ -335,7 +335,7 @@ impl RedirectedHttp {
         }
 
         let mut buffered = Vec::new();
-        let mut total_size = 0;
+        let mut received_data_bytes = 0;
 
         // We are forced to drain all of `body_head` regardless of its
         // size because it will be sent *before* the buffered body so
@@ -344,24 +344,18 @@ impl RedirectedHttp {
         // In any case the body head is unlikely to be longer than `MAX_BODY_SIZE`
         // so it shouldn't matter :D
 
+        let mut got_trailers = false;
         for frame in self.request.body_head.drain(..) {
-            total_size += frame.data_ref().unwrap().len();
+            match frame.data_ref() {
+                Some(data) => received_data_bytes += data.len(),
+                None => got_trailers = true,
+            }
             buffered.push(frame);
         }
 
-        if let Some(expected_len) = content_length
-            && expected_len < total_size
-        {
-            tracing::warn!(
-                content_len = expected_len,
-                actual_at_least = total_size,
-                "http actual body size exceeded content-length",
-            );
-            self.buffered_body = BufferedBody::Failed(Arc::new(buffered));
-            return Err(BufferBodyError::BodyTooBig);
+        if got_trailers {
+            return Ok(());
         }
-
-        let rx_until = content_length.unwrap_or(max_body_size);
 
         let Some(tail) = self.request.body_tail.as_mut() else {
             tracing::debug!("request has no tail, bailing early");
@@ -396,32 +390,21 @@ impl RedirectedHttp {
 
             let frame = match frame {
                 Ok(Some(Ok(f))) => f,
+                Ok(None) => break Ok(()),
                 Err(elapsed) => break Err(elapsed.into()),
                 Ok(Some(Err(err))) => break Err(err.into()),
-                Ok(None) => {
-                    // If content_length is Some, us being at this
-                    // point implies that there's still more stuff to
-                    // receive.
-                    break if content_length.is_some() {
-                        Err(BufferBodyError::UnexpectedEOB)
-                    } else {
-                        Ok(())
-                    };
-                }
             };
 
             buffered.push(frame);
 
             let Some(data) = buffered.last().unwrap().data_ref() else {
-                break Err(BufferBodyError::UnexpectedEOB);
+                break Ok(());
             };
 
-            total_size += data.len();
+            received_data_bytes += data.len();
 
-            match total_size.cmp(&rx_until) {
-                Ordering::Less => {}
-                Ordering::Equal => break Ok(()),
-                Ordering::Greater => break Err(BufferBodyError::BodyTooBig),
+            if received_data_bytes > max_body_size {
+                break Err(BufferBodyError::BodyTooBig);
             }
         };
 
@@ -443,8 +426,6 @@ impl RedirectedHttp {
 pub enum BufferBodyError {
     #[error("io error while receiving http body: {0}")]
     Hyper(#[from] hyper::Error),
-    #[error("body size was less than content-length")]
-    UnexpectedEOB,
     #[error("body size exceeded max configured size")]
     BodyTooBig,
     #[error("receiving body took too long")]
