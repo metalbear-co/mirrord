@@ -8,6 +8,53 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.172.0](https://github.com/metalbear-co/mirrord/tree/3.172.0) - 2025-11-06
+
+
+### Removed
+
+- Reverted arm64e support in mirrord-sip.
+
+
+### Changed
+
+- When possible, mirrord now binds application socket to the requested address
+  (instead of always to localhost or unspecified).
+  [#3693](https://github.com/metalbear-co/mirrord/issues/3693)
+- Reverted independent send handles for intproxy tasks.
+- The `fs.not_found` filesystem filter is now checked *before* bypassing
+  relative files, meaning you can now ignore relative files instead of always
+  reading them locally
+- `incoming.listen_ports` mappings now always apply, regardless of whether the
+  port is stolen or not.
+- mirrord CLI progress messages now always include the binary version.
+
+## [3.171.0](https://github.com/metalbear-co/mirrord/tree/3.171.0) - 2025-11-04
+
+
+### Added
+
+- Added ADOPTERS.md
+- Added configurable creation timeout to the db branching config
+- mirrord can now run arm64e binaries, both when inside a universal binary and
+  standalone. In practice, this means running arm64e+x86_64 universal binaries
+  no longer has to go through the Rosetta emulation layer.
+
+
+### Internal
+
+- Added optional signing for windows builds.
+- Build only the fat universal layer lib when running macos tests in CI.
+- CLI and Intproxy now queue and (almost) fairly schedule agent-bound messages.
+  Intproxy now also has proper flow control when receiving network traffic from
+  user apps.
+- Changed incoming proxy's `BusyTcpListener` check to use IPv4 instead of IPv6.
+- Enriched an error log produced by `mirrord-layer` in some cases.
+- The flake's lockfile has been updated and rust-analyzer is now grabbed from
+  nixpkgs, allowing updates without changing the rust toolchain.
+- Update configuration.md with MySQL data copy options.
+- Updated contributing guidance. Add PR section.
+
 ## [3.170.0](https://github.com/metalbear-co/mirrord/tree/3.170.0) - 2025-10-29
 
 

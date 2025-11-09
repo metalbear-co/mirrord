@@ -45,14 +45,19 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 
 /// Convenience extension for verifying that a [`Path`] is not relative.
 trait PathExt {
-    /// If this [`Path`] is relative, returns a [`Detour::Bypass`].
-    fn ensure_not_relative(&self) -> Detour<()>;
+    /// If this [`Path`] is relative and is not present in the `fs.not_found` filters, returns a
+    /// [`Detour::Bypass`], otherwise errors with [`HookError::FileNotFound`].
+    fn ensure_not_relative_or_not_found(&self) -> Detour<()>;
 }
 
 impl PathExt for Path {
-    fn ensure_not_relative(&self) -> Detour<()> {
+    fn ensure_not_relative_or_not_found(&self) -> Detour<()> {
         if self.is_relative() {
-            Detour::Bypass(Bypass::relative_path(self.to_str().unwrap_or_default()))
+            if crate::setup().file_filter().check_not_found(self) {
+                Detour::Error(HookError::FileNotFound)
+            } else {
+                Detour::Bypass(Bypass::relative_path(self.to_str().unwrap_or_default()))
+            }
         } else {
             Detour::Success(())
         }
@@ -62,13 +67,14 @@ impl PathExt for Path {
 /// Performs standard verification of paths accessed by the user application.
 ///
 /// Operations in order:
-/// 1. Bypass if the path is not relative.
+/// 1. Bypass if the path is not relative and not present in the `fs.not_found` filters.
 /// 2. Remap the file according to the config.
 /// 3. Bypass if the new path should be accessed locally.
 ///
 /// Returns the remapped path.
 fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
-    path.ensure_not_relative()?;
+    path.ensure_not_relative_or_not_found()?;
+
     let path = crate::setup().file_remapper().change_path(path);
     crate::setup().file_filter().ensure_remote(&path, write)?;
     Detour::Success(path)
@@ -422,7 +428,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
     let mut path = path?;
 
     if dirfd == AT_FDCWD {
-        path.ensure_not_relative()?;
+        path.ensure_not_relative_or_not_found()?;
     }
 
     if path.is_absolute() {
