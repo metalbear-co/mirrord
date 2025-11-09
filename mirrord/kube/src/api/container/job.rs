@@ -406,6 +406,8 @@ mod test {
                                     { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
                                     { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) },
                                     { "name": envs::PASSTHROUGH_MIRRORING.name, "value": "true" },
+                                    { "name": envs::MAX_BODY_BUFFER_SIZE.name, "value": "65535" },
+                                    { "name": envs::MAX_BODY_BUFFER_TIMEOUT.name, "value": "1000" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -547,6 +549,8 @@ mod test {
                                     { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
                                     { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) },
                                     { "name": envs::PASSTHROUGH_MIRRORING.name, "value": "true" },
+                                    { "name": envs::MAX_BODY_BUFFER_SIZE.name, "value": "65535" },
+                                    { "name": envs::MAX_BODY_BUFFER_TIMEOUT.name, "value": "1000" },
                                     { "name": envs::NFTABLES.name, "value": "true" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
