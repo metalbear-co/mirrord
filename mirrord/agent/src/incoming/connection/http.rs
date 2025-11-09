@@ -79,30 +79,37 @@ impl BufferedBody {
         #[derive(Clone, Copy)]
         struct Reader<'a> {
             remaining: &'a [Frame<Bytes>],
-            read_from_current: usize,
+            read_until: usize,
         }
 
         impl<'a> Read for Reader<'a> {
             fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                let [first, rest @ ..] = self.remaining else {
-                    return Ok(0);
+                let frame = loop {
+                    let [first, rest @ ..] = self.remaining else {
+                        return Ok(0);
+                    };
+
+                    let Some(frame) = first.data_ref() else {
+                        return Ok(0);
+                    };
+
+                    if self.read_until == frame.len() {
+                        self.remaining = rest;
+                        self.read_until = 0;
+                    } else {
+                        assert!(self.read_until < frame.len());
+                        break frame;
+                    }
                 };
 
-                let Some(frame) = first.data_ref() else {
-                    return Ok(0);
-                };
+                let until = Ord::min(frame.len(), self.read_until + buf.len());
+                let range = self.read_until..until;
 
-                let until = Ord::min(frame.len(), self.read_from_current + buf.len());
-                let range = self.read_from_current..until;
+                buf.get_mut(..range.len())
+                    .unwrap()
+                    .copy_from_slice(frame.get(range.clone()).unwrap());
 
-                buf.copy_from_slice(frame.get(range.clone()).unwrap());
-
-                if until == frame.len() {
-                    self.remaining = rest;
-                    self.read_from_current = 0;
-                } else {
-                    self.read_from_current = until;
-                }
+                self.read_until = until;
 
                 Ok(range.len())
             }
@@ -111,7 +118,7 @@ impl BufferedBody {
         match self {
             BufferedBody::Successful(full) => Some(Reader {
                 remaining: full,
-                read_from_current: 0,
+                read_until: 0,
             }),
             _ => None,
         }
@@ -392,9 +399,9 @@ impl RedirectedHttp {
                 Err(elapsed) => break Err(elapsed.into()),
                 Ok(Some(Err(err))) => break Err(err.into()),
                 Ok(None) => {
-					// If content_length is Some, us being at this
-					// point implies that there's still more stuff to
-					// receive.
+                    // If content_length is Some, us being at this
+                    // point implies that there's still more stuff to
+                    // receive.
                     break if content_length.is_some() {
                         Err(BufferBodyError::UnexpectedEOB)
                     } else {
