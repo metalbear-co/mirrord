@@ -751,7 +751,6 @@ async fn body_filters_pass(
                 let mut remaining = payload_2.clone();
                 Box::pin(async move {
                     while let Some(frame) = {
-                        dbg!("waiting for frame");
                         body.frame().await
                     } {
                         let frame = frame
@@ -763,7 +762,6 @@ async fn body_filters_pass(
                         assert_eq!(&remaining[..frame.len()], &frame[..]);
                         remaining.advance(frame.len());
                     }
-                    dbg!("rxd all frames");
                     assert!(remaining.is_empty());
                 })
             },
