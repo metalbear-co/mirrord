@@ -4464,6 +4464,7 @@ dependencies = [
  "pnet",
  "procfs",
  "prometheus",
+ "rand 0.9.2",
  "rawsocket",
  "rcgen",
  "reqwest",
