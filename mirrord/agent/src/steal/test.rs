@@ -2,6 +2,7 @@
 //!
 //! Verify the whole flow from the [`TcpStealerApi`](super::api::TcpStealerApi)
 //! to the [`RedirectorTask`](crate::incoming::RedirectorTask).
+#![allow(clippy::indexing_slicing)]
 
 use std::time::Duration;
 
@@ -550,7 +551,7 @@ enum SizeHintType {
 }
 
 impl SizeHintType {
-    fn from_real(self, real_size: u64) -> Option<SizeHint> {
+    fn hint(self, real_size: u64) -> Option<SizeHint> {
         match self {
             SizeHintType::Missing => Some(SizeHint::default()),
             SizeHintType::Set => Some(SizeHint::with_exact(real_size)),
@@ -640,7 +641,7 @@ async fn body_filters_fail(
                 });
                 WithSizeHint::new(
                     StreamBody::new(ReceiverStream::new(rx)).map_err(|_| unreachable!()),
-                    size_hint.from_real(payload.len() as u64),
+                    size_hint.hint(payload.len() as u64),
                 )
             },
             move |_parts, mut body| {
@@ -743,7 +744,7 @@ async fn body_filters_pass(
             move || {
                 WithSizeHint::new(
                     Full::new(payload.clone()).map_err(|_| unreachable!()),
-                    size_hint.from_real(payload.len() as u64),
+                    size_hint.hint(payload.len() as u64),
                 )
             },
             move |_parts, mut body| {
