@@ -77,9 +77,10 @@ where
         // Avoid cloning the Arc. Technically we could avoid replacing
         // it as well but just taking self by value but this is less
         // hassle.
-        let buffered = std::mem::replace(&mut self.buffered_body, BufferedBody::Empty);
+        let buffered =
+            std::mem::replace(&mut self.buffered_body, BufferedBody::Empty).buffered_data();
 
-        if let Some(buffered) = buffered.buffered_data() {
+        if let Some(ref buffered) = buffered {
             for frame in buffered.iter() {
                 let frame = if let Some(data) = frame.data_ref() {
                     Frame::data(data.clone())
@@ -94,7 +95,9 @@ where
         }
 
         let Some(mut body) = self.body_tail.take() else {
-            self.destination.no_more_frames().await?;
+            if buffered.is_some() {
+                self.destination.no_more_frames().await?;
+            }
             return Ok(());
         };
 
