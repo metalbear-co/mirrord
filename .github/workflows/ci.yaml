@@ -210,24 +210,6 @@ jobs:
           cache-provider: github
           # Override cache directory for self-hosted runners
           cache-all-crates: true
-      # ---- Python (PEP 668-safe via venv) — binary wheels only; skip C speedups
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Verify Python dependencies
-        run: |
-          set -euxo pipefail
-          python3 - <<'PY'
-          import sys
-          from textwrap import dedent
-          code = """
-          from importlib.util import find_spec
-          missing = [pkg for pkg in ("flask", "fastapi", "uvicorn") if find_spec(pkg) is None]
-          if missing:
-              raise SystemExit("Missing Python packages: " + ", ".join(missing))
-          """
-          exec(dedent(code))
-PY
       # ---- Node
       - name: Verify Node dependencies
         run: |
