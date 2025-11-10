@@ -60,7 +60,7 @@ jobs:
   # Build agent image tar (for E2E)
   # ======================
   test_agent_image:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, docker]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,8 +73,13 @@ jobs:
           file: mirrord/agent/Dockerfile
           tags: test
           outputs: type=docker,dest=/tmp/test.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Use persistent cache on self-hosted runners, GHA cache otherwise
+          cache-from: |
+            type=local,src=/mnt/cache/docker
+            type=gha
+          cache-to: |
+            type=local,dest=/mnt/cache/docker,mode=max
+            type=gha,mode=max
           provenance: false
           sbom: false
           build-args: |
@@ -91,7 +96,7 @@ jobs:
   # Build CLI image tar (optional artifact)
   # ======================
   test_cli_image:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, docker]
     # Optional artifact - don't block workflow on failure
     continue-on-error: true
     steps:
@@ -137,8 +142,13 @@ jobs:
           file: mirrord/cli/Dockerfile
           tags: cli_image
           outputs: type=docker,dest=/tmp/cli_image.tar
-          cache-from: type=gha,scope=cli
-          cache-to: type=gha,mode=max,scope=cli
+          # Use persistent cache on self-hosted runners, GHA cache otherwise
+          cache-from: |
+            type=local,src=/mnt/cache/docker
+            type=gha,scope=cli
+          cache-to: |
+            type=local,dest=/mnt/cache/docker,mode=max
+            type=gha,mode=max,scope=cli
           provenance: false
           sbom: false
           build-args: |
@@ -156,7 +166,11 @@ jobs:
   # Integration tests (Linux)
   # ======================
   integration_tests:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64]
+    env:
+      # Use persistent cache on self-hosted runners if available
+      CARGO_TARGET_DIR: ${{ runner.os == 'Linux' && '/mnt/cache/rust/target' || 'target' }}
+      CARGO_HOME: ${{ runner.os == 'Linux' && '/mnt/cache/cargo-registry' || '~/.cargo' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -176,6 +190,8 @@ jobs:
           cache-targets: true
           save-if: true
           cache-provider: github
+          # Override cache directory for self-hosted runners
+          cache-all-crates: true
       # ---- Python (PEP 668-safe via venv) — binary wheels only; skip C speedups
       - uses: actions/setup-python@v5
         with:
