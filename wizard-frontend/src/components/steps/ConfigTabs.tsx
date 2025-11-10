@@ -39,6 +39,7 @@ import DownloadButton from "../DownloadButton";
 import {
   getConfigString,
   readCurrentTargetDetails,
+  readIncoming,
   updateConfigTarget,
 } from "../JsonUtils";
 import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
@@ -49,6 +50,7 @@ const ConfigTabs = () => {
   const [currentTab, setCurrentTab] = useState<string>("target");
   const [namespace, setNamespace] = useState<string>("default");
   const [targetType, setTargetType] = useState<string>("");
+  const [savedIncoming, setSavedIncoming] = useState<any>(readIncoming(config));
 
   // For copying to clipboard
   const { toast } = useToast();
@@ -113,7 +115,7 @@ const ConfigTabs = () => {
   };
   const prevTab = () => {
     if (currentTab === "export") setCurrentTab("network");
-    if (currentTab === "network") setCurrentTab("target");
+    else if (currentTab === "network") setCurrentTab("target");
     else setCurrentTab("target");
   };
 
@@ -280,7 +282,7 @@ const ConfigTabs = () => {
           </Card>
         </TabsContent>
 
-        <NetworkTab />
+        <NetworkTab savedIncoming={savedIncoming} setSavedIncoming={setSavedIncoming} />
 
         <TabsContent value="export" className="space-y-4 mt-6">
           <Card>

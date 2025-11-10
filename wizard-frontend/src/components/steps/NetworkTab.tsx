@@ -44,6 +44,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import DownloadButton from "../DownloadButton";
 import {
+  disableConfigFilter,
+  disablePortsAndMapping,
   getConfigString,
   readCurrentFilters,
   readCurrentPortMapping,
@@ -61,12 +63,17 @@ import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
 import { LayerFileConfig, PortMapping } from "@/mirrord-schema";
 import { Disable } from "react-disable";
 
-const IncomingConfigToggle = () => {
+const IncomingConfigToggle = ({
+  savedIncoming,
+  setSavedIncoming,
+}: {
+  savedIncoming: any;
+  setSavedIncoming: (any) => void;
+}) => {
   const { config, setConfig } = useContext(ConfigDataContext);
-  const [toggleEnabled, setToggleEnabled] = useState<boolean>(true);
-  const [savedIncoming, setSavedIncoming] = useState<any>(readIncoming(config));
-
-  const mockPorts = [8080, 3000, 5432, 9000, 4000, 6379, 5672, 3306];
+  const [toggleEnabled, setToggleEnabled] = useState<boolean>(
+    readIncoming(config) !== false
+  );
 
   return (
     <Button
@@ -127,14 +134,7 @@ const FilterConfigToggle = ({
           // user turned incoming from "on" to "off"
           // save state, in case the user turns the toggle back on
           setSavedFilters(readCurrentFilters(config));
-
-          // TODO: remove filters util function
-          const noFilters = {
-            headerFilters: [],
-            pathFilters: [],
-            operator: "any" as "any" | "all",
-          };
-          const newConfig = updateConfigFilter(noFilters, config);
+          const newConfig = disableConfigFilter(config);
           setConfig(newConfig);
         } else {
           // user turned incoming from "off" to "on"
@@ -159,7 +159,7 @@ const PortsConfigToggle = ({
   setToggleEnabled: (boolean) => void;
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
-  const [savedPorts, setSavedPorts] = useState<any>(readCurrentPorts(config));
+  const [savedPorts, setSavedPorts] = useState<any>([readCurrentPorts(config), readCurrentPortMapping(config)]);
 
   return (
     <Button
@@ -175,15 +175,15 @@ const PortsConfigToggle = ({
         if (toggleEnabled) {
           // user turned incoming from "on" to "off"
           // save state, in case the user turns the toggle back on
-          setSavedPorts(readCurrentPorts(config)); // TODO: and port mappings
-          const newConfig = updateConfigPorts([], config);
-          // TODO: also update portmappings
+          setSavedPorts([readCurrentPorts(config), readCurrentPortMapping(config)]); 
+          const newConfig = disablePortsAndMapping(config); 
           setConfig(newConfig);
         } else {
           // user turned incoming from "off" to "on"
           // restore the last state that was saved
-          const newConfig = updateConfigPorts(savedPorts, config);
-          // TODO: also update portmappings
+          const [savedPortsOnly, savedMapping] = savedPorts;
+          const partialNewConfig = updateConfigPorts(savedPortsOnly, config);
+          const newConfig = updateConfigPortMapping(savedMapping, partialNewConfig);
           setConfig(newConfig);
         }
 
@@ -195,11 +195,19 @@ const PortsConfigToggle = ({
   );
 };
 
-const NetworkTab = () => {
+const NetworkTab = ({
+  savedIncoming,
+  setSavedIncoming,
+}: {
+  savedIncoming: any;
+  setSavedIncoming: (any) => void;
+}) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [toggleFiltersEnabled, setToggleFiltersEnabled] =
     useState<boolean>(false);
   const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false);
+
+  const mockPorts = [8080, 3000, 5432, 9000, 4000, 6379, 5672, 3306];
 
   return (
     <TabsContent value="network" className="space-y-3 mt-4">
@@ -208,7 +216,7 @@ const NetworkTab = () => {
           <CardTitle className="flex items-center gap-2 text-base">
             <Network className="h-4 w-4" />
             Incoming Traffic
-            <IncomingConfigToggle />
+            <IncomingConfigToggle savedIncoming={savedIncoming} setSavedIncoming={setSavedIncoming} />
           </CardTitle>
         </CardHeader>
         {/* Controlled by IncomingConfigToggle indirectly (through incoming config state) */}
@@ -743,4 +751,4 @@ const NetworkTab = () => {
   );
 };
 
-export default NetworkTab
+export default NetworkTab;

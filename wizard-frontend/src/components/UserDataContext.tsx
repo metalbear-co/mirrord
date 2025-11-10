@@ -15,7 +15,6 @@ export const DefaultConfig: LayerFileConfig = {
     network: {
       incoming: {
         mode: "mirror",
-        http_filter: {},
       },
       outgoing: true,
     },

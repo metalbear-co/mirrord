@@ -135,7 +135,8 @@ export const readCurrentFilters = (
   if (
     typeof config.feature?.network === "object" &&
     typeof config.feature?.network.incoming === "object" &&
-    typeof config.feature?.network.incoming.http_filter === "object"
+    typeof config.feature?.network.incoming.http_filter === "object" &&
+    config.feature?.network.incoming.http_filter
   ) {
     const filter = config.feature?.network.incoming.http_filter;
 
@@ -201,7 +202,7 @@ export const readCurrentFilters = (
     .filter((inner) => "path" in inner)
     .map((inner) => (inner.path as string) ?? "")
     .filter((string) => string.length > 0);
-  return { header, path, operator };
+    return { header, path, operator };
 };
 
 // Return the ports currently set to remote from `incoming.ports`.
@@ -396,27 +397,22 @@ export const updateConfigCopyTarget = (
 };
 
 // Sets filters to null
-// export const turnOffConfigFilter = (config: LayerFileConfig) => {
-//   if (
-//     typeof config.feature?.network === "object" &&
-//     typeof config.feature?.network.incoming === "object"
-//   ) {
-//     const newIncoming = {
-//       ...config.feature.network.incoming,
-//       http_filter: null,
-//     };
-//     return updateIncoming(config, newIncoming);
-//   }
-
-//   return config;
-// };
+export const disableConfigFilter = (config: LayerFileConfig) => {
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object"
+  ) {
+    delete config.feature?.network.incoming.http_filter
+  }
+  return config;
+};
 
 // Returns an updated config with new config.feature.network.filter according to parameters.
 export const updateConfigFilter = (
   filters: {
     headerFilters: string[];
     pathFilters: string[];
-    operator: "any" | "all";
+    operator: "any" | "all" | null;
   },
   config: LayerFileConfig
 ) => {
@@ -509,6 +505,18 @@ export const updateConfigFilter = (
   };
 
   return newConfig;
+};
+
+// Sets ports and port_mapping to null
+export const disablePortsAndMapping = (config: LayerFileConfig) => {
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object"
+  ) {
+    delete config.feature?.network.incoming.ports
+    delete config.feature?.network.incoming.port_mapping
+  }
+  return config;
 };
 
 export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
