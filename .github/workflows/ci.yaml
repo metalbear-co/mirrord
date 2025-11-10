@@ -199,21 +199,6 @@ jobs:
           cache-provider: github
           # Override cache directory for self-hosted runners
           cache-all-crates: true
-      # ---- Node
-      - name: Verify Node dependencies
-        run: |
-          set -euxo pipefail
-          if ! command -v node >/dev/null 2>&1; then
-            echo "node not available on runner" >&2
-            exit 1
-          fi
-          if ! command -v npm >/dev/null 2>&1; then
-            echo "npm not available on runner" >&2
-            exit 1
-          fi
-          export NODE_PATH="$(npm root -g)"
-          node -e "require('express'); require('portfinder');"
-          echo "NODE_PATH=${NODE_PATH}" >> "$GITHUB_ENV"
       # Build Go fixtures (three versions)
       - uses: actions/setup-go@v5
         with:
