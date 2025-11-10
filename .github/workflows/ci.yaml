@@ -535,7 +535,11 @@ jobs:
           version: 17.0.6-tem
       - run: java -version
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard] # For http mirroring test with Flask.
+        with:
+          cache: "pip"
+      - name: Display Pip version
+        run: pip --version
+      - run: pip install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
       - uses: actions/setup-node@v3
         with:
           node-version: 18
