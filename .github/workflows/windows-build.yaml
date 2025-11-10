@@ -72,7 +72,6 @@ jobs:
           rustc -V
           cargo -V
           rustup show
-
       - name: Prepare artifacts (download OR build+sign)
         id: prep
         run: |
@@ -84,7 +83,6 @@ jobs:
           $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
           New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
-
           if ($env:MODE -eq 'reuse') {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
               throw "gcloud not found on PATH. Ensure the runner is authenticated."
@@ -98,7 +96,6 @@ jobs:
             $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
             if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
             if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
-
             if ($shouldSign) {
               if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
                 throw "SIGN_ARTIFACTS=true but signtool.exe not found."
@@ -124,7 +121,6 @@ jobs:
               }
               Write-Host "Signing disabled (SIGN_ARTIFACTS=false)."
             }
-
             Set-Env "MIRRORD_EXE" $exe
             Set-Env "MIRRORD_LAYER_FILE" $dll
             Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
@@ -133,7 +129,6 @@ jobs:
             Write-Host "Picked DLL: $dll"
             exit 0
           }
-
           # === build_sign path ===
           rustup target add $Target
           # 1) Build layer (DLL)
@@ -141,7 +136,6 @@ jobs:
           $dll = if (Test-Path (Join-Path $DbgDir  'mirrord_layer_win.dll')) { Join-Path $DbgDir  'mirrord_layer_win.dll' }
                  elseif (Test-Path (Join-Path $RelDir 'mirrord_layer_win.dll')) { Join-Path $RelDir 'mirrord_layer_win.dll' }
                  else { throw "Layer DLL not found in debug or release directories." }
-
           if ($shouldSign) {
             if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
               throw "SIGN_ARTIFACTS=true but signtool.exe not found."
@@ -153,7 +147,6 @@ jobs:
           } else {
             Write-Host "Signing disabled for DLL."
           }
-
           # 3) Build CLI with (optionally) signed DLL embedded
           $env:MIRRORD_LAYER_FILE = $dll
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
@@ -163,7 +156,6 @@ jobs:
           $exe = if (Test-Path (Join-Path $DbgDir  'mirrord.exe')) { Join-Path $DbgDir  'mirrord.exe' }
                  elseif (Test-Path (Join-Path $RelDir 'mirrord.exe')) { Join-Path $RelDir 'mirrord.exe' }
                  else { throw "mirrord.exe not found (debug/release)" }
-
           if ($shouldSign) {
             # 4) Sign EXE
             & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
@@ -172,21 +164,18 @@ jobs:
           } else {
             Write-Host "Signing disabled for EXE."
           }
-
           # 5) Checksums (always generate with the final bytes)
           foreach ($f in @($exe,$dll)) {
             $sha = "$f.sha256"
             $h = (Get-FileHash -Algorithm SHA256 $f).Hash
             "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
           }
-
           # 6) Export env
           Set-Env "MIRRORD_LAYER_FILE" $dll
           Set-Env "MIRRORD_EXE" $exe
           Set-Env "MIRRORD_PKG" $pkg.name
           Set-Env "MIRRORD_VERSION" $pkg.version
           Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
-
       - name: Upload to GCS (build_sign only)
         if: ${{ env.MODE == 'build_sign' }}
         run: |
@@ -209,7 +198,6 @@ jobs:
           Write-Host "Uploading to $dest"
           Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
           gcloud --quiet storage ls $dest
-
       - name: Run Rust unit tests (single loop)
         run: |
           $ErrorActionPreference = 'Stop'
@@ -233,7 +221,6 @@ jobs:
             }
             if ($LASTEXITCODE -ne 0) { throw "Tests failed for $($t.name)" }
           }
-
       # -----------------------------
       # GitHub Release (optional)
       # -----------------------------
@@ -254,8 +241,6 @@ jobs:
           }
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Release tag: $tag"
-
-
       - name: Publish GitHub Release and upload artifacts (github-script)
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
         uses: actions/github-script@v7
@@ -270,7 +255,6 @@ jobs:
             const fs = require('fs');
             const path = require('path');
             const { owner, repo } = context.repo;
-
             const tag = process.env.RELEASE_TAG;
             const isDraft = process.env.PUBLISH_MODE === 'draft';
             const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
@@ -278,7 +262,6 @@ jobs:
             const signedBlockStart = '<!-- SIGNED_STATUS_START -->';
             const signedBlockEnd   = '<!-- SIGNED_STATUS_END -->';
             const signedLine       = `**Signed artifacts:** ${signed ? 'Yes' : 'No'}`;
-
             // Find or create the release
             let rel;
             try {
@@ -297,7 +280,6 @@ jobs:
               });
               rel = r.data;
             }
-
             // Ensure flags (draft/prerelease) match input
             if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
               const r = await github.rest.repos.updateRelease({
@@ -308,7 +290,6 @@ jobs:
               });
               rel = r.data;
             }
-
             // Upload helper (replaces asset if it already exists)
             async function upload(file) {
               if (!file || !fs.existsSync(file)) {
@@ -332,7 +313,6 @@ jobs:
               });
               core.info(`Uploaded ${name}`);
             }
-
             // Upload artifacts
             const files = [
               process.env.MIRRORD_EXE,
@@ -341,7 +321,6 @@ jobs:
               `${process.env.MIRRORD_LAYER_FILE}.sha256`,
             ];
             for (const f of files) { await upload(f); }
-
             // Append/refresh a small, explicit signed-status block in the body (idempotent)
             const currentBody = rel.body || '';
             const block = `${signedBlockStart}\n${signedLine}\n${signedBlockEnd}`;
@@ -349,7 +328,6 @@ jobs:
             const newBody = hasBlock
               ? currentBody.replace(new RegExp(`${signedBlockStart}[\\s\\S]*?${signedBlockEnd}`,'m'), block)
               : (currentBody + (currentBody ? '\n\n' : '') + block);
-
             if (newBody !== currentBody) {
               await github.rest.repos.updateRelease({
                 owner, repo, release_id: rel.id,
@@ -359,9 +337,6 @@ jobs:
             } else {
               core.info('Signed status already up to date in release body.');
             }
-
-
-
       # ==================================
       # === Pretty summary to step tab ===
       # ==================================
