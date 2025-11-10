@@ -118,18 +118,22 @@ export const readCurrentTargetDetails = (
   }
 };
 
+export interface UiHttpFilter {
+  value: string;
+  type: "header" | "path";
+  matching: "regex" | "exact";
+}
+
 // Return the filters currently set in the given config, as well as the operator used to
 // combine them ("any", "all" or null).
 // Instead of using the generated type `InnerFilter`, return a list of strings for header and path.
 export const readCurrentFilters = (
   config: LayerFileConfig
 ): {
-  header: string[];
-  path: string[];
+  filters: UiHttpFilter[];
   operator: "any" | "all" | null;
 } => {
-  let headerGenType: InnerFilter[] = [];
-  let pathGenType: InnerFilter[] = [];
+  let filters: UiHttpFilter[] = [];
   let operator = null;
 
   if (
@@ -138,71 +142,64 @@ export const readCurrentFilters = (
     typeof config.feature?.network.incoming.http_filter === "object" &&
     config.feature?.network.incoming.http_filter
   ) {
-    const filter = config.feature?.network.incoming.http_filter;
+    const filterConfig = config.feature?.network.incoming.http_filter;
+    // As soon as filters get stored in real config, exact match filters get converted to regex
+    const matching: "regex" | "exact" = "regex";
 
-    if (filter.header_filter) {
+    if (filterConfig.header_filter) {
       // single header filter
-      headerGenType = [{ header: filter.header_filter }];
-    } else if (filter.path_filter) {
+      filters = [
+        {
+          value: filterConfig.header_filter,
+          type: "header",
+          matching: matching,
+        },
+      ];
+    } else if (filterConfig.path_filter) {
       // single path filter
-      pathGenType = [{ path: filter.path_filter }];
-    } else if (filter.all_of || filter.any_of) {
+      filters = [
+        { value: filterConfig.path_filter, type: "path", matching: matching },
+      ];
+    } else if (filterConfig.all_of) {
       // multiple filters
-      headerGenType = filter.all_of
-        ?.filter((innerFilter) => {
-          "header" in innerFilter;
-        })
-        .concat(
-          filter.any_of?.filter((innerFilter) => {
-            "header" in innerFilter;
-          })
-        ) ?? [];
-      pathGenType = filter.all_of
-        ?.filter((innerFilter) => {
-          "path" in innerFilter;
-        })
-        .concat(
-          filter.any_of?.filter((innerFilter) => {
-            "path" in innerFilter;
-          })
-        ) ?? [];
-
-      if (filter.all_of) operator = "all";
-      else if (filter.any_of) operator = "any";
+      operator = "all";
+      filters = filterConfig.all_of?.map((filter) => {
+        let value: string;
+        let filterType: "header" | "path";
+        if ("header" in filter) {
+          filterType = "header";
+          if (typeof filter.header === "string") value = filter.header;
+        } else if ("path" in filter) {
+          filterType = "path";
+          if (typeof filter.path === "string") value = filter.path;
+        }
+        if (filterType && value) {
+          return { value: value, type: filterType, matching: matching };
+        }
+      });
+    } else if (filterConfig.any_of) {
+      // multiple filters
+      operator = "any";
+      filters = filterConfig.any_of?.map((filter) => {
+        let value: string;
+        let filterType: "header" | "path";
+        if ("header" in filter) {
+          filterType = "header";
+          if (typeof filter.header === "string") value = filter.header;
+          else value = "";
+        } else if ("path" in filter) {
+          filterType = "path";
+          if (typeof filter.path === "string") value = filter.path;
+          else value = "";
+        }
+        if (filterType && value) {
+          return { value: value, type: filterType, matching: matching };
+        }
+      });
     }
+    filters = filters.filter((filter) => filter.value.length > 0);
   }
-
-  // ### Generated types (they may change slightly as mirrord config changes):
-  //
-  // export type InnerFilter =
-  //   | Feature[...]HeaderFilter
-  //   | Feature[...]PathFilter
-  //   | {
-  //       method: string;
-  //       [k: string]: unknown;
-  //     };
-  //
-  // export interface Feature[...]HeaderFilter {
-  //   header: string;
-  //   [k: string]: unknown;
-  // }
-  //
-  // export interface Feature[...]PathFilter {
-  //   path: string;
-  //   [k: string]: unknown;
-  // }
-  //
-  // For this, we can ignore the unknown keys and method filtering.
-
-  const header: string[] = headerGenType
-    .filter((inner) => "header" in inner)
-    .map((inner) => (inner.header as string) ?? "")
-    .filter((string) => string.length > 0);
-  const path: string[] = pathGenType
-    .filter((inner) => "path" in inner)
-    .map((inner) => (inner.path as string) ?? "")
-    .filter((string) => string.length > 0);
-    return { header, path, operator };
+  return { filters, operator };
 };
 
 // Return the ports currently set to remote from `incoming.ports`.
@@ -402,18 +399,15 @@ export const disableConfigFilter = (config: LayerFileConfig) => {
     typeof config.feature?.network === "object" &&
     typeof config.feature?.network.incoming === "object"
   ) {
-    delete config.feature?.network.incoming.http_filter
+    delete config.feature?.network.incoming.http_filter;
   }
   return config;
 };
 
 // Returns an updated config with new config.feature.network.filter according to parameters.
 export const updateConfigFilter = (
-  filters: {
-    headerFilters: string[];
-    pathFilters: string[];
-    operator: "any" | "all" | null;
-  },
+  filters: UiHttpFilter[],
+  operator: "any" | "all" | null,
   config: LayerFileConfig
 ) => {
   if (typeof config !== "object") {
@@ -449,44 +443,71 @@ export const updateConfigFilter = (
     }
   }
 
-  if (
-    !("http_filter" in config.feature.network.incoming) ||
-    typeof config.feature.network.incoming.http_filter !== "object"
-  ) {
-    config.feature.network.incoming.http_filter = (
-      (DefaultConfig.feature.network as NetworkFileConfig)
-        .incoming as IncomingAdvancedSetup
-    ).http_filter;
-  }
+  // First, check every filter and turn all exact filters into corresponding regex, then switch matching to regex
+  const regexFilters: UiHttpFilter[] = filters.map(
+    ({ value: value, type: type, matching: matching }) => {
+      // if match type is "exact", convert value into regex equivalent
+      if (matching === "exact") {
+        // escape special characters and add anchors
+        const newValue = "/^" + value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$/";
+        return { value: newValue, type, matching: "regex" };
+      } else {
+        return { value, type, matching };
+      }
+    }
+  );
 
   // create new value for config.feature.network.incoming.http_filter
   let http_filter: HTTPFilter;
-  switch (filters.operator) {
-    case "any":
-      http_filter = {
-        any_of: filters.headerFilters
-          .map((headerFilter) => {
-            return { header: headerFilter } as any;
-          })
-          .concat(
-            filters.pathFilters.map((pathFilter) => {
-              return { path: pathFilter };
-            })
-          ),
-      };
-      break;
-    case "all":
-      http_filter = {
-        all_of: filters.headerFilters
-          .map((headerFilter) => {
-            return { header: headerFilter } as any;
-          })
-          .concat(
-            filters.pathFilters.map((pathFilter) => {
-              return { path: pathFilter };
-            })
-          ),
-      };
+  if (regexFilters.length === 0) {
+    // filters config toggled on, but no filters set
+    http_filter = null;
+  } else if (regexFilters.length === 1) {
+    // single filter, ignore operator
+    const filter = regexFilters[0];
+    if ("header" in filter) {
+      http_filter = { header: filter.header } as any;
+    } else if ("path" in filter) {
+      http_filter = { path: filter.path } as any;
+    } else {
+      http_filter = null;
+    }
+  } else {
+    switch (operator) {
+      case null:
+        // only valid operator=null situation is single or no filter - something went wrong if this case is hit
+        console.log(
+          "Unexpected filter configuration: operator cannot be null for multiple filters"
+        );
+        http_filter = null;
+        break;
+      case "any":
+        http_filter = {
+          any_of: regexFilters.map((filter) => {
+            if ("header" in filter) {
+              return { header: filter.header } as any;
+            } else if ("path" in filter) {
+              return { path: filter.path } as any;
+            } else {
+              return;
+            }
+          }),
+        };
+        break;
+      case "all":
+        http_filter = {
+          all_of: regexFilters.map((filter) => {
+            if ("header" in filter) {
+              return { header: filter.header } as any;
+            } else if ("path" in filter) {
+              return { path: filter.path } as any;
+            } else {
+              return;
+            }
+          }),
+        };
+        break;
+    }
   }
 
   // overwrite filter
@@ -513,8 +534,8 @@ export const disablePortsAndMapping = (config: LayerFileConfig) => {
     typeof config.feature?.network === "object" &&
     typeof config.feature?.network.incoming === "object"
   ) {
-    delete config.feature?.network.incoming.ports
-    delete config.feature?.network.incoming.port_mapping
+    delete config.feature?.network.incoming.ports;
+    delete config.feature?.network.incoming.port_mapping;
   }
   return config;
 };
