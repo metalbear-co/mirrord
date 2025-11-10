@@ -167,14 +167,21 @@ jobs:
   # ======================
   integration_tests:
     runs-on: [self-hosted, linux, x64]
-    env:
-      # Use persistent cache on self-hosted runners if available
-      CARGO_TARGET_DIR: ${{ runner.os == 'Linux' && '/mnt/cache/rust/target' || 'target' }}
-      CARGO_HOME: ${{ runner.os == 'Linux' && '/mnt/cache/cargo-registry' || '~/.cargo' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+      - name: Configure persistent cache directories
+        run: |
+          set -euxo pipefail
+          if [ -d /mnt/cache ]; then
+            mkdir -p /mnt/cache/rust/target
+            mkdir -p /mnt/cache/cargo-registry
+            echo "CARGO_TARGET_DIR=/mnt/cache/rust/target" >> "$GITHUB_ENV"
+            echo "CARGO_HOME=/mnt/cache/cargo-registry" >> "$GITHUB_ENV"
+          else
+            echo "/mnt/cache not present, using default Cargo directories"
+          fi
       # CHANGED: Added toolchain specification to match working YAML
       - run: rm -f rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
