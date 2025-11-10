@@ -218,11 +218,12 @@ jobs:
         run: |
           set -euxo pipefail
           python3 - <<'PY'
-import importlib
-needed = ["flask", "fastapi", "uvicorn"]
-missing = [pkg for pkg in needed if importlib.util.find_spec(pkg) is None]
-if missing:
-    raise SystemExit(f"Missing Python packages: {', '.join(missing)}")
+if True:
+    import importlib
+    needed = ["flask", "fastapi", "uvicorn"]
+    missing = [pkg for pkg in needed if importlib.util.find_spec(pkg) is None]
+    if missing:
+        raise SystemExit(f"Missing Python packages: {', '.join(missing)}")
 PY
       # ---- Node
       - name: Verify Node dependencies
