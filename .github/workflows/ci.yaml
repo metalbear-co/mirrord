@@ -263,13 +263,16 @@ jobs:
           set -euxo pipefail
           cargo build --manifest-path mirrord/layer/tests/apps/dns_resolve/Cargo.toml
           mkdir -p target/debug
-          SRC="mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve"
+          BUILD_TARGET_DIR="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/dns_resolve/target}"
+          SRC="${BUILD_TARGET_DIR%/}/debug/dns_resolve"
           DEST="target/debug/dns_resolve"
           if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
             cp -f "$SRC" "$DEST"
-          fi
-          if [ ! -f "$DEST" ]; then
-            cp -f target/debug/dns_resolve "$DEST"
+          elif [ -f "mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve" ]; then
+            cp -f mirrord/layer/tests/apps/dns_resolve/target/debug/dns_resolve "$DEST"
+          else
+            echo "dns_resolve binary not found in $SRC" >&2
+            exit 1
           fi
           test -f "$DEST"
           chmod +x "$DEST"
@@ -285,7 +288,7 @@ jobs:
       - name: Copy fileops to repo target (expected by tests)
         run: |
           set -euxo pipefail
-          SRC="mirrord/layer/tests/apps/fileops/target/debug/fileops"
+          SRC="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/fileops/target}/debug/fileops"
           DEST="target/debug/fileops"
           mkdir -p "$(dirname "$DEST")"
           if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
