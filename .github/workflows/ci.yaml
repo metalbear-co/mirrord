@@ -182,6 +182,15 @@ jobs:
           else
             echo "/mnt/cache not present, using default Cargo directories"
           fi
+      - name: Install libclang dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev
+          if [ -d /usr/lib/llvm ]; then
+            LLVM_VERSION=$(ls /usr/lib/llvm | sort -V | tail -1)
+            echo "LIBCLANG_PATH=/usr/lib/llvm/${LLVM_VERSION}/lib" >> "$GITHUB_ENV"
+          fi
       # CHANGED: Added toolchain specification to match working YAML
       - run: rm -f rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
