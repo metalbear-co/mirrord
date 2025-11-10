@@ -279,22 +279,32 @@ jobs:
       - name: Build fileops/outgoing/recv_from/rebind0 (Linux, parallel)
         run: |
           set -euxo pipefail
+          FILEOPS_TARGET_DIR="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/fileops/target}"
+          OUTGOING_TARGET_DIR="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/outgoing/target}"
+          RECV_FROM_TARGET_DIR="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/recv_from/target}"
+          REBIND_TARGET_DIR="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/rebind0/target}"
           cargo build --manifest-path mirrord/layer/tests/apps/fileops/Cargo.toml \
-                      --target-dir mirrord/layer/tests/apps/fileops/target &
-          cargo build --manifest-path mirrord/layer/tests/apps/outgoing/Cargo.toml &
-          cargo build --manifest-path mirrord/layer/tests/apps/recv_from/Cargo.toml &
-          cargo build --manifest-path mirrord/layer/tests/apps/rebind0/Cargo.toml &
+                      --target-dir "${FILEOPS_TARGET_DIR}" &
+          cargo build --manifest-path mirrord/layer/tests/apps/outgoing/Cargo.toml \
+                      --target-dir "${OUTGOING_TARGET_DIR}" &
+          cargo build --manifest-path mirrord/layer/tests/apps/recv_from/Cargo.toml \
+                      --target-dir "${RECV_FROM_TARGET_DIR}" &
+          cargo build --manifest-path mirrord/layer/tests/apps/rebind0/Cargo.toml \
+                      --target-dir "${REBIND_TARGET_DIR}" &
           wait
       - name: Copy fileops to repo target (expected by tests)
         run: |
           set -euxo pipefail
-          SRC="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/fileops/target}/debug/fileops"
+          BUILD_TARGET_DIR="${CARGO_TARGET_DIR:-mirrord/layer/tests/apps/fileops/target}"
+          SRC="${BUILD_TARGET_DIR%/}/debug/fileops"
           DEST="target/debug/fileops"
           mkdir -p "$(dirname "$DEST")"
           if [ -f "$SRC" ] && [ "$SRC" != "$DEST" ]; then
             cp -f "$SRC" "$DEST"
+          elif [ -f "mirrord/layer/tests/apps/fileops/target/debug/fileops" ]; then
+            cp -f mirrord/layer/tests/apps/fileops/target/debug/fileops "$DEST"
           else
-            echo "ERROR: $SRC not found after build" >&2
+            echo "ERROR: fileops binary not found in $SRC" >&2
             exit 1
           fi
           chmod +x "$DEST"
