@@ -61,7 +61,7 @@ fi
 git pull
 
 # Get current version from workspace Cargo.toml
-CURRENT_VERSION=$(grep -A1 '^\[workspace.package\]' Cargo.toml | grep '^version' | sed -E 's/version = "(.*)"/\1/')
+CURRENT_VERSION=$(cargo get workspace.package.version)
 echo "Preparing release for version ${VERSION} (current: ${CURRENT_VERSION})"
 read -rp "Do you want to continue? (y/n): " CONTINUE
 case "$CONTINUE" in

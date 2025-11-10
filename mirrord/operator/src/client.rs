@@ -2,9 +2,9 @@ use std::{fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
+use conn_wrapper::ConnectionWrapper;
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderName, HeaderValue, request::Request};
 use kube::{
     Api, Client, Config, Resource,
@@ -28,10 +28,9 @@ use mirrord_kube::{
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use mirrord_protocol_io::{Client as ProtocolClient, Connection};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::tungstenite;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
@@ -51,6 +50,7 @@ use crate::{
     },
 };
 
+mod conn_wrapper;
 mod connect_params;
 mod credentials;
 mod database_branches;
@@ -125,7 +125,7 @@ pub struct OperatorSession {
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
     operator_license_fingerprint: Option<String>,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`Connection`].
+    /// Used to create [`ConnectionWrapper`].
     pub operator_protocol_version: Option<Version>,
 
     /// Allow the layer to attempt reconnection
@@ -152,15 +152,23 @@ impl fmt::Debug for OperatorSession {
 pub struct OperatorSessionConnection {
     /// Session of this connection.
     pub session: OperatorSession,
-
-    pub conn: Connection<ProtocolClient>,
+    /// Used to send [`ClientMessage`]s to the operator.
+    pub tx: Sender<ClientMessage>,
+    /// Used to receive [`DaemonMessage`]s from the operator.
+    pub rx: Receiver<DaemonMessage>,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let tx_queued_messages = self.tx.max_capacity() - self.tx.capacity();
+        let rx_queued_messages = self.rx.len();
+
         f.debug_struct("OperatorSessionConnection")
             .field("session", &self.session)
-            .field("closed", &self.conn.is_closed())
+            .field("tx_closed", &self.tx.is_closed())
+            .field("tx_queued_messages", &tx_queued_messages)
+            .field("rx_closed", &self.rx.is_closed())
+            .field("rx_queued_messages", &rx_queued_messages)
             .finish()
     }
 }
@@ -821,10 +829,10 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (conn, session) = match Self::connect_target(&self.client, &session).await {
-            Ok(conn) => {
+        let (tx, rx, session) = match Self::connect_target(&self.client, &session).await {
+            Ok((tx, rx)) => {
                 connection_subtask.success(Some("connected to the target"));
-                (conn, session)
+                (tx, rx, session)
             }
             Err(OperatorApiError::KubeError {
                 error: kube::Error::Api(response),
@@ -847,14 +855,14 @@ impl OperatorApi<PreparedClientCert> {
                 let session = self.make_operator_session(session_id, connect_url)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
-                let conn = Self::connect_target(&self.client, &session).await?;
+                let (tx, rx) = Self::connect_target(&self.client, &session).await?;
                 connection_subtask.success(Some("connected to the target"));
-                (conn, session)
+                (tx, rx, session)
             }
             Err(error) => return Err(error),
         };
 
-        Ok(OperatorSessionConnection { session, conn })
+        Ok(OperatorSessionConnection { session, tx, rx })
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -1219,9 +1227,9 @@ impl OperatorApi<PreparedClientCert> {
             )?))
             .build();
 
-        let conn = Self::connect_target(&client, &session).await?;
+        let (tx, rx) = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection { conn, session })
+        Ok(OperatorSessionConnection { tx, rx, session })
     }
 
     /// Creates websocket connection to the operator target.
@@ -1229,59 +1237,24 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-    ) -> OperatorApiResult<Connection<ProtocolClient>> {
+    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         let request = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string())
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        #[derive(thiserror::Error, Debug)]
-        enum OperatorClientError {
-            #[error(transparent)]
-            DecodeError(#[from] bincode::error::DecodeError),
-            #[error(transparent)]
-            WsError(#[from] tungstenite::Error),
-            #[error("invalid message: {0:?}")]
-            InvalidMessage(tungstenite::Message),
-        }
-
-        let ws = upgrade::connect_ws(client, request)
+        let connection = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
-            })?
-            .with(|e: Vec<u8>| async {
-                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
-            })
-            .map(|i| match i.map_err(OperatorClientError::from)? {
-                tungstenite::Message::Binary(pl) => Ok(pl),
-                other => Err(OperatorClientError::InvalidMessage(other)),
-            });
+            })?;
 
-        let operator_protocol_version = session.operator_protocol_version.clone();
-
-        let conn = Connection::<ProtocolClient>::from_channel(
-            ws,
-            // Mock protocol version negotiation if the operator does not support it.
-            Some(move |msg| match msg {
-                ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
-                    Some(operator_protocol_version) => {
-                        Either::Left(ClientMessage::SwitchProtocolVersion(
-                            operator_protocol_version.min(&version).clone(),
-                        ))
-                    }
-                    _ => Either::Right(DaemonMessage::SwitchProtocolVersionResponse(
-                        semver::Version::new(1, 2, 1),
-                    )),
-                },
-                other => Either::Left(other),
-            }),
-        )
-        .await?;
-
-        Ok(conn)
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session.operator_protocol_version.clone(),
+        ))
     }
 
     /// Prepare branch databases, and return database resource names.

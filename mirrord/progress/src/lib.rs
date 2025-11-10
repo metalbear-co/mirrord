@@ -89,17 +89,26 @@ pub enum ProgressTracker {
 #[cfg(feature = "implementations")]
 impl ProgressTracker {
     /// Get the progress tracker from environment or return a default ([`SpinnerProgress`]).
-    pub fn from_env(text: &str) -> Self {
-        Self::try_from_env(text).unwrap_or_else(|| SpinnerProgress::new(text).into())
+    ///
+    /// Automatically appends current version to the title.
+    pub fn from_env(title: &str) -> Self {
+        Self::try_from_env(title).unwrap_or_else(|| {
+            let title = format!("{title} ({})", env!("CARGO_PKG_VERSION"));
+            SpinnerProgress::new(&title).into()
+        })
     }
 
     /// Get the progress tracker from environment.
-    pub fn try_from_env(text: &str) -> Option<Self> {
+    ///
+    /// Automatically appends current version to the title.
+    pub fn try_from_env(title: &str) -> Option<Self> {
+        let title_with_version = format!("{title} ({})", env!("CARGO_PKG_VERSION"));
         let progress = match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
-            Ok("dumb" | "simple") => SimpleProgress::new(text).into(),
-            Ok("json") => JsonProgress::new(text).into(),
+            Ok("dumb" | "simple") => SimpleProgress::new(&title_with_version).into(),
+            // adding version in title breaks IDE extension.
+            Ok("json") => JsonProgress::new(title).into(),
             Ok("off") => NullProgress.into(),
-            Ok("std" | "standard") => SpinnerProgress::new(text).into(),
+            Ok("std" | "standard") => SpinnerProgress::new(&title_with_version).into(),
             _ => return None,
         };
 
