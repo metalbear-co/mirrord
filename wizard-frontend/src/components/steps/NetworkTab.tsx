@@ -52,6 +52,7 @@ import {
   readCurrentPorts,
   readCurrentTargetDetails,
   readIncoming,
+  UiHttpFilter,
   updateConfigFilter,
   updateConfigPortMapping,
   updateConfigPorts,
@@ -115,9 +116,10 @@ const FilterConfigToggle = ({
   setToggleEnabled: (boolean) => void;
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
-  const [savedFilters, setSavedFilters] = useState<any>(
-    readCurrentFilters(config)
-  );
+  const [savedFilters, setSavedFilters] = useState<{
+    filters: UiHttpFilter[];
+    operator: "any" | "all" | null;
+  }>(readCurrentFilters(config));
 
   return (
     <Button
@@ -139,7 +141,11 @@ const FilterConfigToggle = ({
         } else {
           // user turned incoming from "off" to "on"
           // restore the last state that was saved
-          const newConfig = updateConfigFilter(savedFilters, config);
+          const newConfig = updateConfigFilter(
+            savedFilters.filters,
+            savedFilters.operator,
+            config
+          );
           setConfig(newConfig);
         }
 
@@ -159,7 +165,10 @@ const PortsConfigToggle = ({
   setToggleEnabled: (boolean) => void;
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
-  const [savedPorts, setSavedPorts] = useState<any>([readCurrentPorts(config), readCurrentPortMapping(config)]);
+  const [savedPorts, setSavedPorts] = useState<any>([
+    readCurrentPorts(config),
+    readCurrentPortMapping(config),
+  ]);
 
   return (
     <Button
@@ -175,15 +184,21 @@ const PortsConfigToggle = ({
         if (toggleEnabled) {
           // user turned incoming from "on" to "off"
           // save state, in case the user turns the toggle back on
-          setSavedPorts([readCurrentPorts(config), readCurrentPortMapping(config)]); 
-          const newConfig = disablePortsAndMapping(config); 
+          setSavedPorts([
+            readCurrentPorts(config),
+            readCurrentPortMapping(config),
+          ]);
+          const newConfig = disablePortsAndMapping(config);
           setConfig(newConfig);
         } else {
           // user turned incoming from "off" to "on"
           // restore the last state that was saved
           const [savedPortsOnly, savedMapping] = savedPorts;
           const partialNewConfig = updateConfigPorts(savedPortsOnly, config);
-          const newConfig = updateConfigPortMapping(savedMapping, partialNewConfig);
+          const newConfig = updateConfigPortMapping(
+            savedMapping,
+            partialNewConfig
+          );
           setConfig(newConfig);
         }
 
@@ -216,7 +231,10 @@ const NetworkTab = ({
           <CardTitle className="flex items-center gap-2 text-base">
             <Network className="h-4 w-4" />
             Incoming Traffic
-            <IncomingConfigToggle savedIncoming={savedIncoming} setSavedIncoming={setSavedIncoming} />
+            <IncomingConfigToggle
+              savedIncoming={savedIncoming}
+              setSavedIncoming={setSavedIncoming}
+            />
           </CardTitle>
         </CardHeader>
         {/* Controlled by IncomingConfigToggle indirectly (through incoming config state) */}
@@ -272,7 +290,7 @@ const NetworkTab = ({
                             Add
                           </Button>
                         </div>
-                        {readCurrentFilters(config).header.length > 0 && (
+                        {/* {readCurrentFilters(config).filters.length > 0 && (
                           <div className="space-y-3">
                             {readCurrentFilters(config).header.map(
                               (headerFilterString, index) => (
@@ -368,7 +386,8 @@ const NetworkTab = ({
                               )
                             )}
                           </div>
-                        )}
+                        )} */}
+                        <p>temp</p>
                       </div>
 
                       {/* Path Filtering */}
