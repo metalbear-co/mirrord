@@ -182,17 +182,6 @@ jobs:
           else
             echo "/mnt/cache not present, using default Cargo directories"
           fi
-      - name: Verify libclang availability
-        run: |
-          set -euxo pipefail
-          if ! command -v clang >/dev/null 2>&1; then
-            echo "clang not available on runner" >&2
-            exit 1
-          fi
-          if [ -d /usr/lib/llvm ]; then
-            LLVM_VERSION=$(ls /usr/lib/llvm | sort -V | tail -1)
-            echo "LIBCLANG_PATH=/usr/lib/llvm/${LLVM_VERSION}/lib" >> "$GITHUB_ENV"
-          fi
       # CHANGED: Added toolchain specification to match working YAML
       - run: rm -f rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
