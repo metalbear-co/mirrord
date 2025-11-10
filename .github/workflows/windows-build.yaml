@@ -1,455 +1,455 @@
-# name: Windows Build
+name: Windows Build
 
-# on:
-#   workflow_dispatch:
-#     inputs:
-#       mode:
-#         description: "Pick artifacts from GCS (reuse) or build & sign now"
-#         type: choice
-#         options: [build_sign, reuse]
-#         default: build_sign
-#       release:
-#         description: "Publish a GitHub Release?"
-#         type: choice
-#         options: [no, draft, prerelease, release]
-#         default: no
-#       release_tag:
-#         description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
-#         required: false
-#         type: string
-#       sign_artifacts:
-#         description: "Code-sign EXE & DLL (uses limited signing tokens)"
-#         type: choice
-#         options: ["false", "true"]
-#         default: false
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Pick artifacts from GCS (reuse) or build & sign now"
+        type: choice
+        options: [build_sign, reuse]
+        default: build_sign
+      release:
+        description: "Publish a GitHub Release?"
+        type: choice
+        options: [no, draft, prerelease, release]
+        default: no
+      release_tag:
+        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        required: false
+        type: string
+      sign_artifacts:
+        description: "Code-sign EXE & DLL (uses limited signing tokens)"
+        type: choice
+        options: ["false", "true"]
+        default: false
   
-#   push:
-#     paths-ignore:
-#       - '*.md'
-#       - '**/*.md'
+  push:
+    paths-ignore:
+      - '*.md'
+      - '**/*.md'
 
-#   pull_request:
-#     branches: ["main", "*staging*", "windows-support"]
-#     types: [opened, synchronize, reopened, ready_for_review]
-#     paths-ignore:
-#       - "*.md"
-#       - "**/*.md"
+  pull_request:
+    branches: ["main", "*staging*", "windows-support"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "*.md"
+      - "**/*.md"
 
-# permissions:
-#   contents: write   # needed for GitHub Releases
+permissions:
+  contents: write   # needed for GitHub Releases
 
-# env:
-#   BUCKET_URI: gs://mirrord-windows-builds
-#   ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
-#   RUST_BACKTRACE: "1"
-#   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-#   MIRRORD_TELEMETRY: "false"
-#   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+env:
+  BUCKET_URI: gs://mirrord-windows-builds
+  ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
+  RUST_BACKTRACE: "1"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: "false"
+  LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
 
-# jobs:
-#   windows_tests:
-#     runs-on: [self-hosted, Windows]
-#     defaults:
-#       run:
-#         shell: pwsh
-#     env:
-#       MODE: ${{ github.event.inputs.mode || 'build_sign' }}
-#       PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
-#       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
-#       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
+jobs:
+  windows_tests:
+    runs-on: [self-hosted, Windows]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      MODE: ${{ github.event.inputs.mode || 'build_sign' }}
+      PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
+      RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
+      SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
 
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
-#         with:
-#           fetch-depth: 0
-#           submodules: recursive
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
-#       - name: Toolchain info
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           whoami
-#           rustc -V
-#           cargo -V
-#           rustup show
+      - name: Toolchain info
+        run: |
+          $ErrorActionPreference = 'Stop'
+          whoami
+          rustc -V
+          cargo -V
+          rustup show
 
-#       - name: Prepare artifacts (download OR build+sign)
-#         id: prep
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append }
-#           $Target = 'x86_64-pc-windows-msvc'
-#           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
-#           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
-#           $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
-#           New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
-#           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
+      - name: Prepare artifacts (download OR build+sign)
+        id: prep
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append }
+          $Target = 'x86_64-pc-windows-msvc'
+          $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
+          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
+          $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
+          New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
 
-#           if ($env:MODE -eq 'reuse') {
-#             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-#               throw "gcloud not found on PATH. Ensure the runner is authenticated."
-#             }
-#             $dest = Join-Path $Tmp 'picked'
-#             New-Item -ItemType Directory -Path $dest -Force | Out-Null
-#             Write-Host "Downloading from: $($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*"
-#             gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
-#             if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
-#             $exe = (Get-ChildItem -Path $dest -Filter 'mirrord.exe' -File -Recurse | Select-Object -First 1).FullName
-#             $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
-#             if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
-#             if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
+          if ($env:MODE -eq 'reuse') {
+            if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+              throw "gcloud not found on PATH. Ensure the runner is authenticated."
+            }
+            $dest = Join-Path $Tmp 'picked'
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            Write-Host "Downloading from: $($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*"
+            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
+            if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
+            $exe = (Get-ChildItem -Path $dest -Filter 'mirrord.exe' -File -Recurse | Select-Object -First 1).FullName
+            $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
+            if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
+            if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
 
-#             if ($shouldSign) {
-#               if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
-#                 throw "SIGN_ARTIFACTS=true but signtool.exe not found."
-#               }
-#               & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-#               if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
-#               & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-#               if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
-#               # refresh .sha256 because files changed
-#               foreach ($f in @($exe,$dll)) {
-#                 $sha = "$f.sha256"
-#                 $h = (Get-FileHash -Algorithm SHA256 $f).Hash
-#                 "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
-#               }
-#             } else {
-#               # Ensure .sha256 exist even if not signing
-#               foreach ($f in @($exe,$dll)) {
-#                 $sha = "$f.sha256"
-#                 if (-not (Test-Path $sha)) {
-#                   $h = (Get-FileHash -Algorithm SHA256 $f).Hash
-#                   "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
-#                 }
-#               }
-#               Write-Host "Signing disabled (SIGN_ARTIFACTS=false)."
-#             }
+            if ($shouldSign) {
+              if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
+                throw "SIGN_ARTIFACTS=true but signtool.exe not found."
+              }
+              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
+              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
+              # refresh .sha256 because files changed
+              foreach ($f in @($exe,$dll)) {
+                $sha = "$f.sha256"
+                $h = (Get-FileHash -Algorithm SHA256 $f).Hash
+                "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
+              }
+            } else {
+              # Ensure .sha256 exist even if not signing
+              foreach ($f in @($exe,$dll)) {
+                $sha = "$f.sha256"
+                if (-not (Test-Path $sha)) {
+                  $h = (Get-FileHash -Algorithm SHA256 $f).Hash
+                  "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
+                }
+              }
+              Write-Host "Signing disabled (SIGN_ARTIFACTS=false)."
+            }
 
-#             Set-Env "MIRRORD_EXE" $exe
-#             Set-Env "MIRRORD_LAYER_FILE" $dll
-#             Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
-#             Set-Env "MIRRORD_VERSION" "unknown"
-#             Write-Host "Picked EXE: $exe"
-#             Write-Host "Picked DLL: $dll"
-#             exit 0
-#           }
+            Set-Env "MIRRORD_EXE" $exe
+            Set-Env "MIRRORD_LAYER_FILE" $dll
+            Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
+            Set-Env "MIRRORD_VERSION" "unknown"
+            Write-Host "Picked EXE: $exe"
+            Write-Host "Picked DLL: $dll"
+            exit 0
+          }
 
-#           # === build_sign path ===
-#           rustup target add $Target
-#           # 1) Build layer (DLL)
-#           cargo build -p mirrord-layer-win --target $Target
-#           $dll = if (Test-Path (Join-Path $DbgDir  'mirrord_layer_win.dll')) { Join-Path $DbgDir  'mirrord_layer_win.dll' }
-#                  elseif (Test-Path (Join-Path $RelDir 'mirrord_layer_win.dll')) { Join-Path $RelDir 'mirrord_layer_win.dll' }
-#                  else { throw "Layer DLL not found in debug or release directories." }
+          # === build_sign path ===
+          rustup target add $Target
+          # 1) Build layer (DLL)
+          cargo build -p mirrord-layer-win --target $Target
+          $dll = if (Test-Path (Join-Path $DbgDir  'mirrord_layer_win.dll')) { Join-Path $DbgDir  'mirrord_layer_win.dll' }
+                 elseif (Test-Path (Join-Path $RelDir 'mirrord_layer_win.dll')) { Join-Path $RelDir 'mirrord_layer_win.dll' }
+                 else { throw "Layer DLL not found in debug or release directories." }
 
-#           if ($shouldSign) {
-#             if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
-#               throw "SIGN_ARTIFACTS=true but signtool.exe not found."
-#             }
-#             # 2) Sign DLL
-#             & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-#             if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
-#             & signtool.exe verify /pa "$dll"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL" }
-#           } else {
-#             Write-Host "Signing disabled for DLL."
-#           }
+          if ($shouldSign) {
+            if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
+              throw "SIGN_ARTIFACTS=true but signtool.exe not found."
+            }
+            # 2) Sign DLL
+            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
+            & signtool.exe verify /pa "$dll"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL" }
+          } else {
+            Write-Host "Signing disabled for DLL."
+          }
 
-#           # 3) Build CLI with (optionally) signed DLL embedded
-#           $env:MIRRORD_LAYER_FILE = $dll
-#           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-#           $pkg  = $meta.packages | Where-Object { $_.targets | Where-Object { $_.kind -contains 'bin' -and $_.name -eq 'mirrord' } } | Select-Object -First 1
-#           if (-not $pkg) { throw "No bin target named 'mirrord' found in workspace." }
-#           cargo build -p $pkg.name --bin mirrord --target $Target
-#           $exe = if (Test-Path (Join-Path $DbgDir  'mirrord.exe')) { Join-Path $DbgDir  'mirrord.exe' }
-#                  elseif (Test-Path (Join-Path $RelDir 'mirrord.exe')) { Join-Path $RelDir 'mirrord.exe' }
-#                  else { throw "mirrord.exe not found (debug/release)" }
+          # 3) Build CLI with (optionally) signed DLL embedded
+          $env:MIRRORD_LAYER_FILE = $dll
+          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $pkg  = $meta.packages | Where-Object { $_.targets | Where-Object { $_.kind -contains 'bin' -and $_.name -eq 'mirrord' } } | Select-Object -First 1
+          if (-not $pkg) { throw "No bin target named 'mirrord' found in workspace." }
+          cargo build -p $pkg.name --bin mirrord --target $Target
+          $exe = if (Test-Path (Join-Path $DbgDir  'mirrord.exe')) { Join-Path $DbgDir  'mirrord.exe' }
+                 elseif (Test-Path (Join-Path $RelDir 'mirrord.exe')) { Join-Path $RelDir 'mirrord.exe' }
+                 else { throw "mirrord.exe not found (debug/release)" }
 
-#           if ($shouldSign) {
-#             # 4) Sign EXE
-#             & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-#             if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
-#             & signtool.exe verify /pa "$exe"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE" }
-#           } else {
-#             Write-Host "Signing disabled for EXE."
-#           }
+          if ($shouldSign) {
+            # 4) Sign EXE
+            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
+            & signtool.exe verify /pa "$exe"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE" }
+          } else {
+            Write-Host "Signing disabled for EXE."
+          }
 
-#           # 5) Checksums (always generate with the final bytes)
-#           foreach ($f in @($exe,$dll)) {
-#             $sha = "$f.sha256"
-#             $h = (Get-FileHash -Algorithm SHA256 $f).Hash
-#             "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
-#           }
+          # 5) Checksums (always generate with the final bytes)
+          foreach ($f in @($exe,$dll)) {
+            $sha = "$f.sha256"
+            $h = (Get-FileHash -Algorithm SHA256 $f).Hash
+            "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
+          }
 
-#           # 6) Export env
-#           Set-Env "MIRRORD_LAYER_FILE" $dll
-#           Set-Env "MIRRORD_EXE" $exe
-#           Set-Env "MIRRORD_PKG" $pkg.name
-#           Set-Env "MIRRORD_VERSION" $pkg.version
-#           Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
+          # 6) Export env
+          Set-Env "MIRRORD_LAYER_FILE" $dll
+          Set-Env "MIRRORD_EXE" $exe
+          Set-Env "MIRRORD_PKG" $pkg.name
+          Set-Env "MIRRORD_VERSION" $pkg.version
+          Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
 
-#       - name: Upload to GCS (build_sign only)
-#         if: ${{ env.MODE == 'build_sign' }}
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-#             throw "gcloud not found on PATH. Ensure the runner is authenticated."
-#           }
-#           $exe = $env:MIRRORD_EXE; $dll = $env:MIRRORD_LAYER_FILE
-#           if (-not (Test-Path $exe) -or -not (Test-Path $dll)) { throw "EXE/DLL missing" }
-#           $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
-#           New-Item -ItemType Directory -Path $staging -Force | Out-Null
-#           Copy-Item $exe $staging -Force
-#           Copy-Item $dll $staging -Force
-#           Copy-Item "$exe.sha256" $staging -Force
-#           Copy-Item "$dll.sha256" $staging -Force
-#           $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
-#           $sha7 = $env:GITHUB_SHA.Substring(0,7)
-#           $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
-#           $dest = "$($env:BUCKET_URI)/$artifactDir/"
-#           Write-Host "Uploading to $dest"
-#           Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
-#           gcloud --quiet storage ls $dest
+      - name: Upload to GCS (build_sign only)
+        if: ${{ env.MODE == 'build_sign' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+            throw "gcloud not found on PATH. Ensure the runner is authenticated."
+          }
+          $exe = $env:MIRRORD_EXE; $dll = $env:MIRRORD_LAYER_FILE
+          if (-not (Test-Path $exe) -or -not (Test-Path $dll)) { throw "EXE/DLL missing" }
+          $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe $staging -Force
+          Copy-Item $dll $staging -Force
+          Copy-Item "$exe.sha256" $staging -Force
+          Copy-Item "$dll.sha256" $staging -Force
+          $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
+          $sha7 = $env:GITHUB_SHA.Substring(0,7)
+          $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
+          $dest = "$($env:BUCKET_URI)/$artifactDir/"
+          Write-Host "Uploading to $dest"
+          Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
+          gcloud --quiet storage ls $dest
 
-#       - name: Run Rust unit tests (single loop)
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           $Target = 'x86_64-pc-windows-msvc'
-#           $tests = @(
-#             @{ name='mirrord-layer-win'; args='' },
-#             @{ name='mirrord-protocol' ; args='' },
-#             @{ name='mirrord-config'   ; args='' },
-#             @{ name='mirrord-kube'     ; args='--all-features' },
-#             @{ name='mirrord-intproxy' ; args='' },
-#             @{ name='mirrord-auth'     ; args='' },
-#             @{ name='mirrord-operator' ; args='--features "crd, client"' },
-#             @{ name='mirrord'          ; args='' }
-#           )
-#           foreach ($t in $tests) {
-#             Write-Host "==> cargo test -p $($t.name) $($t.args)"
-#             if ($t.args) {
-#               Invoke-Expression "cargo test --target $Target -p $($t.name) $($t.args)"
-#             } else {
-#               cargo test --target $Target -p $($t.name)
-#             }
-#             if ($LASTEXITCODE -ne 0) { throw "Tests failed for $($t.name)" }
-#           }
+      - name: Run Rust unit tests (single loop)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Target = 'x86_64-pc-windows-msvc'
+          $tests = @(
+            @{ name='mirrord-layer-win'; args='' },
+            @{ name='mirrord-protocol' ; args='' },
+            @{ name='mirrord-config'   ; args='' },
+            @{ name='mirrord-kube'     ; args='--all-features' },
+            @{ name='mirrord-intproxy' ; args='' },
+            @{ name='mirrord-auth'     ; args='' },
+            @{ name='mirrord-operator' ; args='--features "crd, client"' },
+            @{ name='mirrord'          ; args='' }
+          )
+          foreach ($t in $tests) {
+            Write-Host "==> cargo test -p $($t.name) $($t.args)"
+            if ($t.args) {
+              Invoke-Expression "cargo test --target $Target -p $($t.name) $($t.args)"
+            } else {
+              cargo test --target $Target -p $($t.name)
+            }
+            if ($LASTEXITCODE -ne 0) { throw "Tests failed for $($t.name)" }
+          }
 
-#       # -----------------------------
-#       # GitHub Release (optional)
-#       # -----------------------------
-#       - name: Compute release tag
-#         id: tag
-#         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           $tag = $null
-#           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
-#             $tag = "$env:GITHUB_REF".Substring(10)
-#           } elseif ($env:RELEASE_TAG_INPUT) {
-#             $tag = $env:RELEASE_TAG_INPUT
-#           } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
-#             $tag = "v$($env:MIRRORD_VERSION)"
-#           } else {
-#             throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
-#           }
-#           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
-#           Write-Host "Release tag: $tag"
-
-
-#       - name: Publish GitHub Release and upload artifacts (github-script)
-#         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-#         uses: actions/github-script@v7
-#         env:
-#           RELEASE_TAG: ${{ env.RELEASE_TAG }}
-#           PUBLISH_MODE: ${{ env.PUBLISH_MODE }}     # draft|prerelease|release|no
-#           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
-#           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
-#           SIGN_ARTIFACTS: ${{ env.SIGN_ARTIFACTS }} # "true" | "false"
-#         with:
-#           script: |
-#             const fs = require('fs');
-#             const path = require('path');
-#             const { owner, repo } = context.repo;
-
-#             const tag = process.env.RELEASE_TAG;
-#             const isDraft = process.env.PUBLISH_MODE === 'draft';
-#             const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
-#             const signed = /^true$/i.test(process.env.SIGN_ARTIFACTS || '');
-#             const signedBlockStart = '<!-- SIGNED_STATUS_START -->';
-#             const signedBlockEnd   = '<!-- SIGNED_STATUS_END -->';
-#             const signedLine       = `**Signed artifacts:** ${signed ? 'Yes' : 'No'}`;
-
-#             // Find or create the release
-#             let rel;
-#             try {
-#               const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
-#               rel = r.data;
-#             } catch (e) {
-#               if (e.status !== 404) throw e;
-#               const r = await github.rest.repos.createRelease({
-#                 owner, repo,
-#                 tag_name: tag,
-#                 name: `Windows build ${tag}`,
-#                 target_commitish: context.sha,
-#                 draft: isDraft,
-#                 prerelease: isPrerelease,
-#                 generate_release_notes: true,
-#               });
-#               rel = r.data;
-#             }
-
-#             // Ensure flags (draft/prerelease) match input
-#             if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
-#               const r = await github.rest.repos.updateRelease({
-#                 owner, repo, release_id: rel.id,
-#                 draft: isDraft, prerelease: isPrerelease,
-#                 name: `Windows build ${tag}`,
-#                 target_commitish: context.sha,
-#               });
-#               rel = r.data;
-#             }
-
-#             // Upload helper (replaces asset if it already exists)
-#             async function upload(file) {
-#               if (!file || !fs.existsSync(file)) {
-#                 core.warning(`Missing file: ${file}`);
-#                 return;
-#               }
-#               const name = path.basename(file);
-#               const assets = await github.paginate(
-#                 github.rest.repos.listReleaseAssets,
-#                 { owner, repo, release_id: rel.id, per_page: 100 }
-#               );
-#               const existing = assets.find(a => a.name === name);
-#               if (existing) {
-#                 await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
-#               }
-#               const data = fs.readFileSync(file);
-#               await github.rest.repos.uploadReleaseAsset({
-#                 owner, repo, release_id: rel.id, name,
-#                 headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
-#                 data,
-#               });
-#               core.info(`Uploaded ${name}`);
-#             }
-
-#             // Upload artifacts
-#             const files = [
-#               process.env.MIRRORD_EXE,
-#               `${process.env.MIRRORD_EXE}.sha256`,
-#               process.env.MIRRORD_LAYER_FILE,
-#               `${process.env.MIRRORD_LAYER_FILE}.sha256`,
-#             ];
-#             for (const f of files) { await upload(f); }
-
-#             // Append/refresh a small, explicit signed-status block in the body (idempotent)
-#             const currentBody = rel.body || '';
-#             const block = `${signedBlockStart}\n${signedLine}\n${signedBlockEnd}`;
-#             const hasBlock = currentBody.includes(signedBlockStart) && currentBody.includes(signedBlockEnd);
-#             const newBody = hasBlock
-#               ? currentBody.replace(new RegExp(`${signedBlockStart}[\\s\\S]*?${signedBlockEnd}`,'m'), block)
-#               : (currentBody + (currentBody ? '\n\n' : '') + block);
-
-#             if (newBody !== currentBody) {
-#               await github.rest.repos.updateRelease({
-#                 owner, repo, release_id: rel.id,
-#                 body: newBody,
-#               });
-#               core.info(`Release body updated with signed status: ${signed ? 'Yes' : 'No'}`);
-#             } else {
-#               core.info('Signed status already up to date in release body.');
-#             }
+      # -----------------------------
+      # GitHub Release (optional)
+      # -----------------------------
+      - name: Compute release tag
+        id: tag
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $null
+          if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
+            $tag = "$env:GITHUB_REF".Substring(10)
+          } elseif ($env:RELEASE_TAG_INPUT) {
+            $tag = $env:RELEASE_TAG_INPUT
+          } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
+            $tag = "v$($env:MIRRORD_VERSION)"
+          } else {
+            throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
+          }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Release tag: $tag"
 
 
+      - name: Publish GitHub Release and upload artifacts (github-script)
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}     # draft|prerelease|release|no
+          MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
+          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+          SIGN_ARTIFACTS: ${{ env.SIGN_ARTIFACTS }} # "true" | "false"
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
 
-#       # ==================================
-#       # === Pretty summary to step tab ===
-#       # ==================================
-#       - name: Publish Windows test results (summary table, sandboxed)
-#         if: always()
-#         run: |
-#           $ErrorActionPreference = 'Stop'
-#           $exe = $env:MIRRORD_EXE
-#           $dll = $env:MIRRORD_LAYER_FILE
-#           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
-#           if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
-#           if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
-#           $base = Split-Path $exe -Parent
-#           function Get-ExpectedSha256([string]$shaFile) {
-#             if (-not (Test-Path $shaFile)) { return $null }
-#             $raw = Get-Content $shaFile -Raw
-#             $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
-#           }
-#           $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
-#           $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
-#           if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
-#           $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-#           $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
-#           $exeExpect = Get-ExpectedSha256 $exeShaFile
-#           $dllExpect = Get-ExpectedSha256 $dllShaFile
-#           $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
-#           $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
-#           $sigExe = $null; $sigDll = $null
-#           if ($shouldSign -and (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
-#             & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
-#             & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
-#           }
-#           $dllLoadOk = $false
-#           $dllCrash = $false
-#           $loader = @"
-#           try {
-#             Add-Type -TypeDefinition @'
-#           using System;
-#           using System.Runtime.InteropServices;
-#           public static class L {
-#             [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-#             public static extern IntPtr LoadLibrary(string lpFileName);
-#             [DllImport("kernel32.dll", SetLastError=true)]
-#             public static extern bool FreeLibrary(IntPtr hModule);
-#           }
-#           '@;
-#             var ptr = L.LoadLibrary(@"{($dll -replace '"','""')}");
-#             if (ptr == IntPtr.Zero) Environment.Exit(2);
-#             L.FreeLibrary(ptr);
-#             Environment.Exit(0);
-#           } catch { Environment.Exit(3); }
-#           "@
-#           $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
-#           Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
-#           $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
-#           $childExit = $p.ExitCode
-#           if ($childExit -eq 0) { $dllLoadOk = $true }
-#           if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
-#           $verRc = $null; $verText = ""
-#           try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
-#           $helpRc = $null; $helpText = ""
-#           try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
-#           $exeSize = (Get-Item $exe).Length
-#           $dllSize = (Get-Item $dll).Length
-#           $rows = @()
-#           $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
-#           $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
-#           $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($shouldSign -and $sigExe -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-#           $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($shouldSign -and $sigDll -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-#           $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
-#           $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
-#           $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
-#           $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
-#           $md = @()
-#           $md += '### Windows test results'
-#           $md += ''
-#           $md += ('**Mode:** `{0}` • **Sign artifacts:** `{1}`  ' -f $env:MODE, $env:SIGN_ARTIFACTS)
-#           $md += ('**EXE:** `{0}`  ' -f $exe)
-#           $md += ('**DLL:** `{0}`' -f $dll)
-#           $md += ''
-#           $md += '| Check | Result | Notes |'
-#           $md += '|------:|:------:|-------|'
-#           foreach ($r in $rows) {
-#             $c = ($r.Check  -replace '\|','\|')
-#             $res = ($r.Result -replace '\|','\|')
-#             $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
-#             $md += "| $c | $res | $n |"
-#           }
-#           $md += ''
-#           $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
-#           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+            const tag = process.env.RELEASE_TAG;
+            const isDraft = process.env.PUBLISH_MODE === 'draft';
+            const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
+            const signed = /^true$/i.test(process.env.SIGN_ARTIFACTS || '');
+            const signedBlockStart = '<!-- SIGNED_STATUS_START -->';
+            const signedBlockEnd   = '<!-- SIGNED_STATUS_END -->';
+            const signedLine       = `**Signed artifacts:** ${signed ? 'Yes' : 'No'}`;
+
+            // Find or create the release
+            let rel;
+            try {
+              const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              rel = r.data;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              const r = await github.rest.repos.createRelease({
+                owner, repo,
+                tag_name: tag,
+                name: `Windows build ${tag}`,
+                target_commitish: context.sha,
+                draft: isDraft,
+                prerelease: isPrerelease,
+                generate_release_notes: true,
+              });
+              rel = r.data;
+            }
+
+            // Ensure flags (draft/prerelease) match input
+            if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
+              const r = await github.rest.repos.updateRelease({
+                owner, repo, release_id: rel.id,
+                draft: isDraft, prerelease: isPrerelease,
+                name: `Windows build ${tag}`,
+                target_commitish: context.sha,
+              });
+              rel = r.data;
+            }
+
+            // Upload helper (replaces asset if it already exists)
+            async function upload(file) {
+              if (!file || !fs.existsSync(file)) {
+                core.warning(`Missing file: ${file}`);
+                return;
+              }
+              const name = path.basename(file);
+              const assets = await github.paginate(
+                github.rest.repos.listReleaseAssets,
+                { owner, repo, release_id: rel.id, per_page: 100 }
+              );
+              const existing = assets.find(a => a.name === name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+              }
+              const data = fs.readFileSync(file);
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: rel.id, name,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
+                data,
+              });
+              core.info(`Uploaded ${name}`);
+            }
+
+            // Upload artifacts
+            const files = [
+              process.env.MIRRORD_EXE,
+              `${process.env.MIRRORD_EXE}.sha256`,
+              process.env.MIRRORD_LAYER_FILE,
+              `${process.env.MIRRORD_LAYER_FILE}.sha256`,
+            ];
+            for (const f of files) { await upload(f); }
+
+            // Append/refresh a small, explicit signed-status block in the body (idempotent)
+            const currentBody = rel.body || '';
+            const block = `${signedBlockStart}\n${signedLine}\n${signedBlockEnd}`;
+            const hasBlock = currentBody.includes(signedBlockStart) && currentBody.includes(signedBlockEnd);
+            const newBody = hasBlock
+              ? currentBody.replace(new RegExp(`${signedBlockStart}[\\s\\S]*?${signedBlockEnd}`,'m'), block)
+              : (currentBody + (currentBody ? '\n\n' : '') + block);
+
+            if (newBody !== currentBody) {
+              await github.rest.repos.updateRelease({
+                owner, repo, release_id: rel.id,
+                body: newBody,
+              });
+              core.info(`Release body updated with signed status: ${signed ? 'Yes' : 'No'}`);
+            } else {
+              core.info('Signed status already up to date in release body.');
+            }
+
+
+
+      # ==================================
+      # === Pretty summary to step tab ===
+      # ==================================
+      - name: Publish Windows test results (summary table, sandboxed)
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = $env:MIRRORD_EXE
+          $dll = $env:MIRRORD_LAYER_FILE
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
+          if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
+          if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
+          $base = Split-Path $exe -Parent
+          function Get-ExpectedSha256([string]$shaFile) {
+            if (-not (Test-Path $shaFile)) { return $null }
+            $raw = Get-Content $shaFile -Raw
+            $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
+          }
+          $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
+          $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
+          if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
+          $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
+          $exeExpect = Get-ExpectedSha256 $exeShaFile
+          $dllExpect = Get-ExpectedSha256 $dllShaFile
+          $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
+          $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
+          $sigExe = $null; $sigDll = $null
+          if ($shouldSign -and (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
+            & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
+            & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
+          }
+          $dllLoadOk = $false
+          $dllCrash = $false
+          $loader = @"
+          try {
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class L {
+            [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+            public static extern IntPtr LoadLibrary(string lpFileName);
+            [DllImport("kernel32.dll", SetLastError=true)]
+            public static extern bool FreeLibrary(IntPtr hModule);
+          }
+          '@;
+            var ptr = L.LoadLibrary(@"{($dll -replace '"','""')}");
+            if (ptr == IntPtr.Zero) Environment.Exit(2);
+            L.FreeLibrary(ptr);
+            Environment.Exit(0);
+          } catch { Environment.Exit(3); }
+          "@
+          $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
+          Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
+          $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
+          $childExit = $p.ExitCode
+          if ($childExit -eq 0) { $dllLoadOk = $true }
+          if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
+          $verRc = $null; $verText = ""
+          try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
+          $helpRc = $null; $helpText = ""
+          try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
+          $exeSize = (Get-Item $exe).Length
+          $dllSize = (Get-Item $dll).Length
+          $rows = @()
+          $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
+          $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
+          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($shouldSign -and $sigExe -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($shouldSign -and $sigDll -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
+          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
+          $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
+          $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
+          $md = @()
+          $md += '### Windows test results'
+          $md += ''
+          $md += ('**Mode:** `{0}` • **Sign artifacts:** `{1}`  ' -f $env:MODE, $env:SIGN_ARTIFACTS)
+          $md += ('**EXE:** `{0}`  ' -f $exe)
+          $md += ('**DLL:** `{0}`' -f $dll)
+          $md += ''
+          $md += '| Check | Result | Notes |'
+          $md += '|------:|:------:|-------|'
+          foreach ($r in $rows) {
+            $c = ($r.Check  -replace '\|','\|')
+            $res = ($r.Result -replace '\|','\|')
+            $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
+            $md += "| $c | $res | $n |"
+          }
+          $md += ''
+          $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
+          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
