@@ -200,23 +200,46 @@ static NT_UNLOCK_FILE_ORIGINAL: OnceLock<&NtUnlockFileType> = OnceLock::new();
 type NtCloseType = unsafe extern "system" fn(HANDLE) -> NTSTATUS;
 static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 
+
 /// [`nt_create_file_hook`] is the function responsible for catching attempts to create a
 /// new file handle. In turn, it is also responsible for catching the attempt to create
 /// POSIX file descriptors through the Windows POSIX compatibility layer.
 ///
 /// The mechanism is:
-/// - We try to run the `NtCreateFile` operation normally initially. Only should it fail with
-///   [`STATUS_OBJECT_PATH_NOT_FOUND`], then do we check if the path could possibly be a Linux path.
-/// - If the path is a Linux path, then we send an open request to the pod
-/// - And if it is succesful, we work to replicate the internal behavior of the `NtCreateFile`
-///   function, creating the same expectations for input,
+/// 
+/// 1. We check if the layer is configured to have file-system hooks enbled or not.
+///     * If not, jump to ["Fallback"](#fallback).
+///     * This is the only point we have to check for this configuration. Without
+///       [`managed_handle::MirrordHandle`]s, there is no other logic.
+/// 2. We try to convert the path from `object_attributes` to a Unix path.
+///     * If we fail, jump to ["Fallback"](#fallback).
+/// 3. We run the Unix path through [`mirrord_layer_lib::file::mapper::FileRemapper::change_path_str`] to account
+///    for file-system configuration, This becomes the new "path".
+///     * If the result of this operation is different from the intiial path, this is logged.
+/// 4. We account for filter logic after we run the Unix path through [`mirrord_layer_lib::file::filter::FileFilter::check`]
+///    to account for file-system configuration.
+/// 5. We check if all input arguments are valid (verify pointer provenance, value, etc.)
+///     * If any is not valid, log and jump to ["Fallback"](#fallback).
+/// 6. We make an [`mirrord_protocol::file::OpenFileRequest`] for the Unix path to obtain a file descriptor from agent.
+///     * If this fails, log and jump to ["Fallback"](#fallback).
+/// 7. Use the file descriptor from the [`mirrord_protocol::file::OpenFileResponse`] to create a [`HandleContext`] and insert
+///    it into the managed handles map.
+///     * The [`HandleContext`] may be modified by future operations over the [`managed_handle::MirrordHandle`].
+/// 
+/// ## Fallback
+/// 
+/// Discard previous progress, proceed with original execution by the operating system.
 ///
-/// Internally, this creates a "managed handle" (see [`MANAGED_HANDLES`]), and if there was a
-/// succesful open operation, we create a [`HandleContext`] for the file descriptor, which is
-/// initially filled in with relevant data, and may surely be modified later.
-///
-/// All instances of a failed network operation are marked by the return value of
-/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
+/// ## Caveats
+/// 
+/// - Currently, file-system write operations are not supported.
+/// - Currently, directory operations are not supported.
+/// 
+/// ## Notes
+/// 
+/// mirrord handles can easily be identified by debugging because of the following:
+/// - They are inserted starting from the numeric value `0x50000000`.
+/// - They grow in linear numeric order from the starting point.
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
