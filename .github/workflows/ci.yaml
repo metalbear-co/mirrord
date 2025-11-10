@@ -182,11 +182,13 @@ jobs:
           else
             echo "/mnt/cache not present, using default Cargo directories"
           fi
-      - name: Install libclang dependencies
+      - name: Verify libclang availability
         run: |
           set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y clang libclang-dev
+          if ! command -v clang >/dev/null 2>&1; then
+            echo "clang not available on runner" >&2
+            exit 1
+          fi
           if [ -d /usr/lib/llvm ]; then
             LLVM_VERSION=$(ls /usr/lib/llvm | sort -V | tail -1)
             echo "LIBCLANG_PATH=/usr/lib/llvm/${LLVM_VERSION}/lib" >> "$GITHUB_ENV"
@@ -212,34 +214,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install Python development headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-dev
-      - name: Create venv & install py deps (binary-only, no C build)
-        env:
-          PIP_PREFER_BINARY: "1"
-          PIP_DISABLE_PIP_VERSION_CHECK: "1"
-          PIP_NO_BUILD_ISOLATION: "1"
-          PYTHONDONTWRITEBYTECODE: "1"
-          WEBSOCKETS_NO_SPEEDUPS: "1"
+      - name: Verify Python dependencies
         run: |
           set -euxo pipefail
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip wheel
-          .venv/bin/pip install --only-binary=:all: flask fastapi "uvicorn[standard]"
-      - name: Make venv available to subsequent steps
-        run: echo "${PWD}/.venv/bin" >> $GITHUB_PATH
+          python3 - <<'PY'
+import importlib
+needed = ["flask", "fastapi", "uvicorn"]
+missing = [pkg for pkg in needed if importlib.util.find_spec(pkg) is None]
+if missing:
+    raise SystemExit(f"Missing Python packages: {', '.join(missing)}")
+PY
       # ---- Node
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: |
+      - name: Verify Node dependencies
+        run: |
           set -euxo pipefail
-          test -f package.json || npm init -y
-          npm set fund false
-          npm set audit false
-          npm install express portfinder
+          if ! command -v node >/dev/null 2>&1; then
+            echo "node not available on runner" >&2
+            exit 1
+          fi
+          if ! command -v npm >/dev/null 2>&1; then
+            echo "npm not available on runner" >&2
+            exit 1
+          fi
+          export NODE_PATH="$(npm root -g)"
+          node -e "require('express'); require('portfinder');"
+          echo "NODE_PATH=${NODE_PATH}" >> "$GITHUB_ENV"
       # Build Go fixtures (three versions)
       - uses: actions/setup-go@v5
         with:
