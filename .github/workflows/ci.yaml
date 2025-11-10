@@ -536,10 +536,11 @@ jobs:
       - run: java -version
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
         with:
+          python-version: "3.14"
           cache: "pip"
       - name: Display Pip version
         run: pip --version
-      - run: pip install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
+      - run: python3 -m pip install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
       - uses: actions/setup-node@v3
         with:
           node-version: 18
