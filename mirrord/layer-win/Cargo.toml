@@ -32,6 +32,7 @@ socket2.workspace = true
 # Used for logging and tracing
 tracing.workspace = true
 tracing-subscriber.workspace = true
+chrono.workspace = true
 
 libc = "0.2.175"
 [target.'cfg(windows)'.dependencies]
