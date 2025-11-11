@@ -184,6 +184,7 @@ impl DatabaseBranchParams {
                     let params = MysqlBranchParams::new(id.as_ref(), mysql_config, target);
                     mysql.insert(id, params);
                 }
+                _ => unreachable!("Unsupported database branch type: {:?}", branch_db_config),
             };
         }
         Self { mysql }

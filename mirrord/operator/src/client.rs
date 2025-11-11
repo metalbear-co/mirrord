@@ -1300,6 +1300,9 @@ impl OperatorApi<PreparedClientCert> {
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => mysql_config.base.creation_timeout_secs,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    pg_config.base.creation_timeout_secs
+                }
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
