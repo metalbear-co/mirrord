@@ -73,6 +73,15 @@ jobs:
           cargo -V
           rustup show
 
+      # TOTALLY WIP
+      - name: Install Windows Console Legacy Capability
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell.exe -NoProfile -Command "Add-WindowsCapability -Online -Name 'Microsoft.Windows.Console.Legacy~~~~'"
+
+      # Build MSI using wix
+      
+
       - name: Prepare artifacts (download OR build+sign)
         id: prep
         run: |
