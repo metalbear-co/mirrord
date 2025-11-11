@@ -282,7 +282,7 @@ unsafe extern "system" fn nt_create_file_hook(
         let name = read_object_attributes_name(object_attributes);
 
         // Try to create a Linux path from the provided Windows UNC path.
-        let Some(parsed_linux_path) = path_to_unix_path(name) else {
+        let Some(parsed_linux_path) = path_to_unix_path(name.clone()) else {
             return original(
                 file_handle,
                 desired_access,
@@ -323,6 +323,7 @@ unsafe extern "system" fn nt_create_file_hook(
         let matched_filter = filter.check(&linux_path);
         match matched_filter {
             Some(FileMode::Local(_)) => {
+                tracing::trace!("Reading \"{}\" locally!", name);
                 return original(
                     file_handle,
                     desired_access,

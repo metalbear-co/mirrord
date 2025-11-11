@@ -805,7 +805,7 @@ impl<T: WindowsAddrInfo> ManagedAddrInfo<T> {
             while !current.is_null() {
                 let addr = (*current).ai_addr();
                 if !addr.is_null() {
-                    match (*current).ai_family() as i32 {
+                    match (*current).ai_family() {
                         AF_INET => {
                             let sockaddr_in_ptr = addr as *mut SOCKADDR_IN;
                             (*sockaddr_in_ptr).sin_port = port.to_be();

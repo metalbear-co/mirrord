@@ -904,10 +904,11 @@ async fn port_forward(
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
         })?;
-
-    let connection_2 = agent_conn.connection;
+    let connection_2 = connection::AgentConnection {
+        sender: agent_conn.agent_tx,
+        receiver: agent_conn.agent_rx,
+    };
 
     progress.success(Some("Ready!"));
     let _ = tokio::try_join!(
@@ -1110,15 +1111,14 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash"
                 };
                 progress.print(&format!(
-                    "New mirrord version available: {}. To update, run: `{:?}`.",
-                    latest_version, command
+                    "New mirrord version available: {latest_version}. To update, run: `{command}`."
                 ));
                 progress.print(
                     "To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.",
                 );
                 progress.success(Some(&format!("update to {latest_version} available")));
             } else {
-                progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
+                progress.success(Some("running on latest!"));
             }
         };
 

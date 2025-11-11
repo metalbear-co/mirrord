@@ -5,5 +5,15 @@ use regex::RegexSetBuilder;
 /// pattern in the `feature.fs.read_only` or `feature.fs.read_write` configuration field,
 /// respectively.
 pub fn regex_set_builder() -> RegexSetBuilder {
-    RegexSetBuilder::new([r""])
+    let patterns: Vec<String> = [
+        // Python folder on Windows.
+        r"^/Users/[^/]+/AppData/Local/Programs/Python/"
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+
+    RegexSetBuilder::new(patterns)
 }
+
+
