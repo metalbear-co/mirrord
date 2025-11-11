@@ -7,7 +7,7 @@ use regex::RegexSetBuilder;
 pub fn regex_set_builder() -> RegexSetBuilder {
     let patterns: Vec<String> = [
         // Python folder on Windows.
-        r"^/Users/[^/]+/AppData/Local/Programs/Python/"
+        r"^/Users/[^/]+/AppData/Local/Programs/Python/",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -15,5 +15,3 @@ pub fn regex_set_builder() -> RegexSetBuilder {
 
     RegexSetBuilder::new(patterns)
 }
-
-
