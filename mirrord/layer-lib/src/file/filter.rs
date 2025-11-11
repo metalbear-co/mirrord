@@ -1,6 +1,3 @@
-#[cfg(unix)]
-use std::{env, path::Path};
-
 /// Controls which files are ignored (opened locally) by mirrord file operations.
 ///
 /// There are 2 ways of setting this up:
