@@ -13,11 +13,7 @@ use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
     util::VecOrSingle,
 };
-#[cfg(unix)]
-use mirrord_layer::{
-    detour::{Bypass, Detour},
-    error::HookError,
-};
+
 use regex::{RegexSet, RegexSetBuilder};
 
 #[cfg(unix)]
@@ -27,10 +23,18 @@ use super::windows::*;
 
 #[derive(Debug, PartialEq)]
 pub enum FileMode {
-    Local,
-    NotFound,
-    ReadOnly,
-    ReadWrite,
+    /// `bool` is for whether the decision for this file mode to be local
+    /// is from defaults.
+    Local(bool),
+    /// `bool` is for whether the decision for this file mode to be not found
+    /// is from defaults.
+    NotFound(bool),
+    /// `bool` is for whether the decision for this file mode to be read only
+    /// is from defaults.
+    ReadOnly(bool),
+    /// `bool` is for whether the decision for this file mode to be read write
+    /// is from defaults.
+    ReadWrite(bool),
 }
 
 #[derive(Debug)]
@@ -42,7 +46,7 @@ pub struct FileFilter {
     default_local: RegexSet,
     default_remote_ro: RegexSet,
     default_not_found: RegexSet,
-    mode: FsModeConfig,
+    pub mode: FsModeConfig,
 }
 
 impl FileFilter {
@@ -93,49 +97,26 @@ impl FileFilter {
         }
     }
 
-    /// Checks whether the given [`Path`] should be accessed remotely.
-    #[cfg(unix)]
-    pub fn ensure_remote(&self, path: &Path, write: bool) -> Detour<()> {
-        let text = path.to_str().unwrap_or_default();
-
-        match self.mode {
-            FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
-            _ if self.not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
-            _ if self.read_write.is_match(text) => Detour::Success(()),
-            _ if self.read_only.is_match(text) => {
-                if write {
-                    Detour::Bypass(Bypass::ignored_file(text))
-                } else {
-                    Detour::Success(())
-                }
-            }
-            _ if self.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
-            _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
-            _ if self.default_remote_ro.is_match(text) && !write => Detour::Success(()),
-            _ if self.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
-            FsModeConfig::LocalWithOverrides => Detour::Bypass(Bypass::ignored_file(text)),
-            FsModeConfig::Write => Detour::Success(()),
-            FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
-            FsModeConfig::Read => Detour::Success(()),
-        }
-    }
-
     pub fn check<T: AsRef<str>>(&self, path: T) -> Option<FileMode> {
         let path = path.as_ref();
 
-        let may_write =
-            self.mode == FsModeConfig::Write || self.mode == FsModeConfig::LocalWithOverrides;
         match self.mode {
-            FsModeConfig::Local => Some(FileMode::Local),
+            FsModeConfig::Local => Some(FileMode::Local(false)),
             FsModeConfig::Read | FsModeConfig::Write | FsModeConfig::LocalWithOverrides => {
                 if self.not_found.is_match(path) {
-                    Some(FileMode::NotFound)
-                } else if may_write && self.read_write.is_match(path) {
-                    Some(FileMode::ReadWrite)
+                    Some(FileMode::NotFound(false))
+                } else if self.read_write.is_match(path) {
+                    Some(FileMode::ReadWrite(false))
                 } else if self.read_only.is_match(path) {
-                    Some(FileMode::ReadOnly)
+                    Some(FileMode::ReadOnly(false))
                 } else if self.local.is_match(path) {
-                    Some(FileMode::Local)
+                    Some(FileMode::Local(false))
+                } else if self.default_not_found.is_match(path) {
+                    Some(FileMode::NotFound(true))
+                } else if self.default_remote_ro.is_match(path) {
+                    Some(FileMode::ReadOnly(true))
+                } else if self.default_local.is_match(path) {
+                    Some(FileMode::Local(true))
                 } else {
                     None
                 }
@@ -147,321 +128,5 @@ impl FileFilter {
 impl Default for FileFilter {
     fn default() -> Self {
         Self::new(FsConfig::default())
-    }
-}
-
-#[cfg(test)]
-#[cfg(unix)]
-mod tests {
-    use mirrord_config::{feature::fs::FsConfig, util::VecOrSingle};
-    use rstest::*;
-
-    use super::*;
-    use crate::detour::Detour;
-
-    /// Helper type for testing [`FileFilter`] results.
-    #[derive(PartialEq, Eq, Debug)]
-    enum DetourKind {
-        Bypass,
-        Error,
-        Success,
-    }
-
-    impl<S> Detour<S> {
-        fn kind(&self) -> DetourKind {
-            match self {
-                Self::Bypass(..) => DetourKind::Bypass,
-                Self::Error(..) => DetourKind::Error,
-                Self::Success(..) => DetourKind::Success,
-            }
-        }
-    }
-
-    #[rstest]
-    #[trace]
-    #[case(FsModeConfig::Write, "/a/test.a", false, DetourKind::Success)]
-    #[case(
-        FsModeConfig::Write,
-        "/pain/read_write/test.a",
-        false,
-        DetourKind::Success
-    )]
-    #[case(
-        FsModeConfig::Write,
-        "/pain/read_only/test.a",
-        false,
-        DetourKind::Success
-    )]
-    #[case(FsModeConfig::Write, "/pain/write.a", false, DetourKind::Success)]
-    #[case(FsModeConfig::Write, "/pain/local/test.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Write, "/opt/test.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Write, "/a/test.a", true, DetourKind::Success)]
-    #[case(
-        FsModeConfig::Write,
-        "/pain/read_write/test.a",
-        true,
-        DetourKind::Success
-    )]
-    #[case(
-        FsModeConfig::Write,
-        "/pain/read_only/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(FsModeConfig::Write, "/pain/write.a", true, DetourKind::Success)]
-    #[case(FsModeConfig::Write, "/pain/local/test.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Write, "/opt/test.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Read, "/a/test.a", false, DetourKind::Success)]
-    #[case(
-        FsModeConfig::Read,
-        "/pain/read_write/test.a",
-        false,
-        DetourKind::Success
-    )]
-    #[case(
-        FsModeConfig::Read,
-        "/pain/read_only/test.a",
-        false,
-        DetourKind::Success
-    )]
-    #[case(FsModeConfig::Read, "/pain/write.a", false, DetourKind::Success)]
-    #[case(FsModeConfig::Read, "/pain/local/test.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Read, "/opt/test.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Read, "/a/test.a", true, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::Read,
-        "/pain/read_write/test.a",
-        true,
-        DetourKind::Success
-    )]
-    #[case(FsModeConfig::Read, "/pain/read_only/test.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Read, "/pain/write.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Read, "/pain/local/test.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Read, "/opt/test.a", true, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/a/test.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/read_write/test.a",
-        false,
-        DetourKind::Success
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/read_only/test.a",
-        false,
-        DetourKind::Success
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/write.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/local/test.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/opt/test.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/a/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/read_write/test.a",
-        true,
-        DetourKind::Success
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/read_only/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/write.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/local/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/opt/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(FsModeConfig::Read, "/etc/resolv.conf", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Write, "/etc/resolv.conf", true, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/etc/resolv.conf",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(FsModeConfig::Local, "/a/test.a", false, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::Local,
-        "/pain/read_write/test.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::Local,
-        "/pain/read_only/test.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(FsModeConfig::Local, "/pain/write.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Local, "/pain/local/test.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Local, "/opt/test.a", false, DetourKind::Bypass)]
-    #[case(FsModeConfig::Local, "/a/test.a", true, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::Local,
-        "/pain/read_write/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::Local,
-        "/pain/read_only/test.a",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(FsModeConfig::Local, "/pain/write.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Local, "/pain/local/test.a", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Local, "/opt/test.a", true, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::Local,
-        "/pain/not_found/test.a",
-        false,
-        DetourKind::Bypass
-    )]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/pain/not_found/test.a",
-        false,
-        DetourKind::Error
-    )]
-    #[case(FsModeConfig::Read, "/pain/not_found/test.a", false, DetourKind::Error)]
-    #[case(
-        FsModeConfig::Write,
-        "/pain/not_found/test.a",
-        false,
-        DetourKind::Error
-    )]
-    fn include_complex_configuration(
-        #[case] mode: FsModeConfig,
-        #[case] path: &str,
-        #[case] write: bool,
-        #[case] expected: DetourKind,
-    ) {
-        use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
-
-        let read_write = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_write.*\.a".to_string(),
-        ]));
-        let read_only = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_only.*\.a".to_string(),
-        ]));
-        let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
-        let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_string()));
-        let fs_config = FsConfig {
-            read_write,
-            read_only,
-            local,
-            not_found,
-            mode,
-            mapping: None,
-            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        let res = file_filter.ensure_remote(Path::new(path), write);
-        println!("filter result: {res:?}");
-        assert_eq!(res.kind(), expected);
-    }
-
-    #[rstest]
-    #[case(FsModeConfig::Read, "/etc/resolv.conf", true, DetourKind::Bypass)]
-    #[case(FsModeConfig::Write, "/etc/resolv.conf", true, DetourKind::Bypass)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/etc/resolv.conf",
-        true,
-        DetourKind::Bypass
-    )]
-    #[case(FsModeConfig::Read, "/etc/resolv.conf", false, DetourKind::Success)]
-    #[case(FsModeConfig::Write, "/etc/resolv.conf", false, DetourKind::Success)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/etc/resolv.conf",
-        false,
-        DetourKind::Success
-    )]
-    fn remote_read_only_set(
-        #[case] mode: FsModeConfig,
-        #[case] path: &str,
-        #[case] write: bool,
-        #[case] expected: DetourKind,
-    ) {
-        use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
-
-        let fs_config = FsConfig {
-            mode,
-            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-            ..Default::default()
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        let res = file_filter.ensure_remote(Path::new(path), write);
-        println!("filter result: {res:?}");
-
-        assert_eq!(res.kind(), expected);
-    }
-
-    /// Sanity test for empty [`RegexSet`] behaviour.
-    #[test]
-    fn empty_regex_set() {
-        let set = FileFilter::make_regex_set(None).unwrap();
-        assert!(!set.is_match("/path/to/some/file"));
-    }
-
-    /// Return path to the $HOME directory without trailing slash.
-    fn clean_home() -> String {
-        env::var("HOME").unwrap().trim_end_matches('/').into()
-    }
-
-    #[rstest]
-    #[case(&format!("{}/.config/gcloud/some_file", clean_home()), DetourKind::Error)]
-    #[case("/root/.config/gcloud/some_file", DetourKind::Success)]
-    #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
-    fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
-        let filter = FileFilter::new(Default::default());
-        let res = filter.ensure_remote(Path::new(path), false);
-        println!("filter result: {res:?}");
-
-        assert_eq!(res.kind(), expected);
     }
 }

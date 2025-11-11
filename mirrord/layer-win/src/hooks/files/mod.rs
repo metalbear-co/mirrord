@@ -461,8 +461,8 @@ unsafe extern "system" fn nt_create_file_hook(
             // network operation succeeded.
 
             tracing::info!(
-                "nt_create_file_hook: Failed opening remote file handle for {}",
-                linux_path
+                ?linux_path
+                "nt_create_file_hook: Failed opening remote file handle"
             );
 
             return original(
@@ -540,14 +540,14 @@ unsafe extern "system" fn nt_read_file_hook(
                 },
             ) else {
                 tracing::error!(
-                    "nt_read_file_hook: Failed seeking when reading file! (fd: {}, path: \"{}\" byte_offset: {})",
-                    handle_context.fd,
-                    handle_context.path,
-                    if byte_offset.is_null() {
+                    fd = handle_context.fd,
+                    path = handle_context.path,
+                    byte_offset = if byte_offset.is_null() {
                         "null".to_string()
                     } else {
                         (*byte_offset).QuadPart().to_string()
-                    }
+                    },
+                    "nt_read_file_hook: Failed seeking when reading file!"
                 );
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             };
@@ -595,14 +595,14 @@ unsafe extern "system" fn nt_read_file_hook(
                     return STATUS_SUCCESS;
                 } else {
                     tracing::error!(
-                        "nt_read_file_hook: Failed seeking when reading file! (handle: {}, path: \"{}\" byte_offset: {})",
-                        handle_context.fd,
-                        handle_context.path,
-                        if byte_offset.is_null() {
+                        fd = handle_context.fd,
+                        path = handle_context.path,
+                        byte_offset = if byte_offset.is_null() {
                             "null".to_string()
                         } else {
                             (*byte_offset).QuadPart().to_string()
-                        }
+                        },
+                        "nt_read_file_hook: Failed seeking when reading file!"
                     );
                     return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
@@ -763,9 +763,9 @@ unsafe extern "system" fn nt_set_information_file_hook(
                 }
                 _ => {
                     tracing::warn!(
-                        "nt_set_information_file_hook: Trying to set for file_information_class: {:?}, but it is not implemented! (file: {})",
+                        path = handle_context.path,
+                        "nt_set_information_file_hook: Trying to set for file_information_class: {:?}, but it is not implemented!",
                         file_information_class,
-                        &handle_context.path
                     );
                 }
             }
@@ -800,9 +800,9 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_set_volume_information_file_hook: Not implemented! Failling back on original! (file: {}, FSINFOCLASS: {:?})",
-                &handle_context.path,
-                fs_info_class
+                path = handle_context.path,
+                ?fs_info_class
+                "nt_set_volume_information_file_hook: Not implemented! Failling back on original!"
             );
         }
 
@@ -830,8 +830,8 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_set_quota_information_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_set_quota_information_file_hook: Not implemented! Failling back on original!"
             );
         }
 
@@ -1134,9 +1134,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
                 }
                 _ => {
                     tracing::warn!(
-                        "nt_query_information_file_hook: Trying to query for file_information_class: {:?}, but it is not implemented! (file: {})",
-                        file_information_class,
-                        handle_context.path
+                        path = handle_context.path,
+                        "nt_query_information_file_hook: Trying to query for file_information_class: {:?}, but it is not implemented!",
+                        file_information_class
                     );
                 }
             }
@@ -1165,9 +1165,9 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     unsafe {
         for_each_handle_with_path(object_attributes, |handle, handle_context| {
             tracing::warn!(
-                "nt_query_attributes_file_hook: Function not implemented! (handle: {:08x}, file: {}) ",
-                handle.0 as usize,
-                &handle_context.path
+                path = handle_context.path
+                "nt_query_attributes_file_hook: Function not implemented! (handle: {:08x})",
+                handle.0 as usize
             );
         });
 
@@ -1233,9 +1233,9 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
                 }
                 _ => {
                     tracing::warn!(
-                        "nt_query_volume_information_file_hook: Trying to query for FSINFOCLASS: {:?}, but it is not implemented! (file: {})",
-                        fs_info_class,
-                        &handle_context.path
+                        path = handle_context.path,
+                        "nt_query_volume_information_file_hook: Trying to query for FSINFOCLASS: {:?}, but it is not implemented!",
+                        fs_info_class
                     );
                 }
             }
@@ -1274,8 +1274,8 @@ unsafe extern "system" fn nt_query_quota_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_query_quota_information_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_query_quota_information_file_hook: Not implemented! Failling back on original!"
             );
         }
 
@@ -1299,9 +1299,9 @@ unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBU
     unsafe {
         for_each_handle_with_path(object_attributes, |handle, handle_context| {
             tracing::warn!(
-                "nt_delete_file_hook: Attempt to delete file that current handle ({:8x}) points to! Not implemented! Will fall back on original! (file: {})",
-                handle.0 as usize,
-                &handle_context.path
+                path = handle_context.path,
+                "nt_delete_file_hook: Attempt to delete file that current handle ({:8x}) points to! Not implemented! Will fall back on original!",
+                handle.0 as usize
             );
         });
 
@@ -1365,8 +1365,8 @@ unsafe extern "system" fn nt_lock_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_lock_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_lock_file_hook: Not implemented! Failling back on original!",
             );
         }
 
@@ -1400,8 +1400,8 @@ unsafe extern "system" fn nt_unlock_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_unlock_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_unlock_file_hook: Not implemented! Failling back on original!",
             );
         }
 
