@@ -4758,6 +4758,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bincode",
+ "chrono",
  "dll-syringe",
  "libc",
  "minhook-detours-rs",
