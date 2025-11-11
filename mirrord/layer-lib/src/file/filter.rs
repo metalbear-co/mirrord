@@ -12,6 +12,8 @@ use mirrord_config::{
 };
 use regex::{RegexSet, RegexSetBuilder};
 
+use std::path::Path;
+
 #[cfg(unix)]
 use super::unix::*;
 #[cfg(windows)]
@@ -117,6 +119,13 @@ impl FileFilter {
                     None
                 }
             }
+        }
+    }
+
+    pub fn check_not_found(&self, path: &Path) -> bool {
+        match self.check(path.to_str().unwrap_or_default()) {
+            Some(FileMode::NotFound(_)) => true,
+            _ => false
         }
     }
 }
