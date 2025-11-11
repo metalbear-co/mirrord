@@ -144,7 +144,7 @@ export const Wizard: React.FC<WizardProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={closeWizard}>
-      <DialogContent className="max-w-2xl max-h-[85vh] p-0 flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[85vh] p-0 flex flex-col">
         {/* Fixed Header */}
         <WizardHeader
           title={currentStepData.title}

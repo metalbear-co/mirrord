@@ -13,6 +13,7 @@ import {
   ToggleableConfigFor_IncomingFileConfig,
 } from "@/mirrord-schema";
 import { DefaultConfig } from "./UserDataContext";
+import { FoldHorizontal } from "lucide-react";
 
 // These functions are utils to interact with the current config.
 // The config type `LayerFileConfig` is generated from the mirrord schema file, as are all
@@ -24,6 +25,8 @@ import { DefaultConfig } from "./UserDataContext";
 //
 // *NOTE* that functions of the latter type DO NOT update the config directly, they return a new
 // `LayerFileConfig` which must be set _by the caller_.
+
+// ===== BOILERPLATE: MODE AND COPY TARGET =====
 
 // Infer the selected boilerplate type (or `custom` if the config has been changed manually)
 // from config state.
@@ -54,247 +57,7 @@ export const readBoilerplateType = (
   return "custom";
 };
 
-const getTargetDetails = (
-  target: Target | any
-): { type: string; name?: string } => {
-  if (target === "targetless") {
-    return { type: "targetless" };
-  }
-  if (typeof target === "string") {
-    const nameParts = target.split("/");
-    if (nameParts.length < 2) {
-      return { type: "targetless" };
-    } else {
-      return { type: nameParts[0], name: nameParts[1] };
-    }
-  }
-  if ("deployment" in target) {
-    return { type: "deployment", name: target.deployment };
-  }
-  if ("pod" in target) {
-    return { type: "pod", name: target.pod };
-  }
-  if ("rollout" in target) {
-    return { type: "rollout", name: target.rollout };
-  }
-  if ("job" in target) {
-    return { type: "job", name: target.job };
-  }
-  if ("cron_job" in target) {
-    return { type: "cron_job", name: target.cron_job };
-  }
-  if ("stateful_set" in target) {
-    return { type: "stateful_set", name: target.stateful_set };
-  }
-  if ("service" in target) {
-    return { type: "service", name: target.service };
-  }
-  if ("replica_set" in target) {
-    return { type: "replica_set", name: target.replica_set };
-  }
-  return { type: "targetless" };
-};
-
-// Return the type and name of the target currently set in the given config.
-export const readCurrentTargetDetails = (
-  config: LayerFileConfig
-): { type: string; name?: string } => {
-  const target = config.target;
-  if (typeof target === "string") {
-    const nameParts = target.split("/");
-    if (nameParts.length < 2) {
-      return { type: "targetless" };
-    } else {
-      return { type: nameParts[0], name: nameParts[1] };
-    }
-  } else if (!target) {
-    return { type: "targetless" };
-  } else if (typeof target === "object") {
-    if ("path" in target) {
-      return getTargetDetails(target.path);
-    } else {
-      return getTargetDetails(target);
-    }
-  }
-};
-
-export interface UiHttpFilter {
-  value: string;
-  type: "header" | "path";
-  matching: "regex" | "exact";
-}
-
-// Return the filters currently set in the given config, as well as the operator used to
-// combine them ("any", "all" or null).
-// Instead of using the generated type `InnerFilter`, return a list of strings for header and path.
-export const readCurrentFilters = (
-  config: LayerFileConfig
-): {
-  filters: UiHttpFilter[];
-  operator: "any" | "all" | null;
-} => {
-  let filters: UiHttpFilter[] = [];
-  let operator = null;
-
-  if (
-    typeof config.feature?.network === "object" &&
-    typeof config.feature?.network.incoming === "object" &&
-    typeof config.feature?.network.incoming.http_filter === "object" &&
-    config.feature?.network.incoming.http_filter
-  ) {
-    const filterConfig = config.feature?.network.incoming.http_filter;
-    // As soon as filters get stored in real config, exact match filters get converted to regex
-    const matching: "regex" | "exact" = "regex";
-
-    if (filterConfig.header_filter) {
-      // single header filter
-      filters = [
-        {
-          value: filterConfig.header_filter,
-          type: "header",
-          matching: matching,
-        },
-      ];
-    } else if (filterConfig.path_filter) {
-      // single path filter
-      filters = [
-        { value: filterConfig.path_filter, type: "path", matching: matching },
-      ];
-    } else if (filterConfig.all_of) {
-      // multiple filters
-      operator = "all";
-      filters = filterConfig.all_of?.map((filter) => {
-        let value: string;
-        let filterType: "header" | "path";
-        if ("header" in filter) {
-          filterType = "header";
-          if (typeof filter.header === "string") value = filter.header;
-        } else if ("path" in filter) {
-          filterType = "path";
-          if (typeof filter.path === "string") value = filter.path;
-        }
-        if (filterType && value) {
-          return { value: value, type: filterType, matching: matching };
-        }
-      });
-    } else if (filterConfig.any_of) {
-      // multiple filters
-      operator = "any";
-      filters = filterConfig.any_of?.map((filter) => {
-        let value: string;
-        let filterType: "header" | "path";
-        if ("header" in filter) {
-          filterType = "header";
-          if (typeof filter.header === "string") value = filter.header;
-          else value = "";
-        } else if ("path" in filter) {
-          filterType = "path";
-          if (typeof filter.path === "string") value = filter.path;
-          else value = "";
-        }
-        if (filterType && value) {
-          return { value: value, type: filterType, matching: matching };
-        }
-      });
-    }
-    filters = filters.filter((filter) => filter.value.length > 0);
-  }
-  return { filters, operator };
-};
-
-// Return the ports currently set to remote from `incoming.ports`.
-// Separate and distinct from `incoming.port_mapping`.
-export const readCurrentPorts = (config: LayerFileConfig): number[] => {
-  if (
-    typeof config.feature?.network === "object" &&
-    typeof config.feature?.network.incoming === "object" &&
-    config.feature?.network.incoming.ports
-  ) {
-    return config.feature?.network.incoming.ports;
-  }
-
-  return [];
-};
-
-export const readCurrentPortMapping = (
-  config: LayerFileConfig
-): PortMapping => {
-  if (
-    typeof config.feature?.network === "object" &&
-    typeof config.feature?.network.incoming === "object" &&
-    config.feature?.network.incoming.port_mapping
-  ) {
-    return config.feature?.network.incoming.port_mapping;
-  }
-
-  return [];
-};
-
-export const readIncoming = (
-  config: LayerFileConfig
-): ToggleableConfigFor_IncomingFileConfig => {
-  if (typeof config.feature?.network === "object") {
-    return config.feature?.network.incoming;
-  }
-
-  return false;
-};
-
-export const updateIncoming = (
-  config: LayerFileConfig,
-  newIncoming: ToggleableConfigFor_IncomingFileConfig
-) => {
-  if (typeof config !== "object") {
-    throw "config badly formed";
-  }
-
-  // If config is not in the right shape, insert from default config
-  if (!("feature" in config) || typeof config.feature !== "object") {
-    config.feature = DefaultConfig.feature;
-  }
-
-  if (
-    !("network" in config.feature) ||
-    typeof config.feature.network !== "object"
-  ) {
-    config.feature.network = DefaultConfig.feature.network as NetworkFileConfig;
-  }
-
-  const newConfig = {
-    ...config,
-    feature: {
-      ...config.feature,
-      network: {
-        ...config.feature.network,
-        incoming: newIncoming,
-      },
-    },
-  };
-
-  return newConfig;
-};
-
-// Returns an updated config with new config.target according to parameters.
-export const updateConfigTarget = (
-  config: LayerFileConfig,
-  target: string,
-  targetNamespace: string
-) => {
-  const newTarget = {
-    path: target,
-    namespace: targetNamespace,
-  };
-
-  // overwrite target
-  const newConfig = {
-    ...config,
-    target: newTarget,
-  };
-
-  return newConfig;
-};
-
-// Returns an updated config with new config.feature.network.incoming.mode according to parameters.
+// Return an updated config with updated incoming.mode.
 export const updateConfigMode = (
   mode: "mirror" | "steal",
   config: LayerFileConfig
@@ -363,7 +126,7 @@ export const updateConfigMode = (
   return newConfig;
 };
 
-// Returns an updated config with new config.feature.network.incoming.mode according to parameters.
+// Return an updated config with updated feature.copy_target.
 export const updateConfigCopyTarget = (
   copy_target: boolean,
   scale_down: boolean,
@@ -393,7 +156,229 @@ export const updateConfigCopyTarget = (
   return newConfig;
 };
 
-// Sets filters to null
+// ===== TARGET =====
+
+// Extract the (resource) type and name of a target from the generated Target type
+const getTargetDetails = (
+  target: Target | any
+): { type: string; name?: string } => {
+  if (target === "targetless") {
+    return { type: "targetless" };
+  }
+  if (typeof target === "string") {
+    const nameParts = target.split("/");
+    if (nameParts.length < 2) {
+      return { type: "targetless" };
+    } else {
+      return { type: nameParts[0], name: nameParts[1] };
+    }
+  }
+  if ("deployment" in target) {
+    return { type: "deployment", name: target.deployment };
+  }
+  if ("pod" in target) {
+    return { type: "pod", name: target.pod };
+  }
+  if ("rollout" in target) {
+    return { type: "rollout", name: target.rollout };
+  }
+  if ("job" in target) {
+    return { type: "job", name: target.job };
+  }
+  if ("cron_job" in target) {
+    return { type: "cron_job", name: target.cron_job };
+  }
+  if ("stateful_set" in target) {
+    return { type: "stateful_set", name: target.stateful_set };
+  }
+  if ("service" in target) {
+    return { type: "service", name: target.service };
+  }
+  if ("replica_set" in target) {
+    return { type: "replica_set", name: target.replica_set };
+  }
+  return { type: "targetless" };
+};
+
+// Return the type and name of the target currently set in the given config.
+export const readCurrentTargetDetails = (
+  config: LayerFileConfig
+): { type: string; name?: string } => {
+  const target = config.target;
+  if (typeof target === "string") {
+    const nameParts = target.split("/");
+    if (nameParts.length < 2) {
+      return { type: "targetless" };
+    } else {
+      return { type: nameParts[0], name: nameParts[1] };
+    }
+  } else if (!target) {
+    return { type: "targetless" };
+  } else if (typeof target === "object") {
+    if ("path" in target) {
+      return getTargetDetails(target.path);
+    } else {
+      return getTargetDetails(target);
+    }
+  }
+};
+
+// Return an updated config with updated config.target.
+export const updateConfigTarget = (
+  config: LayerFileConfig,
+  target: string,
+  targetNamespace: string
+) => {
+  const newTarget = {
+    path: target,
+    namespace: targetNamespace,
+  };
+
+  // overwrite target
+  const newConfig = {
+    ...config,
+    target: newTarget,
+  };
+
+  return newConfig;
+};
+
+// ===== INCOMING NETWORK =====
+
+// Return the entire `network.incoming` section of config.
+export const readIncoming = (
+  config: LayerFileConfig
+): ToggleableConfigFor_IncomingFileConfig => {
+  if (typeof config.feature?.network === "object") {
+    return config.feature?.network.incoming;
+  }
+
+  return false;
+};
+
+// set the entire `network.incoming` section of config.
+export const updateIncoming = (
+  config: LayerFileConfig,
+  newIncoming: ToggleableConfigFor_IncomingFileConfig
+) => {
+  if (typeof config !== "object") {
+    throw "config badly formed";
+  }
+
+  // If config is not in the right shape, insert from default config
+  if (!("feature" in config) || typeof config.feature !== "object") {
+    config.feature = DefaultConfig.feature;
+  }
+
+  if (
+    !("network" in config.feature) ||
+    typeof config.feature.network !== "object"
+  ) {
+    config.feature.network = DefaultConfig.feature.network as NetworkFileConfig;
+  }
+
+  const newConfig = {
+    ...config,
+    feature: {
+      ...config.feature,
+      network: {
+        ...config.feature.network,
+        incoming: newIncoming,
+      },
+    },
+  };
+
+  return newConfig;
+};
+
+// ===== FILTERS =====
+
+// A helpful type for handling filters in the UI to avoid using the generated type.
+// IMPORTANT: NEVER STORE EXACT MATCH FILTERS IN CONFIG, always convert them first
+export interface UiHttpFilter {
+  value: string;
+  type: "header" | "path";
+}
+
+// Return the filters currently set in the given config, as well as the operator used to
+// combine them ("any", "all" or null).
+// Instead of using the generated type `InnerFilter`, uses `UiHttpFilter`.
+export const readCurrentFilters = (
+  config: LayerFileConfig
+): {
+  filters: UiHttpFilter[];
+  operator: "any" | "all" | null;
+} => {
+  let filters: UiHttpFilter[] = [];
+  let operator = null;
+
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object" &&
+    typeof config.feature?.network.incoming.http_filter === "object" &&
+    config.feature?.network.incoming.http_filter
+  ) {
+    const filterConfig = config.feature?.network.incoming.http_filter;
+
+    if ("header" in filterConfig && typeof filterConfig.header === "string") {
+      // single header filter
+      filters = [
+        {
+          value: filterConfig.header,
+          type: "header"
+        },
+      ];
+    } else if (
+      "path" in filterConfig &&
+      typeof filterConfig.path === "string"
+    ) {
+      // single path filter
+      filters = [
+        { value: filterConfig.path, type: "path" },
+      ];
+    } else if ("all_of" in filterConfig) {
+      // multiple filters
+      operator = "all";
+      filters = filterConfig.all_of?.map((filter) => {
+        let value: string;
+        let filterType: "header" | "path";
+        if ("header" in filter) {
+          filterType = "header";
+          if (typeof filter.header === "string") value = filter.header;
+        } else if ("path" in filter) {
+          filterType = "path";
+          if (typeof filter.path === "string") value = filter.path;
+        }
+        if (filterType && value) {
+          return { value: value, type: filterType };
+        }
+      });
+    } else if ("any_of" in filterConfig) {
+      // multiple filters
+      operator = "any";
+      filters = filterConfig.any_of?.map((filter) => {
+        let value: string;
+        let filterType: "header" | "path";
+        if ("header" in filter) {
+          filterType = "header";
+          if (typeof filter.header === "string") value = filter.header;
+          else value = "";
+        } else if ("path" in filter) {
+          filterType = "path";
+          if (typeof filter.path === "string") value = filter.path;
+          else value = "";
+        }
+        if (filterType && value) {
+          return { value: value, type: filterType };
+        }
+      });
+    }
+    filters = filters.filter((filter) => filter.value?.length > 0);
+  }
+  return { filters, operator };
+};
+
+// Return an updated config with filters set to null.
 export const disableConfigFilter = (config: LayerFileConfig) => {
   if (
     typeof config.feature?.network === "object" &&
@@ -404,7 +389,7 @@ export const disableConfigFilter = (config: LayerFileConfig) => {
   return config;
 };
 
-// Returns an updated config with new config.feature.network.filter according to parameters.
+// Return an updated config with updated incoming.http_filter.
 export const updateConfigFilter = (
   filters: UiHttpFilter[],
   operator: "any" | "all" | null,
@@ -443,51 +428,31 @@ export const updateConfigFilter = (
     }
   }
 
-  // First, check every filter and turn all exact filters into corresponding regex, then switch matching to regex
-  const regexFilters: UiHttpFilter[] = filters.map(
-    ({ value: value, type: type, matching: matching }) => {
-      // if match type is "exact", convert value into regex equivalent
-      if (matching === "exact") {
-        // escape special characters and add anchors
-        const newValue = "/^" + value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$/";
-        return { value: newValue, type, matching: "regex" };
-      } else {
-        return { value, type, matching };
-      }
-    }
-  );
-
   // create new value for config.feature.network.incoming.http_filter
   let http_filter: HTTPFilter;
-  if (regexFilters.length === 0) {
+  if (filters.length === 0) {
     // filters config toggled on, but no filters set
     http_filter = null;
-  } else if (regexFilters.length === 1) {
+  } else if (filters.length === 1) {
     // single filter, ignore operator
-    const filter = regexFilters[0];
-    if ("header" in filter) {
-      http_filter = { header: filter.header } as any;
-    } else if ("path" in filter) {
-      http_filter = { path: filter.path } as any;
+    const filter = filters[0];
+    if (filter.type === "header") {
+      http_filter = { header: filter.value } as any;
+    } else if (filter.type === "path") {
+      http_filter = { path: filter.value } as any;
     } else {
       http_filter = null;
     }
   } else {
     switch (operator) {
       case null:
-        // only valid operator=null situation is single or no filter - something went wrong if this case is hit
-        console.log(
-          "Unexpected filter configuration: operator cannot be null for multiple filters"
-        );
-        http_filter = null;
-        break;
       case "any":
         http_filter = {
-          any_of: regexFilters.map((filter) => {
-            if ("header" in filter) {
-              return { header: filter.header } as any;
-            } else if ("path" in filter) {
-              return { path: filter.path } as any;
+          any_of: filters.map((filter) => {
+            if (filter.type === "header") {
+              return { header: filter.value } as any;
+            } else if (filter.type === "path") {
+              return { path: filter.value } as any;
             } else {
               return;
             }
@@ -496,11 +461,11 @@ export const updateConfigFilter = (
         break;
       case "all":
         http_filter = {
-          all_of: regexFilters.map((filter) => {
-            if ("header" in filter) {
-              return { header: filter.header } as any;
-            } else if ("path" in filter) {
-              return { path: filter.path } as any;
+          all_of: filters.map((filter) => {
+            if (filter.type === "header") {
+              return { header: filter.value } as any;
+            } else if (filter.type === "path") {
+              return { path: filter.value } as any;
             } else {
               return;
             }
@@ -509,6 +474,9 @@ export const updateConfigFilter = (
         break;
     }
   }
+
+  // FIX: dont merge this!! debugging only
+  console.log(http_filter);
 
   // overwrite filter
   const newConfig = {
@@ -528,7 +496,61 @@ export const updateConfigFilter = (
   return newConfig;
 };
 
-// Sets ports and port_mapping to null
+export const updateSingleFilter = (
+  oldFilter: UiHttpFilter,
+  updatedFilter: UiHttpFilter,
+  config: LayerFileConfig) : LayerFileConfig => {
+  const {filters, operator} = readCurrentFilters(config)
+  const newFilters = filters.filter((filter) => filter.type != oldFilter.type && filter.value != oldFilter.value).concat([updatedFilter]);
+
+  return updateConfigFilter(newFilters, operator, config);
+};
+
+export const removeSingleFilter = (
+  removedFilter: UiHttpFilter,
+  config: LayerFileConfig) : LayerFileConfig => {
+  const {filters, operator} = readCurrentFilters(config)
+  const newFilters = filters.filter((filter) => filter.type != removedFilter.type && filter.value != removedFilter.value);
+
+  return updateConfigFilter(newFilters, operator, config);
+};
+
+// Return the regex expression for an exact match of the given string value.
+export const regexificationRay = (value: string) =>
+  "/^" + value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$/";
+
+// ===== PORTS AND PORT MAPPING(S) =====
+
+// Return the ports currently set to remote from `incoming.ports`.
+// Separate and distinct from `incoming.port_mapping`.
+export const readCurrentPorts = (config: LayerFileConfig): number[] => {
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object" &&
+    config.feature?.network.incoming.ports
+  ) {
+    return config.feature?.network.incoming.ports;
+  }
+
+  return [];
+};
+
+// Return the port maps currently set in `incoming.port_mapping`.
+export const readCurrentPortMapping = (
+  config: LayerFileConfig
+): PortMapping => {
+  if (
+    typeof config.feature?.network === "object" &&
+    typeof config.feature?.network.incoming === "object" &&
+    config.feature?.network.incoming.port_mapping
+  ) {
+    return config.feature?.network.incoming.port_mapping;
+  }
+
+  return [];
+};
+
+// Return an updated config with ports and port_mapping set to null.
 export const disablePortsAndMapping = (config: LayerFileConfig) => {
   if (
     typeof config.feature?.network === "object" &&
@@ -540,6 +562,7 @@ export const disablePortsAndMapping = (config: LayerFileConfig) => {
   return config;
 };
 
+// Return an updated config with updated incoming.ports.
 export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
   if (typeof config !== "object") {
     throw "config badly formed";
@@ -600,8 +623,7 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
   return newConfig;
 };
 
-// Returns an updated config with new config.feature.network.incoming.port_mapping according
-// to parameters.
+// Return an updated config with updated incoming.port_mapping.
 export const updateConfigPortMapping = (
   portMappings: PortMapping,
   config: LayerFileConfig
@@ -664,6 +686,98 @@ export const updateConfigPortMapping = (
 
   return newConfig;
 };
+
+// Return an updated config with the given port mapping applied:
+// If a mapping does not exist for the remote port, create one. Otherwise, remove or update the
+// mapping according to the local port.
+export const addRemoveOrUpdateMapping = (
+  remotePort: number,
+  localPort: number,
+  config: LayerFileConfig
+) => {
+  const existingMappings = readCurrentPortMapping(config);
+  const existingMapping = existingMappings.find(
+    ([_local, remote]) => remote === remotePort
+  );
+
+  if (existingMapping) {
+    // a mapping exists for this remote, so replace or remove it
+    const newMappings = existingMappings.filter(
+      (mapping) => mapping != existingMapping
+    );
+    if (remotePort === localPort) {
+      // remove existing mapping only
+      return updateConfigPortMapping(newMappings, config);
+    } else {
+      // add new mapping
+      return updateConfigPortMapping(
+        newMappings.concat([[localPort, remotePort]]),
+        config
+      );
+    }
+  } else {
+    if (remotePort === localPort) {
+      // no mapping exists, no mapping should exist: do nothing
+      return config;
+    } else {
+      // add new mapping
+      return updateConfigPortMapping(
+        existingMappings.concat([[localPort, remotePort]]),
+        config
+      );
+    }
+  }
+};
+
+// Read mapping for given remote port if it exists and return the local port, otherwise return
+// remote port.
+export const getLocalPort = (
+  remotePort: number,
+  config: LayerFileConfig
+): number => {
+  const existingMapping = readCurrentPortMapping(config).filter(
+    ([_local, remote]) => remote === remotePort
+  );
+  if (existingMapping.length > 0) {
+    return existingMapping[0][0];
+  } else {
+    return remotePort;
+  }
+};
+
+// Return an updated config with the remote port removed from incoming.ports and its associated
+// mapping removed from incoming.port_mapping (if it exists) from config.
+export const removePortandMapping = (
+  remotePort: number,
+  config: LayerFileConfig
+): LayerFileConfig => {
+  // remove port
+  const ports = readCurrentPorts(config);
+  if (ports.includes(remotePort)) {
+    // remove the mapping _before_ removing the port, if there is one
+    const newPorts = ports.filter((port) => port != remotePort);
+
+    // remove mapping
+    const oldMapping = readCurrentPortMapping(config);
+    const matchingMapping = oldMapping.find(
+      ([_local, remote]) => remote === remotePort
+    );
+
+    let halfConfig = config;
+    if (matchingMapping) {
+      const newMapping = oldMapping.filter(
+        (mapping) => mapping != matchingMapping
+      );
+      halfConfig = updateConfigPortMapping(newMapping, config);
+    }
+
+    return updateConfigPorts(newPorts, halfConfig);
+  } else {
+    return config;
+  }
+};
+
+// ===== JSON HANDLING =====
 
 // Update config from user's text box input, if and only if it passes validation.
 export const updateConfigFromJson = (

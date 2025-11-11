@@ -484,9 +484,9 @@ const learningStep6Returning: WizardStep = {
             during development.
           </p>
 
-          <div className="bg-background border border-border rounded-lg p-2 mb-4">
+          <div className="bg-background border border-border rounded-lg mb-4">
             <img
-              src="/lovable-uploads/0514df82-cea8-46c8-bfb5-05db3e6778e2.png"
+              src="/src/assets/mirrord-logo.png"
               alt="Development Feedback Loop with mirrord"
               className="w-full max-w-full mx-auto rounded"
             />
