@@ -78,7 +78,7 @@ fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<(
                 if file_filter.mode == FsModeConfig::Write {
                     Detour::Bypass(Bypass::ReadOnly(text.into()))
                 } else {
-                    Detour::Success(())
+                    Detour::Bypass(Bypass::ignored_file(text))
                 }
             } else {
                 Detour::Success(())
