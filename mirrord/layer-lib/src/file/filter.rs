@@ -123,10 +123,10 @@ impl FileFilter {
     }
 
     pub fn check_not_found(&self, path: &Path) -> bool {
-        match self.check(path.to_str().unwrap_or_default()) {
-            Some(FileMode::NotFound(_)) => true,
-            _ => false,
-        }
+        matches!(
+            self.check(path.to_str().unwrap_or_default()),
+            Some(FileMode::NotFound(_))
+        )
     }
 }
 
