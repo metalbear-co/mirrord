@@ -41,7 +41,7 @@ use crate::{
 };
 
 use mirrord_config::feature::fs::FsModeConfig;
-use mirrord_layer_lib::file::filter::FileMode;
+use mirrord_layer_lib::file::filter::{FileFilter, FileMode};
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
@@ -63,9 +63,8 @@ impl PathExt for Path {
 }
 
 /// Checks whether the given [`Path`] should be accessed remotely.
-fn ensure_remote(path: &Path, write: bool) -> Detour<()> {
+fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<()> {
     let text = path.to_str().unwrap_or_default();
-    let file_filter = crate::setup().file_filter();
 
     match file_filter.check(text) {
         Some(FileMode::Local(_default)) => {
@@ -105,7 +104,7 @@ fn ensure_remote(path: &Path, write: bool) -> Detour<()> {
 fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
     path.ensure_not_relative()?;
     let path = crate::setup().file_remapper().change_path(path);
-    ensure_remote(&path, write)?;
+    ensure_remote(crate::setup().file_filter(), &path, write)?;
     Detour::Success(path)
 }
 
@@ -462,7 +461,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 
     if path.is_absolute() {
         path = crate::setup().file_remapper().change_path(path);
-        ensure_remote(&path, true)?;
+        ensure_remote(crate::setup().file_filter(), &path, true)?;
     }
 
     let unlink = if path.is_absolute() || dirfd == AT_FDCWD {
@@ -597,7 +596,7 @@ pub(crate) fn xstat(
                     None
                 } else if path.is_absolute() {
                     path = crate::setup().file_remapper().change_path(path);
-                    ensure_remote(&path, true)?;
+                    ensure_remote(crate::setup().file_filter(), &path, true)?;
                     None
                 } else {
                     Some(get_remote_fd(fd)?)
@@ -1143,7 +1142,7 @@ mod test {
 
         let file_filter = FileFilter::new(fs_config);
 
-        let res = file_filter.ensure_remote(Path::new(path), write);
+        let res = ensure_remote(&file_filter, Path::new(path), write);
         println!("filter result: {res:?}");
         assert_eq!(res.kind(), expected);
     }
@@ -1181,7 +1180,7 @@ mod test {
 
         let file_filter = FileFilter::new(fs_config);
 
-        let res = file_filter.ensure_remote(Path::new(path), write);
+        let res = ensure_remote(&file_filter, Path::new(path), write);
         println!("filter result: {res:?}");
 
         assert_eq!(res.kind(), expected);
@@ -1205,7 +1204,7 @@ mod test {
     #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
         let filter = FileFilter::new(Default::default());
-        let res = filter.ensure_remote(Path::new(path), false);
+        let res = ensure_remote(&filter, Path::new(path), false);
         println!("filter result: {res:?}");
 
         assert_eq!(res.kind(), expected);

@@ -319,7 +319,7 @@ unsafe extern "system" fn nt_create_file_hook(
         // see how it collides with desired_access.
         let matched_filter = filter.check(&linux_path);
         match matched_filter {
-            Some(FileMode::Local) => {
+            Some(FileMode::Local(_)) => {
                 return original(
                     file_handle,
                     desired_access,
@@ -334,13 +334,13 @@ unsafe extern "system" fn nt_create_file_hook(
                     ea_size,
                 );
             }
-            Some(FileMode::NotFound) => {
+            Some(FileMode::NotFound(_)) => {
                 *file_handle = std::ptr::null_mut();
                 *io_status_block = _IO_STATUS_BLOCK::default();
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
             // TODO(gabriela): edit when supported!
-            Some(FileMode::ReadOnly) | Some(FileMode::ReadWrite) | None => {
+            Some(FileMode::ReadOnly(_)) | Some(FileMode::ReadWrite(_)) | None => {
                 if desired_access & FILE_WRITE_DATA != 0
                     || desired_access & FILE_APPEND_DATA != 0
                     || desired_access & GENERIC_WRITE != 0
@@ -461,7 +461,7 @@ unsafe extern "system" fn nt_create_file_hook(
             // network operation succeeded.
 
             tracing::info!(
-                ?linux_path
+                ?linux_path,
                 "nt_create_file_hook: Failed opening remote file handle"
             );
 
@@ -801,7 +801,7 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
         {
             tracing::warn!(
                 path = handle_context.path,
-                ?fs_info_class
+                ?fs_info_class,
                 "nt_set_volume_information_file_hook: Not implemented! Failling back on original!"
             );
         }
@@ -1165,7 +1165,7 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     unsafe {
         for_each_handle_with_path(object_attributes, |handle, handle_context| {
             tracing::warn!(
-                path = handle_context.path
+                path = handle_context.path,
                 "nt_query_attributes_file_hook: Function not implemented! (handle: {:08x})",
                 handle.0 as usize
             );

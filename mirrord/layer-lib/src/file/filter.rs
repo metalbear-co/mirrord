@@ -50,7 +50,7 @@ pub struct FileFilter {
 }
 
 impl FileFilter {
-    fn make_regex_set(patterns: Option<VecOrSingle<String>>) -> Result<RegexSet, regex::Error> {
+    pub fn make_regex_set(patterns: Option<VecOrSingle<String>>) -> Result<RegexSet, regex::Error> {
         RegexSetBuilder::new(patterns.as_deref().map(<[_]>::to_vec).unwrap_or_default())
             .case_insensitive(true)
             .build()
