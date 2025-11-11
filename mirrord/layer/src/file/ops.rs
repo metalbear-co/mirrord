@@ -16,6 +16,8 @@ use std::{
 use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
+use mirrord_config::feature::fs::FsModeConfig;
+use mirrord_layer_lib::file::filter::{FileFilter, FileMode};
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
@@ -39,9 +41,6 @@ use crate::{
     detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
 };
-
-use mirrord_config::feature::fs::FsModeConfig;
-use mirrord_layer_lib::file::filter::{FileFilter, FileMode};
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
@@ -67,12 +66,8 @@ fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<(
     let text = path.to_str().unwrap_or_default();
 
     match file_filter.check(text) {
-        Some(FileMode::Local(_default)) => {
-            Detour::Bypass(Bypass::ignored_file(text))
-        },
-        Some(FileMode::NotFound(_default)) => {
-            Detour::Error(HookError::FileNotFound)
-        },
+        Some(FileMode::Local(_default)) => Detour::Bypass(Bypass::ignored_file(text)),
+        Some(FileMode::NotFound(_default)) => Detour::Error(HookError::FileNotFound),
         Some(FileMode::ReadOnly(_default)) => {
             if write {
                 if file_filter.mode == FsModeConfig::Write {
@@ -83,13 +78,9 @@ fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<(
             } else {
                 Detour::Success(())
             }
-        },
-        Some(FileMode::ReadWrite(_default)) => {
-            Detour::Success(())
-        },
-        None => {
-            Detour::Success(())
         }
+        Some(FileMode::ReadWrite(_default)) => Detour::Success(()),
+        None => Detour::Success(()),
     }
 }
 
@@ -881,13 +872,12 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
+
     use mirrord_config::{feature::fs::FsConfig, util::VecOrSingle};
     use rstest::*;
 
-    use super::*;
+    use super::{absolute_path, *};
     use crate::detour::Detour;
-
-    use super::absolute_path;
     #[test]
     fn test_absolute_normal() {
         assert_eq!(

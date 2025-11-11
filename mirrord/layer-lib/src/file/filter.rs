@@ -13,7 +13,6 @@ use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
     util::VecOrSingle,
 };
-
 use regex::{RegexSet, RegexSetBuilder};
 
 #[cfg(unix)]
