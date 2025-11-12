@@ -1,1 +1,0 @@
-`incoming.listen_ports` mappings now always apply, regardless of whether the port is stolen or not.

@@ -3,7 +3,6 @@ use std::{
     net::SocketAddr,
 };
 
-use futures::future::Either;
 use mirrord_intproxy_protocol::{
     IncomingResponse, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
 };
@@ -195,7 +194,7 @@ impl SubscriptionsManager {
         message_id: MessageId,
         request: PortSubscribe,
         protocol_version: Option<&Version>,
-    ) -> Option<Either<ProxyMessage, ClientMessage>> {
+    ) -> Option<ProxyMessage> {
         self.remote_ports.add(
             layer_id,
             (request.subscription.port(), request.listening_on),
@@ -209,14 +208,11 @@ impl SubscriptionsManager {
         };
 
         match self.subscriptions.entry(port) {
-            Entry::Occupied(mut e) => e
-                .get_mut()
-                .push_source(source)
-                .map(|m| Either::Left(ProxyMessage::ToLayer(m))),
+            Entry::Occupied(mut e) => e.get_mut().push_source(source).map(ProxyMessage::ToLayer),
             Entry::Vacant(e) => {
                 let (subscription, message) = Subscription::new(source, protocol_version);
                 e.insert(subscription);
-                Some(Either::Right(message))
+                Some(ProxyMessage::ToAgent(message))
             }
         }
     }
@@ -361,9 +357,9 @@ mod test {
         assert!(
             matches!(
                 response,
-                Some(Either::Right(ClientMessage::Tcp(LayerTcp::PortSubscribe(
-                    80
-                ))))
+                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
+                    LayerTcp::PortSubscribe(80)
+                )))
             ),
             "{response:?}"
         );
@@ -442,9 +438,9 @@ mod test {
         assert!(
             matches!(
                 response,
-                Some(Either::Right(ClientMessage::Tcp(LayerTcp::PortSubscribe(
-                    80
-                ))))
+                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
+                    LayerTcp::PortSubscribe(80)
+                )))
             ),
             "{response:?}"
         );
@@ -509,9 +505,9 @@ mod test {
         assert!(
             matches!(
                 response,
-                Some(Either::Right(ClientMessage::Tcp(LayerTcp::PortSubscribe(
-                    80
-                ))))
+                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
+                    LayerTcp::PortSubscribe(80)
+                )))
             ),
             "{response:?}"
         );
