@@ -120,17 +120,12 @@ fn type_of(nodes: NodesType) -> ValueType {
 
     let mut iter = nodes.iter();
 
-    tracing::error!(?nodes, "lol");
-
     let first_type = match iter.next() {
         Some(first) => Types::from(*first),
         None => return ValueType::Nothing,
     };
 
-    tracing::error!(%first_type, "not undefined");
-
     for v in iter {
-        tracing::error!(?v, "json match");
         if Types::from(*v) != first_type {
             return ValueType::Nothing;
         }
