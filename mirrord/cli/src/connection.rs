@@ -110,7 +110,7 @@ where
             layer_config,
             &session_subtask,
             branch_name,
-            mirrord_for_ci.map(|ci| ci.info(target)),
+            mirrord_for_ci.map(MirrordCi::info),
         )
         .await?;
     session_subtask.success(Some("session started"));

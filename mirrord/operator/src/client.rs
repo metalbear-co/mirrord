@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use connect_params::ConnectParams;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use futures::{SinkExt, StreamExt, future::Either};
-use http::{HeaderMap, HeaderName, HeaderValue, request::Request};
+use http::{HeaderName, HeaderValue, request::Request};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},

@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     env::{self, temp_dir},
     fs::File,
-    hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     process::Stdio,
     time::SystemTime,
@@ -14,7 +13,6 @@ use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
-use mirrord_kube::resolved::ResolvedTarget;
 use mirrord_operator::{MirrordCiInfo, client::OperatorApi};
 use mirrord_progress::{Progress, ProgressTracker};
 use rand::distr::{Alphanumeric, SampleString};
@@ -290,7 +288,7 @@ impl MirrordCi {
         MirrordCiStore::remove_file().await
     }
 
-    pub(super) fn info(&self, target: ResolvedTarget<false>) -> MirrordCiInfo {
+    pub(super) fn info(&self) -> MirrordCiInfo {
         let CiInfo {
             vendor: _,
             name,
@@ -299,20 +297,9 @@ impl MirrordCi {
             branch_name,
         } = ci_info::get();
 
-        let mut hasher = DefaultHasher::new();
-
         MirrordCiInfo {
             vendor: name,
-            target: {
-                target.to_string().hash(&mut hasher);
-                hasher.finish()
-            },
-            branch_name: {
-                branch_name.map(|name| {
-                    name.hash(&mut hasher);
-                    hasher.finish()
-                })
-            },
+            branch_name,
         }
     }
 }
