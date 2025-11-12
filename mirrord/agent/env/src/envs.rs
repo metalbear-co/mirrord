@@ -84,9 +84,9 @@ pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL")
 /// responses that went through the agent.
 pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJECT_HEADERS");
 
-/// Sets the max size for bodies buffered for body filters.
+/// Sets the max size (in bytes) for bodies buffered for body filters.
 pub const MAX_BODY_BUFFER_SIZE: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_SIZE");
 
-/// Sets how long to wait to receive the entire body for body filters.
+/// Sets how long to wait (in milliseconds) to receive the entire body for body filters.
 pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
     CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_TIMEOUT");
