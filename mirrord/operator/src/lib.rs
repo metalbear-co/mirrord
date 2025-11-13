@@ -6,6 +6,7 @@
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[cfg(feature = "client")]
 pub mod client;
@@ -29,6 +30,7 @@ pub enum CiTrigger {
 // TODO(alex) [mid] 6: Move this to /operator/crd/session, probably.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 pub struct MirrordCiInfo {
+    pub controller_uid: Option<Uuid>,
     pub vendor: Option<String>,
     pub branch_name: Option<String>,
 }

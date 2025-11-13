@@ -36,7 +36,6 @@ pub struct MirrordClusterSessionSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<SessionTarget>,
 
-    pub operator_uid: String,
     pub ci_info: Option<MirrordCiInfo>,
 }
 

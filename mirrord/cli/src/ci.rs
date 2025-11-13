@@ -300,6 +300,7 @@ impl MirrordCi {
         MirrordCiInfo {
             vendor: name,
             branch_name,
+            controller_uid: None,
         }
     }
 }
