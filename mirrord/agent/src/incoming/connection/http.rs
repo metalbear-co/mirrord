@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     fmt::{self, Debug},
     ops::Not,
     pin::Pin,
@@ -10,10 +9,10 @@ use std::{
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use http::{header::CONTENT_LENGTH, request::Parts};
-use http_body_util::{BodyExt, BodyStream, StreamBody, combinators::BoxBody};
+use http_body_util::{BodyStream, StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
-    body::{Body, Frame, Incoming},
+    body::{Frame, Incoming},
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
@@ -354,7 +353,9 @@ pub struct MirroredHttp {
 impl MirroredHttp {
     /// Returns a mutable reference to the request parts and a shared
     /// reference to buffered body, if any.
-    pub fn parts_and_body(&mut self) -> (&mut request::Parts, &BufferedBody<InternalHttpBodyFrame>) {
+    pub fn parts_and_body(
+        &mut self,
+    ) -> (&mut request::Parts, &BufferedBody<InternalHttpBodyFrame>) {
         (&mut self.parts, &self.buffered_body)
     }
 }

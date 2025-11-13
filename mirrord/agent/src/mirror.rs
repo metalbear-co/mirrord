@@ -4,14 +4,14 @@ use std::{
     ops::{Not, RangeInclusive},
 };
 
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
-        HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyFrame,
-        InternalHttpBodyNew, InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS,
-        NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
+        HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
+        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
+        NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
 use tokio::task::JoinSet;
@@ -26,7 +26,7 @@ use crate::{
         MirroredTraffic, RedirectorTaskError,
     },
     sniffer::api::TcpSnifferApi,
-    util::{body_buffering::FramesReader, protocol_version::ClientProtocolVersion},
+    util::protocol_version::ClientProtocolVersion,
 };
 
 /// Agent client's API for using the TCP mirror feature.
