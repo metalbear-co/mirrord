@@ -11,6 +11,8 @@ use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::time::error::Elapsed;
 
+use crate::incoming::ConnError;
+
 pub(crate) trait Framelike {
     fn data_ref(&self) -> Option<&[u8]>;
 }
@@ -124,6 +126,8 @@ pub(crate) static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(||
 pub(crate) enum BufferBodyError {
     #[error("io error while receiving http body: {0}")]
     Hyper(#[from] hyper::Error),
+    #[error(transparent)]
+    Conn(#[from] ConnError),
     #[error("body size exceeded max configured size")]
     BodyTooBig,
     #[error("receiving body took too long")]

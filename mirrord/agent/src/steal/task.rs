@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     http::filter::HttpFilter,
-    incoming::{RedirectedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
+    incoming::{BodyBufferable, RedirectedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 

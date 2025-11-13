@@ -4,25 +4,29 @@ use std::{
     ops::{Not, RangeInclusive},
 };
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
-        HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyNew,
-        InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS, NewTcpConnectionV1,
-        NewTcpConnectionV2, TcpClose, TcpData,
+        HttpRequestMetadata, IncomingTrafficTransportType, InternalHttpBodyFrame,
+        InternalHttpBodyNew, InternalHttpRequest, LayerTcp, MODE_AGNOSTIC_HTTP_REQUESTS,
+        NewTcpConnectionV1, NewTcpConnectionV2, TcpClose, TcpData,
     },
 };
+use tokio::task::JoinSet;
 use tokio_stream::StreamMap;
 
 use crate::{
     AgentError,
     error::AgentResult,
     http::filter::HttpFilter,
-    incoming::{IncomingStream, IncomingStreamItem, MirrorHandle, MirroredTraffic},
+    incoming::{
+        BodyBufferable, IncomingStream, IncomingStreamItem, MirrorHandle, MirroredHttp,
+        MirroredTraffic, RedirectorTaskError,
+    },
     sniffer::api::TcpSnifferApi,
-    util::protocol_version::ClientProtocolVersion,
+    util::{body_buffering::FramesReader, protocol_version::ClientProtocolVersion},
 };
 
 /// Agent client's API for using the TCP mirror feature.
@@ -37,6 +41,7 @@ pub enum TcpMirrorApi {
         connection_ids_iter: RangeInclusive<ConnectionId>,
         queued_messages: VecDeque<DaemonTcp>,
         port_filters: HashMap<Port, HttpFilter>,
+        ongoing_requests: JoinSet<MirroredHttp>,
     },
     /// Wrapper over a [`TcpSnifferApi`].
     ///
@@ -67,6 +72,7 @@ impl TcpMirrorApi {
             connection_ids_iter: 0..=ConnectionId::MAX,
             queued_messages: Default::default(),
             port_filters: Default::default(),
+            ongoing_requests: Default::default(),
         }
     }
 
@@ -98,9 +104,7 @@ impl TcpMirrorApi {
                     let agent_filter =
                         HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
 
-                    mirror_handle
-                        .mirror(port)
-                        .await?;
+                    mirror_handle.mirror(port).await?;
 
                     port_filters.insert(port, agent_filter);
 
@@ -133,6 +137,89 @@ impl TcpMirrorApi {
         Ok(())
     }
 
+    async fn next(
+        handle: &mut MirrorHandle,
+        ongoing: &mut JoinSet<MirroredHttp>,
+        version: &ClientProtocolVersion,
+        filters: &HashMap<Port, HttpFilter>,
+    ) -> Option<Result<MirroredTraffic, RedirectorTaskError>> {
+        use MirroredTraffic as M;
+        tokio::select! {
+            Some(finished) = ongoing.join_next() => {
+                match finished {
+                    Ok(mut http) => {
+                        let port = http.info.original_destination.port();
+                        let (parts, body) = http.parts_and_body();
+                        let Some(filter) = filters.get(&port) else {
+                            return Some(Ok(M::Http(http)));
+                        };
+
+                        // Nothing should be buffered the first time around.
+                        assert!(body.is_empty());
+
+                        filter.matches(parts, body.reader()).then_some(Ok(M::Http(http)))
+                    },
+                    Err(error) => {
+                        tracing::error!(
+                            ?error,
+                            "HTTP mirror body buffer task panicked. This is a bug in the agent, please report it"
+                        );
+                        None
+                    }
+                }
+            }
+            Some(next) = handle.next() => {
+                let next = match next {
+                    Ok(n) => n,
+                    e => return Some(e),
+                };
+                match next {
+                    M::Tcp(tcp) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                        filters
+                            .contains_key(&tcp.info.original_destination.port())
+                            .not()
+                            .then_some(Ok(M::Tcp(tcp)))
+                    }
+
+                    M::Tcp(tcp) => {
+                        filters
+                            .contains_key(&tcp.info.original_destination.port())
+                            .not()
+                        .then_some(Ok(M::Tcp(tcp)))
+                    }
+
+                    M::Http(mut http) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                        let port = http.info.original_destination.port();
+                        let (parts, body) = http.parts_and_body();
+                        let Some(filter) = filters.get(&port) else {
+                            return Some(Ok(M::Http(http)));
+                        };
+
+                        // Nothing should be buffered the first time around.
+                        assert!(body.is_empty());
+
+                        if filter.matches(parts, body.reader()) {
+                            return Some(Ok(M::Http(http)));
+                        }
+
+                        ongoing.spawn(async move {
+                            if let Err(error) = http.buffer_body().await {
+                                tracing::warn!(?error, "failed to buffer request body");
+                            };
+                            http
+                        });
+
+                        None
+                    }
+
+                    M::Http(http) => {
+                        Some(Ok(M::Http(http)))
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn recv(&mut self) -> AgentResult<DaemonMessage> {
         loop {
             let message = match self {
@@ -143,6 +230,7 @@ impl TcpMirrorApi {
                     connection_ids_iter,
                     queued_messages,
                     port_filters,
+                    ongoing_requests,
                 } => {
                     if let Some(message) = queued_messages.pop_front() {
                         return Ok(DaemonMessage::Tcp(message));
@@ -189,12 +277,8 @@ impl TcpMirrorApi {
                             }
                         },
 
-                        Some(traffic) = mirror_handle.next() => match traffic? {
+                        Some(traffic) = Self::next(mirror_handle, ongoing_requests, protocol_version, port_filters) => match traffic? {
                             MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                if port_filters.contains_key(&tcp.info.original_destination.port()) {
-                                    continue;
-                                }
-
                                 let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                                 let connection = NewTcpConnectionV1 {
                                     connection_id: id,
@@ -219,10 +303,6 @@ impl TcpMirrorApi {
                             }
 
                             MirroredTraffic::Tcp(tcp) => {
-                                if port_filters.contains_key(&tcp.info.original_destination.port()) {
-                                    continue;
-                                }
-
                                 if tcp.info.tls_connector.is_some() {
                                     return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                                         "A TLS connection was not mirrored due to mirrord-protocol version requirement: {}",
@@ -249,13 +329,7 @@ impl TcpMirrorApi {
                                 DaemonTcp::NewConnectionV1(message)
                             }
 
-                            MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                                let port = http.info.original_destination.port();
-                                let parts = http.parts();
-                                if let Some(filter) = port_filters.get(&port) && filter.matches(parts, None::<&[u8]>).not() {
-                                    continue;
-                                }
-
+                            MirroredTraffic::Http(http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                                 let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                                 incoming_streams.insert(id, http.stream);
 

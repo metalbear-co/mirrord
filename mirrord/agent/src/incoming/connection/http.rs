@@ -1,16 +1,19 @@
-use core::str::FromStr;
 use std::{
+    convert::Infallible,
     fmt::{self, Debug},
     ops::Not,
+    pin::Pin,
+    str::FromStr,
+    task::{Context, Poll, ready},
 };
 
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use http::{header::CONTENT_LENGTH, request::Parts};
-use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
+use http_body_util::{BodyExt, BodyStream, StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
-    body::Frame,
+    body::{Body, Frame, Incoming},
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
@@ -26,11 +29,12 @@ use super::{ConnectionInfo, IncomingStream};
 use crate::{
     http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
     incoming::{
-        IncomingStreamItem, RedirectorTaskConfig,
+        ConnError, IncomingStreamItem, RedirectorTaskConfig,
         connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
     },
     util::body_buffering::{
-        BufferBodyError, BufferedBody, FramesReader, MAX_BODY_BUFFER_SIZE, MAX_BODY_BUFFER_TIMEOUT,
+        BufferBodyError, BufferedBody, Framelike, FramesReader, MAX_BODY_BUFFER_SIZE,
+        MAX_BODY_BUFFER_TIMEOUT,
     },
 };
 
@@ -126,6 +130,7 @@ impl RedirectedHttp {
             },
             parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
+            buffered_body: BufferedBody::Empty,
         }
     }
 
@@ -189,96 +194,30 @@ impl RedirectedHttp {
         self.runtime_handle.spawn(task.run());
     }
 
-    #[instrument(level = "trace", ret)]
-    pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
-        if self.buffered_body.is_empty().not() {
-            tracing::error!(
-                buffered_body = ?self.buffered_body,
-                "buffer_body called more than once. This is a bug, please report."
-            );
-            return Ok(());
-        }
-
-        let content_length = self
-            .request
-            .parts
-            .headers
-            .get(CONTENT_LENGTH)
-            .and_then(|t| t.to_str().ok())
-            .and_then(|t| usize::from_str(t).ok());
-
-        if content_length.is_some_and(|l| l > *MAX_BODY_BUFFER_SIZE) {
-            return Err(BufferBodyError::BodyTooBig);
-        }
-
-        let mut buffered = Vec::new();
-        let mut received_data_bytes = 0;
-
-        // We are forced to drain all of `body_head` regardless of its
-        // size because it will be sent *before* the buffered body so
-        // if we leave any trailing frames the order will get messed
-        // up :(
-        // In any case the body head is unlikely to be longer than `MAX_BODY_SIZE`
-        // so it shouldn't matter :D
-
-        let mut got_trailers = false;
-        for frame in self.request.body_head.drain(..) {
-            match frame.data_ref() {
-                Some(data) => received_data_bytes += data.len(),
-                None => got_trailers = true,
-            }
-            buffered.push(frame);
-        }
-
-        if got_trailers {
-            return Ok(());
-        }
-
-        let Some(tail) = self.request.body_tail.as_mut() else {
-            tracing::debug!("request has no tail, bailing early");
-            self.buffered_body = BufferedBody::Successful(buffered);
-            return Ok(());
-        };
-
-        let until = Instant::now() + *MAX_BODY_BUFFER_TIMEOUT;
-
-        let result = loop {
-            let frame = tokio::time::timeout_at(until, tail.frame()).await;
-
-            let frame = match frame {
-                Ok(Some(Ok(f))) => f,
-                Ok(None) => break Ok(()),
-                Err(elapsed) => break Err(elapsed.into()),
-                Ok(Some(Err(err))) => break Err(err.into()),
-            };
-
-            buffered.push(frame);
-
-            let Some(data) = buffered.last().unwrap().data_ref() else {
-                break Ok(());
-            };
-
-            received_data_bytes += data.len();
-
-            if received_data_bytes > *MAX_BODY_BUFFER_SIZE {
-                break Err(BufferBodyError::BodyTooBig);
-            }
-        };
-
-        match &result {
-            Ok(()) => {
-                self.buffered_body = BufferedBody::Successful(buffered);
-            }
-            Err(_) => {
-                self.buffered_body = BufferedBody::Failed(buffered);
-            }
-        };
-
-        result
-    }
-
     pub fn parts_and_body(&mut self) -> (&mut Parts, Option<FramesReader<'_, Frame<Bytes>>>) {
         (&mut self.request.parts, self.buffered_body.reader())
+    }
+}
+
+impl BodyBufferable for RedirectedHttp {
+    type Frame = Frame<Bytes>;
+    type FrameError = hyper::Error;
+    type Body<'a> = BodyStream<&'a mut Incoming>;
+
+    fn buffered_body(&mut self) -> &mut BufferedBody<Self::Frame> {
+        &mut self.buffered_body
+    }
+
+    fn parts(&self) -> &Parts {
+        &self.request.parts
+    }
+
+    fn body_head(&mut self) -> &mut Vec<Self::Frame> {
+        &mut self.request.body_head
+    }
+
+    fn body_tail(&mut self) -> Option<Self::Body<'_>> {
+        self.request.body_tail.as_mut().map(BodyStream::new)
     }
 }
 
@@ -408,13 +347,54 @@ pub struct MirroredHttp {
     pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
+
+    buffered_body: BufferedBody<InternalHttpBodyFrame>,
 }
 
 impl MirroredHttp {
     /// Returns a mutable reference to the request parts and a shared
     /// reference to buffered body, if any.
-    pub fn parts(&mut self) -> &mut request::Parts {
-        &mut self.parts
+    pub fn parts_and_body(&mut self) -> (&mut request::Parts, &BufferedBody<InternalHttpBodyFrame>) {
+        (&mut self.parts, &self.buffered_body)
+    }
+}
+
+pub struct IncomingFrameStream<'a>(&'a mut IncomingStream);
+impl Stream for IncomingFrameStream<'_> {
+    type Item = Result<InternalHttpBodyFrame, ConnError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(match ready!(self.0.poll_next_unpin(cx)) {
+            Some(IncomingStreamItem::Frame(frame)) => Some(Ok(frame)),
+            Some(IncomingStreamItem::NoMoreFrames) => None,
+            Some(IncomingStreamItem::Data(_)) => unreachable!(),
+            Some(IncomingStreamItem::NoMoreData) => unreachable!(),
+            Some(IncomingStreamItem::Finished(Ok(()))) => None,
+            Some(IncomingStreamItem::Finished(Err(error))) => Some(Err(error)),
+            None => None,
+        })
+    }
+}
+
+impl BodyBufferable for MirroredHttp {
+    type Frame = InternalHttpBodyFrame;
+    type FrameError = ConnError;
+    type Body<'a> = IncomingFrameStream<'a>;
+
+    fn buffered_body(&mut self) -> &mut BufferedBody<Self::Frame> {
+        &mut self.buffered_body
+    }
+
+    fn parts(&self) -> &Parts {
+        &self.parts
+    }
+
+    fn body_head(&mut self) -> &mut Vec<Self::Frame> {
+        &mut self.request_head.body_head
+    }
+
+    fn body_tail(&mut self) -> Option<Self::Body<'_>> {
+        Some(IncomingFrameStream(&mut self.stream))
     }
 }
 
@@ -425,5 +405,108 @@ impl Debug for MirroredHttp {
             .field("request_head", &self.request_head)
             .field("parts", &self.parts)
             .finish()
+    }
+}
+
+/// Used to implement `buffer_body` on both [`MirroredHttp`] and [`StolenHttp`]
+pub trait BodyBufferable: Debug {
+    type Frame: Framelike;
+    type FrameError: Into<BufferBodyError>;
+    type Body<'a>: Stream<Item = Result<Self::Frame, Self::FrameError>> + Unpin + 'a
+    where
+        Self: 'a;
+
+    fn buffered_body(&mut self) -> &mut BufferedBody<Self::Frame>;
+    fn parts(&self) -> &Parts;
+    fn body_head(&mut self) -> &mut Vec<Self::Frame>;
+    fn body_tail(&mut self) -> Option<Self::Body<'_>>;
+
+    #[instrument(level = "trace", ret)]
+    async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        if self.buffered_body().is_empty().not() {
+            tracing::error!(
+                buffered_body = ?self.buffered_body(),
+                "buffer_body called more than once. This is a bug, please report."
+            );
+            return Ok(());
+        }
+
+        let content_length = self
+            .parts()
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|t| t.to_str().ok())
+            .and_then(|t| usize::from_str(t).ok());
+
+        if content_length.is_some_and(|l| l > *MAX_BODY_BUFFER_SIZE) {
+            return Err(BufferBodyError::BodyTooBig);
+        }
+
+        let mut buffered = Vec::new();
+        let mut received_data_bytes = 0;
+
+        // We are forced to drain all of `body_head` regardless of its
+        // size because it will be sent *before* the buffered body so
+        // if we leave any trailing frames the order will get messed
+        // up :(
+        // In any case the body head is unlikely to be longer than `MAX_BODY_SIZE`
+        // so it shouldn't matter :D
+
+        let mut got_trailers = false;
+        for frame in self.body_head().drain(..) {
+            match frame.data_ref() {
+                Some(data) => received_data_bytes += data.len(),
+                None => got_trailers = true,
+            }
+            buffered.push(frame);
+        }
+
+        if got_trailers {
+            return Ok(());
+        }
+
+        let Some(mut tail) = self.body_tail() else {
+            tracing::debug!("request has no tail, bailing early");
+            *self.buffered_body() = BufferedBody::Successful(buffered);
+            return Ok(());
+        };
+
+        let until = Instant::now() + *MAX_BODY_BUFFER_TIMEOUT;
+
+        let result = loop {
+            let frame = tokio::time::timeout_at(until, tail.next()).await;
+
+            let frame = match frame {
+                Ok(Some(Ok(f))) => f,
+                Ok(None) => break Ok(()),
+                Err(elapsed) => break Err(elapsed.into()),
+                Ok(Some(Err(err))) => break Err(err.into()),
+            };
+
+            buffered.push(frame);
+
+            let Some(data) = buffered.last().unwrap().data_ref() else {
+                break Ok(());
+            };
+
+            received_data_bytes += data.len();
+
+            if received_data_bytes > *MAX_BODY_BUFFER_SIZE {
+                break Err(BufferBodyError::BodyTooBig);
+            }
+        };
+
+        drop(tail);
+
+        match &result {
+            Ok(()) => {
+                *self.buffered_body() = BufferedBody::Successful(buffered);
+            }
+            Err(_) => {
+                *self.buffered_body() = BufferedBody::Failed(buffered);
+            }
+        };
+
+        result
     }
 }
