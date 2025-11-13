@@ -347,7 +347,7 @@ pub struct MirroredHttp {
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
 
-    buffered_body: BufferedBody<InternalHttpBodyFrame>,
+    pub buffered_body: BufferedBody<InternalHttpBodyFrame>,
 }
 
 impl MirroredHttp {
