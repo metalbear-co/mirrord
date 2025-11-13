@@ -19,7 +19,7 @@ use std::{
 use composed::ComposedRedirector;
 pub use connection::{
     IncomingStream, IncomingStreamItem,
-    http::{ResponseBodyProvider, ResponseProvider, StolenHttp},
+    http::{ResponseBodyProvider, ResponseProvider, StolenHttp, RedirectedHttp},
     tcp::StolenTcp,
 };
 pub use error::{ConnError, RedirectorTaskError};

@@ -21,7 +21,6 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument;
 
-use super::http::BufferedBody;
 use crate::{
     http::{
         HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, body::RolledBackBody,
@@ -36,6 +35,7 @@ use crate::{
         },
         error::ConnError,
     },
+    util::body_buffering::BufferedBody,
 };
 
 pub type UpgradeDataRx = mpsc::Receiver<Bytes>;
@@ -49,7 +49,7 @@ pub struct HttpTask<D> {
     /// Destination of the request.
     pub destination: D,
     /// Any buffered frames that we had
-    pub buffered_body: BufferedBody,
+    pub buffered_body: BufferedBody<Frame<Bytes>>,
 }
 
 impl<D> HttpTask<D>
@@ -136,7 +136,7 @@ impl HttpTask<PassthroughConnection> {
         mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest,
         redirector_config: RedirectorTaskConfig,
-        buffered_body: BufferedBody,
+        buffered_body: BufferedBody<Frame<Bytes>>,
     ) -> Self {
         let (request_frame_tx, request_frame_rx) = (request.body_tail.is_some()
             || buffered_body.is_empty().not())

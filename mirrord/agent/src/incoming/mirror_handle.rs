@@ -45,7 +45,7 @@ impl MirrorHandle {
     /// If this method returns [`Ok`], it means that the port redirection
     /// was done in the [`RedirectorTask`](super::RedirectorTask),
     /// and incoming connections are now being mirrored.
-    pub async fn mirror(&mut self, port: u16, needs_body: bool) -> Result<(), RedirectorTaskError> {
+    pub async fn mirror(&mut self, port: u16) -> Result<(), RedirectorTaskError> {
         if self.mirrored_ports.contains_key(&port) {
             return Ok(());
         };
@@ -56,7 +56,6 @@ impl MirrorHandle {
             .send(RedirectRequest::Mirror {
                 port,
                 receiver_tx,
-                needs_body,
             })
             .await
             .is_err()

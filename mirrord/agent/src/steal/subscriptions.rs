@@ -118,9 +118,7 @@ impl PortSubscriptions {
             },
 
             Entry::Vacant(e) => {
-                self.handle
-                    .steal(port, filter.as_ref().is_some_and(HttpFilter::needs_body))
-                    .await?;
+                self.handle.steal(port).await?;
                 if filter.is_some() {
                     STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
                 } else {
@@ -229,6 +227,10 @@ impl PortSubscriptions {
                 "Received stolen traffic for a port that is no longer stolen, dropping",
             );
         }
+    }
+
+    pub fn get(&mut self, port: u16) -> Option<&PortSubscription> {
+        self.subscriptions.get(&port)
     }
 }
 

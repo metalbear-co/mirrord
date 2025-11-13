@@ -13,7 +13,7 @@ use mirrord_protocol::{
         HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_FILTERED_UPGRADE_VERSION, MODE_AGNOSTIC_HTTP_REQUESTS,
     },
 };
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
@@ -22,7 +22,8 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    incoming::{RedirectorTaskError, StealHandle, StolenTraffic},
+    http::filter::HttpFilter,
+    incoming::{RedirectedHttp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
 
@@ -39,6 +40,8 @@ pub struct TcpStealerTask {
     clients: HashMap<ClientId, Client>,
     /// Futures that resolve when clients disconnect (drop their [`StealerMessage`] receivers).
     disconnected_clients: FuturesUnordered<ChannelClosedFuture>,
+    /// For tracking http requests whose bodes are being buffered
+    ongoing_requests: JoinSet<RedirectedHttp>,
 }
 
 impl TcpStealerTask {
@@ -48,6 +51,7 @@ impl TcpStealerTask {
             command_rx,
             clients: Default::default(),
             disconnected_clients: Default::default(),
+            ongoing_requests: Default::default(),
         }
     }
 
@@ -63,11 +67,25 @@ impl TcpStealerTask {
 
                 Some(result) = self.subscriptions.next() => {
                     let (traffic, subscription) = result?;
-                    Self::handle_stolen_traffic(&self.clients, traffic, subscription).await;
+                    Self::handle_stolen_traffic(&self.clients, traffic, subscription, &mut self.ongoing_requests).await;
                 }
 
                 Some(client_id) = self.disconnected_clients.next() => {
                     self.handle_client_disconnected(client_id);
+                }
+
+                Some(next) = self.ongoing_requests.join_next() => {
+                    match next {
+                        Ok(http) => {
+                            self.handle_buffered_http(http).await;
+                        },
+                        Err(error) => {
+                            tracing::error!(
+                                ?error,
+                                "HTTP body buffer task panicked. This is a bug in the agent, please report it"
+                            );
+                        },
+                    }
                 }
 
                 _ = token.cancelled() => break,
@@ -96,23 +114,30 @@ impl TcpStealerTask {
                 .map(Cow::Borrowed)
                 .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
 
-            StolenTraffic::Http(http) => matches!(subscription, PortSubscription::Unfiltered(..))
-                .then_some(&*MODE_AGNOSTIC_HTTP_REQUESTS)
-                .or_else(|| {
-                    http.info()
-                        .tls_connector
-                        .is_some()
-                        .then_some(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
-                })
-                .or_else(|| {
-                    http.parts()
-                        .headers
-                        .contains_key(UPGRADE)
-                        .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
-                })
-                .map(Cow::Borrowed)
-                .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
+            StolenTraffic::Http(http) => Self::protocol_version_req_http(subscription, http),
         }
+    }
+
+    fn protocol_version_req_http(
+        subscription: &PortSubscription,
+        http: &RedirectedHttp,
+    ) -> Cow<'static, semver::VersionReq> {
+        matches!(subscription, PortSubscription::Unfiltered(..))
+            .then_some(&*MODE_AGNOSTIC_HTTP_REQUESTS)
+            .or_else(|| {
+                http.info()
+                    .tls_connector
+                    .is_some()
+                    .then_some(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
+            })
+            .or_else(|| {
+                http.parts()
+                    .headers
+                    .contains_key(UPGRADE)
+                    .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
+            })
+            .map(Cow::Borrowed)
+            .unwrap_or(Cow::Owned(semver::VersionReq::STAR))
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
@@ -120,6 +145,7 @@ impl TcpStealerTask {
         clients: &HashMap<ClientId, Client>,
         traffic: StolenTraffic,
         subscription: &PortSubscription,
+        ongoing: &mut JoinSet<RedirectedHttp>,
     ) {
         let protocol_version_req = Self::protocol_version_req(subscription, &traffic);
 
@@ -184,34 +210,52 @@ impl TcpStealerTask {
             }
         };
 
+        if filters.values().any(HttpFilter::needs_body) {
+            ongoing.spawn(async move {
+                if let Err(error) = http.buffer_body().await {
+                    tracing::warn!(?error, "failed to buffer request body");
+                };
+                http
+            });
+        } else {
+            Self::finish_stealing(clients, filters, http, protocol_version_req).await
+        }
+    }
+
+    async fn finish_stealing(
+        clients: &HashMap<ClientId, Client>,
+        filters: &HashMap<ClientId, HttpFilter>,
+        mut http: RedirectedHttp,
+        protocol_version_req: Cow<'static, semver::VersionReq>,
+    ) {
         let mut send_to = None; // the client that will receive the request
         let mut preempted = vec![]; // other clients that could receive the request as well
         let mut blocked_on_protocol = vec![]; // clients that cannot receive the request due to their protocol version
 
-        let (parts, body) = http.parts_and_body();
+        let (parts, body_reader) = http.parts_and_body();
 
-        filters
-            .iter()
-            .filter(|(_, filter)| filter.matches(parts, body))
-            .filter_map(|(client_id, _)| {
-                clients.get(client_id).or_else(|| {
-                    tracing::error!(
-                        client_id,
-                        "TcpStealerTask failed to find a connected client for a stolen HTTP request. \
+        for (client_id, filter) in filters {
+            if filter.matches(parts, body_reader).not() {
+                continue;
+            }
+
+            let Some(client) = clients.get(client_id) else {
+                tracing::error!(
+                    client_id,
+                    "TcpStealerTask failed to find a connected client for a stolen HTTP request. \
                         This is a bug in the agent, please report it.",
-                    );
-                    None
-                })
-            })
-            .for_each(|client| {
-                if client.protocol_version.matches(&protocol_version_req).not() {
-                    blocked_on_protocol.push(client);
-                } else if send_to.is_none() {
-                    send_to = Some(client);
-                } else {
-                    preempted.push(client);
-                }
-            });
+                );
+                continue;
+            };
+
+            if client.protocol_version.matches(&protocol_version_req).not() {
+                blocked_on_protocol.push(client);
+            } else if send_to.is_none() {
+                send_to = Some(client);
+            } else {
+                preempted.push(client);
+            }
+        }
 
         for client in preempted {
             let _ = client
@@ -296,6 +340,33 @@ impl TcpStealerTask {
     fn handle_client_disconnected(&mut self, client_id: ClientId) {
         self.clients.remove(&client_id);
         self.subscriptions.remove_all(client_id);
+    }
+
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    async fn handle_buffered_http(&mut self, http: RedirectedHttp) {
+        let Some(subscription) = self
+            .subscriptions
+            .get(http.info().original_destination.port())
+        else {
+            tracing::warn!(
+                ?http,
+                "Finished buffering HTTP body for a port that is no longer stolen, dropping",
+            );
+            http.pass_through();
+            return;
+        };
+
+        let PortSubscription::Filtered(filters) = subscription else {
+            tracing::error!(
+                ?http,
+                "handle_buffered_http called for a request on an unfiltered port. This is a bug in the agent, please report it.",
+            );
+            http.pass_through();
+            return;
+        };
+
+        let protocol_version_req = Self::protocol_version_req_http(subscription, &http);
+        Self::finish_stealing(&self.clients, filters, http, protocol_version_req).await;
     }
 }
 

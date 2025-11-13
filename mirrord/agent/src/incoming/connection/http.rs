@@ -1,27 +1,23 @@
+use core::str::FromStr;
 use std::{
     fmt::{self, Debug},
-    io::Read,
     ops::Not,
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
 };
 
 use bytes::Bytes;
 use futures::StreamExt;
-use http::header::CONTENT_LENGTH;
+use http::{header::CONTENT_LENGTH, request::Parts};
 use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
     body::Frame,
     http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
 };
-use mirrord_agent_env::envs::{self};
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
     sync::{broadcast, mpsc, oneshot},
-    time::{Instant, error::Elapsed},
+    time::Instant,
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tracing::instrument;
@@ -33,106 +29,10 @@ use crate::{
         IncomingStreamItem, RedirectorTaskConfig,
         connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
     },
+    util::body_buffering::{
+        BufferBodyError, BufferedBody, FramesReader, MAX_BODY_BUFFER_SIZE, MAX_BODY_BUFFER_TIMEOUT,
+    },
 };
-
-#[derive(Clone)]
-pub(super) enum BufferedBody {
-    Empty,
-
-    // Since we only store data frames and one optional trailer frame
-    // at the end, we could save a couple hundred bytes by storing raw
-    // `Bytes` objects instead of `Frame<Bytes>`-es, (32 vs 96 bytes
-    // on 64bit) and having an optional `first_nondata_frame` field.
-    // We go with this approach because it's a little simpler to
-    // implement.
-    Successful(Arc<Vec<Frame<Bytes>>>),
-    Failed(Arc<Vec<Frame<Bytes>>>),
-}
-
-impl Debug for BufferedBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "Empty"),
-            Self::Successful(buf) => f
-                .debug_struct("Full")
-                .field("frame_count", &buf.len())
-                .finish(),
-            Self::Failed(buf) => f
-                .debug_struct("Partial")
-                .field("frame_count", &buf.len())
-                .finish(),
-        }
-    }
-}
-
-impl BufferedBody {
-    #[inline]
-    pub(super) fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-
-    /// When full, returns an [`Read`] impl that returns the
-    /// buffered data.
-    #[inline]
-    fn reader(&self) -> Option<impl Read + Copy> {
-        #[derive(Clone, Copy)]
-        struct Reader<'a> {
-            remaining: &'a [Frame<Bytes>],
-            read_until: usize,
-        }
-
-        impl<'a> Read for Reader<'a> {
-            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                let frame = loop {
-                    let [first, rest @ ..] = self.remaining else {
-                        return Ok(0);
-                    };
-
-                    let Some(frame) = first.data_ref() else {
-                        return Ok(0);
-                    };
-
-                    if self.read_until == frame.len() {
-                        self.remaining = rest;
-                        self.read_until = 0;
-                    } else {
-                        assert!(self.read_until < frame.len());
-                        break frame;
-                    }
-                };
-
-                let until = Ord::min(frame.len(), self.read_until + buf.len());
-                let range = self.read_until..until;
-
-                buf.get_mut(..range.len())
-                    .unwrap()
-                    .copy_from_slice(frame.get(range.clone()).unwrap());
-
-                self.read_until = until;
-
-                Ok(range.len())
-            }
-        }
-
-        match self {
-            BufferedBody::Successful(full) => Some(Reader {
-                remaining: full,
-                read_until: 0,
-            }),
-            _ => None,
-        }
-    }
-
-    /// Returns the buffered data if we have anything, regardless of
-    /// whether it's full or partial.
-    #[inline]
-    pub(super) fn buffered_data(self) -> Option<Arc<Vec<Frame<Bytes>>>> {
-        match self {
-            BufferedBody::Empty => None,
-            BufferedBody::Successful(frames) | BufferedBody::Failed(frames) => Some(frames),
-        }
-    }
-}
 
 /// A redirected HTTP request.
 ///
@@ -152,7 +52,7 @@ pub struct RedirectedHttp {
     /// Configuration of the RedirectorTask that created this
     redirector_config: RedirectorTaskConfig,
 
-    buffered_body: BufferedBody,
+    buffered_body: BufferedBody<Frame<Bytes>>,
 }
 
 impl RedirectedHttp {
@@ -180,10 +80,6 @@ impl RedirectedHttp {
 
     pub fn parts(&self) -> &request::Parts {
         &self.request.parts
-    }
-
-    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<impl Read + Copy>) {
-        (&mut self.request.parts, self.buffered_body.reader())
     }
 
     /// Acquires a mirror handle to this request.
@@ -230,7 +126,6 @@ impl RedirectedHttp {
             },
             parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
-            buffered_body: self.buffered_body.clone(),
         }
     }
 
@@ -304,23 +199,6 @@ impl RedirectedHttp {
             return Ok(());
         }
 
-        let max_body_size = match envs::MAX_BODY_BUFFER_SIZE.try_from_env() {
-            Ok(Some(t)) => Some(t as usize),
-            Ok(None) => {
-                tracing::warn!("{} not set, using default", envs::MAX_BODY_BUFFER_SIZE.name);
-                None
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    "failed to parse {}, using default",
-                    envs::MAX_BODY_BUFFER_SIZE.name
-                );
-                None
-            }
-        }
-        .unwrap_or(64 * 1024);
-
         let content_length = self
             .request
             .parts
@@ -329,7 +207,7 @@ impl RedirectedHttp {
             .and_then(|t| t.to_str().ok())
             .and_then(|t| usize::from_str(t).ok());
 
-        if content_length.is_some_and(|l| l > max_body_size) {
+        if content_length.is_some_and(|l| l > *MAX_BODY_BUFFER_SIZE) {
             return Err(BufferBodyError::BodyTooBig);
         }
 
@@ -358,31 +236,11 @@ impl RedirectedHttp {
 
         let Some(tail) = self.request.body_tail.as_mut() else {
             tracing::debug!("request has no tail, bailing early");
-            self.buffered_body = BufferedBody::Successful(Arc::new(buffered));
+            self.buffered_body = BufferedBody::Successful(buffered);
             return Ok(());
         };
 
-        let timeout = match envs::MAX_BODY_BUFFER_TIMEOUT.try_from_env() {
-            Ok(Some(t)) => Some(t),
-            Ok(None) => {
-                tracing::warn!(
-                    "{} not set, using default",
-                    envs::MAX_BODY_BUFFER_TIMEOUT.name
-                );
-                None
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    "failed to parse {}, using default",
-                    envs::MAX_BODY_BUFFER_TIMEOUT.name
-                );
-                None
-            }
-        }
-        .unwrap_or(1000);
-
-        let until = Instant::now() + Duration::from_millis(timeout.into());
+        let until = Instant::now() + *MAX_BODY_BUFFER_TIMEOUT;
 
         let result = loop {
             let frame = tokio::time::timeout_at(until, tail.frame()).await;
@@ -402,33 +260,26 @@ impl RedirectedHttp {
 
             received_data_bytes += data.len();
 
-            if received_data_bytes > max_body_size {
+            if received_data_bytes > *MAX_BODY_BUFFER_SIZE {
                 break Err(BufferBodyError::BodyTooBig);
             }
         };
 
         match &result {
             Ok(()) => {
-                self.buffered_body = BufferedBody::Successful(Arc::new(buffered));
+                self.buffered_body = BufferedBody::Successful(buffered);
             }
-            Err(error) => {
-                tracing::warn!(?error, "failed to buffer request body");
-                self.buffered_body = BufferedBody::Failed(Arc::new(buffered));
+            Err(_) => {
+                self.buffered_body = BufferedBody::Failed(buffered);
             }
         };
 
         result
     }
-}
 
-#[derive(thiserror::Error, Debug)]
-pub enum BufferBodyError {
-    #[error("io error while receiving http body: {0}")]
-    Hyper(#[from] hyper::Error),
-    #[error("body size exceeded max configured size")]
-    BodyTooBig,
-    #[error("receiving body took too long")]
-    Timeout(#[from] Elapsed),
+    pub fn parts_and_body(&mut self) -> (&mut Parts, Option<FramesReader<'_, Frame<Bytes>>>) {
+        (&mut self.request.parts, self.buffered_body.reader())
+    }
 }
 
 impl Debug for RedirectedHttp {
@@ -557,15 +408,13 @@ pub struct MirroredHttp {
     pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
-
-    buffered_body: BufferedBody,
 }
 
 impl MirroredHttp {
     /// Returns a mutable reference to the request parts and a shared
     /// reference to buffered body, if any.
-    pub fn parts_and_body(&mut self) -> (&mut request::Parts, Option<impl Read + Copy>) {
-        (&mut self.parts, self.buffered_body.reader())
+    pub fn parts(&mut self) -> &mut request::Parts {
+        &mut self.parts
     }
 }
 

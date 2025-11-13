@@ -90,7 +90,7 @@ impl TcpMirrorApi {
                     incoming_streams.remove(&id);
                 }
                 LayerTcp::PortSubscribe(port) => {
-                    mirror_handle.mirror(port, false).await?;
+                    mirror_handle.mirror(port).await?;
                     queued_messages.push_back(DaemonTcp::SubscribeResult(Ok(port)));
                 }
                 LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
@@ -99,7 +99,7 @@ impl TcpMirrorApi {
                         HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
 
                     mirror_handle
-                        .mirror(port, agent_filter.needs_body())
+                        .mirror(port)
                         .await?;
 
                     port_filters.insert(port, agent_filter);
@@ -251,8 +251,8 @@ impl TcpMirrorApi {
 
                             MirroredTraffic::Http(mut http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                                 let port = http.info.original_destination.port();
-                                let (parts, body) = http.parts_and_body();
-                                if let Some(filter) = port_filters.get(&port) && filter.matches(parts, body).not() {
+                                let parts = http.parts();
+                                if let Some(filter) = port_filters.get(&port) && filter.matches(parts, None::<&[u8]>).not() {
                                     continue;
                                 }
 

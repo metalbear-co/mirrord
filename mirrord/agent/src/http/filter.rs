@@ -220,7 +220,7 @@ impl HttpFilter {
 
     pub fn needs_body(&self) -> bool {
         match self {
-            HttpFilter::Composite { filters, .. } => filters.iter().any(|t| t.needs_body()),
+            HttpFilter::Composite { filters, .. } => filters.iter().any(HttpFilter::needs_body),
             HttpFilter::Body(_) => true,
             _ => false,
         }

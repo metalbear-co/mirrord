@@ -14,7 +14,7 @@ use tokio::sync::{
     oneshot,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, Level, Span};
+use tracing::Level;
 
 use super::{
     PortRedirector, Redirected,
@@ -126,20 +126,15 @@ where
                 },
 
                 Some(message) = self.internal_rx.recv() => match message {
-                    InternalMessage::DeadChannel {
-                       port,
-                       needed_body
-                    } => {
-                        self.handle_dead_channel(port, needed_body).await?;
+                    InternalMessage::DeadChannel(port)
+                     => {
+                        self.handle_dead_channel(port).await?;
                     }
                     InternalMessage::ConnInitialized(conn) => {
                         self.handle_initialized_connection(conn).await;
                     }
                     InternalMessage::Request(request, info) => {
                         self.handle_extracted_request(request, info).await;
-                    }
-                    InternalMessage::FinishedBuffering(request) => {
-                        self.finish_handling_extracted_request(request, None).await;
                     }
                 }
             }
@@ -287,45 +282,6 @@ where
 
         let mut redirected = RedirectedHttp::new(info, request, self.config.clone());
 
-        if port_state.body_users == 0 {
-            tracing::trace!("no body users, not buffering request body");
-            self.finish_handling_extracted_request(redirected, Some(port_state))
-                .await;
-        } else {
-            tracing::trace!(
-                count = port_state.body_users,
-                "have body users, buffering request body"
-            );
-            let tx = self.internal_tx.clone();
-            tokio::spawn(
-                async move {
-                    let _ = redirected.buffer_body().await;
-                    let _ = tx
-                        .send(InternalMessage::FinishedBuffering(redirected))
-                        .await;
-                }
-                .instrument(Span::current()),
-            );
-        }
-    }
-
-    #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn finish_handling_extracted_request(
-        &self,
-        mut redirected: RedirectedHttp,
-        port_state: Option<&PortState>,
-    ) {
-        let Some(port_state) = port_state.or_else(|| {
-            self.ports
-                .get(&redirected.info().original_destination.port())
-        }) else {
-            tracing::warn!(
-                ?redirected,
-                "Redirected request port is no longer subscribed, dropping",
-            );
-            return;
-        };
-
         for mirror_tx in &port_state.mirror_txs {
             if let Err(TrySendError::Full(..)) =
                 mirror_tx.try_send(MirroredTraffic::Http(redirected.mirror()))
@@ -353,11 +309,7 @@ where
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_client_request(&mut self, message: RedirectRequest) -> Result<(), R::Error> {
         match message {
-            RedirectRequest::Mirror {
-                port,
-                receiver_tx,
-                needs_body,
-            } => {
+            RedirectRequest::Mirror { port, receiver_tx } => {
                 let (conn_tx, conn_rx) = mpsc::channel(32);
 
                 match self.ports.entry(port) {
@@ -371,37 +323,23 @@ where
                             steal_tx: None,
                             mirror_txs: vec![conn_tx.clone()],
                             http_shutdown: Default::default(),
-                            body_users: if needs_body { 1 } else { 0 },
                         });
                     }
                     Entry::Occupied(mut e) => {
-                        let state = e.get_mut();
-                        state.mirror_txs.push(conn_tx.clone());
-                        if needs_body {
-                            state.body_users += 1;
-                        }
+                        e.get_mut().mirror_txs.push(conn_tx.clone());
                     }
                 };
 
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
                     conn_tx.closed().await;
-                    let _ = tx
-                        .send(InternalMessage::DeadChannel {
-                            port,
-                            needed_body: needs_body,
-                        })
-                        .await;
+                    let _ = tx.send(InternalMessage::DeadChannel(port)).await;
                 });
 
                 let _ = receiver_tx.send(conn_rx);
             }
 
-            RedirectRequest::Steal {
-                port,
-                receiver_tx,
-                needs_body,
-            } => {
+            RedirectRequest::Steal { port, receiver_tx } => {
                 let (conn_tx, conn_rx) = mpsc::channel(32);
 
                 match self.ports.entry(port) {
@@ -415,27 +353,17 @@ where
                             steal_tx: Some(conn_tx.clone()),
                             mirror_txs: Default::default(),
                             http_shutdown: Default::default(),
-                            body_users: if needs_body { 1 } else { 0 },
                         });
                     }
                     Entry::Occupied(mut e) => {
-                        let state = e.get_mut();
-                        state.steal_tx.replace(conn_tx.clone());
-                        if needs_body {
-                            state.body_users += 1;
-                        }
+                        e.get_mut().steal_tx.replace(conn_tx.clone());
                     }
                 }
 
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
                     conn_tx.closed().await;
-                    let _ = tx
-                        .send(InternalMessage::DeadChannel {
-                            port,
-                            needed_body: needs_body,
-                        })
-                        .await;
+                    let _ = tx.send(InternalMessage::DeadChannel(port)).await;
                 });
 
                 let _ = receiver_tx.send(conn_rx);
@@ -449,7 +377,7 @@ where
     ///
     /// One of the subscription channels is closed. We need to check the related [`PortState`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
-    async fn handle_dead_channel(&mut self, port: u16, needed_body: bool) -> Result<(), R::Error> {
+    async fn handle_dead_channel(&mut self, port: u16) -> Result<(), R::Error> {
         let Entry::Occupied(mut e) = self.ports.entry(port) else {
             return Ok(());
         };
@@ -457,15 +385,11 @@ where
         let PortState {
             steal_tx,
             mirror_txs,
-            body_users,
             ..
         } = e.get_mut();
 
         *steal_tx = steal_tx.take().filter(|tx| tx.is_closed().not());
         mirror_txs.retain(|tx| tx.is_closed().not());
-        if needed_body {
-            *body_users -= 1;
-        }
 
         if steal_tx.is_none() && mirror_txs.is_empty() {
             e.remove();
@@ -549,12 +473,10 @@ pub enum RedirectRequest {
     Steal {
         port: u16,
         receiver_tx: oneshot::Sender<StolenConnectionsRx>,
-        needs_body: bool,
     },
     Mirror {
         port: u16,
         receiver_tx: oneshot::Sender<MirroredConnectionsRx>,
-        needs_body: bool,
     },
 }
 
@@ -604,13 +526,11 @@ enum InternalMessage {
     /// Each port subscription results in spawning a separate helper task,
     /// that waits for the subscription channel to close, and sends this message to the
     /// [`RedirectorTask`].
-    DeadChannel { port: u16, needed_body: bool },
+    DeadChannel(u16),
     /// HTTP detection finished on a redirected connection.
     ConnInitialized(MaybeHttp),
     /// An HTTP request was extracted from a redirected connection.
     Request(ExtractedRequest, ConnectionInfo),
-    /// Finished buffering body of the request
-    FinishedBuffering(RedirectedHttp),
 }
 
 /// State of a single port in the [`RedirectorTask`].
@@ -622,9 +542,6 @@ struct PortState {
     /// Used to initiate a graceful shutdown of stolen HTTP connections,
     /// once the all clients cancel their subscriptions.
     http_shutdown: CancellationToken,
-    /// Number of clients that will need the request body to run their filters.
-    /// We buffer the body when this is >1.
-    body_users: u16,
 }
 
 impl fmt::Debug for PortState {
@@ -638,7 +555,6 @@ impl fmt::Debug for PortState {
                     .is_some_and(|tx| tx.is_closed().not()),
             )
             .field("mirrorers", &self.mirror_txs.len())
-            .field("body_users", &self.body_users)
             .finish()
     }
 }
@@ -674,7 +590,7 @@ mod test {
         );
         tokio::spawn(task.run());
 
-        handle.steal(80, false).await.unwrap();
+        handle.steal(80).await.unwrap();
         assert!(state.borrow().has_redirections([80]));
 
         handle.stop_steal(80);
@@ -683,7 +599,7 @@ mod test {
             .await
             .unwrap();
 
-        handle.steal(81, false).await.unwrap();
+        handle.steal(81).await.unwrap();
         assert!(state.borrow().has_redirections([81]));
 
         std::mem::drop(handle);
@@ -712,7 +628,7 @@ mod test {
         );
         let redirector_task = tokio::spawn(task.run());
 
-        handle.steal(80, false).await.unwrap();
+        handle.steal(80).await.unwrap();
         let client_conn = conn_tx
             .make_connection("127.0.0.1:80".parse().unwrap())
             .await;
