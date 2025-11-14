@@ -71,10 +71,6 @@
             nightlyRustToolchain.components
             nightlyRustToolchain.rust-analyzer
 
-            # Kubernetes
-            kubectl
-            minikube
-
             # E2E testing
             go
             nodejs_24 # Needs express.js - install with `npm install express` after entering the devshell
