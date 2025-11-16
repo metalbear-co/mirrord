@@ -509,6 +509,11 @@ pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
 pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows HTTP body filtering
+/// ([`HttpFilter::Body`]) by JSON.
+pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.23.0".parse().expect("Bad Identifier"));
+
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

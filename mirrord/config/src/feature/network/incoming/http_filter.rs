@@ -1,8 +1,15 @@
-use std::{collections::HashSet, ops::Deref, str::FromStr};
+use std::{
+    collections::HashSet,
+    ops::{Deref, Not},
+    str::FromStr,
+    sync::LazyLock,
+};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
+use mirrord_protocol::tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HTTP_BODY_JSON_FILTER_VERSION};
 use schemars::JsonSchema;
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -190,11 +197,52 @@ impl HttpFilterConfig {
             || self.body_filter.is_some()
     }
 
-    pub fn is_composite(&self) -> bool {
+    pub fn ensure_usable_with(
+        &self,
+        agent_protocol_version: Option<Version>,
+    ) -> Result<(), ConfigError> {
+        static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 3] = [
+            (
+                HttpFilterConfig::is_composite,
+                &HTTP_COMPOSITE_FILTER_VERSION,
+                "'any_of' or 'all_of' HTTP filter types",
+            ),
+            (
+                HttpFilterConfig::has_method_filter,
+                &HTTP_METHOD_FILTER_VERSION,
+                "'method' http filter type",
+            ),
+            (
+                HttpFilterConfig::has_json_body_filter,
+                &HTTP_BODY_JSON_FILTER_VERSION,
+                "JSON body filters",
+            ),
+        ];
+
+        for (validator, version, what) in REQUIREMENTS {
+            if validator(self)
+                && agent_protocol_version
+                    .as_ref()
+                    .map(|v| version.matches(v))
+                    .unwrap_or(false)
+                    .not()
+            {
+                Err(ConfigError::Conflict(format!(
+                    "Cannot use {what}, protocol version used by mirrord-agent must match {}. \
+                    Consider using a newer version of mirrord-agent",
+                    **version
+                )))?
+            }
+        }
+
+        Ok(())
+    }
+
+    fn is_composite(&self) -> bool {
         self.all_of.is_some() || self.any_of.is_some()
     }
 
-    pub fn has_method_filter(&self) -> bool {
+    fn has_method_filter(&self) -> bool {
         self.method_filter.is_some()
             || self.all_of.as_ref().is_some_and(|composite| {
                 composite
@@ -205,6 +253,20 @@ impl HttpFilterConfig {
                 composite
                     .iter()
                     .any(|f| matches!(f, InnerFilter::Method { .. }))
+            })
+    }
+
+    fn has_json_body_filter(&self) -> bool {
+        matches!(self.body_filter, Some(BodyFilter::Json { .. }))
+            || self.all_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Body(BodyFilter::Json { .. })))
+            })
+            || self.any_of.as_ref().is_some_and(|composite| {
+                composite
+                    .iter()
+                    .any(|f| matches!(f, InnerFilter::Body(BodyFilter::Json { .. })))
             })
     }
 
