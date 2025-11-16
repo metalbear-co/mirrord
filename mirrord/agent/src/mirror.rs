@@ -144,19 +144,25 @@ impl TcpMirrorApi {
         ongoing: &mut JoinSet<MirroredHttp>,
         version: &ClientProtocolVersion,
         filters: &HashMap<Port, HttpFilter>,
-    ) -> Option<Result<MirroredTraffic, RedirectorTaskError>> {
+    ) -> Result<MirroredTraffic, RedirectorTaskError> {
         use MirroredTraffic as M;
         loop {
-            tokio::select! {
+            return tokio::select! {
                 Some(finished) = ongoing.join_next() => {
                     match finished {
                         Ok(mut http) => {
                             let port = http.info.original_destination.port();
                             let (parts, body) = http.parts_and_body();
                             let Some(filter) = filters.get(&port) else {
-                                return Some(Ok(M::Http(http)));
+                                tracing::warn!("have no filter for request with buffered body.");
+                                return Ok(M::Http(http));
                             };
-                            return dbg!(filter.matches(parts, body.reader()).then_some(Ok(M::Http(http))))
+
+                            if filter.matches(parts, body.reader()) {
+                                Ok(M::Http(http))
+                            } else {
+                                continue
+                            }
                         },
                         Err(error) => {
                             tracing::error!(
@@ -168,37 +174,27 @@ impl TcpMirrorApi {
                     }
                 }
                 Some(next) = handle.next() => {
-                    let next = match next {
-                        Ok(n) => n,
-                        e => return Some(e),
-                    };
-                    return match next {
-                        M::Tcp(tcp) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                            filters
-                                .contains_key(&tcp.info.original_destination.port())
-                                .not()
-                                .then_some(Ok(M::Tcp(tcp)))
-                        }
-
+                    match next? {
                         M::Tcp(tcp) => {
-                            filters
-                                .contains_key(&tcp.info.original_destination.port())
-                                .not()
-                                .then_some(Ok(M::Tcp(tcp)))
+                            if filters.contains_key(&tcp.info.original_destination.port()) {
+                                continue
+                            } else {
+                                Ok(M::Tcp(tcp))
+                            }
                         }
 
                         M::Http(mut http) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                             let port = http.info.original_destination.port();
                             let (parts, body) = http.parts_and_body();
                             let Some(filter) = filters.get(&port) else {
-                                return Some(Ok(M::Http(http)));
+                                return Ok(M::Http(http));
                             };
 
                             // Nothing should be buffered the first time around.
                             assert!(body.is_empty());
 
                             if filter.matches(parts, body.reader()) {
-                                return Some(Ok(M::Http(http)));
+                                return Ok(M::Http(http));
                             }
 
                             if filter.needs_body() {
@@ -209,16 +205,16 @@ impl TcpMirrorApi {
                                     http
                                 });
                             }
-							continue
+                            continue
                         }
 
                         M::Http(http) => {
-                            Some(Ok(M::Http(http)))
+                            Ok(M::Http(http))
                         }
                     }
                 }
                 else => std::future::pending().await,
-            };
+            }
         }
     }
 
@@ -276,7 +272,7 @@ impl TcpMirrorApi {
                             }
                         },
 
-                        Some(traffic) = Self::next(mirror_handle, ongoing_requests, protocol_version, port_filters) => match traffic? {
+                        traffic = Self::next(mirror_handle, ongoing_requests, protocol_version, port_filters) => match traffic? {
                             MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                                 let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
                                 let connection = NewTcpConnectionV1 {
@@ -331,7 +327,7 @@ impl TcpMirrorApi {
                             MirroredTraffic::Http(http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                                 let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
 
-                                if let Some(buffered) = http.buffered_body.buffered_data() {
+                                let have_more = if let Some(buffered) = http.buffered_body.buffered_data() {
                                     for frame in buffered {
                                         queued_messages.push_back(
                                             DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
@@ -342,9 +338,9 @@ impl TcpMirrorApi {
                                             }))
                                         );
                                     }
-									// We know that the filter passed,
-									// thus the body must have been
-									// complete
+                                    // We know that the filter passed,
+                                    // thus the body must have been
+                                    // complete
                                     queued_messages.push_back(
                                         DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
                                             frames: vec![],
@@ -353,9 +349,11 @@ impl TcpMirrorApi {
                                             request_id: Self::REQUEST_ID,
                                         }))
                                     );
+                                    true
                                 } else {
                                     incoming_streams.insert(id, http.stream);
-                                }
+                                    false
+                                };
 
                                 let message = ChunkedRequestStartV2 {
                                     connection_id: id,
@@ -379,7 +377,7 @@ impl TcpMirrorApi {
                                         version: http.request_head.version,
                                         body: InternalHttpBodyNew {
                                             frames: http.request_head.body_head,
-                                            is_last: http.request_head.body_finished,
+                                            is_last: http.request_head.body_finished && have_more.not(),
                                         },
                                     },
                                 };
