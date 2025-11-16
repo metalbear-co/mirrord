@@ -80,22 +80,17 @@ where
         let buffered =
             std::mem::replace(&mut self.buffered_body, BufferedBody::Empty).buffered_data();
 
-        if let Some(ref buffered) = buffered {
-            for frame in buffered.iter() {
-                let frame = if let Some(data) = frame.data_ref() {
-                    Frame::data(data.clone())
-                } else if let Some(trailers) = frame.trailers_ref() {
-                    Frame::trailers(trailers.clone())
-                } else {
-                    panic!("{frame:?} was neither a data or a trailers frame");
-                };
-
+        let sent_frames = if let Some(buffered) = buffered {
+            for frame in buffered {
                 self.destination.send_frame(frame).await?;
             }
-        }
+            true
+        } else {
+            false
+        };
 
         let Some(mut body) = self.body_tail.take() else {
-            if buffered.is_some() {
+            if sent_frames {
                 self.destination.no_more_frames().await?;
             }
             return Ok(());
