@@ -258,7 +258,7 @@ pub enum InnerFilter {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "body", rename_all = "lowercase")]
 pub enum BodyFilter {
     /// ##### feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}
     ///
@@ -273,7 +273,7 @@ pub enum BodyFilter {
     /// ```json
     /// "http_filter": {
     ///   "body_filter": {
-    ///     "type": "json",
+    ///     "body": "json",
     ///     "query": "$.library.books[*]",
     ///     "matches": "^\\d{3,5}$"
     ///   }
@@ -307,7 +307,7 @@ pub enum BodyFilter {
     ///
     /// ```json
     /// "body_filter": {
-    ///   "type": "json",
+    ///   "body": "json",
     ///   "query": "$.books[?(typeof(@) == 'number')]",
     ///   "matches": "4$"
     /// }
@@ -346,7 +346,7 @@ pub enum BodyFilter {
     ///       "path": "/buildings"
     ///     },
     ///     {
-    ///       "type": "json",
+    ///       "body": "json",
     ///       "query": "$.library.books[*]",
     ///       "matches": "^\\d{3,5}$"
     ///     }
