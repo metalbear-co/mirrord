@@ -11,11 +11,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.173.0](https://github.com/metalbear-co/mirrord/tree/3.173.0) - 2025-11-16
 
 
-### Added
-
-- KubeCon Atlanta raffle password added to project README.md
-
-
 ### Changed
 
 - Update `experimental.non_blocking_tcp_connect` config default to `false`.
