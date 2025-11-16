@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.173.1](https://github.com/metalbear-co/mirrord/tree/3.173.1) - 2025-11-16
+
+
+### Internal
+
+- Add cleanup of unnececary items in CI builder for docker builds.
+  [#add-cleanup-before-docker-build](https://github.com/metalbear-co/mirrord/issues/add-cleanup-before-docker-build)
+
 ## [3.173.0](https://github.com/metalbear-co/mirrord/tree/3.173.0) - 2025-11-16
 
 
