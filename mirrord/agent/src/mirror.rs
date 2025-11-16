@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     error::Report,
-    ops::{ControlFlow, Not, RangeInclusive},
+    ops::{Not, RangeInclusive},
 };
 
 use futures::StreamExt;
@@ -146,78 +146,79 @@ impl TcpMirrorApi {
         filters: &HashMap<Port, HttpFilter>,
     ) -> Option<Result<MirroredTraffic, RedirectorTaskError>> {
         use MirroredTraffic as M;
-        tokio::select! {
-            Some(finished) = ongoing.join_next() => {
-                match finished {
-                    Ok(mut http) => {
-                        let port = http.info.original_destination.port();
-                        let (parts, body) = http.parts_and_body();
-                        let Some(filter) = filters.get(&port) else {
-                            return Some(Ok(M::Http(http)));
-                        };
-                        filter.matches(parts, body.reader()).then_some(Ok(M::Http(http)))
-                    },
-                    Err(error) => {
-                        tracing::error!(
-                            ?error,
-                            "HTTP mirror body buffer task panicked. This is a bug in the agent, please report it"
-                        );
-                        None
+        loop {
+            tokio::select! {
+                Some(finished) = ongoing.join_next() => {
+                    match finished {
+                        Ok(mut http) => {
+                            let port = http.info.original_destination.port();
+                            let (parts, body) = http.parts_and_body();
+                            let Some(filter) = filters.get(&port) else {
+                                return Some(Ok(M::Http(http)));
+                            };
+                            return dbg!(filter.matches(parts, body.reader()).then_some(Ok(M::Http(http))))
+                        },
+                        Err(error) => {
+                            tracing::error!(
+                                ?error,
+                                "HTTP mirror body buffer task panicked. This is a bug in the agent, please report it"
+                            );
+                            continue
+                        }
                     }
                 }
-            }
-            Some(next) = handle.next() => {
-                let next = match next {
-                    Ok(n) => n,
-                    e => return Some(e),
-                };
-                match next {
-                    M::Tcp(tcp) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                        filters
-                            .contains_key(&tcp.info.original_destination.port())
-                            .not()
-                            .then_some(Ok(M::Tcp(tcp)))
-                    }
-
-                    M::Tcp(tcp) => {
-                        filters
-                            .contains_key(&tcp.info.original_destination.port())
-                            .not()
-                            .then_some(Ok(M::Tcp(tcp)))
-                    }
-
-                    M::Http(mut http) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
-                        let port = http.info.original_destination.port();
-                        let (parts, body) = http.parts_and_body();
-                        let Some(filter) = filters.get(&port) else {
-                            return Some(Ok(M::Http(http)));
-                        };
-
-                        // Nothing should be buffered the first time around.
-                        assert!(body.is_empty());
-
-                        if filter.matches(parts, body.reader()) {
-                            return Some(Ok(M::Http(http)));
+                Some(next) = handle.next() => {
+                    let next = match next {
+                        Ok(n) => n,
+                        e => return Some(e),
+                    };
+                    return match next {
+                        M::Tcp(tcp) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                            filters
+                                .contains_key(&tcp.info.original_destination.port())
+                                .not()
+                                .then_some(Ok(M::Tcp(tcp)))
                         }
 
-                        if filter.needs_body() {
-                            ongoing.spawn(async move {
-                                if let Err(error) = http.buffer_body().await {
-                                    tracing::warn!(?error, "failed to buffer request body");
-                                };
-                                http
-                            });
+                        M::Tcp(tcp) => {
+                            filters
+                                .contains_key(&tcp.info.original_destination.port())
+                                .not()
+                                .then_some(Ok(M::Tcp(tcp)))
                         }
 
-                        None
-                    }
+                        M::Http(mut http) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
+                            let port = http.info.original_destination.port();
+                            let (parts, body) = http.parts_and_body();
+                            let Some(filter) = filters.get(&port) else {
+                                return Some(Ok(M::Http(http)));
+                            };
 
-                    M::Http(http) => {
-                        Some(Ok(M::Http(http)))
+                            // Nothing should be buffered the first time around.
+                            assert!(body.is_empty());
+
+                            if filter.matches(parts, body.reader()) {
+                                return Some(Ok(M::Http(http)));
+                            }
+
+                            if filter.needs_body() {
+                                ongoing.spawn(async move {
+                                    if let Err(error) = http.buffer_body().await {
+                                        tracing::warn!(?error, "failed to buffer request body");
+                                    };
+                                    http
+                                });
+                            }
+							continue
+                        }
+
+                        M::Http(http) => {
+                            Some(Ok(M::Http(http)))
+                        }
                     }
                 }
-            }
-            else => None,
+                else => std::future::pending().await,
+            };
         }
     }
 
@@ -238,42 +239,42 @@ impl TcpMirrorApi {
                     }
 
                     tokio::select! {
-                    Some((id, item)) = incoming_streams.next() => match item {
-                        IncomingStreamItem::Data(data) => DaemonTcp::Data(TcpData {
-                            connection_id: id,
-                            bytes: data.into(),
-                        }),
-                        IncomingStreamItem::NoMoreData => DaemonTcp::Data(TcpData {
-                            connection_id: id,
-                            bytes: Default::default(),
-                        }),
-                        IncomingStreamItem::Frame(frame) => {
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                                frames: vec![frame],
-                                is_last: false,
+                        Some((id, item)) = incoming_streams.next() => match item {
+                            IncomingStreamItem::Data(data) => DaemonTcp::Data(TcpData {
                                 connection_id: id,
-                                request_id: Self::REQUEST_ID,
-                            }))
-                        }
-                        IncomingStreamItem::NoMoreFrames => {
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                                frames: Default::default(),
-                                is_last: true,
+                                bytes: data.into(),
+                            }),
+                            IncomingStreamItem::NoMoreData => DaemonTcp::Data(TcpData {
                                 connection_id: id,
-                                request_id: Self::REQUEST_ID,
-                            }))
-                        }
-                        IncomingStreamItem::Finished(Ok(())) => {
-                            DaemonTcp::Close(TcpClose { connection_id: id })
-                        }
-                        IncomingStreamItem::Finished(Err(error)) => {
-                            queued_messages.push_back(DaemonTcp::Close(TcpClose { connection_id: id }));
-                            return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                "Mirrored connection {id} failed: {}",
-                                Report::new(error)
-                            ))));
-                        }
-                    },
+                                bytes: Default::default(),
+                            }),
+                            IncomingStreamItem::Frame(frame) => {
+                                DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                                    frames: vec![frame],
+                                    is_last: false,
+                                    connection_id: id,
+                                    request_id: Self::REQUEST_ID,
+                                }))
+                            }
+                            IncomingStreamItem::NoMoreFrames => {
+                                DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                                    frames: Default::default(),
+                                    is_last: true,
+                                    connection_id: id,
+                                    request_id: Self::REQUEST_ID,
+                                }))
+                            }
+                            IncomingStreamItem::Finished(Ok(())) => {
+                                DaemonTcp::Close(TcpClose { connection_id: id })
+                            }
+                            IncomingStreamItem::Finished(Err(error)) => {
+                                queued_messages.push_back(DaemonTcp::Close(TcpClose { connection_id: id }));
+                                return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                                    "Mirrored connection {id} failed: {}",
+                                    Report::new(error)
+                                ))));
+                            }
+                        },
 
                         Some(traffic) = Self::next(mirror_handle, ongoing_requests, protocol_version, port_filters) => match traffic? {
                             MirroredTraffic::Tcp(tcp) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
@@ -341,9 +342,20 @@ impl TcpMirrorApi {
                                             }))
                                         );
                                     }
+									// We know that the filter passed,
+									// thus the body must have been
+									// complete
+                                    queued_messages.push_back(
+                                        DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                                            frames: vec![],
+                                            is_last: true,
+                                            connection_id: id,
+                                            request_id: Self::REQUEST_ID,
+                                        }))
+                                    );
+                                } else {
+                                    incoming_streams.insert(id, http.stream);
                                 }
-
-								incoming_streams.insert(id, http.stream);
 
                                 let message = ChunkedRequestStartV2 {
                                     connection_id: id,

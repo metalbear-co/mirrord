@@ -405,6 +405,7 @@ impl Debug for MirroredHttp {
             .field("info", &self.info)
             .field("request_head", &self.request_head)
             .field("parts", &self.parts)
+            .field("buffered_body", &self.buffered_body)
             .finish()
     }
 }
@@ -468,7 +469,7 @@ pub trait BodyBufferable: Debug {
 
         let Some(mut tail) = self.body_tail() else {
             tracing::debug!("request has no tail, bailing early");
-            *self.buffered_body() = BufferedBody::Successful(buffered);
+            *self.buffered_body() = BufferedBody::Full(buffered);
             return Ok(());
         };
 
@@ -501,10 +502,10 @@ pub trait BodyBufferable: Debug {
 
         match &result {
             Ok(()) => {
-                *self.buffered_body() = BufferedBody::Successful(buffered);
+                *self.buffered_body() = BufferedBody::Full(buffered);
             }
             Err(_) => {
-                *self.buffered_body() = BufferedBody::Failed(buffered);
+                *self.buffered_body() = BufferedBody::Partial(buffered);
             }
         };
 

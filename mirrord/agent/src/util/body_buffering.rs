@@ -136,26 +136,19 @@ pub(crate) enum BufferBodyError {
 
 pub(crate) enum BufferedBody<T> {
     Empty,
-
-    // Since we only store data frames and one optional trailer frame
-    // at the end, we could save a couple hundred bytes by storing raw
-    // `Bytes` objects instead of `Frame<Bytes>`-es, (32 vs 96 bytes
-    // on 64bit) and having an optional `first_nondata_frame` field.
-    // We go with this approach because it's a little simpler to
-    // implement.
-    Successful(Vec<T>),
-    Failed(Vec<T>),
+    Full(Vec<T>),
+    Partial(Vec<T>),
 }
 
 impl<T> Debug for BufferedBody<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "Empty"),
-            Self::Successful(buf) => f
+            Self::Full(buf) => f
                 .debug_struct("Full")
                 .field("frame_count", &buf.len())
                 .finish(),
-            Self::Failed(buf) => f
+            Self::Partial(buf) => f
                 .debug_struct("Partial")
                 .field("frame_count", &buf.len())
                 .finish(),
@@ -175,7 +168,7 @@ impl<T> BufferedBody<T> {
     pub(crate) fn buffered_data(self) -> Option<Vec<T>> {
         match self {
             BufferedBody::Empty => None,
-            BufferedBody::Successful(frames) | BufferedBody::Failed(frames) => Some(frames),
+            BufferedBody::Full(frames) | BufferedBody::Partial(frames) => Some(frames),
         }
     }
 }
@@ -185,8 +178,8 @@ impl<T: Framelike> BufferedBody<T> {
     /// [`FramesReader`] for it.
     pub(crate) fn reader(&self) -> Option<FramesReader<'_, T>> {
         match self {
-            Self::Empty | Self::Failed(_) => None,
-            Self::Successful(items) => Some(FramesReader {
+            Self::Empty | Self::Partial(_) => None,
+            Self::Full(items) => Some(FramesReader {
                 remaining: &items,
                 read_until: 0,
             }),

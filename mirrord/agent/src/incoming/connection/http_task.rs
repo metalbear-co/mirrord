@@ -95,6 +95,7 @@ where
         }
 
         let Some(mut body) = self.body_tail.take() else {
+			// FIXME(areg): replace with .is_some_and(t.0.not()) aka not full after testing??
             if buffered.is_some() {
                 self.destination.no_more_frames().await?;
             }
