@@ -181,36 +181,48 @@ jobs:
             return $false
           }
 
+          function Add-WixToPath {
+            Write-Host "Searching for WiX candle.exe in common locations..."
+
+            $candidateDirs = @(
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.14\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.13\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.12\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.11\bin",
+              # Common Chocolatey paths
+              "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
+              "$Env:ProgramData\chocolatey\bin"
+            ) | Where-Object { $_ -and (Test-Path $_) }
+
+            foreach ($dir in $candidateDirs) {
+              $candlePath = Join-Path $dir "candle.exe"
+              if (Test-Path $candlePath) {
+                Write-Host "Found candle.exe at $candlePath. Adding $dir to PATH."
+                $env:PATH = "$dir;$env:PATH"
+                return $true
+              }
+            }
+
+            Write-Host "No candle.exe found in known directories."
+            return $false
+          }
+
           Write-Host "Checking for candle.exe on PATH..."
           if (Test-Candle) {
             Write-Host "WiX already installed; candle.exe is available on PATH."
             return
           }
 
-          Write-Host "candle.exe not on PATH. Searching common WiX install directories..."
-          $candidateDirs = @(
-            "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
-            "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
-            "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
-            "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
-            "$Env:ProgramFiles\WiX Toolset v3.14\bin",
-            "$Env:ProgramFiles\WiX Toolset v3.13\bin",
-            "$Env:ProgramFiles\WiX Toolset v3.12\bin",
-            "$Env:ProgramFiles\WiX Toolset v3.11\bin"
-          ) | Where-Object { $_ -and (Test-Path $_) }
-
-          foreach ($dir in $candidateDirs) {
-            $candlePath = Join-Path $dir "candle.exe"
-            if (Test-Path $candlePath) {
-              Write-Host "Found candle.exe at $candlePath. Adding $dir to PATH."
-              $env:PATH = "$dir;$env:PATH"
-              break
+          # Try to locate an existing WiX installation and add it to PATH
+          if (Add-WixToPath) {
+            if (Test-Candle) {
+              Write-Host "candle.exe is now available after adjusting PATH."
+              return
             }
-          }
-
-          if (Test-Candle) {
-            Write-Host "candle.exe is now available after adjusting PATH."
-            return
           }
 
           Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
@@ -231,25 +243,8 @@ jobs:
 
           Write-Host "Re-checking for candle.exe after Chocolatey step..."
           if (-not (Test-Candle)) {
-            $candidateDirs = @(
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
-              "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.14\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.13\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.12\bin",
-              "$Env:ProgramFiles\WiX Toolset v3.11\bin"
-            ) | Where-Object { $_ -and (Test-Path $_) }
-
-            foreach ($dir in $candidateDirs) {
-              $candlePath = Join-Path $dir "candle.exe"
-              if (Test-Path $candlePath) {
-                Write-Host "Found candle.exe at $candlePath after Chocolatey. Adding $dir to PATH."
-                $env:PATH = "$dir;$env:PATH"
-                break
-              }
-            }
+            # Try again to locate WiX in known locations, including Chocolatey folders
+            Add-WixToPath | Out-Null
           }
 
           if (-not (Test-Candle)) {
