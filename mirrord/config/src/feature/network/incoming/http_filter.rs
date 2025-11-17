@@ -203,6 +203,7 @@ impl HttpFilterConfig {
         &self,
         agent_protocol_version: Option<Version>,
     ) -> Result<(), ConfigError> {
+        #![allow(clippy::type_complexity)]
         static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 3] = [
             (
                 HttpFilterConfig::is_composite,
