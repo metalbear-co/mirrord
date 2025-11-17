@@ -10,7 +10,6 @@ use std::{
 use futures::{FutureExt, future::BoxFuture};
 use tokio::sync::mpsc;
 
-pub mod body_buffering;
 pub mod error;
 pub mod path_resolver;
 pub mod protocol_version;

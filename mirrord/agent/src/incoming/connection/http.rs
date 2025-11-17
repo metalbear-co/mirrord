@@ -24,16 +24,18 @@ use tokio::{
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tracing::instrument;
 
-use super::{ConnectionInfo, IncomingStream};
+use super::{
+    ConnectionInfo, IncomingStream,
+    body_utils::{BufferedBody, Framelike, FramesReader},
+};
 use crate::{
     http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
     incoming::{
         ConnError, IncomingStreamItem, RedirectorTaskConfig,
-        connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
-    },
-    util::body_buffering::{
-        BufferBodyError, BufferedBody, Framelike, FramesReader, MAX_BODY_BUFFER_SIZE,
-        MAX_BODY_BUFFER_TIMEOUT,
+        connection::{
+            body_utils::{BufferBodyError, MAX_BODY_BUFFER_SIZE, MAX_BODY_BUFFER_TIMEOUT},
+            http_task::{HttpTask, StealingClient, UpgradeDataRx},
+        },
     },
 };
 

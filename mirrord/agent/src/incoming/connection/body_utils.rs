@@ -1,8 +1,5 @@
 use std::{
-    fmt::{self, Debug},
-    io::Read,
-    sync::LazyLock,
-    time::Duration,
+    fmt::{self, Debug}, io::Read, sync::LazyLock, time::Duration
 };
 
 use bytes::Bytes;
@@ -13,7 +10,7 @@ use tokio::time::error::Elapsed;
 
 use crate::incoming::ConnError;
 
-pub(crate) trait Framelike {
+pub trait Framelike {
     fn data_ref(&self) -> Option<&[u8]>;
 }
 
@@ -33,7 +30,7 @@ impl Framelike for InternalHttpBodyFrame {
 }
 
 /// Implements [`Read`] for a &[Frame]
-pub(crate) struct FramesReader<'a, T> {
+pub struct FramesReader<'a, T> {
     remaining: &'a [T],
     read_until: usize,
 }
@@ -78,7 +75,7 @@ impl<T: Framelike> Read for FramesReader<'_, T> {
     }
 }
 
-pub(crate) static MAX_BODY_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
+pub static MAX_BODY_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
     match envs::MAX_BODY_BUFFER_SIZE.try_from_env() {
         Ok(Some(t)) => Some(t as usize),
         Ok(None) => {
@@ -97,7 +94,7 @@ pub(crate) static MAX_BODY_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
     .unwrap_or(64 * 1024)
 });
 
-pub(crate) static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
+pub static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
     Duration::from_millis(
         match envs::MAX_BODY_BUFFER_TIMEOUT.try_from_env() {
             Ok(Some(t)) => Some(t),
@@ -123,7 +120,7 @@ pub(crate) static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(||
 });
 
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum BufferBodyError {
+pub enum BufferBodyError {
     #[error("io error while receiving http body: {0}")]
     Hyper(#[from] hyper::Error),
     #[error(transparent)]
@@ -134,7 +131,7 @@ pub(crate) enum BufferBodyError {
     Timeout(#[from] Elapsed),
 }
 
-pub(crate) enum BufferedBody<T> {
+pub enum BufferedBody<T> {
     Empty,
     Full(Vec<T>),
     Partial(Vec<T>),
@@ -158,14 +155,14 @@ impl<T> Debug for BufferedBody<T> {
 
 impl<T> BufferedBody<T> {
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
     }
 
     /// Returns the buffered data if we have anything, regardless of
     /// whether it's full or partial.
     #[inline]
-    pub(crate) fn buffered_data(self) -> Option<Vec<T>> {
+    pub fn buffered_data(self) -> Option<Vec<T>> {
         match self {
             BufferedBody::Empty => None,
             BufferedBody::Full(frames) | BufferedBody::Partial(frames) => Some(frames),
@@ -176,7 +173,7 @@ impl<T> BufferedBody<T> {
 impl<T: Framelike> BufferedBody<T> {
     /// If we have an entire successfully buffered body, return a
     /// [`FramesReader`] for it.
-    pub(crate) fn reader(&self) -> Option<FramesReader<'_, T>> {
+    pub fn reader(&self) -> Option<FramesReader<'_, T>> {
         match self {
             Self::Empty | Self::Partial(_) => None,
             Self::Full(items) => Some(FramesReader {

@@ -21,6 +21,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument;
 
+use super::body_utils::BufferedBody;
 use crate::{
     http::{
         HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, body::RolledBackBody,
@@ -35,7 +36,6 @@ use crate::{
         },
         error::ConnError,
     },
-    util::body_buffering::BufferedBody,
 };
 
 pub type UpgradeDataRx = mpsc::Receiver<Bytes>;

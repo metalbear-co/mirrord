@@ -31,6 +31,7 @@ pub mod http;
 mod http_task;
 mod optional_broadcast;
 pub mod tcp;
+mod body_utils;
 
 /// Redirected connection info.
 #[derive(Clone, Debug)]
