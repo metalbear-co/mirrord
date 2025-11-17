@@ -26,7 +26,7 @@ impl Framelike for Frame<Bytes> {
 impl Framelike for InternalHttpBodyFrame {
     fn data_ref(&self) -> Option<&[u8]> {
         match self {
-            InternalHttpBodyFrame::Data(payload) => Some(&payload),
+            InternalHttpBodyFrame::Data(payload) => Some(payload),
             InternalHttpBodyFrame::Trailers(_) => None,
         }
     }
@@ -180,7 +180,7 @@ impl<T: Framelike> BufferedBody<T> {
         match self {
             Self::Empty | Self::Partial(_) => None,
             Self::Full(items) => Some(FramesReader {
-                remaining: &items,
+                remaining: items,
                 read_until: 0,
             }),
         }
