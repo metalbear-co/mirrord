@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use k8s_openapi::{
     Resource as _,
@@ -21,6 +21,7 @@ use mirrord_config::{
 use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use uuid::Uuid;
 
 /// Limit for concurrently used agents in a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,7 +283,7 @@ pub struct SessionOwner {
 }
 
 /// Describes a target of a mirrord session.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
     /// Kubernetes resource apiVersion.
@@ -324,7 +325,7 @@ pub struct MirrordClusterSessionAgent {
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
     #[serde(default)]
-    pub agents: Vec<MirrordClusterSessionAgent>,
+    pub agents: BTreeMap<Uuid, MirrordClusterSessionAgent>,
     /// Last time when the session was observed to have an open user connection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connected_timestamp: Option<MicroTime>,

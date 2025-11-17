@@ -36,7 +36,6 @@ client = [
   "dep:tokio-tungstenite",
   "dep:tracing",
   "dep:serde_urlencoded",
-  "dep:uuid",
   "dep:tower"
 ]
 crd = [
@@ -48,6 +47,7 @@ crd = [
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
+  "dep:uuid",
 ]
 setup = ["crd", "dep:serde_yaml"]
 
