@@ -172,16 +172,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          function Test-Candle {
-            $cmd = Get-Command candle.exe -ErrorAction SilentlyContinue
-            if ($cmd) {
-              Write-Host "candle.exe found at $($cmd.Source)"
-              return $true
-            }
-            return $false
+          function Write-Env([string]$k,[string]$v) {
+            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
           }
 
-          function Find-Candle-And-AddToPath {
+          function Find-Candle {
             param(
               [switch]$DeepSearch
             )
@@ -190,7 +185,6 @@ jobs:
 
             $candidateDirs = @()
 
-            # Respect ChocolateyInstall if present
             if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
               $candidateDirs += @(
                 (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
@@ -199,7 +193,6 @@ jobs:
               )
             }
 
-            # Common WiX install paths
             $candidateDirs += @(
               "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
               "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
@@ -209,7 +202,6 @@ jobs:
               "$Env:ProgramFiles\WiX Toolset v3.13\bin",
               "$Env:ProgramFiles\WiX Toolset v3.12\bin",
               "$Env:ProgramFiles\WiX Toolset v3.11\bin",
-              # System-wide Chocolatey root (if used)
               "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
               "$Env:ProgramData\chocolatey\bin"
             )
@@ -219,73 +211,92 @@ jobs:
             foreach ($dir in $candidateDirs) {
               $candlePath = Join-Path $dir "candle.exe"
               if (Test-Path $candlePath) {
-                Write-Host "Found candle.exe at $candlePath. Adding $dir to PATH."
-                $env:PATH = "$dir;$env:PATH"
-                return $true
+                Write-Host "Found candle.exe at $candlePath."
+                return $candlePath
               }
             }
 
             if ($DeepSearch) {
-              Write-Host "No candle.exe in known directories. Deep searching C:\ for candle.exe (this may take some time)..."
+              Write-Host "No candle.exe in known dirs. Deep searching C:\ for candle.exe (may take time)..."
               try {
                 $hit = Get-ChildItem -Path 'C:\' -Filter 'candle.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($hit) {
-                  $dir = $hit.DirectoryName
-                  Write-Host "Deep search found candle.exe at $($hit.FullName). Adding $dir to PATH."
-                  $env:PATH = "$dir;$env:PATH"
-                  return $true
+                  Write-Host "Deep search found candle.exe at $($hit.FullName)."
+                  return $hit.FullName
                 } else {
                   Write-Host "Deep search did not find candle.exe on C:\."
                 }
               } catch {
-                Write-Warning "Deep search for candle.exe failed: $($_.Exception.Message)"
+                Write-Warning "Deep search failed: $($_.Exception.Message)"
               }
             }
 
-            Write-Host "No candle.exe found in known or searched directories."
-            return $false
+            return $null
           }
 
-          Write-Host "Checking for candle.exe on PATH..."
-          if (Test-Candle) {
-            Write-Host "WiX already installed; candle.exe is available on PATH."
-            return
+          # 1. Try PATH directly
+          $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $candlePath = $null
+          if ($candleCmd) {
+            $candlePath = $candleCmd.Source
+            Write-Host "candle.exe found on PATH at $candlePath"
+          } else {
+            # 2. Try common locations
+            $candlePath = Find-Candle
           }
 
-          # Try to locate an existing WiX installation and add it to PATH
-          if (Find-Candle-And-AddToPath) {
-            if (Test-Candle) {
-              Write-Host "candle.exe is now available after adjusting PATH."
-              return
+          # 3. If still not found, try installing via Chocolatey (best effort)
+          if (-not $candlePath) {
+            Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
+
+            if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+              Write-Host "Chocolatey not found, installing Chocolatey..."
+              Set-ExecutionPolicy Bypass -Scope Process -Force
+              [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+              Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+            }
+
+            try {
+              choco install wixtoolset -y --no-progress
+            } catch {
+              Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
+            }
+
+            # 4. After choco, re-check (including deep search)
+            $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+            if ($candleCmd) {
+              $candlePath = $candleCmd.Source
+              Write-Host "After Chocolatey, candle.exe found on PATH at $candlePath"
+            } else {
+              $candlePath = Find-Candle -DeepSearch
             }
           }
 
-          Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
-
-          if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
-            Write-Host "Chocolatey not found, installing Chocolatey..."
-            Set-ExecutionPolicy Bypass -Scope Process -Force
-            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          if (-not $candlePath -or -not (Test-Path $candlePath)) {
+            throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists (e.g., via Chocolatey or MSI)."
           }
 
-          try {
-            choco install wixtoolset -y --no-progress
-          }
-          catch {
-            Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
-          }
-
-          Write-Host "Re-checking for candle.exe after Chocolatey step (including deep search)..."
-          if (-not (Test-Candle)) {
-            Find-Candle-And-AddToPath -DeepSearch | Out-Null
+          # Resolve light.exe in same directory (or via PATH as fallback)
+          $wixDir = Split-Path $candlePath -Parent
+          $lightPath = Join-Path $wixDir "light.exe"
+          if (-not (Test-Path $lightPath)) {
+            $lightCmd = Get-Command light.exe -ErrorAction SilentlyContinue
+            if ($lightCmd) {
+              $lightPath = $lightCmd.Source
+            }
           }
 
-          if (-not (Test-Candle)) {
-            throw "candle.exe still not found after WiX detection, Chocolatey attempt, and deep search. Please install WiX Toolset 3.x on this runner as an administrator and ensure its 'bin' directory is on PATH (or set ChocolateyInstall correctly)."
+          if (-not (Test-Path $lightPath)) {
+            throw "Found candle.exe at '$candlePath' but could not find light.exe in the same directory or on PATH. Please ensure a full WiX Toolset 3.x install (candle.exe and light.exe)."
           }
 
-          Write-Host "candle.exe is available: OK."
+          Write-Host "Resolved WiX tools:"
+          Write-Host "  candle.exe = $candlePath"
+          Write-Host "  light.exe  = $lightPath"
+
+          # Export for subsequent steps
+          Write-Env "CANDLE_EXE" $candlePath
+          Write-Env "LIGHT_EXE"  $lightPath
 
       ###########################################################################
       # BUILD MSI USING main.wxs
@@ -294,6 +305,19 @@ jobs:
       - name: Build MSI
         run: |
           $ErrorActionPreference = "Stop"
+
+          if (-not $env:CANDLE_EXE -or -not (Test-Path $env:CANDLE_EXE)) {
+            throw "CANDLE_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+          }
+          if (-not $env:LIGHT_EXE -or -not (Test-Path $env:LIGHT_EXE)) {
+            throw "LIGHT_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+          }
+
+          $candle = $env:CANDLE_EXE
+          $light  = $env:LIGHT_EXE
+
+          Write-Host "Using candle.exe at: $candle"
+          Write-Host "Using light.exe  at: $light"
 
           $Root = "C:\wix\mirrord"
           New-Item -ItemType Directory -Force -Path $Root | Out-Null
@@ -305,30 +329,13 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
 
-          # Resolve WiX binaries dynamically
-          $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
-          $lightCmd  = Get-Command light.exe  -ErrorAction SilentlyContinue
-
-          if (-not $candleCmd) {
-            throw "candle.exe not found on PATH. Please install WiX Toolset v3.x and ensure candle.exe is on PATH."
-          }
-          if (-not $lightCmd) {
-            throw "light.exe not found on PATH. Please install WiX Toolset v3.x and ensure light.exe is on PATH."
-          }
-
-          $candle = $candleCmd.Source
-          $light  = $lightCmd.Source
-
-          Write-Host "Using candle.exe at: $candle"
-          Write-Host "Using light.exe  at: $light"
-
           $Obj = "$Root\main.wixobj"
           $Msi = "$Root\mirrord.msi"
 
           if (Test-Path $Msi) { Remove-Item $Msi -Force }
 
           & $candle -nologo -v "$Root\main.wxs" -out $Obj
-          & $light -nologo -v $Obj -out $Msi -ext WixUIExtension
+          & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension
 
           if (-not (Test-Path $Msi)) { throw "MSI not produced" }
 
