@@ -165,6 +165,45 @@ jobs:
           Set-Env "MIRRORD_VERSION" $pkg.version
 
       ###########################################################################
+      # ENSURE WIX TOOLSET IS INSTALLED
+      ###########################################################################
+
+      - name: Ensure WiX Toolset
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $wixBin = "C:\Program Files (x86)\WiX Toolset v3.11\bin"
+
+          # If candle.exe is already available, nothing to do
+          if (Get-Command candle.exe -ErrorAction SilentlyContinue) {
+            Write-Host "WiX already installed; candle.exe is available on PATH."
+          } else {
+            Write-Host "candle.exe not found on PATH. Installing WiX Toolset v3.11 via Chocolatey..."
+
+            # Ensure Chocolatey exists
+            if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+              Write-Host "Chocolatey not found, installing Chocolatey..."
+              Set-ExecutionPolicy Bypass -Scope Process -Force
+              [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+              Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+            }
+
+            # Install WiX Toolset 3.11
+            choco install wixtoolset --version=3.11.2 --yes --no-progress
+
+            # Ensure current session PATH includes WiX bin directory
+            if (Test-Path $wixBin) {
+              Write-Host "Adding WiX bin folder to PATH for current session: $wixBin"
+              $env:PATH = "$wixBin;$env:PATH"
+            }
+          }
+
+          # Final check
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            throw "candle.exe still not found after WiX installation. Check runner permissions or install WiX manually."
+          }
+
+      ###########################################################################
       # BUILD MSI USING main.wxs
       ###########################################################################
 
@@ -182,7 +221,7 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
 
-          # Resolve WiX binaries dynamically (no hard-coded path)
+          # Resolve WiX binaries dynamically
           $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
           $lightCmd  = Get-Command light.exe  -ErrorAction SilentlyContinue
 
