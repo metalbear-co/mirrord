@@ -13,7 +13,7 @@ use std::{net::SocketAddr, sync::OnceLock};
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_intproxy_protocol::{ConnMetadataRequest, ConnMetadataResponse, PortSubscribe};
 use mirrord_layer_lib::{
-    error::{ConnectError, HookError, HookResult, SendToError, windows::WindowsError},
+    error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{layer_setup, windows::NetworkHookConfig},
     socket::{
@@ -2277,7 +2277,7 @@ unsafe extern "system" fn getsockopt_detour(
 pub fn initialize_hooks(
     guard: &mut DetourGuard<'static>,
     setup: &mirrord_layer_lib::setup::windows::LayerSetup,
-) -> anyhow::Result<()> {
+) -> LayerResult<()> {
     // Ensure winsock libraries are loaded before attempting to hook them
     // This prevents issues with Python's _socket.pyd or other dynamic loaders
     // ensure_winsock_libraries_loaded()?;

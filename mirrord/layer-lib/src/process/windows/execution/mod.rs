@@ -48,6 +48,9 @@ pub const MIRRORD_AGENT_ADDR_ENV: &str = "MIRRORD_AGENT_ADDR";
 pub const MIRRORD_LAYER_ID_ENV: &str = "MIRRORD_LAYER_ID";
 pub const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
 
+/// Environment variable for specifying layer log directory path
+pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
+
 // Windows-specific child process inheritance environment variables
 pub const MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID: &str = "MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID";
 pub const MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID: &str = "MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID";
@@ -60,6 +63,7 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_AGENT_ADDR_ENV,
     MIRRORD_LAYER_ID_ENV,
     MIRRORD_LAYER_FILE_ENV,
+    MIRRORD_LAYER_LOG_PATH,
     "RUST_LOG",
     "RUST_BACKTRACE",
 ];

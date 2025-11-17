@@ -25,7 +25,7 @@ pub type ConsoleResult<T> = Result<T, ConsoleError>;
 
 #[derive(Error)]
 pub enum WindowsError {
-    /// Usually returned by [`winapi::umm::errhandlingapi::GetLastError`].
+    /// Usually returned by [`winapi::um::errhandlingapi::GetLastError`].
     Windows(u32),
     /// Usually returned by Winsock functions. [`winapi::um::winsock2::WSAGetLastError`].
     WinSock(i32),
@@ -39,7 +39,7 @@ impl WindowsError {
         Self::Windows(error)
     }
 
-    /// Generate a new [`WindowsError`] from [`WSAGetLastError`].
+    /// Generate a new [`WindowsError`] from [`winapi::um::winsock2::WSAGetLastError`].
     pub fn wsa_last_error() -> Self {
         let error = unsafe { winapi::um::winsock2::WSAGetLastError() };
         Self::WinSock(error)

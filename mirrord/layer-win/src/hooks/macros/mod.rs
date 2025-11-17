@@ -19,10 +19,20 @@
 macro_rules! apply_hook {
     ($guard:ident, $dll:literal, $fn:literal, $detour:ident, $detour_type:ty, $original:ident) => {
         $original
-            .set($guard.create_hook::<$detour_type>(
-                $crate::process::get_export($dll, $fn) as _,
-                $detour as _,
-            )?)
+            .set(
+                $guard
+                    .create_hook::<$detour_type>(
+                        $crate::process::get_export($dll, $fn) as _,
+                        $detour as _,
+                    )
+                    .map_err(
+                        |err| mirrord_layer_lib::error::LayerError::HookEngineApply {
+                            function: $fn,
+                            dll: $dll,
+                            error: err.to_string(),
+                        },
+                    )?,
+            )
             .or(Err(
                 mirrord_layer_lib::error::LayerError::FailedApplyingAPIHook(
                     $fn.into(),

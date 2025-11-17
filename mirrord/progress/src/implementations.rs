@@ -215,6 +215,10 @@ impl Progress for SpinnerProgress {
             self.progress
                 .finish_with_message(format!("✓ {}", self.progress.message()));
         }
+        // On Windows, we need to print a final line break to avoid having exec process's stdout
+        // begin the same line as the "Ready"
+        #[cfg(target_os = "windows")]
+        println!();
         self.message_buffer.iter().for_each(|msg| println!("{msg}"));
     }
 

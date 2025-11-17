@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
-    error::{LayerError, windows::WindowsError},
+    error::{LayerError, LayerResult, windows::WindowsError},
     process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
 };
 use winapi::{
@@ -170,7 +170,7 @@ unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMO
     // Log LoadLibrary calls for debugging
     if !lpLibFileName.is_null() {
         // Convert the wide string to a Rust string for logging
-        let lib_name = unsafe { str_win::wide_string_ptr_to_string(lpLibFileName) };
+        let lib_name = unsafe { str_win::u16_ptr_to_string(lpLibFileName) };
 
         if !lib_name.is_empty() {
             // Trace library loading for debugging
@@ -198,7 +198,7 @@ unsafe extern "system" fn getprocaddress_detour(
     // Only process if we have a valid function name pointer
     if !lpProcName.is_null() {
         // Convert the function name to a string for logging
-        let function_name = unsafe { str_win::c_string_ptr_to_string(lpProcName) };
+        let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
 
         if !function_name.is_empty() {
             // Trace function resolution for debugging
@@ -218,7 +218,7 @@ unsafe extern "system" fn getprocaddress_detour(
 ///
 /// Installs the CreateProcessInternalW hook using the detours library to intercept
 /// all process creation calls and redirect them through our unified mirrord system.
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     // NOTE(gabriela): handling this at syscall level is super cumbersome
     // and undocumented, so I'd have to reverse engineer CreateProcessInternalW
     // which is like, 3000-ish lines without type fixups, and we shipped this before

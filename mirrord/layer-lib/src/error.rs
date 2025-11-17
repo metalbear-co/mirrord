@@ -52,7 +52,7 @@ mod ignore_codes {
         winapi::um::winsock2::WSAEACCES, // Using EACCES as equivalent to EPERM
     ];
 
-    /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
+    /// Checks if an error code from some function should be treated as a hard error, or
     /// not.
     pub(super) fn is_ignored_code(code: Option<i32>) -> bool {
         if let Some(code) = code {
@@ -342,6 +342,22 @@ pub enum LayerError {
 
     #[error("Global {0} already initialized")]
     GlobalAlreadyInitialized(&'static str),
+
+    #[cfg(target_os = "windows")]
+    #[error("Hook engine failure: {0}")]
+    HookEngine(String),
+
+    #[cfg(target_os = "windows")]
+    #[error("Hook engine failure while applying {function} from {dll}: {error}")]
+    HookEngineApply {
+        function: &'static str,
+        dll: &'static str,
+        error: String,
+    },
+
+    #[cfg(target_os = "windows")]
+    #[error("Detour guard failure: {0}")]
+    DetourGuard(String),
 
     #[cfg(target_os = "windows")]
     #[error("Environment variable for layer id not present")]
