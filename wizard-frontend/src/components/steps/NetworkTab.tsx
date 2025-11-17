@@ -28,6 +28,8 @@ import { ConfigDataContext } from "../UserDataContext";
 import { Disable } from "react-disable";
 import { PortMapping } from "./PortMapping";
 import HttpFilter from "./HttpFilter";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import AddNewFilter from "./AddNewFilter";
 
 const IncomingConfigToggle = ({
   savedIncoming,
@@ -192,7 +194,7 @@ const NetworkTab = ({
 
   const mockPorts = [8080, 3000, 5432, 9000, 4000, 6379, 5672, 3306];
 
-  const handleOnSubmitPort = (e) => {
+  const handleOnSubmit = (e) => {
     e.preventDefault();
     if (newRemotePort) {
       const ports = readCurrentPorts(config);
@@ -244,31 +246,9 @@ const NetworkTab = ({
                     <div className="space-y-3">
                       {/* Header Filtering */}
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex-1 items-center justify-between">
                           <Label className="font-medium">Header Filters</Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const { filters, operator } =
-                                readCurrentFilters(config);
-                              const updated = updateConfigFilter(
-                                filters.concat([
-                                  {
-                                    value: "x-mirrord-test: true",
-                                    type: "header"
-                                  },
-                                ]),
-                                operator,
-                                config
-                              );
-                              setConfig(updated);
-                            }}
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add
-                          </Button>
+                          <AddNewFilter type="header" placeholder="eg. x-mirrord-test: true" key="addheaderfilter" />
                         </div>
                         {readCurrentFilters(config).filters.length > 0 && (
                           <div className="space-y-3">
@@ -289,105 +269,26 @@ const NetworkTab = ({
 
                       {/* Path Filtering */}
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex-1 items-center justify-between">
                           <Label className="font-medium">Path Filters</Label>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const { filters, operator } =
-                                readCurrentFilters(config);
-                              const updated = updateConfigFilter(
-                                filters.concat([
-                                  {
-                                    value: "",
-                                    type: "path",
-                                  },
-                                ]),
-                                operator,
-                                config
-                              );
-                              setConfig(updated);
-                            }}
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add
-                          </Button>
+                          <AddNewFilter type="path" placeholder="e.g. /api/v1/test" key="addpathfilter" />
                         </div>
 
-                        {/* {(
-                          config.feature.network.incoming.httpFilter ?? []
-                        ).filter((f) => f.type === "path").length > 0 && (
-                          <div className="space-y-2">
-                            {(config.feature.network.incoming.httpFilter ?? [])
-                              .filter((f) => f.type === "path")
-                              .map((filter, index) => (
-                                <div
-                                  key={index}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Input
-                                    placeholder="e.g., /api/v1/test"
-                                    value={filter.value}
-                                    onChange={(e) => {
-                                      const newFilters = [
-                                        ...config.feature.network.incoming
-                                          .httpFilter,
-                                      ];
-                                      const pathIndex = newFilters.findIndex(
-                                        (f, i) =>
-                                          f.type === "path" && i === index
-                                      );
-                                      if (pathIndex !== -1) {
-                                        newFilters[pathIndex] = {
-                                          ...newFilters[pathIndex],
-                                          value: e.target.value,
-                                        };
-                                        setConfig({
-                                          ...config,
-                                          network: {
-                                            ...config.feature.network,
-                                            incoming: {
-                                              ...config.feature.network
-                                                .incoming,
-                                              httpFilter: newFilters,
-                                            },
-                                          },
-                                        });
-                                      }
-                                    }}
-                                  />
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      const newFilters = (
-                                        config.feature.network.incoming
-                                          .httpFilter ?? []
-                                      ).filter(
-                                        (f, i) =>
-                                          !(f.type === "path" && i === index)
-                                      );
-                                      setConfig({
-                                        ...config,
-                                        network: {
-                                          ...config.feature.network,
-                                          incoming: {
-                                            ...config.feature.network.incoming,
-                                            httpFilter: newFilters,
-                                          },
-                                        },
-                                      });
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
+                        {readCurrentFilters(config).filters.length > 0 && (
+                          <div className="space-y-3">
+                            {readCurrentFilters(config)
+                              .filters.filter(
+                                (filter) => filter.type === "path"
+                              )
+                              .map((headerFilter) => (
+                                <HttpFilter
+                                  initValue={headerFilter.value}
+                                  inputType={"path"}
+                                  key={headerFilter.value}
+                                />
                               ))}
                           </div>
-                        )} */}
+                        )}
                       </div>
 
                       {/* Filter Logic Selection - Only show when there are multiple filters */}
@@ -487,7 +388,7 @@ const NetworkTab = ({
                             className="border rounded-lg p-3 space-y-3 bg-green-100"
                           >
                             <form
-                              onSubmit={handleOnSubmitPort}
+                              onSubmit={handleOnSubmit}
                               className="flex items-center gap-3"
                             >
                               <Label>Add New Port</Label>
