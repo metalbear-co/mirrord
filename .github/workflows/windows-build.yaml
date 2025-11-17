@@ -234,6 +234,7 @@ jobs:
           $wxsPath = Join-Path $Root "Product_mirrord.wxs"
 
           $wxs = @"
+
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*" Name="mirrord" Manufacturer="MetalBear" Language="1033" Version="$msiVersion" UpgradeCode="EAFD3591-E78C-4B78-85BF-5FE0E72BB7A2">
