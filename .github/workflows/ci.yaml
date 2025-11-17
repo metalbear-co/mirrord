@@ -60,7 +60,7 @@ jobs:
   # Build agent image tar (for E2E)
   # ======================
   test_agent_image:
-    runs-on: [self-hosted, linux, x64, docker]
+    runs-on: [self-hosted, linux, x64, docker, spot]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +96,7 @@ jobs:
   # Build CLI image tar (optional artifact)
   # ======================
   test_cli_image:
-    runs-on: [self-hosted, linux, x64, docker]
+    runs-on: [self-hosted, linux, x64, docker, spot]
     # Optional artifact - don't block workflow on failure
     continue-on-error: true
     steps:
@@ -166,7 +166,7 @@ jobs:
   # Integration tests (Linux)
   # ======================
   integration_tests:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, linux, x64, spot]
     steps:
       - uses: actions/checkout@v4
         with:
