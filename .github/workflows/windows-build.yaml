@@ -181,10 +181,26 @@ jobs:
             return $false
           }
 
-          function Add-WixToPath {
-            Write-Host "Searching for WiX candle.exe in common locations..."
+          function Find-Candle-And-AddToPath {
+            param(
+              [switch]$DeepSearch
+            )
 
-            $candidateDirs = @(
+            Write-Host "Searching for WiX candle.exe in known locations..."
+
+            $candidateDirs = @()
+
+            # Respect ChocolateyInstall if present
+            if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
+              $candidateDirs += @(
+                (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
+                (Join-Path $Env:ChocolateyInstall "tools"),
+                (Join-Path $Env:ChocolateyInstall "bin")
+              )
+            }
+
+            # Common WiX install paths
+            $candidateDirs += @(
               "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
               "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
               "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
@@ -193,10 +209,12 @@ jobs:
               "$Env:ProgramFiles\WiX Toolset v3.13\bin",
               "$Env:ProgramFiles\WiX Toolset v3.12\bin",
               "$Env:ProgramFiles\WiX Toolset v3.11\bin",
-              # Common Chocolatey paths
+              # System-wide Chocolatey root (if used)
               "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
               "$Env:ProgramData\chocolatey\bin"
-            ) | Where-Object { $_ -and (Test-Path $_) }
+            )
+
+            $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
 
             foreach ($dir in $candidateDirs) {
               $candlePath = Join-Path $dir "candle.exe"
@@ -207,7 +225,24 @@ jobs:
               }
             }
 
-            Write-Host "No candle.exe found in known directories."
+            if ($DeepSearch) {
+              Write-Host "No candle.exe in known directories. Deep searching C:\ for candle.exe (this may take some time)..."
+              try {
+                $hit = Get-ChildItem -Path 'C:\' -Filter 'candle.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) {
+                  $dir = $hit.DirectoryName
+                  Write-Host "Deep search found candle.exe at $($hit.FullName). Adding $dir to PATH."
+                  $env:PATH = "$dir;$env:PATH"
+                  return $true
+                } else {
+                  Write-Host "Deep search did not find candle.exe on C:\."
+                }
+              } catch {
+                Write-Warning "Deep search for candle.exe failed: $($_.Exception.Message)"
+              }
+            }
+
+            Write-Host "No candle.exe found in known or searched directories."
             return $false
           }
 
@@ -218,7 +253,7 @@ jobs:
           }
 
           # Try to locate an existing WiX installation and add it to PATH
-          if (Add-WixToPath) {
+          if (Find-Candle-And-AddToPath) {
             if (Test-Candle) {
               Write-Host "candle.exe is now available after adjusting PATH."
               return
@@ -241,14 +276,13 @@ jobs:
             Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
           }
 
-          Write-Host "Re-checking for candle.exe after Chocolatey step..."
+          Write-Host "Re-checking for candle.exe after Chocolatey step (including deep search)..."
           if (-not (Test-Candle)) {
-            # Try again to locate WiX in known locations, including Chocolatey folders
-            Add-WixToPath | Out-Null
+            Find-Candle-And-AddToPath -DeepSearch | Out-Null
           }
 
           if (-not (Test-Candle)) {
-            throw "candle.exe still not found after WiX detection and Chocolatey attempt. Check runner permissions or install WiX Toolset 3.x manually and ensure its 'bin' directory is on PATH."
+            throw "candle.exe still not found after WiX detection, Chocolatey attempt, and deep search. Please install WiX Toolset 3.x on this runner as an administrator and ensure its 'bin' directory is on PATH (or set ChocolateyInstall correctly)."
           }
 
           Write-Host "candle.exe is available: OK."
