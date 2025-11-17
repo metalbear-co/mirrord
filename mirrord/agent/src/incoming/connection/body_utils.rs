@@ -1,5 +1,8 @@
 use std::{
-    fmt::{self, Debug}, io::Read, sync::LazyLock, time::Duration
+    fmt::{self, Debug},
+    io::Read,
+    sync::LazyLock,
+    time::Duration,
 };
 
 use bytes::Bytes;
