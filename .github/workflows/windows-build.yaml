@@ -182,9 +182,22 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
 
-          # WIx paths
-          $candle = "C:\Program Files (x86)\WiX Toolset v3.11\bin\candle.exe"
-          $light  = "C:\Program Files (x86)\WiX Toolset v3.11\bin\light.exe"
+          # Resolve WiX binaries dynamically (no hard-coded path)
+          $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $lightCmd  = Get-Command light.exe  -ErrorAction SilentlyContinue
+
+          if (-not $candleCmd) {
+            throw "candle.exe not found on PATH. Please install WiX Toolset v3.x and ensure candle.exe is on PATH."
+          }
+          if (-not $lightCmd) {
+            throw "light.exe not found on PATH. Please install WiX Toolset v3.x and ensure light.exe is on PATH."
+          }
+
+          $candle = $candleCmd.Source
+          $light  = $lightCmd.Source
+
+          Write-Host "Using candle.exe at: $candle"
+          Write-Host "Using light.exe  at: $light"
 
           $Obj = "$Root\main.wixobj"
           $Msi = "$Root\mirrord.msi"
