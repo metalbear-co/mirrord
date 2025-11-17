@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     env::{self, temp_dir},
     fs::File,
+    os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
     process::Stdio,
     time::SystemTime,
@@ -14,6 +15,7 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
+use nix::libc::{SIGINT, SIGKILL, SIGTERM};
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -22,7 +24,9 @@ use tokio::{
 };
 use tracing::Level;
 
-use crate::{CiArgs, CiCommand, CliError, CliResult, ci::error::CiError, user_data::UserData};
+use crate::{
+    CiArgs, CiCommand, CiStartArgs, CliError, CliResult, ci::error::CiError, user_data::UserData,
+};
 
 pub(crate) mod error;
 pub(super) mod start;
@@ -163,6 +167,9 @@ pub(super) struct MirrordCi {
     /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
     ci_api_key: Option<CiApiKey>,
 
+    /// Arguments that are specific to `mirrord ci start`.
+    start_args: StartArgs,
+
     /// [`MirrordCiStore`] holds the intproxy pid, and the user process pid so we can kill them
     /// later (on `mirrord ci stop`).
     ///
@@ -232,22 +239,50 @@ impl MirrordCi {
         ));
 
         if mirrord_ci_store.user_pid.is_some() {
-            Err(CiError::UserPidAlreadyPresent)
-        } else {
-            match tokio::process::Command::new(binary_path)
-                .args(binary_args.iter().skip(1))
-                .envs(env_vars)
-                .stdin(Stdio::null())
-                .stdout(File::create(ci_run_output_dir.join("stdout"))?)
-                .stderr(File::create(ci_run_output_dir.join("stderr"))?)
-                .kill_on_drop(false)
-                .spawn()
-            {
-                Ok(child) => {
-                    mirrord_ci_store.user_pid = child.id();
-                    mirrord_ci_store.write_to_file().await?;
+            return Err(CiError::UserPidAlreadyPresent);
+        };
 
-                    progress.success(Some(&format!("child pid: {:?}", mirrord_ci_store.user_pid)));
+        let mut child = match tokio::process::Command::new(binary_path)
+            .args(binary_args.iter().skip(1))
+            .envs(env_vars)
+            .stdin(Stdio::null())
+            .stdout(File::create(ci_run_output_dir.join("stdout"))?)
+            .stderr(File::create(ci_run_output_dir.join("stderr"))?)
+            .kill_on_drop(false)
+            .spawn()
+        {
+            Ok(child) => {
+                mirrord_ci_store.user_pid = child.id();
+                mirrord_ci_store.write_to_file().await?;
+                child
+            }
+            Err(fail) => {
+                progress.failure(Some(&fail.to_string()));
+                return Err(CiError::BinaryExecuteFailed(
+                    binary.to_string(),
+                    binary_args.to_vec(),
+                ));
+            }
+        };
+
+        if self.start_args.foreground {
+            progress.info(&format!(
+                "Waiting for child with pid {:?}",
+                mirrord_ci_store.user_pid,
+            ));
+            match child.wait().await {
+                Ok(status) => {
+                    if status.success() {
+                        progress.success(None);
+                    } else if let Some(signal) = status.signal() {
+                        match signal {
+                            SIGKILL => progress.success(Some("Process killed by SIGKILL")),
+                            SIGTERM => progress.success(Some("Process terminated by SIGTERM")),
+                            SIGINT => progress.success(Some("Process interrupted by SIGINT")),
+                            _ => progress
+                                .failure(Some(&format!("Process exited with status: {}", status))),
+                        };
+                    }
                     Ok::<_, CiError>(())
                 }
                 Err(fail) => {
@@ -258,14 +293,18 @@ impl MirrordCi {
                     ))
                 }
             }
+        } else {
+            progress.success(Some(&format!("child pid: {:?}", mirrord_ci_store.user_pid)));
+            Ok::<_, CiError>(())
         }
     }
 
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
     /// [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    pub(super) async fn get() -> CiResult<Self> {
+    pub(super) async fn new(args: &CiStartArgs) -> CiResult<Self> {
         let store = MirrordCiStore::read_from_file_or_default().await?;
+        let start_args = args.into();
 
         let ci_api_key = match std::env::var(MIRRORD_CI_API_KEY) {
             Ok(api_key) => Some(CiApiKey::decode(&api_key)?),
@@ -275,15 +314,22 @@ impl MirrordCi {
             }
         };
 
-        Ok(Self { ci_api_key, store })
+        Ok(Self {
+            ci_api_key,
+            start_args,
+            store,
+        })
     }
+}
 
-    /// Removes the [`MirrordCiStore`] files.
-    ///
-    /// If one of these files remains available, `mirrord ci start` may fail to execute, as you
-    /// always need to match a `mirrord ci start` with a `mirrord ci stop`.
-    #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn clear(self) -> CiResult<()> {
-        MirrordCiStore::remove_file().await
+#[derive(Debug, Default)]
+struct StartArgs {
+    foreground: bool,
+}
+
+impl From<&CiStartArgs> for StartArgs {
+    fn from(args: &CiStartArgs) -> Self {
+        let foreground = args.foreground;
+        Self { foreground }
     }
 }
