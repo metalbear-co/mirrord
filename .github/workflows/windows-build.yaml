@@ -22,11 +22,11 @@ on:
         type: choice
         options: ["false", "true"]
         default: false
-  
+
   push:
     paths-ignore:
-      - '*.md'
-      - '**/*.md'
+      - "*.md"
+      - "**/*.md"
 
   pull_request:
     branches: ["main", "*staging*", "windows-support"]
@@ -45,6 +45,8 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+  # Dedicated bucket for MSI artifacts (change to your real bucket if needed)
+  MSI_BUCKET_URI: gs://mirrord-windows-msi
 
 jobs:
   windows_tests:
@@ -73,15 +75,6 @@ jobs:
           cargo -V
           rustup show
 
-      # TOTALLY WIP
-      - name: Install Windows Console Legacy Capability
-        run: |
-          $ErrorActionPreference = 'Stop'
-          powershell.exe -NoProfile -Command "Add-WindowsCapability -Online -Name 'Microsoft.Windows.Console.Legacy~~~~'"
-
-      # Build MSI using wix
-      
-
       - name: Prepare artifacts (download OR build+sign)
         id: prep
         run: |
@@ -92,7 +85,7 @@ jobs:
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
           $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
           New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
+          $shouldSign = [System.String]::Equals($env.SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
 
           if ($env:MODE -eq 'reuse') {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
@@ -196,7 +189,140 @@ jobs:
           Set-Env "MIRRORD_VERSION" $pkg.version
           Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
 
-      - name: Upload to GCS (build_sign only)
+      # ============================
+      # Build MSI (WiX UI + icon + license)
+      # ============================
+      - name: Build MSI (WiX)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # ---- Compute MSI version (4-part) from MIRRORD_VERSION ----
+          $rawVersion = $env:MIRRORD_VERSION
+          if ([string]::IsNullOrWhiteSpace($rawVersion) -or $rawVersion -eq "unknown") {
+            $msiVersion = "0.0.0.0"
+          } else {
+            $parts = $rawVersion.Split('.')
+            if ($parts.Count -lt 4) {
+              $parts += @("0") * (4 - $parts.Count)
+            }
+            $msiVersion = ($parts[0..3] -join '.')
+          }
+
+          # Root layout on the runner
+          $Root      = "C:\wix\mirrord"
+          $Src       = Join-Path $Root "src"
+          $Out       = Join-Path $Root "out"
+          $WixAssets = $Root   # Folder where mirrord.ico + License.rtf live
+
+          New-Item -ItemType Directory -Force -Path $Src, $Out | Out-Null
+
+          # Copy built artifacts into $Src (assuming these envs were set earlier in the job)
+          if (-not $env:MIRRORD_EXE) { throw "MIRRORD_EXE env var is not set." }
+          if (-not $env:MIRRORD_LAYER_FILE) { throw "MIRRORD_LAYER_FILE env var is not set." }
+
+          Copy-Item $env:MIRRORD_EXE        (Join-Path $Src "mirrord.exe")           -Force
+          Copy-Item $env:MIRRORD_LAYER_FILE (Join-Path $Src "mirrord_layer_win.dll") -Force
+
+          # Ensure icon + license exist in $WixAssets
+          $icoPath = Join-Path $WixAssets "mirrord.ico"
+          $licPath = Join-Path $WixAssets "License.rtf"
+          if (-not (Test-Path $icoPath)) { throw "mirrord.ico not found in $WixAssets" }
+          if (-not (Test-Path $licPath)) { throw "License.rtf not found in $WixAssets" }
+
+          # ---- WiX XML here-string (with UI, icon, license) ----
+          $wxsPath = Join-Path $Root "Product_mirrord.wxs"
+
+          $wxs = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="mirrord" Manufacturer="MetalBear" Language="1033" Version="$msiVersion" UpgradeCode="EAFD3591-E78C-4B78-85BF-5FE0E72BB7A2">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="Run a local process in the context of a cloud environment"
+             Manufacturer="MetalBear" />
+
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit." />
+
+    <MediaTemplate />
+
+    <!-- ARP metadata -->
+    <Property Id="ARPPRODUCTICON" Value="ProductICO" />
+    <Property Id="ARPHELPLINK"   Value="https://metalbear.co/mirrord/docs" />
+
+    <!-- Icon that shows in Add/Remove Programs -->
+    <Icon Id="ProductICO" SourceFile="`$(var.WixAssets)\mirrord.ico" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="mirrord" />
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Component Id="ExeComp" Guid="*">
+        <File Id="MirrordExe" Source="`$(var.Src)\mirrord.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="DllComp" Guid="*">
+        <File Id="MirrordDll" Source="`$(var.Src)\mirrord_layer_win.dll" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="MainFeature" Title="mirrord" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+
+    <!-- Simple built-in UI with license dialog -->
+    <UI>
+      <UIRef Id="WixUI_Minimal" />
+    </UI>
+
+    <!-- License file shown in the EULA dialog -->
+    <WixVariable Id="WixUILicenseRtf" Value="`$(var.WixAssets)\License.rtf" />
+  </Product>
+</Wix>
+"@
+
+          $wxs | Set-Content -Path $wxsPath -Encoding UTF8
+
+          # ---- Locate WiX toolset ----
+          $candle = (Get-ChildItem 'C:\Program Files (x86)\WiX Toolset v3.*\bin\candle.exe' | Select-Object -First 1).FullName
+          $light  = (Get-ChildItem 'C:\Program Files (x86)\WiX Toolset v3.*\bin\light.exe'  | Select-Object -First 1).FullName
+
+          if (-not $candle) { throw "candle.exe not found under C:\Program Files (x86)\WiX Toolset v3.*\bin" }
+          if (-not $light)  { throw "light.exe not found under C:\Program Files (x86)\WiX Toolset v3.*\bin" }
+
+          $WixObj = Join-Path $Out "Product_mirrord.wixobj"
+          $MsiOut = Join-Path $Out ("mirrord-{0}.msi" -f $msiVersion)
+
+          # Optional: delete old MSI if present
+          if (Test-Path $MsiOut) {
+            Write-Host "Removing existing MSI at $MsiOut"
+            Remove-Item $MsiOut -Force
+          }
+
+          Write-Host ">> $candle -nologo -v -dSrc=$Src -dWixAssets=$WixAssets -ext WixUIExtension -out $WixObj $wxsPath" -ForegroundColor Cyan
+          & $candle -nologo -v "-dSrc=$Src" "-dWixAssets=$WixAssets" -ext WixUIExtension -out "$WixObj" "$wxsPath"
+          if ($LASTEXITCODE -ne 0) { throw "candle failed ($LASTEXITCODE)" }
+          if (-not (Test-Path $WixObj)) { throw "candle produced no wixobj: $WixObj" }
+
+          Write-Host ">> $light -nologo -v -ext WixUIExtension -out $MsiOut $WixObj" -ForegroundColor Cyan
+          & $light -nologo -v -ext WixUIExtension -out "$MsiOut" "$WixObj"
+          if ($LASTEXITCODE -ne 0) { throw "light failed ($LASTEXITCODE)" }
+          if (-not (Test-Path $MsiOut)) { throw "light produced no MSI: $MsiOut" }
+
+          Write-Host "MSI: $MsiOut" -ForegroundColor Green
+
+          # SHA256 for MSI
+          $msiSha = "$MsiOut.sha256"
+          $h = (Get-FileHash -Algorithm SHA256 $MsiOut).Hash
+          "$h  $(Split-Path $MsiOut -Leaf)" | Out-File -FilePath $msiSha -Encoding ascii
+
+          # Export for later steps (upload to GCS / GitHub Release)
+          "MSI_PATH=$MsiOut"       | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MSI_SHA256_PATH=$msiSha" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload EXE/DLL to GCS (build_sign only)
         if: ${{ env.MODE == 'build_sign' }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -218,6 +344,25 @@ jobs:
           Write-Host "Uploading to $dest"
           Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
           gcloud --quiet storage ls $dest
+
+      - name: Upload MSI to GCS (optional)
+        if: ${{ env.MSI_BUCKET_URI != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+            throw "gcloud not found on PATH. Ensure the runner is authenticated."
+          }
+          $msi = $env:MSI_PATH
+          if (-not (Test-Path $msi)) { throw "MSI not found at $msi" }
+          $version = if ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') { $env:MIRRORD_VERSION } else { 'unknown' }
+          $sha7 = $env:GITHUB_SHA.Substring(0,7)
+          $dest = "$($env:MSI_BUCKET_URI)/windows/msi/mirrord-$version-$sha7/"
+          Write-Host "Uploading MSI to $dest"
+          gcloud --quiet storage cp $msi $dest
+          if ($env:MSI_SHA256_PATH -and (Test-Path $env:MSI_SHA256_PATH)) {
+            gcloud --quiet storage cp $env:MSI_SHA256_PATH $dest
+          }
 
       - name: Run Rust unit tests (single loop)
         run: |
@@ -264,7 +409,6 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Release tag: $tag"
 
-
       - name: Publish GitHub Release and upload artifacts (github-script)
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
         uses: actions/github-script@v7
@@ -274,6 +418,8 @@ jobs:
           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
           SIGN_ARTIFACTS: ${{ env.SIGN_ARTIFACTS }} # "true" | "false"
+          MSI_PATH: ${{ env.MSI_PATH }}
+          MSI_SHA256_PATH: ${{ env.MSI_SHA256_PATH }}
         with:
           script: |
             const fs = require('fs');
@@ -342,12 +488,14 @@ jobs:
               core.info(`Uploaded ${name}`);
             }
 
-            // Upload artifacts
+            // Upload artifacts: exe, dll, and msi (+ sha256 files)
             const files = [
               process.env.MIRRORD_EXE,
               `${process.env.MIRRORD_EXE}.sha256`,
               process.env.MIRRORD_LAYER_FILE,
               `${process.env.MIRRORD_LAYER_FILE}.sha256`,
+              process.env.MSI_PATH,
+              process.env.MSI_SHA256_PATH,
             ];
             for (const f of files) { await upload(f); }
 
@@ -369,8 +517,6 @@ jobs:
               core.info('Signed status already up to date in release body.');
             }
 
-
-
       # ==================================
       # === Pretty summary to step tab ===
       # ==================================
@@ -380,7 +526,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = $env:MIRRORD_EXE
           $dll = $env:MIRRORD_LAYER_FILE
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
+          $shouldSign = [System.String]::Equals($env.SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
           if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
           if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
           $base = Split-Path $exe -Parent
@@ -447,7 +593,7 @@ jobs:
           $md = @()
           $md += '### Windows test results'
           $md += ''
-          $md += ('**Mode:** `{0}` • **Sign artifacts:** `{1}`  ' -f $env:MODE, $env:SIGN_ARTIFACTS)
+          $md += ('**Mode:** `{0}` • **Sign artifacts:** `{1}`  ' -f $env:MODE, $env.SIGN_ARTIFACTS)
           $md += ('**EXE:** `{0}`  ' -f $exe)
           $md += ('**DLL:** `{0}`' -f $dll)
           $md += ''
