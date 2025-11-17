@@ -214,7 +214,7 @@ impl TcpMirrorApi {
                     }
                 }
                 else => std::future::pending().await,
-            }
+            };
         }
     }
 

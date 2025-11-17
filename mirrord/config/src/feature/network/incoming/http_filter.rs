@@ -7,7 +7,9 @@ use std::{
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
-use mirrord_protocol::tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HTTP_BODY_JSON_FILTER_VERSION};
+use mirrord_protocol::tcp::{
+    HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION,
+};
 use schemars::JsonSchema;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};

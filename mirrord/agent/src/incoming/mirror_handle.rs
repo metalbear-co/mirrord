@@ -53,10 +53,7 @@ impl MirrorHandle {
         let (receiver_tx, receiver_rx) = oneshot::channel();
         if self
             .message_tx
-            .send(RedirectRequest::Mirror {
-                port,
-                receiver_tx,
-            })
+            .send(RedirectRequest::Mirror { port, receiver_tx })
             .await
             .is_err()
         {
