@@ -14,7 +14,10 @@ use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
-    LayerResult, file::filter::FileMode, proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response}, setup::layer_setup
+    LayerResult,
+    file::filter::FileMode,
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    setup::layer_setup,
 };
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
@@ -255,14 +258,10 @@ unsafe extern "system" fn nt_create_file_hook(
     ea_size: ULONG,
 ) -> NTSTATUS {
     unsafe {
-        let setup = layer_setup();
-        let original = NT_CREATE_FILE_ORIGINAL.get().unwrap();
-        // If file-system hooks are enabled, don't proceed with logic for mirrord handles.
-        // NOTE(gabriela): this is the only place, realistically, where this logic handling
-        // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
-        // to all functions which rely on expecting one!
-        if !setup.fs_hooks_enabled() {
-            return original(
+        // Closure to prevent repeating this long invocation ad-nauseam.
+        let run_original = || -> NTSTATUS {
+            let original = NT_CREATE_FILE_ORIGINAL.get().unwrap();
+            original(
                 file_handle,
                 desired_access,
                 object_attributes,
@@ -274,26 +273,23 @@ unsafe extern "system" fn nt_create_file_hook(
                 create_options,
                 ea_buf,
                 ea_size,
-            );
+            )
+        };
+
+        let setup = layer_setup();
+        // If file-system hooks are enabled, don't proceed with logic for mirrord handles.
+        // NOTE(gabriela): this is the only place, realistically, where this logic handling
+        // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
+        // to all functions which rely on expecting one!
+        if !setup.fs_hooks_enabled() {
+            return run_original();
         }
 
         let name = read_object_attributes_name(object_attributes);
 
         // Try to create a Linux path from the provided Windows UNC path.
         let Some(parsed_linux_path) = path_to_unix_path(name.clone()) else {
-            return original(
-                file_handle,
-                desired_access,
-                object_attributes,
-                io_status_block,
-                allocation_size,
-                file_attributes,
-                share_access,
-                create_disposition,
-                create_options,
-                ea_buf,
-                ea_size,
-            );
+            return run_original();
         };
 
         // NOTE(gabriela): (fs config) - we must make sure to follow the same routine
@@ -321,20 +317,8 @@ unsafe extern "system" fn nt_create_file_hook(
         let matched_filter = filter.check(&linux_path);
         match matched_filter {
             Some(FileMode::Local(_)) => {
-                tracing::trace!("Reading \"{}\" locally!", name);
-                return original(
-                    file_handle,
-                    desired_access,
-                    object_attributes,
-                    io_status_block,
-                    allocation_size,
-                    file_attributes,
-                    share_access,
-                    create_disposition,
-                    create_options,
-                    ea_buf,
-                    ea_size,
-                );
+                tracing::trace!("nt_create_file_hook: reading \"{}\" locally!", name);
+                return run_original()
             }
             Some(FileMode::NotFound(_)) => {
                 *file_handle = std::ptr::null_mut();
@@ -343,23 +327,16 @@ unsafe extern "system" fn nt_create_file_hook(
             }
             // TODO(gabriela): edit when supported!
             Some(FileMode::ReadOnly(_)) | Some(FileMode::ReadWrite(_)) | None => {
+                // Check if the caller is attempting to get a write capable handle.
                 if desired_access & FILE_WRITE_DATA != 0
                     || desired_access & FILE_APPEND_DATA != 0
                     || desired_access & GENERIC_WRITE != 0
                 {
-                    return original(
-                        file_handle,
-                        desired_access,
-                        object_attributes,
-                        io_status_block,
-                        allocation_size,
-                        file_attributes,
-                        share_access,
-                        create_disposition,
-                        create_options,
-                        ea_buf,
-                        ea_size,
+                    tracing::warn!(
+                        path = linux_path,
+                        "nt_create_file_hook: write mode not supported presently. falling back to original!"
                     );
+                    return run_original();
                 }
             }
         }
@@ -367,41 +344,19 @@ unsafe extern "system" fn nt_create_file_hook(
         // Check if pointer to handle is valid.
         if file_handle.is_null() {
             tracing::warn!("nt_create_file_hook: Invalid memory for file_handle variable in hook");
-            return original(
-                file_handle,
-                desired_access,
-                object_attributes,
-                io_status_block,
-                allocation_size,
-                file_attributes,
-                share_access,
-                create_disposition,
-                create_options,
-                ea_buf,
-                ea_size,
-            );
+            return run_original();
         }
 
         if !is_memory_valid(io_status_block) {
             tracing::warn!(
                 "nt_create_file_hook: Invalid memory for io_status_block variable in hook"
             );
-            return original(
-                file_handle,
-                desired_access,
-                object_attributes,
-                io_status_block,
-                allocation_size,
-                file_attributes,
-                share_access,
-                create_disposition,
-                create_options,
-                ea_buf,
-                ea_size,
-            );
+            return run_original();
         }
 
         // Get open options.
+        // NOTE(gabriela): currently read-only!
+        // TODO(gabriela): update when write mode supported!
         let open_options = OpenOptionsInternal {
             read: true,
             ..Default::default()
@@ -467,19 +422,7 @@ unsafe extern "system" fn nt_create_file_hook(
                 "nt_create_file_hook: Failed opening remote file handle"
             );
 
-            original(
-                file_handle,
-                desired_access,
-                object_attributes,
-                io_status_block,
-                allocation_size,
-                file_attributes,
-                share_access,
-                create_disposition,
-                create_options,
-                ea_buf,
-                ea_size,
-            )
+            run_original()
         }
     }
 }

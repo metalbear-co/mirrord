@@ -67,25 +67,30 @@ impl PathExt for Path {
 }
 
 /// Checks whether the given [`Path`] should be accessed remotely.
-fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<()> {
+pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<()> {
+    // TODO(gabriela): rewrite this using `FileFilter::check`!
+
     let text = path.to_str().unwrap_or_default();
 
-    match file_filter.check(text) {
-        Some(FileMode::Local(_default)) => Detour::Bypass(Bypass::ignored_file(text)),
-        Some(FileMode::NotFound(_default)) => Detour::Error(HookError::FileNotFound),
-        Some(FileMode::ReadOnly(_default)) => {
+    match file_filter.mode {
+        FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
+        _ if file_filter.not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+        _ if file_filter.read_write.is_match(text) => Detour::Success(()),
+        _ if file_filter.read_only.is_match(text) => {
             if write {
-                if file_filter.mode == FsModeConfig::Write {
-                    Detour::Bypass(Bypass::ReadOnly(text.into()))
-                } else {
-                    Detour::Bypass(Bypass::ignored_file(text))
-                }
+                Detour::Bypass(Bypass::ignored_file(text))
             } else {
                 Detour::Success(())
             }
         }
-        Some(FileMode::ReadWrite(_default)) => Detour::Success(()),
-        None => Detour::Success(()),
+        _ if file_filter.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
+        _ if file_filter.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+        _ if file_filter.default_remote_ro.is_match(text) && !write => Detour::Success(()),
+        _ if file_filter.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
+        FsModeConfig::LocalWithOverrides => Detour::Bypass(Bypass::ignored_file(text)),
+        FsModeConfig::Write => Detour::Success(()),
+        FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
+        FsModeConfig::Read => Detour::Success(()),
     }
 }
 

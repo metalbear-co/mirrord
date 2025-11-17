@@ -37,13 +37,13 @@ pub enum FileMode {
 
 #[derive(Debug)]
 pub struct FileFilter {
-    read_only: RegexSet,
-    read_write: RegexSet,
-    local: RegexSet,
-    not_found: RegexSet,
-    default_local: RegexSet,
-    default_remote_ro: RegexSet,
-    default_not_found: RegexSet,
+    pub read_only: RegexSet,
+    pub read_write: RegexSet,
+    pub local: RegexSet,
+    pub not_found: RegexSet,
+    pub default_local: RegexSet,
+    pub default_remote_ro: RegexSet,
+    pub default_not_found: RegexSet,
     pub mode: FsModeConfig,
 }
 
