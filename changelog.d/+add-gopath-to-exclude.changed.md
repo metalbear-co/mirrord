@@ -1,1 +1,1 @@
-Exclude GOPATH from env fetched
+Exclude `GOPATH` and `GOMODCACHE` from env fetched

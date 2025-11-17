@@ -52,6 +52,7 @@ impl EnvFilter {
                 WildMatch::new("GEM_HOME"),
                 WildMatch::new("GEM_PATH"),
                 WildMatch::new("GOPATH"),
+                WildMatch::new("GOMODCACHE"),
                 WildMatch::new("HOME"),
                 WildMatch::new("HOMEPATH"),
                 WildMatch::new("JAVA_EXE"),
