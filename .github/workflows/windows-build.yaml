@@ -335,7 +335,7 @@ jobs:
           if (Test-Path $Msi) { Remove-Item $Msi -Force }
 
           & $candle -nologo -v "$Root\main.wxs" -out $Obj
-          & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension
+          & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
 
           if (-not (Test-Path $Msi)) { throw "MSI not produced" }
 
