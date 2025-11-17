@@ -8,6 +8,59 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.173.1](https://github.com/metalbear-co/mirrord/tree/3.173.1) - 2025-11-16
+
+
+### Internal
+
+- Add cleanup of unnececary items in CI builder for docker builds.
+  [#add-cleanup-before-docker-build](https://github.com/metalbear-co/mirrord/issues/add-cleanup-before-docker-build)
+
+## [3.173.0](https://github.com/metalbear-co/mirrord/tree/3.173.0) - 2025-11-16
+
+
+### Changed
+
+- Update `experimental.non_blocking_tcp_connect` config default to `false`.
+
+
+### Fixed
+
+- Fixed the security advisories of the config's template engine by updating it
+  to the newest version
+  [#3657](https://github.com/metalbear-co/mirrord/issues/3657)
+
+
+### Internal
+
+- Fix the way release script gets workspace version.
+- Kubernetes-related packages have been removed from the devshell, they should
+  be installed system-wide instead.
+- Use the pip from the setup action, not the one preinstalled on the runner.
+- make CI workflow trigger for PRs targeted to `windows-support` branch
+  (windows main)
+
+## [3.172.0](https://github.com/metalbear-co/mirrord/tree/3.172.0) - 2025-11-06
+
+
+### Removed
+
+- Reverted arm64e support in mirrord-sip.
+
+
+### Changed
+
+- When possible, mirrord now binds application socket to the requested address
+  (instead of always to localhost or unspecified).
+  [#3693](https://github.com/metalbear-co/mirrord/issues/3693)
+- Reverted independent send handles for intproxy tasks.
+- The `fs.not_found` filesystem filter is now checked *before* bypassing
+  relative files, meaning you can now ignore relative files instead of always
+  reading them locally
+- `incoming.listen_ports` mappings now always apply, regardless of whether the
+  port is stolen or not.
+- mirrord CLI progress messages now always include the binary version.
+
 ## [3.171.0](https://github.com/metalbear-co/mirrord/tree/3.171.0) - 2025-11-04
 
 
