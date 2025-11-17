@@ -14,7 +14,7 @@ on:
         options: [no, draft, prerelease, release]
         default: no
       release_tag:
-        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        description: "Release tag"
         required: false
         type: string
       sign_artifacts:
@@ -60,213 +60,175 @@ jobs:
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
 
       - name: Toolchain info
         run: |
-          $ErrorActionPreference = 'Stop'
-          whoami
           rustc -V
           cargo -V
-          rustup show
+          whoami
 
-      ##########################################################################
-      #  ARTIFACTS PREP (Build or download existing)
-      ##########################################################################
+      # ----------------------------
+      #  DOWNLOAD OR BUILD ARTIFACTS
+      # ----------------------------
       - name: Prepare artifacts
         id: prep
         run: |
-          $ErrorActionPreference = 'Stop'
-          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append }
+          $ErrorActionPreference = "Stop"
+
+          function Set-Env ($k,$v){ "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append }
 
           $Target = "x86_64-pc-windows-msvc"
-          $CargoTargetDir = Join-Path $env:GITHUB_WORKSPACE "target"
-          $Dbg = Join-Path $CargoTargetDir "$Target\debug"
-          $Rel = Join-Path $CargoTargetDir "$Target\release"
-
           $Tmp = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS,'true','InvariantCultureIgnoreCase')
+          if ($env:MODE -eq "reuse") {
+            Write-Host "⚡ Reusing artifacts from GCS"
 
-          if ($env:MODE -eq 'reuse') {
-            if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-              throw "gcloud missing"
-            }
-            $dest = Join-Path $Tmp "picked"
+            $dest = Join-Path $Tmp "gcs"
             New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
-            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
-            if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed" }
+            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" $dest/
 
-            $exe = (Get-ChildItem $dest -Recurse -Filter "mirrord.exe" | Select-Object -First 1).FullName
-            $dll = (Get-ChildItem $dest -Recurse -Filter "mirrord_layer_win.dll" | Select-Object -First 1).FullName
-            if (-not $dll) { $dll = (Get-ChildItem $dest -Recurse -Filter "mirrord-layer-win.dll" | Select-Object -First 1).FullName }
-
-            if (-not ($exe -and $dll)) { throw "Missing exe/dll in reuse mode" }
-
-            if ($shouldSign) {
-              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com "$dll"
-              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com "$exe"
-            }
+            $exe = Join-Path $dest "mirrord.exe"
+            $dll = Join-Path $dest "mirrord_layer_win.dll"
 
             Set-Env MIRRORD_EXE $exe
             Set-Env MIRRORD_LAYER_FILE $dll
-            Set-Env MIRRORD_VERSION "unknown"
+            Set-Env MIRRORD_VERSION "0.0.0"
             exit 0
           }
 
+          Write-Host "⚙️ Building artifacts"
+
           rustup target add $Target
 
-          cargo build -p mirrord-layer-win --target $Target
-          $dll = if (Test-Path (Join-Path $Dbg "mirrord_layer_win.dll")) { Join-Path $Dbg "mirrord_layer_win.dll" } else { Join-Path $Rel "mirrord_layer_win.dll" }
+          cargo build -p mirrord-layer-win --target $Target --release
+          cargo build -p mirrord --bin mirrord --target $Target --release
 
-          if ($shouldSign) {
-            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com "$dll"
+          $dll = "target/$Target/release/mirrord_layer_win.dll"
+          $exe = "target/$Target/release/mirrord.exe"
+
+          if ($env:SIGN_ARTIFACTS -eq "true") {
+            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 $dll
+            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 $exe
           }
 
-          $env:MIRRORD_LAYER_FILE = $dll
-
-          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $pkg  = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
-
-          cargo build -p mirrord --bin mirrord --target $Target
-          $exe = if (Test-Path (Join-Path $Dbg "mirrord.exe")) { Join-Path $Dbg "mirrord.exe" } else { Join-Path $Rel "mirrord.exe" }
-
-          if ($shouldSign) {
-            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com "$exe"
+          # Compute SHA256
+          foreach ($f in @($exe,$dll)) {
+            $h = (Get-FileHash -Algorithm SHA256 $f).Hash
+            "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath "$f.sha256"
           }
 
+          $version = (cargo metadata --format-version 1 | ConvertFrom-Json).packages |
+            Where-Object { $_.name -eq "mirrord" } |
+            Select-Object -ExpandProperty version
+
+          Set-Env MIRRORD_VERSION $version
           Set-Env MIRRORD_EXE $exe
           Set-Env MIRRORD_LAYER_FILE $dll
-          Set-Env MIRRORD_VERSION $pkg.version
-          Set-Env MIRRORD_PKG $pkg.name
 
-      ##########################################################################
-      #  MSI BUILD FROM REPO MAIN.WXS  (A2 MODE)
-      ##########################################################################
-      - name: Build MSI (WiX, using repo main.wxs)
+      # ----------------------------
+      #  BUILD SIMPLE MSI INSTALLER
+      # ----------------------------
+      - name: Build MSI
         run: |
           $ErrorActionPreference = "Stop"
 
-          $wxsRoot = Join-Path $env:GITHUB_WORKSPACE "mirrord/cli/wix"
-          $wxsPath = Join-Path $wxsRoot "main.wxs"
-          $icon    = Join-Path $wxsRoot "mirrord.ico"
-          $rtf     = Join-Path $wxsRoot "License.rtf"
+          $version = $env:MIRRORD_VERSION
+          $Root = "C:\wix\mirrord"
+          $Src = Join-Path $Root "src"
+          $Out = Join-Path $Root "out"
 
-          if (-not (Test-Path $wxsPath)) { throw "Missing main.wxs" }
-          if (-not (Test-Path $icon))    { throw "Missing mirrord.ico" }
-          if (-not (Test-Path $rtf))     { throw "Missing License.rtf" }
+          New-Item -ItemType Directory -Force -Path $Src,$Out | Out-Null
 
-          $Target     = "x86_64-pc-windows-msvc"
-          $CargoProfile = "release"
-          $CargoTargetDir = Join-Path $env:GITHUB_WORKSPACE "target"
-          $CargoTargetBinDir = Join-Path $CargoTargetDir "$Target\$CargoProfile"
+          Copy-Item $env:MIRRORD_EXE  "$Src\mirrord.exe" -Force
+          Copy-Item $env:MIRRORD_LAYER_FILE "$Src\mirrord_layer_win.dll" -Force
 
-          $Version = $env:MIRRORD_VERSION
-          if (-not $Version -or $Version -eq "unknown") {
-            $Version = "0.0.0"
-          }
+          Copy-Item "mirrord/cli/wix/mirrord.ico" "$Src\mirrord.ico" -Force
+          Copy-Item "mirrord/cli/wix/License.rtf" "$Src\License.rtf" -Force
 
-          $candle = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3.*\bin\candle.exe" | Select-Object -First 1).FullName
-          $light  = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3.*\bin\light.exe"  | Select-Object -First 1).FullName
+          $wxsPath = Join-Path $Root "ProductSimple.wxs"
 
-          if (-not $candle) { throw "candle.exe not found" }
-          if (-not $light)  { throw "light.exe not found" }
+          @"
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="mirrord" Manufacturer="MetalBear" Language="1033" Version="$version" UpgradeCode="EAFD3591-E78C-4B78-85BF-5FE0E72BB7A2">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="Run a local process in the context of a cloud environment" />
 
-          $OutDir = Join-Path $env:RUNNER_TEMP "msi"
-          New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    <MediaTemplate />
 
-          $obj = Join-Path $OutDir "product.wixobj"
-          $msi = Join-Path $OutDir ("mirrord-{0}.msi" -f $Version)
+    <Property Id="ARPPRODUCTICON" Value="ProductICO"/>
+    <Property Id="ARPHELPLINK"   Value="https://metalbear.co/mirrord/docs"/>
 
-          & $candle `
-            -nologo `
-            -ext WixUIExtension `
-            -dCargoTargetBinDir="$CargoTargetBinDir" `
-            -dCargoTargetDir="$CargoTargetDir" `
-            -dCargoProfile="$CargoProfile" `
-            -dVersion="$Version" `
-            -dTargetEnv="msvc" `
-            -dTargetTriple="$Target" `
-            -dTargetVendor="pc" `
-            -out $obj `
-            $wxsPath
+    <Icon Id="ProductICO" SourceFile="mirrord.ico"/>
 
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $obj)) { throw "Candle failed" }
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="InstallDir" Name="mirrord"/>
+      </Directory>
+    </Directory>
 
-          & $light `
-            -nologo `
-            -ext WixUIExtension `
-            -out $msi `
-            $obj
+    <ComponentGroup Id="InstallFiles" Directory="InstallDir">
+      <Component Id="MirrordExe" Guid="*">
+        <File Id="ExeFile" Source="mirrord.exe" KeyPath="yes"/>
+      </Component>
+      <Component Id="MirrordDll" Guid="*">
+        <File Id="DllFile" Source="mirrord_layer_win.dll" KeyPath="yes"/>
+      </Component>
+    </ComponentGroup>
 
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $msi)) { throw "Light failed" }
+    <Feature Id="MainFeature" Title="mirrord" Level="1">
+      <ComponentGroupRef Id="InstallFiles"/>
+    </Feature>
 
-          "MSI_PATH=$msi" | Out-File -FilePath $env:GITHUB_ENV -Append
+    <UI>
+      <UIRef Id="WixUI_Minimal"/>
+    </UI>
+
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf"/>
+  </Product>
+</Wix>
+"@ | Set-Content -Path $wxsPath -Encoding UTF8
+
+          $candle = (Get-ChildItem 'C:\Program Files (x86)\WiX Toolset v3.*\bin\candle.exe')[0].FullName
+          $light  = (Get-ChildItem 'C:\Program Files (x86)\WiX Toolset v3.*\bin\light.exe')[0].FullName
+
+          $obj = Join-Path $Out "ProductSimple.wixobj"
+          $msi = Join-Path $Out "mirrord-$version.msi"
+
+          & $candle -nologo -dSrc=$Src -ext WixUIExtension -out $obj $wxsPath
+          & $light -nologo -ext WixUIExtension -out $msi $obj
 
           $sha = "$msi.sha256"
           $h = (Get-FileHash -Algorithm SHA256 $msi).Hash
-          "$h  $(Split-Path $msi -Leaf)" | Out-File $sha -Encoding ascii
+          "$h  $(Split-Path $msi -Leaf)" | Out-File -FilePath $sha
+
+          "MSI_PATH=$msi" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MSI_SHA256_PATH=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      ##########################################################################
-      # Upload MSI to GCS
-      ##########################################################################
+      # ----------------------------
+      #  UPLOAD MSI TO GCS
+      # ----------------------------
       - name: Upload MSI to GCS
-        if: ${{ env.MSI_BUCKET_URI != '' }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $msi = $env:MSI_PATH
-          $sha = $env:MSI_SHA256_PATH
-          if (-not (Test-Path $msi)) { throw "MSI missing" }
-
-          $ver  = $env:MIRRORD_VERSION
+          $version = $env:MIRRORD_VERSION
           $sha7 = $env:GITHUB_SHA.Substring(0,7)
-          $dest = "$($env:MSI_BUCKET_URI)/mirrord-$ver-$sha7/"
+          $dest = "$env:MSI_BUCKET_URI/msi/mirrord-$version-$sha7/"
+          gcloud --quiet storage cp $env:MSI_PATH $dest
+          gcloud --quiet storage cp $env:MSI_SHA256_PATH $dest
 
-          gcloud --quiet storage cp $msi $dest
-          gcloud --quiet storage cp $sha $dest
-
-      ##########################################################################
-      # Tests
-      ##########################################################################
-      - name: Run tests
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cargo test --target x86_64-pc-windows-msvc --workspace
-
-      ##########################################################################
-      # Compute Release Tag
-      ##########################################################################
-      - name: Compute release tag
-        id: tag
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref,'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-        run: |
-          $ErrorActionPreference='Stop'
-          if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
-            $tag = "$env:GITHUB_REF".Substring(10)
-          } elseif ($env:RELEASE_TAG_INPUT) {
-            $tag = $env:RELEASE_TAG_INPUT
-          } else {
-            $tag = "v$($env:MIRRORD_VERSION)"
-          }
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      ##########################################################################
-      # Upload EXE/DLL/MSI to GitHub Release
-      ##########################################################################
+      # ----------------------------
+      #  GITHUB RELEASE
+      # ----------------------------
       - name: Upload to GitHub Release
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref,'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/github-release@v1
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ${{ env.MSI_PATH }}
-          asset_name: mirrord-${{ env.MIRRORD_VERSION }}.msi
-          asset_content_type: application/octet-stream
+          files: |
+            ${{ env.MSI_PATH }}
+            ${{ env.MSI_SHA256_PATH }}
