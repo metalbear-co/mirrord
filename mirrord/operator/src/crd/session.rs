@@ -283,7 +283,7 @@ pub struct SessionOwner {
 }
 
 /// Describes a target of a mirrord session.
-#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
     /// Kubernetes resource apiVersion.
