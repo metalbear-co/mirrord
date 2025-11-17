@@ -10,7 +10,7 @@ mod common;
 pub use common::*;
 use mirrord_protocol::tcp::LayerTcp;
 
-/// Verify that if mirrord application connects to it own listening port it
+/// Verify that if mirrord application connects to its own listening port it
 /// doesn't go through the layer unnecessarily.
 #[rstest]
 #[tokio::test]

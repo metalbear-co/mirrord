@@ -150,6 +150,11 @@ impl FileFilter {
             FsModeConfig::Read => Detour::Success(()),
         }
     }
+
+    pub fn check_not_found(&self, path: &Path) -> bool {
+        let text = path.to_str().unwrap_or_default();
+        self.not_found.is_match(text) || self.default_not_found.is_match(text)
+    }
 }
 
 impl Default for FileFilter {
