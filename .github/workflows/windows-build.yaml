@@ -255,17 +255,110 @@ jobs:
           }
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release (github-script)
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-        uses: softprops/action-gh-release@v2
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}
+          MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
+          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+          MSI_PATH: ${{ env.MSI_PATH }}
+          MSI_SHA256_PATH: ${{ env.MSI_SHA256_PATH }}
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          prerelease: ${{ env.PUBLISH_MODE == 'prerelease' }}
-          draft: ${{ env.PUBLISH_MODE == 'draft' }}
-          files: |
-            ${{ env.MIRRORD_EXE }}
-            ${{ env.MIRRORD_EXE }}.sha256
-            ${{ env.MIRRORD_LAYER_FILE }}
-            ${{ env.MIRRORD_LAYER_FILE }}.sha256
-            ${{ env.MSI_PATH }}
-            ${{ env.MSI_SHA256_PATH }}
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const { owner, repo } = context.repo;
+
+            const tag = process.env.RELEASE_TAG;
+            const isDraft = process.env.PUBLISH_MODE === "draft";
+            const isPrerelease = process.env.PUBLISH_MODE === "prerelease";
+
+            // 1. Get or create release
+            let release;
+            try {
+              const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              release = r.data;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              const r = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                name: `Windows build ${tag}`,
+                draft: isDraft,
+                prerelease: isPrerelease,
+                target_commitish: context.sha,
+                generate_release_notes: true,
+              });
+              release = r.data;
+            }
+
+            // 2. Correct draft/prerelease flags if mismatched
+            if (release.draft !== isDraft || release.prerelease !== isPrerelease) {
+              const r = await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: release.id,
+                draft: isDraft,
+                prerelease: isPrerelease,
+                name: `Windows build ${tag}`,
+              });
+              release = r.data;
+            }
+
+            // Helper to upload asset
+            async function upload(filePath) {
+              if (!filePath || !fs.existsSync(filePath)) {
+                core.warning(`Missing file: ${filePath}`);
+                return;
+              }
+              const name = path.basename(filePath);
+              const data = fs.readFileSync(filePath);
+
+              // remove old asset
+              const assets = await github.rest.repos.listReleaseAssets({
+                owner,
+                repo,
+                release_id: release.id,
+              });
+              const existing = assets.data.find(a => a.name === name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner,
+                  repo,
+                  asset_id: existing.id,
+                });
+              }
+
+              // upload new asset
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name,
+                data,
+                headers: {
+                  "content-type": "application/octet-stream",
+                  "content-length": data.length
+                },
+              });
+
+              core.info(`Uploaded ${name}`);
+            }
+
+            // Upload all artifacts
+            const files = [
+              process.env.MIRRORD_EXE,
+              `${process.env.MIRRORD_EXE}.sha256`,
+              process.env.MIRRORD_LAYER_FILE,
+              `${process.env.MIRRORD_LAYER_FILE}.sha256`,
+              process.env.MSI_PATH,
+              process.env.MSI_SHA256_PATH,
+            ];
+
+            for (const file of files) {
+              await upload(file);
+            }
+
