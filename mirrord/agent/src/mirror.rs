@@ -370,10 +370,10 @@ impl TcpMirrorApi {
                                     })
                                     .unwrap_or(IncomingTrafficTransportType::Tcp),
                                 request: InternalHttpRequest {
-                                    method: http.request_head.method,
-                                    uri: http.request_head.uri,
-                                    headers: http.request_head.headers,
-                                    version: http.request_head.version,
+                                    method: http.request_head.parts.method,
+                                    uri: http.request_head.parts.uri,
+                                    headers: http.request_head.parts.headers,
+                                    version: http.request_head.parts.version,
                                     body: InternalHttpBodyNew {
                                         frames: http.request_head.body_head,
                                         is_last: http.request_head.body_finished && have_more.not(),

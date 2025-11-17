@@ -13,7 +13,7 @@ use http_body_util::{BodyStream, StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
     body::{Frame, Incoming},
-    http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
+    http::{StatusCode, request, response},
 };
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
@@ -104,10 +104,7 @@ impl RedirectedHttp {
         MirroredHttp {
             info: self.info.clone(),
             request_head: RequestHead {
-                uri: self.request.parts.uri.clone(),
-                method: self.request.parts.method.clone(),
-                headers: self.request.parts.headers.clone(),
-                version: self.request.parts.version,
+                parts: self.request.parts.clone(),
                 body_head: self
                     .request
                     .body_head
@@ -129,7 +126,6 @@ impl RedirectedHttp {
                     .collect(),
                 body_finished: self.request.body_tail.is_none() && self.buffered_body.is_empty(),
             },
-            parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
             buffered_body: BufferedBody::Empty,
         }
@@ -144,10 +140,7 @@ impl RedirectedHttp {
         let (upgrade_tx, upgrade_rx) = oneshot::channel();
 
         let request_head = RequestHead {
-            uri: self.request.parts.uri,
-            method: self.request.parts.method,
-            headers: self.request.parts.headers,
-            version: self.request.parts.version,
+            parts: self.request.parts.clone(),
             body_head: self
                 .request
                 .body_head
@@ -254,10 +247,7 @@ impl Debug for StolenHttp {
 /// Head of a redirected HTTP request.
 #[derive(Debug)]
 pub struct RequestHead {
-    pub uri: Uri,
-    pub method: Method,
-    pub headers: HeaderMap,
-    pub version: Version,
+    pub parts: Parts,
     pub body_head: Vec<InternalHttpBodyFrame>,
     pub body_finished: bool,
 }
@@ -344,8 +334,6 @@ impl ResponseBodyProvider {
 pub struct MirroredHttp {
     pub info: ConnectionInfo,
     pub request_head: RequestHead,
-    /// The original request parts from ExtractedRequest, used for HTTP filtering
-    pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
 
@@ -358,7 +346,7 @@ impl MirroredHttp {
     pub fn parts_and_body(
         &mut self,
     ) -> (&mut request::Parts, &BufferedBody<InternalHttpBodyFrame>) {
-        (&mut self.parts, &self.buffered_body)
+        (&mut self.request_head.parts, &self.buffered_body)
     }
 }
 
@@ -389,7 +377,7 @@ impl BodyBufferable for MirroredHttp {
     }
 
     fn parts(&self) -> &Parts {
-        &self.parts
+        &self.request_head.parts
     }
 
     fn body_head(&mut self) -> &mut Vec<Self::Frame> {
@@ -406,7 +394,6 @@ impl Debug for MirroredHttp {
         f.debug_struct("MirroredHttp")
             .field("info", &self.info)
             .field("request_head", &self.request_head)
-            .field("parts", &self.parts)
             .field("buffered_body", &self.buffered_body)
             .finish()
     }
