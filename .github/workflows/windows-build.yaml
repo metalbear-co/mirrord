@@ -144,73 +144,62 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          # ---- Compute MSI version ----
           $rawVersion = $env:MIRRORD_VERSION
-          if (-not $rawVersion -or $rawVersion -eq "unknown") { $msiVersion = "0.0.0.0" }
-          else {
+          if (-not $rawVersion -or $rawVersion -eq "unknown") { 
+            $msiVersion = "0.0.0.0" 
+          } else {
             $parts = $rawVersion.Split(".")
             if ($parts.Count -lt 4) { $parts += @("0") * (4 - $parts.Count) }
             $msiVersion = ($parts[0..3] -join ".")
           }
 
+          # Paths
           $Root = "C:\wix\mirrord"
           $Src  = Join-Path $Root "src"
           $Out  = Join-Path $Root "out"
           $WixAssets = $Root
 
           New-Item -ItemType Directory -Force -Path $Src, $Out | Out-Null
-
           Copy-Item $env:MIRRORD_EXE        (Join-Path $Src "mirrord.exe") -Force
           Copy-Item $env:MIRRORD_LAYER_FILE (Join-Path $Src "mirrord_layer_win.dll") -Force
 
+          # Build WiX XML safely
           $wxsPath = Join-Path $Root "Product_mirrord.wxs"
+          $wxs = ""
+          $wxs += '<?xml version="1.0" encoding="UTF-8"?>'
+          $wxs += "<Wix xmlns=`"http://schemas.microsoft.com/wix/2006/wi`">"
+          $wxs += "  <Product Id=`"*`" Name=`"mirrord`" Manufacturer=`"MetalBear`" Language=`"1033`" Version=`"$msiVersion`" UpgradeCode=`"EAFD3591-E78C-4B78-85BF-5FE0E72BB7A2`">"
+          $wxs += "    <Package InstallerVersion=`"500`" Compressed=`"yes`" InstallScope=`"perMachine`" Description=`"Run a local process in the context of a cloud environment`" />"
+          $wxs += "    <MajorUpgrade Schedule=`"afterInstallInitialize`" DowngradeErrorMessage=`"A newer version of mirrord is already installed.`" />"
+          $wxs += "    <MediaTemplate />"
+          $wxs += "    <Property Id=`"ARPPRODUCTICON`" Value=`"ProductICO`" />"
+          $wxs += "    <Property Id=`"ARPHELPLINK`" Value=`"https://metalbear.co/mirrord/docs`" />"
+          $wxs += "    <Icon Id=`"ProductICO`" SourceFile=`"$(var.WixAssets)\mirrord.ico`" />"
+          $wxs += "    <Directory Id=`"TARGETDIR`" Name=`"SourceDir`">"
+          $wxs += "      <Directory Id=`"ProgramFilesFolder`">"
+          $wxs += "        <Directory Id=`"INSTALLFOLDER`" Name=`"mirrord`" />"
+          $wxs += "      </Directory>"
+          $wxs += "    </Directory>"
+          $wxs += "    <ComponentGroup Id=`"AppFiles`" Directory=`"INSTALLFOLDER`">"
+          $wxs += "      <Component Id=`"ExeComp`" Guid=`"*`">"
+          $wxs += "        <File Id=`"MirrordExe`" Source=`"$(var.Src)\mirrord.exe`" KeyPath=`"yes`" />"
+          $wxs += "      </Component>"
+          $wxs += "      <Component Id=`"DllComp`" Guid=`"*`">"
+          $wxs += "        <File Id=`"MirrordDll`" Source=`"$(var.Src)\mirrord_layer_win.dll`" KeyPath=`"yes`" />"
+          $wxs += "      </Component>"
+          $wxs += "    </ComponentGroup>"
+          $wxs += "    <Feature Id=`"MainFeature`" Title=`"mirrord`" Level=`"1`">"
+          $wxs += "      <ComponentGroupRef Id=`"AppFiles`" />"
+          $wxs += "    </Feature>"
+          $wxs += "    <UI><UIRef Id=`"WixUI_Minimal`" /></UI>"
+          $wxs += "    <WixVariable Id=`"WixUILicenseRtf`" Value=`"$(var.WixAssets)\License.rtf`" />"
+          $wxs += "  </Product>"
+          $wxs += "</Wix>"
 
-          @'
-<?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="mirrord" Manufacturer="MetalBear" Language="1033"
-           Version="'@ + $msiVersion + '" UpgradeCode="EAFD3591-E78C-4B78-85BF-5FE0E72BB7A2">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
-             Description="Run a local process in the context of a cloud environment" />
+          Set-Content -Path $wxsPath -Value $wxs -Encoding UTF8
 
-    <MajorUpgrade Schedule="afterInstallInitialize"
-                  DowngradeErrorMessage="A newer version of mirrord is already installed." />
-
-    <MediaTemplate />
-
-    <Property Id="ARPPRODUCTICON" Value="ProductICO" />
-    <Property Id="ARPHELPLINK" Value="https://metalbear.co/mirrord/docs" />
-
-    <Icon Id="ProductICO" SourceFile="$(var.WixAssets)\mirrord.ico" />
-
-    <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFilesFolder">
-        <Directory Id="INSTALLFOLDER" Name="mirrord" />
-      </Directory>
-    </Directory>
-
-    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-      <Component Id="ExeComp" Guid="*">
-        <File Id="MirrordExe" Source="$(var.Src)\mirrord.exe" KeyPath="yes" />
-      </Component>
-      <Component Id="DllComp" Guid="*">
-        <File Id="MirrordDll" Source="$(var.Src)\mirrord_layer_win.dll" KeyPath="yes" />
-      </Component>
-    </ComponentGroup>
-
-    <Feature Id="MainFeature" Title="mirrord" Level="1">
-      <ComponentGroupRef Id="AppFiles" />
-    </Feature>
-
-    <UI>
-      <UIRef Id="WixUI_Minimal" />
-    </UI>
-
-    <WixVariable Id="WixUILicenseRtf" Value="$(var.WixAssets)\License.rtf" />
-
-  </Product>
-</Wix>
-'@ | Set-Content -Path $wxsPath -Encoding UTF8
-
+          # Locate WiX
           $candle = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3.*\bin\candle.exe" | Select-Object -First 1).FullName
           $light  = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3.*\bin\light.exe"  | Select-Object -First 1).FullName
 
@@ -223,10 +212,11 @@ jobs:
           & $light -nologo -ext WixUIExtension -out $MsiOut $WixObj
 
           $sha = (Get-FileHash -Algorithm SHA256 $MsiOut).Hash
-          "$sha  $(Split-Path $MsiOut -Leaf)" | Out-File "$MsiOut.sha256" -Encoding ascii
+          "$sha  $(Split-Path $MsiOut -Leaf)" | Out-File "$MsiOut.sha256"
 
           "MSI_PATH=$MsiOut"       | Out-File $env:GITHUB_ENV -Append
           "MSI_SHA256_PATH=$MsiOut.sha256" | Out-File $env:GITHUB_ENV -Append
+
 
       - name: Upload MSI to GCS
         if: ${{ env.MSI_BUCKET_URI != '' }}
