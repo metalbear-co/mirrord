@@ -475,9 +475,6 @@ export const updateConfigFilter = (
     }
   }
 
-  // FIX: dont merge this!! debugging only
-  console.log(http_filter);
-
   // overwrite filter
   const newConfig = {
     ...config,
@@ -501,7 +498,7 @@ export const updateSingleFilter = (
   updatedFilter: UiHttpFilter,
   config: LayerFileConfig) : LayerFileConfig => {
   const {filters, operator} = readCurrentFilters(config)
-  const newFilters = filters.filter((filter) => filter.type != oldFilter.type && filter.value != oldFilter.value).concat([updatedFilter]);
+  const newFilters = filters.filter((filter) => !(filter.type === oldFilter.type && filter.value === oldFilter.value)).concat([updatedFilter]);
 
   return updateConfigFilter(newFilters, operator, config);
 };
@@ -510,7 +507,10 @@ export const removeSingleFilter = (
   removedFilter: UiHttpFilter,
   config: LayerFileConfig) : LayerFileConfig => {
   const {filters, operator} = readCurrentFilters(config)
-  const newFilters = filters.filter((filter) => filter.type != removedFilter.type && filter.value != removedFilter.value);
+  const newFilters = filters.filter((filter) => 
+    !(filter.type === removedFilter.type && filter.value === removedFilter.value)
+  );
+
 
   return updateConfigFilter(newFilters, operator, config);
 };
@@ -703,7 +703,7 @@ export const addRemoveOrUpdateMapping = (
   if (existingMapping) {
     // a mapping exists for this remote, so replace or remove it
     const newMappings = existingMappings.filter(
-      (mapping) => mapping != existingMapping
+      (mapping) => mapping !== existingMapping
     );
     if (remotePort === localPort) {
       // remove existing mapping only
@@ -755,7 +755,7 @@ export const removePortandMapping = (
   const ports = readCurrentPorts(config);
   if (ports.includes(remotePort)) {
     // remove the mapping _before_ removing the port, if there is one
-    const newPorts = ports.filter((port) => port != remotePort);
+    const newPorts = ports.filter((port) => port !== remotePort);
 
     // remove mapping
     const oldMapping = readCurrentPortMapping(config);
@@ -766,7 +766,7 @@ export const removePortandMapping = (
     let halfConfig = config;
     if (matchingMapping) {
       const newMapping = oldMapping.filter(
-        (mapping) => mapping != matchingMapping
+        (mapping) => mapping !== matchingMapping
       );
       halfConfig = updateConfigPortMapping(newMapping, config);
     }
