@@ -17,7 +17,7 @@ use libc::{AT_FDCWD, c_int, iovec};
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
 use mirrord_config::feature::fs::FsModeConfig;
-use mirrord_layer_lib::file::filter::{FileFilter, FileMode};
+use mirrord_layer_lib::file::filter::FileFilter;
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
