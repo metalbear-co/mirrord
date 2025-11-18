@@ -325,7 +325,7 @@ export const readCurrentFilters = (
       filters = [
         {
           value: filterConfig.header,
-          type: "header"
+          type: "header",
         },
       ];
     } else if (
@@ -333,9 +333,7 @@ export const readCurrentFilters = (
       typeof filterConfig.path === "string"
     ) {
       // single path filter
-      filters = [
-        { value: filterConfig.path, type: "path" },
-      ];
+      filters = [{ value: filterConfig.path, type: "path" }];
     } else if ("all_of" in filterConfig) {
       // multiple filters
       operator = "all";
@@ -389,7 +387,8 @@ export const disableConfigFilter = (config: LayerFileConfig) => {
   return config;
 };
 
-// Return an updated config with updated incoming.http_filter.
+// Return an updated config with updated incoming.http_filter and, iff ports are set,
+// incoming.ports.
 export const updateConfigFilter = (
   filters: UiHttpFilter[],
   operator: "any" | "all" | null,
@@ -475,6 +474,18 @@ export const updateConfigFilter = (
     }
   }
 
+  // update ports if incoming.ports is set and http_filter is not null
+  if (
+    "ports" in config.feature.network.incoming &&
+    typeof config.feature.network.incoming.http_filter === "object" &&
+    http_filter
+  ) {
+    http_filter = {
+      ...config.feature.network.incoming.http_filter,
+      ports: readCurrentPorts(config),
+    };
+  }
+
   // overwrite filter
   const newConfig = {
     ...config,
@@ -496,21 +507,31 @@ export const updateConfigFilter = (
 export const updateSingleFilter = (
   oldFilter: UiHttpFilter,
   updatedFilter: UiHttpFilter,
-  config: LayerFileConfig) : LayerFileConfig => {
-  const {filters, operator} = readCurrentFilters(config)
-  const newFilters = filters.filter((filter) => !(filter.type === oldFilter.type && filter.value === oldFilter.value)).concat([updatedFilter]);
+  config: LayerFileConfig
+): LayerFileConfig => {
+  const { filters, operator } = readCurrentFilters(config);
+  const newFilters = filters
+    .filter(
+      (filter) =>
+        !(filter.type === oldFilter.type && filter.value === oldFilter.value)
+    )
+    .concat([updatedFilter]);
 
   return updateConfigFilter(newFilters, operator, config);
 };
 
 export const removeSingleFilter = (
   removedFilter: UiHttpFilter,
-  config: LayerFileConfig) : LayerFileConfig => {
-  const {filters, operator} = readCurrentFilters(config)
-  const newFilters = filters.filter((filter) => 
-    !(filter.type === removedFilter.type && filter.value === removedFilter.value)
+  config: LayerFileConfig
+): LayerFileConfig => {
+  const { filters, operator } = readCurrentFilters(config);
+  const newFilters = filters.filter(
+    (filter) =>
+      !(
+        filter.type === removedFilter.type &&
+        filter.value === removedFilter.value
+      )
   );
-
 
   return updateConfigFilter(newFilters, operator, config);
 };
@@ -562,7 +583,7 @@ export const disablePortsAndMapping = (config: LayerFileConfig) => {
   return config;
 };
 
-// Return an updated config with updated incoming.ports.
+// Return an updated config with updated incoming.ports and, iff filters are set, http_filter.ports.
 export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
   if (typeof config !== "object") {
     throw "config badly formed";
@@ -605,6 +626,27 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
     config.feature.network.incoming.ports = [];
   }
 
+  let incomingConfig: IncomingAdvancedSetup = {
+    ...config.feature.network.incoming,
+    ports: ports,
+  };
+
+  // if filters are set, set ports into http_filter as well
+  if (
+    "http_filter" in config.feature.network.incoming &&
+    config.feature.network.incoming.http_filter &&
+    typeof config.feature.network.incoming.http_filter === "object"
+  ) {
+    config.feature.network.incoming.http_filter.ports = [];
+    incomingConfig = {
+      ...incomingConfig,
+      http_filter: {
+        ...config.feature.network.incoming.http_filter,
+        ports: ports,
+      },
+    };
+  }
+
   // overwrite ports
   const newConfig = {
     ...config,
@@ -612,10 +654,7 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
       ...config.feature,
       network: {
         ...config.feature.network,
-        incoming: {
-          ...config.feature.network.incoming,
-          ports: ports,
-        },
+        incoming: incomingConfig,
       },
     },
   };
