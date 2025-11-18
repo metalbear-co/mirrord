@@ -349,7 +349,30 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $msi = $env:MSI_PATH
-          gcloud --quiet storage cp $msi "$env:MSI_BUCKET_URI/"
+          if (-not (Test-Path $msi)) {
+            throw "MSI_PATH '$msi' does not exist."
+          }
+
+          # Build a unique folder per run:
+          # gs://mirrord-windows-msi/<ref-name>/run-<run-id>/mirrord.msi
+          $runId = $env:GITHUB_RUN_ID
+          $refName = $env:GITHUB_REF_NAME
+          if (-not $refName) {
+            $refName = "unknown"
+          }
+
+          # Sanitize ref name for use in path
+          $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
+
+          $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
+          $destFolder = "$bucketBase/$refSafe/run-$runId"
+          $destUri = "$destFolder/mirrord.msi"
+
+          Write-Host "Uploading MSI to $destUri"
+          gcloud --quiet storage cp $msi $destUri
+
+          # Export for later (summary, logs)
+          "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
       # UNIT TESTS
@@ -439,6 +462,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          Write-Host "MSI: $env:MSI_PATH"
-          Write-Host "EXE: $env:MIRRORD_EXE"
-          Write-Host "DLL: $env:MIRRORD_LAYER_FILE"
+          Write-Host "MSI (local): $env:MSI_PATH"
+          Write-Host "MSI (GCS):   $env:MSI_GCS_URI"
+          Write-Host "EXE:         $env:MIRRORD_EXE"
+          Write-Host "DLL:         $env:MIRRORD_LAYER_FILE"
