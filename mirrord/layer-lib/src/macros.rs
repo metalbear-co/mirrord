@@ -18,6 +18,9 @@
 /// - Exiting on IO failure:
 ///
 /// ```rust, no_run
+/// use std::fs::File;
+///
+/// use mirrord_layer_lib::graceful_exit;
 /// if let Err(fail) = File::open("nothing.txt") {
 ///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
 /// }

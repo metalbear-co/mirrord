@@ -2,7 +2,7 @@
 use std::os::unix::io::RawFd;
 use std::{
     convert::TryFrom,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 
@@ -207,15 +207,18 @@ where
             // Our socket can be bound to any local interface,
             // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
             // We need to fill the exact IP here.
-            match &user_socket_info.state {
-                SocketState::Bound(Bound { address, .. }) => {
-                    interceptor_address.set_ip(address.ip())
+            let replacement_ip = match &user_socket_info.state {
+                SocketState::Bound(Bound { address, .. })
+                | SocketState::Listening(Bound { address, .. })
+                    if !address.ip().is_unspecified() =>
+                {
+                    address.ip()
                 }
-                _ if interceptor_address.is_ipv4() => {
-                    interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
-                }
-                _ => interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into()),
-            }
+                _ if interceptor_address.is_ipv4() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                _ => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            };
+
+            interceptor_address.set_ip(replacement_ip);
         }
 
         // Connect to the interceptor socket that is listening.

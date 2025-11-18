@@ -1,7 +1,9 @@
 use tracing::Level;
 
 use super::CiResult;
-use crate::{MirrordCi, ci::error::CiError};
+use crate::MirrordCi;
+#[cfg(not(target_os = "windows"))]
+use crate::ci::error::CiError;
 
 /// Handles the `mirrord ci stop` command.
 ///
@@ -10,6 +12,7 @@ use crate::{MirrordCi, ci::error::CiError};
 pub(super) struct CiStopCommandHandler {
     /// The [`MirrordCi`] we retrieve from the user's environment (env var and temp files) so we
     /// can kill the intproxy and the user's process.
+    #[cfg_attr(target_os = "windows", allow(unused))]
     pub(crate) mirrord_ci: MirrordCi,
 }
 

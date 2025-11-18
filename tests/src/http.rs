@@ -58,7 +58,6 @@ async fn send_and_verify(
 ///
 /// In this test, [`hyper`] is used directly to send HTTP requests,
 /// as it gives us more control over the underlying TCP connections.
-#[cfg_attr(target_os = "windows", ignore)]
 #[cfg_attr(not(any(feature = "job", feature = "ephemeral")), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -147,7 +146,7 @@ async fn mirror_http_traffic(
 /// at the same time.
 ///
 /// This test requires that the operator's agents use passthrough mirroring and connection flushing.
-#[cfg_attr(not(feature = "operator"), ignore)]
+#[cfg_attr(any(not(feature = "operator"), target_os = "windows"), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]
