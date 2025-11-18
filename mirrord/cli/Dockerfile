@@ -22,9 +22,7 @@ COPY --from=planner /build/recipe.json recipe.json
 RUN cargo +nightly-2025-08-01 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
 
 COPY . /build/
-RUN echo INITIAL CARGO LOCK --- && cat Cargo.lock && echo INITIAL CARGO LOCK OVER ----
-RUN cargo +nightly-2025-08-01 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release
-RUN echo MODIFIED CARGO LOCK --- && cat Cargo.lock && echo MODIFIED CARGO LOCK OVER ----
+RUN cargo +nightly-2025-08-01 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release --locked
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 

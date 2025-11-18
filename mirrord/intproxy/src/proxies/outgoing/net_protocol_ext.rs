@@ -108,8 +108,8 @@ impl NetProtocolExt for NetProtocol {
         let socket = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {
-                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                 };
                 let bind_at = SocketAddr::new(ip_addr, 0);
 

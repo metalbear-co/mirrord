@@ -1,6 +1,10 @@
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
-use std::{convert::TryFrom, net::SocketAddr, sync::Arc};
+use std::{
+    convert::TryFrom,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 
 #[cfg(unix)]
 use libc::{AF_UNIX, c_void, sockaddr, socklen_t};
@@ -22,7 +26,7 @@ use crate::error::windows::WindowsError;
 use crate::{
     HookError, HookResult,
     error::ConnectError,
-    socket::{Connected, SOCKETS, SocketState, UserSocket},
+    socket::{Bound, Connected, SOCKETS, SocketState, UserSocket},
 };
 
 // Platform-specific socket descriptor type
@@ -164,12 +168,12 @@ fn set_last_error(error: i32) {
 #[mirrord_layer_macro::instrument(
     level = "debug",
     ret,
-    skip(_user_socket_info, proxy_request_fn, connect_fn)
+    skip(user_socket_info, proxy_request_fn, connect_fn)
 )]
 pub fn connect_outgoing<P, F>(
     sockfd: SocketDescriptor,
     remote_address: SockAddr,
-    _user_socket_info: Arc<UserSocket>,
+    user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
     proxy_request_fn: P,
     connect_fn: F,
@@ -194,10 +198,25 @@ where
         };
 
         let OutgoingConnectResponse {
-            layer_address,
+            mut layer_address,
             in_cluster_address,
             ..
         } = response;
+
+        if let SocketAddress::Ip(interceptor_address) = &mut layer_address {
+            // Our socket can be bound to any local interface,
+            // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
+            // We need to fill the exact IP here.
+            match &user_socket_info.state {
+                SocketState::Bound(Bound { address, .. }) => {
+                    interceptor_address.set_ip(address.ip())
+                }
+                _ if interceptor_address.is_ipv4() => {
+                    interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                }
+                _ => interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into()),
+            }
+        }
 
         // Connect to the interceptor socket that is listening.
         call_connect_fn(
