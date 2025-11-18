@@ -34,7 +34,7 @@
           <Directory Id="Bin" Name="bin">
 
             <!-- mirrord.exe -->
-            <Component Id="MirrordExeComponent" Guid="*">
+            <Component Id="MirrordExeComponent" Guid="4E7C9B2E-7D8A-4DF1-9EAC-0B2A5F52B6A1">
               <File
                 Id="MirrordExeFile"
                 Source="mirrord.exe"
@@ -42,7 +42,7 @@
             </Component>
 
             <!-- mirrord_layer_win.dll -->
-            <Component Id="MirrordDllComponent" Guid="*">
+            <Component Id="MirrordDllComponent" Guid="C3C9F542-3B93-4F71-B3F3-8F4B7AFCD2C0">
               <File
                 Id="MirrordDllFile"
                 Source="mirrord_layer_win.dll"
@@ -60,8 +60,7 @@
               Permanent="no"
               Part="last"
               Action="set"
-              System="yes"
-              KeyPath="yes" />
+              System="yes" />
           </Component>
 
         </Directory>
