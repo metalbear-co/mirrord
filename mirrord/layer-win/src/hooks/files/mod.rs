@@ -318,7 +318,7 @@ unsafe extern "system" fn nt_create_file_hook(
         match matched_filter {
             Some(FileMode::Local(_)) => {
                 tracing::trace!("nt_create_file_hook: reading \"{}\" locally!", name);
-                return run_original()
+                return run_original();
             }
             Some(FileMode::NotFound(_)) => {
                 *file_handle = std::ptr::null_mut();
