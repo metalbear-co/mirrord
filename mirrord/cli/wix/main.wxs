@@ -15,25 +15,18 @@
         Compressed="yes"
         InstallScope="perMachine"
         Manufacturer="MetalBear"
-        Description="Run a local process in the context of a cloud environment" />
+        Description="Run a local process in the context of a cloud environment"/>
 
     <MajorUpgrade
         Schedule="afterInstallInitialize"
-        DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit." />
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit."/>
 
-    <!--
-      IMPORTANT:
-      EmbedCab="yes" makes WiX embed the cabinet into the MSI,
-      so you don't need an external cab1.cab next to the MSI.
-    -->
-    <MediaTemplate
-        EmbedCab="yes"
-        CompressionLevel="high" />
+    <MediaTemplate />
 
     <!-- ARP icon shown in Programs & Features -->
-    <Icon Id="ProductIcon" SourceFile="mirrord.ico" />
-    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
-    <Property Id="ARPHELPLINK" Value="https://metalbear.co/mirrord/docs" />
+    <Icon Id="ProductIcon" SourceFile="mirrord.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon"/>
+    <Property Id="ARPHELPLINK" Value="https://metalbear.co/mirrord/docs"/>
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">
@@ -45,7 +38,7 @@
               <File
                 Id="MirrordExeFile"
                 Source="mirrord.exe"
-                KeyPath="yes" />
+                KeyPath="yes"/>
             </Component>
 
             <!-- mirrord_layer_win.dll -->
@@ -53,27 +46,41 @@
               <File
                 Id="MirrordDllFile"
                 Source="mirrord_layer_win.dll"
-                KeyPath="yes" />
+                KeyPath="yes"/>
             </Component>
 
           </Directory>
+
+          <!-- Component that appends mirrord\bin to the system PATH -->
+          <Component Id="PathComponent" Guid="*">
+            <Environment
+              Id="AddMirrordToPath"
+              Name="PATH"
+              Value="[APPLICATIONFOLDER]bin"
+              Permanent="no"
+              Part="last"
+              Action="set"
+              System="yes" />
+          </Component>
+
         </Directory>
       </Directory>
     </Directory>
 
     <!-- GROUPING -->
     <Feature Id="MainFeature" Title="mirrord" Level="1">
-      <ComponentRef Id="MirrordExeComponent" />
-      <ComponentRef Id="MirrordDllComponent" />
+      <ComponentRef Id="MirrordExeComponent"/>
+      <ComponentRef Id="MirrordDllComponent"/>
+      <ComponentRef Id="PathComponent"/>
     </Feature>
 
     <!-- UI + License -->
     <UI>
-      <UIRef Id="WixUI_Minimal" />
+      <UIRef Id="WixUI_Minimal"/>
     </UI>
 
     <!-- License shown in installer -->
-    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf"/>
 
   </Product>
 

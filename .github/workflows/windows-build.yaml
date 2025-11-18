@@ -342,6 +342,21 @@ jobs:
           "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
+      # SIGN MSI (optional, same cert as EXE/DLL)
+      ###########################################################################
+
+      - name: Sign MSI
+        if: env.SIGN_ARTIFACTS == 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msi = $env:MSI_PATH
+          if (-not (Test-Path $msi)) {
+            throw "MSI_PATH '$msi' does not exist."
+          }
+          & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+              /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
+
+      ###########################################################################
       # UPLOAD TO GCS
       ###########################################################################
 
