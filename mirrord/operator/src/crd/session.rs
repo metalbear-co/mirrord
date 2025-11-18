@@ -213,7 +213,7 @@ pub struct MirrordClusterSessionAgent {
     pub container_id: Option<String>,
     /// Agent spawn error if there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<SessionError>,
+    pub error: Option<ErrorMessage>,
     /// The phase of agent's pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
@@ -233,13 +233,13 @@ pub struct MirrordClusterSessionStatus {
     pub connected_timestamp: Option<MicroTime>,
     /// If the session has been closed, describes the reason.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub closed: Option<SessionError>,
+    pub closed: Option<ErrorMessage>,
 }
 
 /// Describes the reason for with a mirrord session was closed.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionError {
+pub struct ErrorMessage {
     /// Short reason in PascalCase.
     pub reason: String,
     /// Optional human friendly message.
