@@ -4,16 +4,35 @@ import { Input } from "@/components/ui/input";
 import {
   addRemoveOrUpdateMapping,
   getLocalPort,
+  readCurrentPorts,
   removePortandMapping,
 } from "../JsonUtils";
 import { useContext, useState } from "react";
 import { ConfigDataContext } from "../UserDataContext";
+import { useToast } from "../ui/use-toast";
 
 export const PortMapping = ({ remotePort }: { remotePort: number }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [inputContents, setInputContents] = useState<number>(
     getLocalPort(remotePort, config)
   );
+  const [outlineConflict, setOutlineConflict] = useState<boolean>(false);
+
+  // remote ports are known to be unique due to the ui structure
+  // manually enforce that local ports are unique
+  const { toast, dismiss } = useToast();
+  const localPortConflict = async () => {
+    setOutlineConflict(true);
+    toast({
+      title: "Local Port Conflict!",
+      description:
+        "Multiple port mappings have the same local port. Local ports should be unique.",
+    });
+  };
+  const resolveConflict = () => {
+    setOutlineConflict(false);
+    dismiss();
+  }
 
   return (
     // remotePort is guarateed to be unique for each PortMapping
@@ -31,16 +50,31 @@ export const PortMapping = ({ remotePort }: { remotePort: number }) => {
           <Input
             type="text"
             pattern="[0-9]*"
-            className="font-mono"
+            className={
+              outlineConflict
+                ? "font-mono ring-2 ring-red-500 ring-offset-2 focus-visible:ring-red-500"
+                : "font-mono"
+            }
             value={inputContents}
             onChange={(event) => {
               if (!isNaN(+event.target.value)) {
+                if (
+                  readCurrentPorts(config).filter(
+                    (remote) =>
+                      getLocalPort(remote, config) === +event.target.value
+                  ).length > 0
+                ) {
+                  localPortConflict();
+                } else {
+                  resolveConflict();
+                }
                 const newConfig = addRemoveOrUpdateMapping(
                   remotePort,
                   +event.target.value,
                   config
                 );
                 setConfig(newConfig);
+
                 setInputContents(+event.target.value);
               }
             }}
