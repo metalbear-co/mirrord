@@ -17,11 +17,8 @@
         Manufacturer="MetalBear"
         Description="Run a local process in the context of a cloud environment"/>
 
-    <MajorUpgrade
-        Schedule="afterInstallInitialize"
-        DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit."/>
-
-    <MediaTemplate />
+    <!-- EmbedCab="yes" => CAB goes *inside* the MSI, no cab1.cab beside it -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <!-- ARP icon shown in Programs & Features -->
     <Icon Id="ProductIcon" SourceFile="mirrord.ico"/>
