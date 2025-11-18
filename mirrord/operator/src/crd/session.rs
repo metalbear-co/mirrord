@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt};
+use std::collections::BTreeMap;
 
 use k8s_openapi::{
     Resource as _,
@@ -20,106 +20,8 @@ use mirrord_config::{
 };
 use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-/// Limit for concurrently used agents in a session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentLimit {
-    /// Represents a hard constant limit. The session should never use more agents than this
-    /// number, regardless of available target pods.
-    Constant(u32),
-    /// Represents desired percentage of available target pods that should have agent attached
-    /// (rounded up).
-    Percentage(u32),
-}
-
-impl AgentLimit {
-    /// No limit, all target pods should be covered by agents.
-    pub const ALL: Self = Self::Percentage(100);
-
-    /// Calculates maximum number of agents that should be used, given count of available target
-    /// pods.
-    pub fn calculate_max(&self, available: usize) -> usize {
-        match self {
-            Self::Constant(limit) => {
-                let limit = usize::try_from(*limit).unwrap_or(usize::MAX);
-                std::cmp::min(limit, available)
-            }
-            Self::Percentage(percentage) => {
-                let percentage = usize::try_from(*percentage).unwrap_or(usize::MAX);
-                (available * percentage).div_ceil(100)
-            }
-        }
-    }
-}
-
-impl Default for AgentLimit {
-    fn default() -> Self {
-        Self::ALL
-    }
-}
-
-impl Serialize for AgentLimit {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            AgentLimit::Constant(limit) => {
-                let as_string = limit.to_string();
-                serializer.serialize_some(&as_string)
-            }
-            AgentLimit::Percentage(limit) => {
-                let as_string = format!("{limit}p");
-                serializer.serialize_str(&as_string)
-            }
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for AgentLimit {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        /// Empty helper type for deserializing [`AgentLimit`].
-        struct AgentLimitVisitor;
-
-        impl de::Visitor<'_> for AgentLimitVisitor {
-            type Value = AgentLimit;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.collect_str("a positive const (e.g '1') or percentage (e.g '50p') limit")
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let result = match v.strip_suffix('p') {
-                    Some(v) => v
-                        .parse::<u32>()
-                        .ok()
-                        .filter(|value| *value > 0 && *value <= 100)
-                        .map(AgentLimit::Percentage),
-                    None => v
-                        .parse::<u32>()
-                        .ok()
-                        .filter(|value| *value > 0)
-                        .map(AgentLimit::Constant),
-                };
-
-                result.ok_or_else(|| E::invalid_value(de::Unexpected::Str(v), &self))
-            }
-        }
-
-        deserializer.deserialize_str(AgentLimitVisitor)
-    }
-}
-
-impl fmt::Display for AgentLimit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Constant(limit) => write!(f, "{limit}"),
-            Self::Percentage(percentage) => write!(f, "{percentage}%"),
-        }
-    }
-}
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -147,10 +49,6 @@ pub struct MirrordClusterSessionSpec {
     pub owner: SessionOwner,
     /// Kubernetes namespace of the session.
     pub namespace: String,
-    /// Agent Limit
-    #[serde(default)]
-    #[schemars(with = "String")]
-    pub agent_limit: AgentLimit,
     /// State of concurrent steal
     #[serde(default)]
     pub on_concurrent_steal: ConcurrentSteal,
@@ -310,6 +208,9 @@ pub struct MirrordClusterSessionAgent {
     /// Agent connection info to target's agents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_info: Option<AgentKubernetesConnectInfo>,
+    /// Agent's container id
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
     /// Agent spawn error if there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<SessionError>,
@@ -324,6 +225,7 @@ pub struct MirrordClusterSessionAgent {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
+    /// Running agents status
     #[serde(default)]
     pub agents: BTreeMap<Uuid, MirrordClusterSessionAgent>,
     /// Last time when the session was observed to have an open user connection.
@@ -343,19 +245,4 @@ pub struct SessionError {
     /// Optional human friendly message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn agent_limit_calculate() {
-        assert_eq!(AgentLimit::Constant(2).calculate_max(1), 1);
-        assert_eq!(AgentLimit::Constant(2).calculate_max(3), 2);
-        assert_eq!(AgentLimit::Percentage(40).calculate_max(100), 40);
-        assert_eq!(AgentLimit::Percentage(1).calculate_max(1), 1);
-        assert_eq!(AgentLimit::Percentage(50).calculate_max(7), 4);
-    }
 }
