@@ -30,11 +30,11 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
     match req {
         Ok(Ok(res)) => Some(res.metadata),
         Ok(Err(e)) => {
-            tracing::error!(?e, "Error trying to xstat into file!");
+            tracing::error!(?e, "Protocol: Error trying to xstat into file!");
             None
         }
         Err(e) => {
-            tracing::error!(?e, "Error trying to xstat file!");
+            tracing::error!(?e, "Proxy: Error trying to xstat file!");
             None
         }
     }
@@ -55,11 +55,11 @@ pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
     match seek {
         Ok(Ok(res)) => Some(res.result_offset),
         Ok(Err(e)) => {
-            tracing::error!(?e, "Error trying to seek into file!");
+            tracing::error!(?e, "Protocol: Error trying to seek into file!");
             None
         }
         Err(e) => {
-            tracing::error!(?e, "Error trying to seek into file!");
+            tracing::error!(?e, "Proxy: Error trying to seek into file!");
             None
         }
     }
