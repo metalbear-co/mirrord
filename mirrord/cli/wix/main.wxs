@@ -52,7 +52,7 @@
           </Directory>
 
           <!-- Component that appends mirrord\bin to the system PATH -->
-          <Component Id="PathComponent" Guid="*">
+          <Component Id="PathComponent" Guid="C4D7B7A5-29C7-4A31-9F25-08763FD9A605">
             <Environment
               Id="AddMirrordToPath"
               Name="PATH"
@@ -60,7 +60,8 @@
               Permanent="no"
               Part="last"
               Action="set"
-              System="yes" />
+              System="yes"
+              KeyPath="yes" />
           </Component>
 
         </Directory>
