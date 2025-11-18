@@ -432,6 +432,7 @@ jobs:
             const { owner, repo } = context.repo;
 
             const tag = process.env.RELEASE_TAG;
+            const versionForName = tag.startsWith("v") ? tag.substring(1) : tag;
 
             // Ensure release exists
             let rel;
@@ -442,7 +443,7 @@ jobs:
               const r = await github.rest.repos.createRelease({
                 owner, repo,
                 tag_name: tag,
-                name: `Windows build ${tag}`,
+                name: `Windows build ${versionForName}`,
                 draft: false,
                 prerelease: false
               });
