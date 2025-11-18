@@ -46,8 +46,8 @@ use crate::{
         mysql_branching::MysqlBranchDatabase,
     },
     types::{
-        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
-        SESSION_ID_HEADER,
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CI_INFO_HEADER,
+        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
 };
 
@@ -1258,7 +1258,7 @@ impl OperatorApi<PreparedClientCert> {
             .map(serde_json::to_vec)
             .transpose()?
         {
-            Some(ci_info) => request_builder.header("x-ci-info", ci_info),
+            Some(ci_info) => request_builder.header(MIRRORD_CI_INFO_HEADER, ci_info),
             None => request_builder,
         };
 
