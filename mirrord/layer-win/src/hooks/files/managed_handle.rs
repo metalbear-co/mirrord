@@ -12,6 +12,7 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
+use str_win::path_to_unix_path;
 use winapi::{
     shared::{
         minwindef::{FILETIME, ULONG},
@@ -20,7 +21,7 @@ use winapi::{
     um::winnt::ACCESS_MASK,
 };
 
-use crate::hooks::files::util::{path_to_unix_path, read_object_attributes_name};
+use crate::hooks::files::util::read_object_attributes_name;
 
 /// This is a [`HANDLE`] type. The values start with [`MIRRORD_FIRST_MANAGED_HANDLE`].
 /// To know what data is held behind this, look at [`HandleContext`].

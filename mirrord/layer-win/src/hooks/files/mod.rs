@@ -28,6 +28,7 @@ use phnt::ffi::{
     FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION,
     PIO_APC_ROUTINE,
 };
+use str_win::path_to_unix_path;
 use winapi::{
     shared::{
         minwindef::FILETIME,
@@ -55,7 +56,7 @@ use crate::{
         managed_handle::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
         },
-        util::{WindowsTime, path_to_unix_path, read_object_attributes_name, try_seek, try_xstat},
+        util::{WindowsTime, read_object_attributes_name, try_seek, try_xstat},
     },
     process::memory::is_memory_valid,
 };
@@ -216,7 +217,7 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 /// 3. We run the Unix path through
 ///    [`mirrord_layer_lib::file::mapper::FileRemapper::change_path_str`] to account for file-system
 ///    configuration, This becomes the new "path".
-///     * If the result of this operation is different from the intiial path, this is logged.
+///     * If the result of this operation is different from the original path, this is logged.
 /// 4. We account for filter logic after we run the Unix path through
 ///    [`mirrord_layer_lib::file::filter::FileFilter::check`] to account for file-system
 ///    configuration.
@@ -277,7 +278,6 @@ unsafe extern "system" fn nt_create_file_hook(
         };
 
         let setup = layer_setup();
-        // If file-system hooks are enabled, don't proceed with logic for mirrord handles.
         // NOTE(gabriela): this is the only place, realistically, where this logic handling
         // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
         // to all functions which rely on expecting one!
@@ -288,7 +288,7 @@ unsafe extern "system" fn nt_create_file_hook(
         let name = read_object_attributes_name(object_attributes);
 
         // Try to create a Linux path from the provided Windows UNC path.
-        let Some(parsed_linux_path) = path_to_unix_path(name.clone()) else {
+        let Some(parsed_unix_path) = path_to_unix_path(name.clone()) else {
             return run_original();
         };
 
@@ -297,14 +297,14 @@ unsafe extern "system" fn nt_create_file_hook(
 
         // NOTE(gabriela): (fs config)[1] - take original path, run through mapper
         let mapper = setup.file_remapper();
-        let linux_path = String::from(mapper.change_path_str(parsed_linux_path.as_str()));
+        let unix_path = String::from(mapper.change_path_str(parsed_unix_path.as_str()));
 
         // NOTE(gabriela): print when a file mapping is found.
-        if parsed_linux_path != linux_path {
+        if parsed_unix_path != unix_path {
             tracing::info!(
                 "nt_create_file_hook: mapping matched, \"{}\" -> \"{}\"",
-                parsed_linux_path,
-                linux_path
+                parsed_unix_path,
+                unix_path
             );
         }
 
@@ -314,7 +314,7 @@ unsafe extern "system" fn nt_create_file_hook(
         // NOTE(gabriela): (fs config)[2] - take mapped path, apply filters
         // NOTE(gabriela): look up if there are any filter settings for the path.
         // see how it collides with desired_access.
-        let matched_filter = filter.check(&linux_path);
+        let matched_filter = filter.check(&unix_path);
         match matched_filter {
             Some(FileMode::Local(_)) => {
                 tracing::trace!("nt_create_file_hook: reading \"{}\" locally!", name);
@@ -333,7 +333,7 @@ unsafe extern "system" fn nt_create_file_hook(
                     || desired_access & GENERIC_WRITE != 0
                 {
                     tracing::warn!(
-                        path = linux_path,
+                        path = unix_path,
                         "nt_create_file_hook: write mode not supported presently. falling back to original!"
                     );
                     return run_original();
@@ -364,7 +364,7 @@ unsafe extern "system" fn nt_create_file_hook(
 
         // Try to open the file on the pod.
         let req = make_proxy_request_with_response(OpenFileRequest {
-            path: PathBuf::from(&linux_path),
+            path: PathBuf::from(&unix_path),
             open_options,
         });
 
@@ -373,7 +373,7 @@ unsafe extern "system" fn nt_create_file_hook(
                 let current_time = WindowsTime::current().as_file_time();
 
                 try_insert_handle(HandleContext {
-                    path: linux_path.clone(),
+                    path: unix_path.clone(),
                     fd: file.fd,
                     desired_access,
                     file_attributes,
@@ -389,7 +389,7 @@ unsafe extern "system" fn nt_create_file_hook(
             Ok(Err(e)) => {
                 tracing::warn!(
                     ?e,
-                    ?linux_path,
+                    ?unix_path,
                     "nt_create_file_hook: Request for open file failed!",
                 );
                 None
@@ -397,7 +397,7 @@ unsafe extern "system" fn nt_create_file_hook(
             Err(e) => {
                 tracing::warn!(
                     ?e,
-                    ?linux_path,
+                    ?unix_path,
                     "nt_create_file_hook: Request for open file failed!",
                 );
                 None
@@ -409,7 +409,7 @@ unsafe extern "system" fn nt_create_file_hook(
             *file_handle = *handle;
             tracing::info!(
                 "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
-                linux_path,
+                unix_path,
                 *file_handle as usize
             );
             STATUS_SUCCESS
@@ -418,7 +418,7 @@ unsafe extern "system" fn nt_create_file_hook(
             // network operation succeeded.
 
             tracing::info!(
-                ?linux_path,
+                ?unix_path,
                 "nt_create_file_hook: Failed opening remote file handle"
             );
 
