@@ -14,7 +14,7 @@ on:
         options: [no, draft, prerelease, release]
         default: no
       release_tag:
-        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
         required: false
         type: string
       sign_artifacts:
