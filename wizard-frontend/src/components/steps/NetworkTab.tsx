@@ -13,6 +13,7 @@ import {
   disableConfigFilter,
   disablePortsAndMapping,
   getLocalPort,
+  readBoilerplateType,
   readCurrentFilters,
   readCurrentPortMapping,
   readCurrentPorts,
@@ -28,7 +29,13 @@ import { ConfigDataContext } from "../UserDataContext";
 import { Disable } from "react-disable";
 import { PortMapping } from "./PortMapping";
 import HttpFilter from "./HttpFilter";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import AddNewFilter from "./AddNewFilter";
 
 const IncomingConfigToggle = ({
@@ -40,7 +47,7 @@ const IncomingConfigToggle = ({
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [toggleEnabled, setToggleEnabled] = useState<boolean>(
-    readIncoming(config) !== false
+    readBoilerplateType(config) === "replace" || readIncoming(config) !== false
   );
 
   return (
@@ -69,6 +76,7 @@ const IncomingConfigToggle = ({
 
         setToggleEnabled(!toggleEnabled);
       }}
+      disabled={readBoilerplateType(config) === "replace"}
     >
       {toggleEnabled ? "On" : "Off"}
     </Button>
@@ -225,114 +233,129 @@ const NetworkTab = ({
           <CardContent>
             <div className="space-y-4">
               <div className="space-y-4">
-                <div className="gap-2">
-                  <h3 className="text-base font-semibold mb-1 flex items-center gap-2 justify-center">
-                    Traffic Filtering
-                    <FilterConfigToggle
-                      toggleEnabled={toggleFiltersEnabled}
-                      setToggleEnabled={setToggleFiltersEnabled}
-                    />
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    mirrord supports stealing a subset of the remote target's
-                    traffic. You can do this by specifying a filter on either an
-                    HTTP header or path.
-                  </p>
-                </div>
-
-                {/* HTTP Filters */}
-                {toggleFiltersEnabled && (
-                  <div className="space-y-4">
-                    <div className="space-y-3">
-                      {/* Header Filtering */}
-                      <div className="space-y-2">
-                        <div className="flex-1 items-center justify-between">
-                          <Label className="font-medium">Header Filters</Label>
-                          <AddNewFilter type="header" placeholder="eg. x-mirrord-test: true" key="addheaderfilter" />
-                        </div>
-                        {readCurrentFilters(config).filters.length > 0 && (
-                          <div className="space-y-3">
-                            {readCurrentFilters(config)
-                              .filters.filter(
-                                (filter) => filter.type === "header"
-                              )
-                              .map((headerFilter) => (
-                                <HttpFilter
-                                  initValue={headerFilter.value}
-                                  inputType={"header"}
-                                  key={headerFilter.value}
-                                />
-                              ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Path Filtering */}
-                      <div className="space-y-2">
-                        <div className="flex-1 items-center justify-between">
-                          <Label className="font-medium">Path Filters</Label>
-                          <AddNewFilter type="path" placeholder="e.g. /api/v1/test" key="addpathfilter" />
-                        </div>
-
-                        {readCurrentFilters(config).filters.length > 0 && (
-                          <div className="space-y-3">
-                            {readCurrentFilters(config)
-                              .filters.filter(
-                                (filter) => filter.type === "path"
-                              )
-                              .map((headerFilter) => (
-                                <HttpFilter
-                                  initValue={headerFilter.value}
-                                  inputType={"path"}
-                                  key={headerFilter.value}
-                                />
-                              ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Filter Logic Selection - Only show when there are multiple filters */}
-                      {readCurrentFilters(config).filters.length > 1 && (
-                        <>
-                          <Separator />
-                          <div className="space-y-2">
-                            <Label className="font-medium">Filter Logic</Label>
-                            <RadioGroup
-                              value={
-                                readCurrentFilters(config).operator ?? "all"
-                              }
-                              onValueChange={(value: "all" | "any") => {
-                                const existingFilters =
-                                  readCurrentFilters(config).filters;
-                                const newConfig = updateConfigFilter(
-                                  existingFilters,
-                                  value,
-                                  config
-                                );
-                                setConfig(newConfig);
-                              }}
-                            >
-                              <div className="flex items-center space-x-2">
-                                <RadioGroupItem value="all" id="and" />
-                                <Label htmlFor="and" className="text-sm">
-                                  <strong>All</strong> - Match all specified
-                                  filters
-                                </Label>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <RadioGroupItem value="any" id="or" />
-                                <Label htmlFor="or" className="text-sm">
-                                  <strong>Any</strong> - Match any specified
-                                  filter
-                                </Label>
-                              </div>
-                            </RadioGroup>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                {readBoilerplateType(config) !== "replace" && (
+                  <div className="gap-2">
+                    <h3 className="text-base font-semibold mb-1 flex items-center gap-2 justify-center">
+                      Traffic Filtering
+                      <FilterConfigToggle
+                        toggleEnabled={toggleFiltersEnabled}
+                        setToggleEnabled={setToggleFiltersEnabled}
+                      />
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      mirrord supports stealing a subset of the remote target's
+                      traffic. You can do this by specifying a filter on either
+                      an HTTP header or path.
+                    </p>
                   </div>
                 )}
+
+                {/* HTTP Filters */}
+                {readBoilerplateType(config) !== "replace" &&
+                  toggleFiltersEnabled && (
+                    <div className="space-y-4">
+                      <div className="space-y-3">
+                        {/* Header Filtering */}
+                        <div className="space-y-2">
+                          <div className="flex-1 items-center justify-between">
+                            <Label className="font-medium">
+                              Header Filters
+                            </Label>
+                            <AddNewFilter
+                              type="header"
+                              placeholder="eg. x-mirrord-test: true"
+                              key="addheaderfilter"
+                            />
+                          </div>
+                          {readCurrentFilters(config).filters.length > 0 && (
+                            <div className="space-y-3">
+                              {readCurrentFilters(config)
+                                .filters.filter(
+                                  (filter) => filter.type === "header"
+                                )
+                                .map((headerFilter) => (
+                                  <HttpFilter
+                                    initValue={headerFilter.value}
+                                    inputType={"header"}
+                                    key={headerFilter.value}
+                                  />
+                                ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Path Filtering */}
+                        <div className="space-y-2">
+                          <div className="flex-1 items-center justify-between">
+                            <Label className="font-medium">Path Filters</Label>
+                            <AddNewFilter
+                              type="path"
+                              placeholder="e.g. /api/v1/test"
+                              key="addpathfilter"
+                            />
+                          </div>
+
+                          {readCurrentFilters(config).filters.length > 0 && (
+                            <div className="space-y-3">
+                              {readCurrentFilters(config)
+                                .filters.filter(
+                                  (filter) => filter.type === "path"
+                                )
+                                .map((headerFilter) => (
+                                  <HttpFilter
+                                    initValue={headerFilter.value}
+                                    inputType={"path"}
+                                    key={headerFilter.value}
+                                  />
+                                ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Filter Logic Selection - Only show when there are multiple filters */}
+                        {readCurrentFilters(config).filters.length > 1 && (
+                          <>
+                            <Separator />
+                            <div className="space-y-2">
+                              <Label className="font-medium">
+                                Filter Logic
+                              </Label>
+                              <RadioGroup
+                                value={
+                                  readCurrentFilters(config).operator ?? "all"
+                                }
+                                onValueChange={(value: "all" | "any") => {
+                                  const existingFilters =
+                                    readCurrentFilters(config).filters;
+                                  const newConfig = updateConfigFilter(
+                                    existingFilters,
+                                    value,
+                                    config
+                                  );
+                                  setConfig(newConfig);
+                                }}
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="all" id="and" />
+                                  <Label htmlFor="and" className="text-sm">
+                                    <strong>All</strong> - Match all specified
+                                    filters
+                                  </Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="any" id="or" />
+                                  <Label htmlFor="or" className="text-sm">
+                                    <strong>Any</strong> - Match any specified
+                                    filter
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                 {/* Simplified Port Configuration */}
                 <div className="space-y-4 mt-6">
@@ -346,7 +369,9 @@ const NetworkTab = ({
                       />
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      Add, remove or map ports for traffic mirroring/ stealing.
+                      {readBoilerplateType(config) === "replace"
+                        ? "Add port mappings for ports that differ locally and remotely. Traffic on all ports will be stolen."
+                        : "Add, remove or map ports for traffic mirroring/ stealing."}
                     </p>
                   </div>
 
@@ -377,8 +402,9 @@ const NetworkTab = ({
 
                           {readCurrentPorts(config).map((remotePort) => (
                             <PortMapping
-                              remotePort={remotePort}
                               key={remotePort}
+                              remotePort={remotePort}
+                              detectedPort={mockPorts.includes(remotePort)}
                             />
                           ))}
 
