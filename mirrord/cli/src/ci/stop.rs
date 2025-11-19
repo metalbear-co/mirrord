@@ -5,16 +5,16 @@ use crate::ci::{MirrordCiStore, error::CiError};
 
 /// Handles the `mirrord ci stop` command.
 ///
-/// Builds a [`MirrordCi`] to kill the intproxy and the user's binary that was started by `mirrord
-/// ci start`.
+/// Builds a [`MirrordCiStore`] to kill the intproxy and the user's binary that was started by
+/// `mirrord ci start`.
 pub(super) struct CiStopCommandHandler {
-    /// The [`MirrordCi`] we retrieve from the user's environment (env var and temp files) so we
-    /// can kill the intproxy and the user's process.
+    /// The [`MirrordCiStore`] we retrieve from the user's environment (env var and temp files) so
+    /// we can kill the intproxy and the user's process.
     pub(crate) store: MirrordCiStore,
 }
 
 impl CiStopCommandHandler {
-    /// Builds the [`MirrordCi`], checking if the mirrord-for-ci requirements have been met.
+    /// Builds the [`MirrordCiStore`], checking if the mirrord-for-ci requirements have been met.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn new() -> CiResult<Self> {
         let store = MirrordCiStore::read_from_file_or_default().await?;
@@ -23,7 +23,7 @@ impl CiStopCommandHandler {
     }
 
     /// [`kill`](nix::sys::signal::kill)s the intproxy and the user's process, using the pids stored
-    /// in [`MirrordCi`].
+    /// in [`MirrordCiStore`].
     #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<()> {
