@@ -584,7 +584,7 @@ export const disablePortsAndMapping = (config: LayerFileConfig) => {
 };
 
 // Return an updated config with updated incoming.ports and, iff filters are set, http_filter.ports.
-export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
+export const updateConfigPorts = (ports: number[] | undefined, config: LayerFileConfig) => {
   if (typeof config !== "object") {
     throw "config badly formed";
   }
@@ -855,5 +855,10 @@ export const validateJson = (
 
 // Stringify the config object with whitespace for display or file download
 export const getConfigString = (config: LayerFileConfig): string => {
+  if (readBoilerplateType(config) === "replace") {
+    // remove incoming.ports when in replace mode
+    const newConfig = updateConfigPorts(undefined, config);
+    return JSON.stringify(newConfig, null, 2);
+  }
   return JSON.stringify(config, null, 2);
 };

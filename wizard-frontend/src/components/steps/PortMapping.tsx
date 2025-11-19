@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import {
   addRemoveOrUpdateMapping,
   getLocalPort,
+  readBoilerplateType,
   readCurrentPorts,
   removePortandMapping,
 } from "../JsonUtils";
@@ -11,7 +12,13 @@ import { useContext, useState } from "react";
 import { ConfigDataContext } from "../UserDataContext";
 import { useToast } from "../ui/use-toast";
 
-export const PortMapping = ({ remotePort }: { remotePort: number }) => {
+export const PortMapping = ({
+  remotePort,
+  detectedPort,
+}: {
+  remotePort: number;
+  detectedPort: boolean;
+}) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [inputContents, setInputContents] = useState<number>(
     getLocalPort(remotePort, config)
@@ -32,7 +39,7 @@ export const PortMapping = ({ remotePort }: { remotePort: number }) => {
   const resolveConflict = () => {
     setOutlineConflict(false);
     dismiss();
-  }
+  };
 
   return (
     // remotePort is guarateed to be unique for each PortMapping
@@ -82,17 +89,19 @@ export const PortMapping = ({ remotePort }: { remotePort: number }) => {
         </div>
 
         {/* Delete button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
-          onClick={() => {
-            const newConfig = removePortandMapping(remotePort, config);
-            setConfig(newConfig);
-          }}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        {!(readBoilerplateType(config) === "replace" && detectedPort) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+            onClick={() => {
+              const newConfig = removePortandMapping(remotePort, config);
+              setConfig(newConfig);
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   );
