@@ -15,7 +15,6 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
-use nix::libc::{SIGINT, SIGKILL, SIGTERM};
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -210,6 +209,7 @@ impl MirrordCi {
     /// Very similar to to how `mirrord exec` behaves, except that here we `spawn` a child process
     /// that'll keep running, and we store the pid of this process in [`MirrordCiStore`] so we can
     /// kill it later.
+    #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
     pub(super) async fn prepare_command<P: Progress>(
         self,
@@ -220,6 +220,8 @@ impl MirrordCi {
         env_vars: &HashMap<String, String>,
         CiConfig { output_dir }: &CiConfig,
     ) -> CiResult<()> {
+        use nix::libc::{SIGINT, SIGKILL, SIGTERM};
+
         let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
 
         // Create a dir like `/tmp/mirrord/node-1234-cool` where we dump ci related files.
@@ -306,6 +308,19 @@ impl MirrordCi {
             progress.success(Some(&format!("child pid: {child_pid}")));
             Ok::<_, CiError>(())
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) async fn prepare_command<P: Progress>(
+        self,
+        progress: &mut P,
+        binary: &str,
+        binary_path: &Path,
+        binary_args: &[String],
+        env_vars: &HashMap<String, String>,
+        CiConfig { output_dir }: &CiConfig,
+    ) -> CiResult<()> {
+        unimplemented!("Not supported on windows.");
     }
 
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
