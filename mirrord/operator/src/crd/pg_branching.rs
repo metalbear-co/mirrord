@@ -170,4 +170,3 @@ impl From<PgBranchTableCopyConfig> for TableCopyConfig {
         }
     }
 }
-
