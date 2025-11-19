@@ -124,11 +124,15 @@ impl MirrordCiStore {
     /// Saves this [`MirrordCiStore`] to the file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`],
     /// creating a new file if it needed.
     async fn write_to_file(&self) -> CiResult<()> {
+        let file_path = temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
         let mut store_file = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH))
+            .open(file_path)
             .await?;
 
         if store_file.try_lock_exclusive()? {
