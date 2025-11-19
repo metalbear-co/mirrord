@@ -265,22 +265,23 @@ impl MirrordCi {
             }
         };
 
+        let child_pid = child
+            .id()
+            .map(|pid| pid.to_string())
+            .unwrap_or("unknown".to_string());
         if self.start_args.foreground {
-            progress.info(&format!(
-                "Waiting for child with pid {:?}",
-                mirrord_ci_store.user_pid,
-            ));
+            progress.info(&format!("waiting for child with pid {child_pid}"));
             match child.wait().await {
                 Ok(status) => {
                     if status.success() {
                         progress.success(None);
                     } else if let Some(signal) = status.signal() {
                         match signal {
-                            SIGKILL => progress.success(Some("Process killed by SIGKILL")),
-                            SIGTERM => progress.success(Some("Process terminated by SIGTERM")),
-                            SIGINT => progress.success(Some("Process interrupted by SIGINT")),
+                            SIGKILL => progress.success(Some("process killed by SIGKILL")),
+                            SIGTERM => progress.success(Some("process terminated by SIGTERM")),
+                            SIGINT => progress.success(Some("process interrupted by SIGINT")),
                             _ => progress
-                                .failure(Some(&format!("Process exited with status: {}", status))),
+                                .failure(Some(&format!("process exited with status: {}", status))),
                         };
                     }
                     Ok::<_, CiError>(())
@@ -294,7 +295,7 @@ impl MirrordCi {
                 }
             }
         } else {
-            progress.success(Some(&format!("child pid: {:?}", mirrord_ci_store.user_pid)));
+            progress.success(Some(&format!("child pid: {child_pid}")));
             Ok::<_, CiError>(())
         }
     }
