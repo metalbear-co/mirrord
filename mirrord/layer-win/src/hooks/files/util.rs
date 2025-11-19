@@ -1,9 +1,6 @@
 //! Utility module for files redirection.
 
-use std::{
-    mem::MaybeUninit,
-    path::{Path, PathBuf},
-};
+use std::mem::MaybeUninit;
 
 use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
@@ -16,30 +13,6 @@ use winapi::{
         timezoneapi::{FileTimeToSystemTime, SystemTimeToFileTime},
     },
 };
-
-// This prefix is a way to explicitly indicate that we're looking in
-// the global namespace for a path.
-const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
-
-/// Responsible for turning global namespace, default volume paths into Linux paths.
-pub fn remove_root_dir_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
-    let mut path = path.as_ref();
-
-    if !path.has_root() {
-        return None;
-    }
-
-    // Rust doesn't know how to separate the components in this case.
-    if path.starts_with(GLOBAL_NAMESPACE_PATH) {
-        path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
-    }
-
-    // Skip root dir
-    let new_path: PathBuf = path.components().skip(1).collect();
-
-    // Turn to string, replace Windows slashes to Linux slashes for ease of use.
-    Some(new_path.to_str()?.to_string().replace("\\", "/"))
-}
 
 /// Attempt to run xstat on pod over file descriptor.
 ///
@@ -56,7 +29,14 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
     // If the response contains the `XstatResponse`, return the metadata.
     match req {
         Ok(Ok(res)) => Some(res.metadata),
-        _ => None,
+        Ok(Err(e)) => {
+            tracing::error!(?e, "Protocol: Error trying to xstat into file!");
+            None
+        }
+        Err(e) => {
+            tracing::error!(?e, "Proxy: Error trying to xstat file!");
+            None
+        }
     }
 }
 
@@ -74,7 +54,14 @@ pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
 
     match seek {
         Ok(Ok(res)) => Some(res.result_offset),
-        _ => None,
+        Ok(Err(e)) => {
+            tracing::error!(?e, "Protocol: Error trying to seek into file!");
+            None
+        }
+        Err(e) => {
+            tracing::error!(?e, "Proxy: Error trying to seek into file!");
+            None
+        }
     }
 }
 

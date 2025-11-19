@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 /// Find the length of a null-terminated buffer using an efficient search
 ///
 /// This utility function replaces the common pattern of using `(0..).take_while`
@@ -263,4 +265,28 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
     }
 
     None // Double null terminator not found within bounds
+}
+
+// This prefix is a way to explicitly indicate that we're looking in
+// the global namespace for a path.
+const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
+
+/// Responsible for turning global namespace, default volume paths into Linux paths.
+pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
+    let mut path = path.as_ref();
+
+    if !path.has_root() {
+        return None;
+    }
+
+    // Rust doesn't know how to separate the components in this case.
+    if path.starts_with(GLOBAL_NAMESPACE_PATH) {
+        path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
+    }
+
+    // Skip root dir
+    let new_path: PathBuf = path.components().skip(1).collect();
+
+    // Turn to string, replace Windows slashes to Linux slashes for ease of use.
+    Some(new_path.to_str()?.to_string().replace("\\", "/"))
 }

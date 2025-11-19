@@ -26,6 +26,7 @@ mirrord-console = { path = "../console" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",
 ] }
+mirrord-layer-lib = { path = "../layer-lib" }
 
 base64.workspace = true
 bincode.workspace = true
