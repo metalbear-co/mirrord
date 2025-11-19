@@ -23,11 +23,6 @@ on:
         options: ["false", "true"]
         default: false
 
-  push:
-    paths-ignore:
-      - "*.md"
-      - "**/*.md"
-
   pull_request:
     branches: ["main", "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
