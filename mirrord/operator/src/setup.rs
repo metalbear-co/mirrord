@@ -315,6 +315,10 @@ impl OperatorSetup for Operator {
             MysqlBranchDatabase::crd().to_writer(&mut writer)?;
         }
 
+        if self.pg_branching {
+            writer.write_all(b"---\n")?;
+            PgBranchDatabase::crd().to_writer(&mut writer)?;
+        }
         Ok(())
     }
 }
