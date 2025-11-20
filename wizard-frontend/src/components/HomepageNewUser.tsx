@@ -1,8 +1,7 @@
 import { Zap, BookOpen, ChevronLeft, ChevronRight, Server } from "lucide-react";
 import {  CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { WizardStep } from "@/components/Wizard";
-import mirrordLogo from "@/assets/mirrord-logo.png";
+import mirrordLogo from "@/assets/mirrord-logo.svg";
 import Panel from "./Panel";
 import BoilerplateStep from "./steps/BoilerplateStep";
 import IntroStep from "./steps/IntroStep";
@@ -39,12 +38,9 @@ const HomepageNewUser = () => {
             <img
               src={mirrordLogo}
               alt="mirrord"
-              className="h-16 w-auto sm:h-20"
+              className="size-40"
             />
           </div>
-          <Badge variant="secondary" className="text-xs mb-6">
-            v3.86.0
-          </Badge>
 
           <h1 className="text-2xl sm:text-3xl font-bold mb-4 text-foreground">
             Welcome to mirrord! 👋
