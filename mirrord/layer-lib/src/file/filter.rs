@@ -1,5 +1,3 @@
-use std::path::Path;
-
 /// Controls which files are ignored (opened locally) by mirrord file operations.
 ///
 /// There are 2 ways of setting this up:
@@ -13,6 +11,8 @@ use mirrord_config::{
     util::VecOrSingle,
 };
 use regex::{RegexSet, RegexSetBuilder};
+
+use std::path::Path;
 
 #[cfg(unix)]
 use super::unix::*;
