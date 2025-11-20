@@ -184,12 +184,20 @@ impl HttpFilter {
             Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
 
             Self::Composite { all: true, filters } => {
+                // Since we require `body` to be Clone + Copy, each
+                // iteration creates a new version that reads from the
+                // beginning. Need to make sure that we don't read
+                // anything from `body` before passing (copies of) it
+                // to other fns.
                 filters.iter().all(|f| f.matches(parts, body))
             }
             Self::Composite {
                 all: false,
                 filters,
-            } => filters.iter().any(|f| f.matches(parts, body)),
+            } => {
+                // Same as above
+                filters.iter().any(|f| f.matches(parts, body))
+            }
             Self::Body(filter) => {
                 let Some(body) = body else { return false };
 
