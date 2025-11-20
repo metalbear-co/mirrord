@@ -209,14 +209,14 @@ where
             // We need to fill the exact IP here.
             match &user_socket_info.state {
                 SocketState::Bound(Bound { address, .. }) => {
-                    if interceptor_addr.ip().is_unspecified() {
-                        if interceptor_addr.is_ipv4() {
-                            interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
+                    if interceptor_address.ip().is_unspecified() {
+                        if interceptor_address.is_ipv4() {
+                            interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
                         } else {
-                            interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into())
+                            interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into())
                         }
                     } else {
-                        interceptor_addr.set_ip(address.ip());
+                        interceptor_address.set_ip(address.ip());
                     }
                 }
                 _ if interceptor_address.is_ipv4() => {
