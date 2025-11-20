@@ -32,9 +32,13 @@ impl Framelike for InternalHttpBodyFrame {
     }
 }
 
-/// Implements [`Read`] for a &[Frame]
+/// Implements [`Read`] for slices of [`Framelike`] objects, like
+/// [`InternalHttpBodyFrame`] or [`Frame<Bytes>`]
 pub struct FramesReader<'a, T> {
+	/// The portion of the slice that we've yet to process
     remaining: &'a [T],
+
+	/// How many bytes we've already read from the *current* frame.
     read_until: usize,
 }
 
@@ -183,6 +187,90 @@ impl<T: Framelike> BufferedBody<T> {
                 remaining: items,
                 read_until: 0,
             }),
+        }
+    }
+}
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn test_framelike() {
+        let frames = vec![
+            data(b"0123456789"),
+            empty(),
+            empty(),
+            data(b"ABCDEFGHIJKLMNO"),
+            empty(),
+            data(b"VWXYZ"),
+            nondata(),
+            data(b"NEVER"),
+        ];
+        let mut reader = FramesReader {
+			remaining: &frames,
+			read_until: 0,
+		};
+
+        // Helper for shorter test code
+        fn read_n<R: Read>(r: &mut R, n: usize) -> Vec<u8> {
+            let mut buf = vec![0; n];
+            let read = r.read(&mut buf).unwrap();
+            buf.truncate(read);
+            buf
+        }
+
+        // Read F1 part by part
+        assert_eq!(read_n(&mut reader, 3), b"012");
+        assert_eq!(read_n(&mut reader, 4), b"3456");
+        assert_eq!(read_n(&mut reader, 3), b"789");
+
+        // Skip multiple empty frames
+        assert_eq!(read_n(&mut reader, 5), b"ABCDE");
+
+        // Read across frame boundaries
+        // Should get 10 remaining from F2, then 2 from F3 ("V", "W")
+        assert_eq!(read_n(&mut reader, 12), b"FGHIJKLMNO");
+
+        // Read remaining from F3
+        assert_eq!(read_n(&mut reader, 4), b"VWXY");
+        assert_eq!(read_n(&mut reader, 1), b"Z");
+
+        // EOF: we hit the first nondata frame and we stay EOF
+        for _ in 0..5 {
+			let mut buf = [0u8; 1];
+			let eof = reader.read(&mut buf).unwrap();
+			assert_eq!(eof, 0);
+		}
+    }
+
+    // ===== Helper Functions =====
+
+    fn data(data: &[u8]) -> TestFrame {
+        TestFrame::Data(data.to_vec())
+    }
+
+    fn empty() -> TestFrame {
+        TestFrame::Data(vec![])
+    }
+
+    fn nondata() -> TestFrame {
+        TestFrame::Nondata
+    }
+
+    // Mock TestFrame for testing
+    #[derive(Clone)]
+    enum TestFrame {
+        Data(Vec<u8>),
+        Nondata,
+    }
+
+    impl Framelike for TestFrame {
+        fn data_ref(&self) -> Option<&[u8]> {
+            match self {
+                TestFrame::Data(v) => Some(v),
+                TestFrame::Nondata => None,
+            }
         }
     }
 }
