@@ -12,7 +12,7 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     {/* value refers to isReturning */}
-    <UserDataContext.Provider value={true}>
+    <UserDataContext.Provider value={false}>
       <TooltipProvider>
         <Toaster />
         <Sonner />

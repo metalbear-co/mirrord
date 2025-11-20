@@ -15,9 +15,11 @@ import { useToast } from "../ui/use-toast";
 export const PortMapping = ({
   remotePort,
   detectedPort,
+  setPortConflicts,
 }: {
   remotePort: number;
   detectedPort: boolean;
+  setPortConflicts: React.Dispatch<React.SetStateAction<boolean>>;
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [inputContents, setInputContents] = useState<number>(
@@ -30,14 +32,18 @@ export const PortMapping = ({
   const { toast, dismiss } = useToast();
   const localPortConflict = async () => {
     setOutlineConflict(true);
+    setPortConflicts(true);
+    // toast does not take prop for stickiness, so set it to stay open for one year
     toast({
       title: "Local Port Conflict!",
       description:
         "Multiple port mappings have the same local port. Local ports should be unique.",
+      duration: 31536000000,
     });
   };
   const resolveConflict = () => {
     setOutlineConflict(false);
+    setPortConflicts(false);
     dismiss();
   };
 
@@ -64,11 +70,12 @@ export const PortMapping = ({
             }
             value={inputContents}
             onChange={(event) => {
-              if (!isNaN(+event.target.value)) {
+              // remove all whitespace from the input
+              const newValue = +event.target.value.replace(/\s/g, "");
+              if (!isNaN(newValue)) {
                 if (
                   readCurrentPorts(config).filter(
-                    (remote) =>
-                      getLocalPort(remote, config) === +event.target.value
+                    (remote) => getLocalPort(remote, config) === newValue
                   ).length > 0
                 ) {
                   localPortConflict();
@@ -77,12 +84,12 @@ export const PortMapping = ({
                 }
                 const newConfig = addRemoveOrUpdateMapping(
                   remotePort,
-                  +event.target.value,
+                  newValue,
                   config
                 );
                 setConfig(newConfig);
 
-                setInputContents(+event.target.value);
+                setInputContents(newValue);
               }
             }}
           />
@@ -97,6 +104,7 @@ export const PortMapping = ({
             onClick={() => {
               const newConfig = removePortandMapping(remotePort, config);
               setConfig(newConfig);
+              resolveConflict();
             }}
           >
             <Trash2 className="h-4 w-4" />

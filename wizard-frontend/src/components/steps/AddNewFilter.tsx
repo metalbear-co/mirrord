@@ -35,19 +35,21 @@ export const AddNewFilter = ({
       const newValue =
         inputMatching === "exact" ? regexificationRay(inputValue) : inputValue;
 
-      const updated = updateConfigFilter(
-        filters.concat([
-          {
-            value: newValue,
-            type: type,
-          },
-        ]),
-        operator,
-        config
-      );
-      setConfig(updated);
+      if (filters.filter((filter) => filter.value == newValue).length === 0) {
+        const updated = updateConfigFilter(
+          filters.concat([
+            {
+              value: newValue,
+              type: type,
+            },
+          ]),
+          operator,
+          config
+        );
+        setConfig(updated);
+      }
 
-      setInputValue(undefined);
+      setInputValue("");
     }
   };
 
@@ -80,7 +82,7 @@ export const AddNewFilter = ({
               if (event.target.value) {
                 setInputValue(event.target.value);
               } else {
-                setInputValue(undefined);
+                setInputValue("");
               }
             }}
           />
