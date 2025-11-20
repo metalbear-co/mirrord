@@ -1,23 +1,9 @@
-import { ArrowRight, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  addRemoveOrUpdateMapping,
-  getLocalPort,
-  regexificationRay,
-  removePortandMapping,
-  removeSingleFilter,
-  updateSingleFilter,
-} from "../JsonUtils";
-import { useContext, useState } from "react";
+import { removeSingleFilter } from "../JsonUtils";
+import { useContext } from "react";
 import { ConfigDataContext } from "../UserDataContext";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
 
 export const HttpFilter = ({
   initValue,
@@ -30,13 +16,15 @@ export const HttpFilter = ({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {"/"}
         <Input
           placeholder="e.g., x-mirrord-test: true"
           value={initValue}
           readOnly={true}
-          className="flex-1"
+          className="flex-1 text-black"
         />
+        {"/"}
 
         <Button
           type="button"

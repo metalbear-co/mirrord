@@ -394,6 +394,7 @@ export const updateConfigFilter = (
   operator: "any" | "all" | null,
   config: LayerFileConfig
 ) => {
+  console.log(filters); // FIX get correct filters, setting config fails
   if (typeof config !== "object") {
     throw "config badly formed";
   }
@@ -477,11 +478,11 @@ export const updateConfigFilter = (
   // update ports if incoming.ports is set and http_filter is not null
   if (
     "ports" in config.feature.network.incoming &&
-    typeof config.feature.network.incoming.http_filter === "object" &&
+    typeof http_filter === "object" &&
     http_filter
   ) {
     http_filter = {
-      ...config.feature.network.incoming.http_filter,
+      ...http_filter,
       ports: readCurrentPorts(config),
     };
   }
@@ -538,7 +539,7 @@ export const removeSingleFilter = (
 
 // Return the regex expression for an exact match of the given string value.
 export const regexificationRay = (value: string) =>
-  "/^" + value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$/";
+  "^" + value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$";
 
 // ===== PORTS AND PORT MAPPING(S) =====
 
@@ -584,7 +585,7 @@ export const disablePortsAndMapping = (config: LayerFileConfig) => {
 };
 
 // Return an updated config with updated incoming.ports and, iff filters are set, http_filter.ports.
-export const updateConfigPorts = (ports: number[] | undefined, config: LayerFileConfig) => {
+export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
   if (typeof config !== "object") {
     throw "config badly formed";
   }
@@ -857,7 +858,14 @@ export const validateJson = (
 export const getConfigString = (config: LayerFileConfig): string => {
   if (readBoilerplateType(config) === "replace") {
     // remove incoming.ports when in replace mode
-    const newConfig = updateConfigPorts(undefined, config);
+    const newConfig = updateConfigPorts([], config);
+    if (
+    typeof newConfig.feature?.network === "object" &&
+    typeof newConfig.feature?.network.incoming === "object" &&
+    newConfig.feature?.network.incoming.ports
+  ) {
+    delete newConfig.feature?.network.incoming.ports;
+  }
     return JSON.stringify(newConfig, null, 2);
   }
   return JSON.stringify(config, null, 2);

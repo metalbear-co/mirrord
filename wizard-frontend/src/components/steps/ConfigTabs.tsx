@@ -38,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea";
 import DownloadButton from "../DownloadButton";
 import {
   getConfigString,
+  readCurrentPorts,
   readCurrentTargetDetails,
   readIncoming,
   updateConfigTarget,
@@ -51,6 +52,7 @@ const ConfigTabs = () => {
   const [namespace, setNamespace] = useState<string>("default");
   const [targetType, setTargetType] = useState<string>("");
   const [savedIncoming, setSavedIncoming] = useState<any>(readIncoming(config));
+  const [portConflicts, setPortConflicts] = useState<boolean>(false);
 
   // For copying to clipboard
   const { toast } = useToast();
@@ -129,27 +131,29 @@ const ConfigTabs = () => {
       <Tabs
         value={currentTab}
         onValueChange={(value) => {
-          // Only allow navigation if target selected
-          if (targetNotSelected()) return;
           setCurrentTab(value);
         }}
         className="w-full"
       >
         <TabsList className="grid w-full grid-cols-3 h-10">
-          <TabsTrigger value="target" className="text-sm">
+          <TabsTrigger
+            value="target"
+            className="text-sm"
+            disabled={portConflicts}
+          >
             Target
           </TabsTrigger>
           <TabsTrigger
             value="network"
             className="text-sm"
-            disabled={!config.target}
+            disabled={targetNotSelected()}
           >
             Network
           </TabsTrigger>
           <TabsTrigger
             value="export"
             className="text-sm"
-            disabled={!config.target}
+            disabled={targetNotSelected() || portConflicts}
           >
             Export
           </TabsTrigger>
@@ -173,7 +177,7 @@ const ConfigTabs = () => {
                 Target Selection
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-3 text-left">
               <div>
                 <Label htmlFor="namespace">Namespace</Label>
                 <Select
@@ -282,7 +286,11 @@ const ConfigTabs = () => {
           </Card>
         </TabsContent>
 
-        <NetworkTab savedIncoming={savedIncoming} setSavedIncoming={setSavedIncoming} />
+        <NetworkTab
+          savedIncoming={savedIncoming}
+          setSavedIncoming={setSavedIncoming}
+          setPortConflicts={setPortConflicts}
+        />
 
         <TabsContent value="export" className="space-y-4 mt-6">
           <Card>
@@ -378,7 +386,7 @@ const ConfigTabs = () => {
               <Button
                 onClick={nextTab}
                 className="flex items-center gap-2"
-                disabled={targetNotSelected()}
+                disabled={targetNotSelected() || portConflicts}
               >
                 Next
                 <ChevronRight className="h-4 w-4" />

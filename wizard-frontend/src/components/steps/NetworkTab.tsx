@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import AddNewFilter from "./AddNewFilter";
+import { Switch } from "../ui/switch";
 
 const IncomingConfigToggle = ({
   savedIncoming,
@@ -51,15 +52,9 @@ const IncomingConfigToggle = ({
   );
 
   return (
-    <Button
+    <Switch
       key={"incomingEnabledToggle"}
-      variant={toggleEnabled ? "default" : "outline"}
-      size="sm"
-      className={`rounded-full px-4 py-2 font-mono transition-all ${
-        toggleEnabled
-          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-          : "hover:bg-primary/10"
-      }`}
+      checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
           // user turned incoming from "on" to "off"
@@ -77,9 +72,7 @@ const IncomingConfigToggle = ({
         setToggleEnabled(!toggleEnabled);
       }}
       disabled={readBoilerplateType(config) === "replace"}
-    >
-      {toggleEnabled ? "On" : "Off"}
-    </Button>
+    />
   );
 };
 
@@ -97,15 +90,9 @@ const FilterConfigToggle = ({
   }>(readCurrentFilters(config));
 
   return (
-    <Button
+    <Switch
       key={"filtersEnabledToggle"}
-      variant={toggleEnabled ? "default" : "outline"}
-      size="sm"
-      className={`rounded-full px-4 py-2 font-mono transition-all ${
-        toggleEnabled
-          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-          : "hover:bg-primary/10"
-      }`}
+      checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
           // user turned incoming from "on" to "off"
@@ -126,9 +113,7 @@ const FilterConfigToggle = ({
 
         setToggleEnabled(!toggleEnabled);
       }}
-    >
-      {toggleEnabled ? "On" : "Off"}
-    </Button>
+    />
   );
 };
 
@@ -148,15 +133,9 @@ const PortsConfigToggle = ({
   ]);
 
   return (
-    <Button
-      key={"filtersEnabledToggle"}
-      variant={toggleEnabled ? "default" : "outline"}
-      size="sm"
-      className={`rounded-full px-4 py-2 font-mono transition-all ${
-        toggleEnabled
-          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-          : "hover:bg-primary/10"
-      }`}
+    <Switch
+      key={"portsEnabledToggle"}
+      checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
           // user turned incoming from "on" to "off"
@@ -181,18 +160,54 @@ const PortsConfigToggle = ({
 
         setToggleEnabled(!toggleEnabled);
       }}
-    >
-      {toggleEnabled ? "On" : "Off"}
-    </Button>
+    />
+    // <Button
+    //   key={"filtersEnabledToggle"}
+    //   variant={toggleEnabled ? "default" : "outline"}
+    //   size="sm"
+    //   className={`rounded-full px-4 py-2 font-mono transition-all ${
+    //     toggleEnabled
+    //       ? "bg-primary text-primary-foreground hover:bg-primary/90"
+    //       : "hover:bg-primary/10"
+    //   }`}
+      // onClick={() => {
+      //   if (toggleEnabled) {
+      //     // user turned incoming from "on" to "off"
+      //     // save state, in case the user turns the toggle back on
+      //     setSavedPorts([
+      //       readCurrentPorts(config),
+      //       readCurrentPortMapping(config),
+      //     ]);
+      //     const newConfig = disablePortsAndMapping(config);
+      //     setConfig(newConfig);
+      //   } else {
+      //     // user turned incoming from "off" to "on"
+      //     // restore the last state that was saved
+      //     const [savedPortsOnly, savedMapping] = savedPorts;
+      //     const partialNewConfig = updateConfigPorts(savedPortsOnly, config);
+      //     const newConfig = updateConfigPortMapping(
+      //       savedMapping,
+      //       partialNewConfig
+      //     );
+      //     setConfig(newConfig);
+      //   }
+
+      //   setToggleEnabled(!toggleEnabled);
+      // }}
+    // >
+    //   {toggleEnabled ? "On" : "Off"}
+    // </Button>
   );
 };
 
 const NetworkTab = ({
   savedIncoming,
   setSavedIncoming,
+  setPortConflicts
 }: {
   savedIncoming: any;
   setSavedIncoming: (any) => void;
+  setPortConflicts: React.Dispatch<React.SetStateAction<boolean>>
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [toggleFiltersEnabled, setToggleFiltersEnabled] =
@@ -290,7 +305,7 @@ const NetworkTab = ({
                             <Label className="font-medium">Path Filters</Label>
                             <AddNewFilter
                               type="path"
-                              placeholder="e.g. /api/v1/test"
+                              placeholder="eg. /api/v1/test"
                               key="addpathfilter"
                             />
                           </div>
@@ -384,27 +399,30 @@ const NetworkTab = ({
                       <div className="space-y-3">
                         <div className="space-y-2">
                           {/* Remote Port and Local Port column labels */}
-                          <div key="labels">
-                            <div className="flex gap-3">
-                              <div className="flex-1">
-                                <Label className="text-xs text-muted-foreground">
-                                  Remote Port
-                                </Label>
-                              </div>
+                          {readCurrentPorts(config).length > 0 && (
+                            <div key="labels">
+                              <div className="flex gap-3">
+                                <div className="flex-1">
+                                  <Label className="text-xs text-muted-foreground">
+                                    Remote Port
+                                  </Label>
+                                </div>
 
-                              <div className="flex-1">
-                                <Label className="text-xs text-muted-foreground">
-                                  Local Port
-                                </Label>
+                                <div className="flex-1">
+                                  <Label className="text-xs text-muted-foreground">
+                                    Local Port
+                                  </Label>
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
 
                           {readCurrentPorts(config).map((remotePort) => (
                             <PortMapping
                               key={remotePort}
                               remotePort={remotePort}
                               detectedPort={mockPorts.includes(remotePort)}
+                              setPortConflicts={setPortConflicts}
                             />
                           ))}
 

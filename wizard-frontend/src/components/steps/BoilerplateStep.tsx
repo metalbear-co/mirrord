@@ -104,7 +104,7 @@ const BoilerplateStep: () => WizardStep = () => {
     },
   ];
 
-  const {config, setConfig} = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext);
   const [selectedBoilerplate, setSelectedBoilerplate] = useState<string>("");
   const handleBoilerplateSelect = (boilerplateId: string) => {
     setSelectedBoilerplate(boilerplateId);
@@ -124,7 +124,7 @@ const BoilerplateStep: () => WizardStep = () => {
   };
 
   return {
-    id: "boilerplate-new-user",
+    id: "boilerplate",
     title: "mirrord configuration",
     content: (
       <div className="space-y-6">
@@ -140,6 +140,7 @@ const BoilerplateStep: () => WizardStep = () => {
         </div>
       </div>
     ),
+    allowProgress: selectedBoilerplate?.length > 0,
   };
 };
 

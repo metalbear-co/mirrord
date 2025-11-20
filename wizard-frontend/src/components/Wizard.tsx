@@ -10,6 +10,7 @@ export interface WizardStep {
   id: string;
   title: string;
   content: ReactNode;
+  allowProgress?: boolean;
 }
 
 export interface WizardProps {
@@ -26,7 +27,7 @@ const WizardHeader = ({
   currentStep,
   totalSteps,
   fetchConfigBadge,
-  goToPrevious
+  goToPrevious,
 }: {
   title: string;
   currentStep: number;
@@ -37,9 +38,11 @@ const WizardHeader = ({
   <div className="bg-background p-4 flex-shrink-0">
     <div className="mb-4">
       <DialogTitle className="flex items-center gap-2">
-        {title === "Configuration Setup" && (<Button variant="outline"
-          onClick={goToPrevious}
-          ><ChevronLeft className="h-4 w-4" /></Button>)}
+        {title === "Configuration Setup" && (
+          <Button variant="outline" onClick={goToPrevious}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+        )}
         {title}
         {title === "Configuration Setup" && (
           <Badge variant="secondary">{fetchConfigBadge()}</Badge>
@@ -58,11 +61,13 @@ const WizardFooter = ({
   onNext,
   isFirstStep,
   isLastStep,
+  allowProgress,
 }: {
   onPrevious: () => void;
   onNext: () => void;
   isFirstStep: boolean;
   isLastStep: boolean;
+  allowProgress: boolean;
 }) => (
   <div className="border-t bg-background p-4">
     <div className="flex items-center justify-between">
@@ -79,7 +84,11 @@ const WizardFooter = ({
       </div>
 
       <div className="flex items-center gap-2">
-        <Button onClick={onNext} className="flex items-center gap-2">
+        <Button
+          onClick={onNext}
+          className="flex items-center gap-2"
+          disabled={!allowProgress}
+        >
           {isLastStep ? "Close" : "Next"}
           {!isLastStep && <ChevronRight className="h-4 w-4" />}
         </Button>
@@ -138,7 +147,7 @@ export const Wizard: React.FC<WizardProps> = ({
     config.setConfig(DefaultConfig);
     // close according to prop
     onClose();
-  }
+  };
 
   if (!isOpen) return null;
 
@@ -165,12 +174,15 @@ export const Wizard: React.FC<WizardProps> = ({
         </div>
 
         {/* Footer with Navigation, use alternative on config tabs*/}
-        {!isLastStep && (<WizardFooter
-          onPrevious={goToPrevious}
-          onNext={goToNext}
-          isFirstStep={isFirstStep}
-          isLastStep={isLastStep}
-        />)}
+        {!isLastStep && (
+          <WizardFooter
+            onPrevious={goToPrevious}
+            onNext={goToNext}
+            isFirstStep={isFirstStep}
+            isLastStep={isLastStep}
+            allowProgress={currentStepData.allowProgress ?? true}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

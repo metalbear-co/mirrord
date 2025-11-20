@@ -241,7 +241,7 @@ const learningStep6NewUser: WizardStep = {
 
           <div className="bg-background border border-border rounded-lg p-2 mb-4">
             <img
-              src="src/assets/mirrord-logo.png"
+              src="src/assets/flow-diagram.png"
               alt="Development Feedback Loop with mirrord"
               className="w-full max-w-full mx-auto rounded"
             />
@@ -486,7 +486,7 @@ const learningStep6Returning: WizardStep = {
 
           <div className="bg-background border border-border rounded-lg mb-4">
             <img
-              src="/src/assets/mirrord-logo.png"
+              src="/src/assets/flow-diagram.png"
               alt="Development Feedback Loop with mirrord"
               className="w-full max-w-full mx-auto rounded"
             />
