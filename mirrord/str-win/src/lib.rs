@@ -271,16 +271,17 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
 // the global namespace for a path.
 const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
 
-/// Responsible for turning a Windows absolute path (potentially Device path) into a Unix-compatible path.
-/// 
+/// Responsible for turning a Windows absolute path (potentially Device path) into a Unix-compatible
+/// path.
+///
 /// ## Implementation
-/// 
+///
 /// 1. If present, remove global namespace path, for device paths (e.g. `"\\??\\"`.)
 /// 2. Remove the volume from the path.
 /// 3. Make all back-slashes be forward-slashes.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `path` - A Windows absolute path.
 pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
     let mut path = path.as_ref();
