@@ -1,9 +1,4 @@
-use std::{
-    fmt::{self, Debug},
-    io::Read,
-    sync::LazyLock,
-    time::Duration,
-};
+use std::{fmt::Debug, io::Read, sync::LazyLock, time::Duration};
 
 use bytes::Bytes;
 use hyper::body::Frame;
@@ -35,10 +30,10 @@ impl Framelike for InternalHttpBodyFrame {
 /// Implements [`Read`] for slices of [`Framelike`] objects, like
 /// [`InternalHttpBodyFrame`] or [`Frame<Bytes>`]
 pub struct FramesReader<'a, T> {
-	/// The portion of the slice that we've yet to process
+    /// The portion of the slice that we've yet to process
     remaining: &'a [T],
 
-	/// How many bytes we've already read from the *current* frame.
+    /// How many bytes we've already read from the *current* frame.
     read_until: usize,
 }
 
@@ -46,6 +41,18 @@ impl<T> Copy for FramesReader<'_, T> {}
 impl<T> Clone for FramesReader<'_, T> {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl<'a, T> From<&'a [T]> for FramesReader<'a, T>
+where
+    T: Framelike,
+{
+    fn from(remaining: &'a [T]) -> Self {
+        Self {
+            remaining,
+            read_until: 0,
+        }
     }
 }
 
@@ -138,62 +145,11 @@ pub enum BufferBodyError {
     Timeout(#[from] Elapsed),
 }
 
-pub enum BufferedBody<T> {
-    Empty,
-    Full(Vec<T>),
-    Partial(Vec<T>),
-}
-
-impl<T> Debug for BufferedBody<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "Empty"),
-            Self::Full(buf) => f
-                .debug_struct("Full")
-                .field("frame_count", &buf.len())
-                .finish(),
-            Self::Partial(buf) => f
-                .debug_struct("Partial")
-                .field("frame_count", &buf.len())
-                .finish(),
-        }
-    }
-}
-
-impl<T> BufferedBody<T> {
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-
-    /// Returns the buffered data if we have anything, regardless of
-    /// whether it's full or partial.
-    #[inline]
-    pub fn buffered_data(self) -> Option<Vec<T>> {
-        match self {
-            BufferedBody::Empty => None,
-            BufferedBody::Full(frames) | BufferedBody::Partial(frames) => Some(frames),
-        }
-    }
-}
-
-impl<T: Framelike> BufferedBody<T> {
-    /// If we have an entire successfully buffered body, return a
-    /// [`FramesReader`] for it.
-    pub fn reader(&self) -> Option<FramesReader<'_, T>> {
-        match self {
-            Self::Empty | Self::Partial(_) => None,
-            Self::Full(items) => Some(FramesReader {
-                remaining: items,
-                read_until: 0,
-            }),
-        }
-    }
-}
 #[cfg(test)]
 mod test {
-    use super::*;
     use std::io::Read;
+
+    use super::*;
 
     #[test]
     fn test_framelike() {
@@ -208,9 +164,9 @@ mod test {
             data(b"NEVER"),
         ];
         let mut reader = FramesReader {
-			remaining: &frames,
-			read_until: 0,
-		};
+            remaining: &frames,
+            read_until: 0,
+        };
 
         // Helper for shorter test code
         fn read_n<R: Read>(r: &mut R, n: usize) -> Vec<u8> {
@@ -238,10 +194,10 @@ mod test {
 
         // EOF: we hit the first nondata frame and we stay EOF
         for _ in 0..5 {
-			let mut buf = [0u8; 1];
-			let eof = reader.read(&mut buf).unwrap();
-			assert_eq!(eof, 0);
-		}
+            let mut buf = [0u8; 1];
+            let eof = reader.read(&mut buf).unwrap();
+            assert_eq!(eof, 0);
+        }
     }
 
     // ===== Helper Functions =====

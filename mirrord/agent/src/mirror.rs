@@ -23,8 +23,8 @@ use crate::{
     error::AgentResult,
     http::filter::HttpFilter,
     incoming::{
-        BodyBufferable, IncomingStream, IncomingStreamItem, MirrorHandle, MirroredHttp,
-        MirroredTraffic, RedirectorTaskError,
+        IncomingStream, IncomingStreamItem, MirrorHandle, MirroredHttp, MirroredTraffic,
+        RedirectorTaskError,
     },
     sniffer::api::TcpSnifferApi,
     util::protocol_version::ClientProtocolVersion,
@@ -151,6 +151,12 @@ impl TcpMirrorApi {
                 Some(finished) = ongoing.join_next() => {
                     match finished {
                         Ok(mut http) => {
+                            // Now that we've buffered everything, we should have
+                            // no more body frames remaining.
+                            if http.request_head.body_finished.not() {
+                                continue;
+                            }
+
                             let port = http.info.original_destination.port();
                             let (parts, body) = http.parts_and_body();
                             let Some(filter) = filters.get(&port) else {
@@ -158,7 +164,7 @@ impl TcpMirrorApi {
                                 return Ok(M::Http(http));
                             };
 
-                            if filter.matches(parts, body.reader()) {
+                            if filter.matches(parts, body) {
                                 Ok(M::Http(http))
                             } else {
                                 continue
@@ -190,10 +196,7 @@ impl TcpMirrorApi {
                                 return Ok(M::Http(http));
                             };
 
-                            // Nothing should be buffered the first time around.
-                            assert!(body.is_empty());
-
-                            if filter.matches(parts, body.reader()) {
+                            if filter.matches(parts, body) {
                                 return Ok(M::Http(http));
                             }
 
@@ -326,33 +329,7 @@ impl TcpMirrorApi {
                         MirroredTraffic::Http(http) if protocol_version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                             let id = connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
 
-                            let have_more = if let Some(buffered) = http.buffered_body.buffered_data() {
-                                for frame in buffered {
-                                    queued_messages.push_back(
-                                        DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                                            frames: vec![frame],
-                                            is_last: false,
-                                            connection_id: id,
-                                            request_id: Self::REQUEST_ID,
-                                        }))
-                                    );
-                                }
-                                // We know that the filter passed,
-                                // thus the body must have been
-                                // complete
-                                queued_messages.push_back(
-                                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                                        frames: vec![],
-                                        is_last: true,
-                                        connection_id: id,
-                                        request_id: Self::REQUEST_ID,
-                                    }))
-                                );
-                                true
-                            } else {
-                                incoming_streams.insert(id, http.stream);
-                                false
-                            };
+                            incoming_streams.insert(id, http.stream);
 
                             let message = ChunkedRequestStartV2 {
                                 connection_id: id,
@@ -376,7 +353,7 @@ impl TcpMirrorApi {
                                     version: http.request_head.parts.version,
                                     body: InternalHttpBodyNew {
                                         frames: http.request_head.body_head,
-                                        is_last: http.request_head.body_finished && have_more.not(),
+                                        is_last: http.request_head.body_finished,
                                     },
                                 },
                             };

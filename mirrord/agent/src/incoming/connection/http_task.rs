@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future, ops::Not};
+use std::{error::Report, future::Future};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -21,7 +21,6 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument;
 
-use super::body_utils::BufferedBody;
 use crate::{
     http::{
         HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, body::RolledBackBody,
@@ -48,8 +47,6 @@ pub struct HttpTask<D> {
     pub on_upgrade: OnUpgrade,
     /// Destination of the request.
     pub destination: D,
-    /// Any buffered frames that we had
-    pub buffered_body: BufferedBody<Frame<Bytes>>,
 }
 
 impl<D> HttpTask<D>
@@ -60,7 +57,7 @@ where
     ///
     /// This method must ensure that [`Self::destination`] is notified about the result with
     /// [`RequestDestination::send_result`].
-    #[instrument(level = "trace", skip(self), fields(buffered_body = ?self.buffered_body))]
+    #[instrument(level = "trace", skip(self))]
     pub async fn run(mut self) {
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
@@ -74,25 +71,7 @@ where
     ///
     /// In this task, we only handle body tail, i.e. frames that were not initially ready.
     async fn handle_frames(&mut self) -> Result<(), ConnError> {
-        // Avoid cloning the Arc. Technically we could avoid replacing
-        // it as well but just taking self by value but this is less
-        // hassle.
-        let buffered =
-            std::mem::replace(&mut self.buffered_body, BufferedBody::Empty).buffered_data();
-
-        let sent_frames = if let Some(buffered) = buffered {
-            for frame in buffered {
-                self.destination.send_frame(frame).await?;
-            }
-            true
-        } else {
-            false
-        };
-
         let Some(mut body) = self.body_tail.take() else {
-            if sent_frames {
-                self.destination.no_more_frames().await?;
-            }
             return Ok(());
         };
 
@@ -131,12 +110,12 @@ impl HttpTask<PassthroughConnection> {
         mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest,
         redirector_config: RedirectorTaskConfig,
-        buffered_body: BufferedBody<Frame<Bytes>>,
     ) -> Self {
-        let (request_frame_tx, request_frame_rx) = (request.body_tail.is_some()
-            || buffered_body.is_empty().not())
-        .then(|| mpsc::channel::<Frame<Bytes>>(1))
-        .unzip();
+        let (request_frame_tx, request_frame_rx) = request
+            .body_tail
+            .is_some()
+            .then(|| mpsc::channel::<Frame<Bytes>>(1))
+            .unzip();
 
         let redirector_config_clone = redirector_config.clone();
         let upgrade = tokio::spawn(async move {
@@ -193,7 +172,6 @@ impl HttpTask<PassthroughConnection> {
             body_tail: request.body_tail,
             on_upgrade: request.upgrade,
             destination,
-            buffered_body,
         }
     }
 
