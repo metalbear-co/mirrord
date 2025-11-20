@@ -468,18 +468,18 @@ impl MirroredHttp {
         let result = tokio::time::timeout(*MAX_BODY_BUFFER_TIMEOUT, async {
             while rxd < *MAX_BODY_BUFFER_SIZE {
                 match self.stream.next().await {
-                    Some(IncomingStreamItem::Frame(f)) =>
-{
+                    Some(IncomingStreamItem::Frame(f)) => {
                         if let InternalHttpBodyFrame::Data(data) = &f {
                             rxd += data.len();
                         }
                         self.request_head.body_head.push(f);
                     }
                     Some(IncomingStreamItem::NoMoreFrames) => return Ok(()),
-                    Some(
-						IncomingStreamItem::
-Finished(error @ Err(_))) => error?,
-                    other => Err(ConnError::AgentBug (format!("received an unexpected IncomingStreamItem when buffering HTTP request body: {other:?}")))?
+                    Some(IncomingStreamItem::Finished(error @ Err(_))) => error?,
+                    other =>
+                        Err(ConnError::AgentBug(format!(
+                            "received an unexpected IncomingStreamItem when buffering HTTP request body: {other:?}"
+                        )))?
                 }
             }
             Err(BufferBodyError::BodyTooBig)
