@@ -1,12 +1,8 @@
-use std::{fmt::Debug, io::Read, sync::LazyLock, time::Duration};
+use std::{io::Read};
 
 use bytes::Bytes;
 use hyper::body::Frame;
-use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
-use tokio::time::error::Elapsed;
-
-use crate::incoming::ConnError;
 
 pub trait Framelike {
     fn data_ref(&self) -> Option<&[u8]>;
@@ -87,62 +83,6 @@ impl<T: Framelike> Read for FramesReader<'_, T> {
 
         Ok(range.len())
     }
-}
-
-pub static MAX_BODY_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
-    match envs::MAX_BODY_BUFFER_SIZE.try_from_env() {
-        Ok(Some(t)) => Some(t as usize),
-        Ok(None) => {
-            tracing::warn!("{} not set, using default", envs::MAX_BODY_BUFFER_SIZE.name);
-            None
-        }
-        Err(error) => {
-            tracing::warn!(
-                ?error,
-                "failed to parse {}, using default",
-                envs::MAX_BODY_BUFFER_SIZE.name
-            );
-            None
-        }
-    }
-    .unwrap_or(64 * 1024)
-});
-
-pub static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
-    Duration::from_millis(
-        match envs::MAX_BODY_BUFFER_TIMEOUT.try_from_env() {
-            Ok(Some(t)) => Some(t),
-            Ok(None) => {
-                tracing::warn!(
-                    "{} not set, using default",
-                    envs::MAX_BODY_BUFFER_TIMEOUT.name
-                );
-                None
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    "failed to parse {}, using default",
-                    envs::MAX_BODY_BUFFER_TIMEOUT.name
-                );
-                None
-            }
-        }
-        .unwrap_or(1000)
-        .into(),
-    )
-});
-
-#[derive(thiserror::Error, Debug)]
-pub enum BufferBodyError {
-    #[error("io error while receiving http body: {0}")]
-    Hyper(#[from] hyper::Error),
-    #[error(transparent)]
-    Conn(#[from] ConnError),
-    #[error("body size exceeded max configured size")]
-    BodyTooBig,
-    #[error("receiving body took too long")]
-    Timeout(#[from] Elapsed),
 }
 
 #[cfg(test)]

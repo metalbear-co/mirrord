@@ -1,7 +1,8 @@
 use std::{
     fmt::{self, Debug},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, LazyLock},
+    time::Duration,
 };
 
 use bytes::Bytes;
@@ -13,10 +14,12 @@ use hyper::{
     body::Frame,
     http::{StatusCode, request, response},
 };
+use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
     sync::{broadcast, mpsc, oneshot},
+    time::error::Elapsed,
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tracing::instrument;
@@ -27,7 +30,6 @@ use crate::{
     incoming::{
         ConnError, IncomingStreamItem, RedirectorTaskConfig,
         connection::{
-            body_utils::{BufferBodyError, MAX_BODY_BUFFER_SIZE, MAX_BODY_BUFFER_TIMEOUT},
             http_task::{HttpTask, StealingClient, UpgradeDataRx},
             optional_broadcast::OptionalBroadcast,
         },
@@ -51,6 +53,18 @@ pub struct RedirectedHttp {
 
     /// Configuration of the RedirectorTask that created this
     redirector_config: RedirectorTaskConfig,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BufferBodyError {
+    #[error("io error while receiving http body: {0}")]
+    Hyper(#[from] hyper::Error),
+    #[error(transparent)]
+    Conn(#[from] ConnError),
+    #[error("body size exceeded max configured size")]
+    BodyTooBig,
+    #[error("receiving body took too long")]
+    Timeout(#[from] Elapsed),
 }
 
 impl RedirectedHttp {
@@ -250,6 +264,49 @@ impl Debug for RedirectedHttp {
     }
 }
 
+static MAX_BODY_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
+    match envs::MAX_BODY_BUFFER_SIZE.try_from_env() {
+        Ok(Some(t)) => Some(t as usize),
+        Ok(None) => {
+            tracing::warn!("{} not set, using default", envs::MAX_BODY_BUFFER_SIZE.name);
+            None
+        }
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "failed to parse {}, using default",
+                envs::MAX_BODY_BUFFER_SIZE.name
+            );
+            None
+        }
+    }
+    .unwrap_or(64 * 1024)
+});
+
+static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
+    Duration::from_millis(
+        match envs::MAX_BODY_BUFFER_TIMEOUT.try_from_env() {
+            Ok(Some(t)) => Some(t),
+            Ok(None) => {
+                tracing::warn!(
+                    "{} not set, using default",
+                    envs::MAX_BODY_BUFFER_TIMEOUT.name
+                );
+                None
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "failed to parse {}, using default",
+                    envs::MAX_BODY_BUFFER_TIMEOUT.name
+                );
+                None
+            }
+        }
+        .unwrap_or(1000)
+        .into(),
+    )
+});
 /// Steal handle to a redirected HTTP request.
 pub struct StolenHttp {
     pub info: ConnectionInfo,
