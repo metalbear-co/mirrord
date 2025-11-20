@@ -1,0 +1,1 @@
+This PR adds support for MSI builds for Windows mirrord
