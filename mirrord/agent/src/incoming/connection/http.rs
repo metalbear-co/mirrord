@@ -61,9 +61,9 @@ pub enum BufferBodyError {
     Hyper(#[from] hyper::Error),
     #[error(transparent)]
     Conn(#[from] ConnError),
-    #[error("body size exceeded max configured size")]
+    #[error("body size exceeded max configured size of {} bytes", *MAX_BODY_BUFFER_SIZE)]
     BodyTooBig,
-    #[error("receiving body took too long")]
+    #[error("receiving body took longer than the max configured timeout of {}ms", MAX_BODY_BUFFER_TIMEOUT.as_millis())]
     Timeout(#[from] Elapsed),
 }
 
