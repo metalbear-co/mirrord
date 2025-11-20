@@ -57,7 +57,7 @@ pub struct RedirectedHttp {
 
 #[derive(thiserror::Error, Debug)]
 pub enum BufferBodyError {
-    #[error("io error while receiving http body: {0}")]
+    #[error("hyper error while receiving http body: {0}")]
     Hyper(#[from] hyper::Error),
     #[error(transparent)]
     Conn(#[from] ConnError),
