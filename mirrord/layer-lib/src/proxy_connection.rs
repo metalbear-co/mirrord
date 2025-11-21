@@ -62,7 +62,7 @@ impl ProxyConnection {
                 proxy_addr,
             })
         } else {
-            Err(ProxyError::UnexpectedResponse(response))
+            Err(ProxyError::UnexpectedResponse(Box::new(response)))
         }
     }
 
@@ -99,7 +99,7 @@ impl ProxyConnection {
     {
         let response_id = self.send(request.wrap())?;
         let response = self.receive(response_id)?;
-        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
+        T::try_unwrap_response(response).map_err(|e| ProxyError::UnexpectedResponse(Box::new(e)))
     }
 
     pub fn make_request_no_response<T: IsLayerRequest + Debug>(

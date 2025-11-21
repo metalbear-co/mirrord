@@ -26,6 +26,7 @@ use crate::{
     metrics::{MetricGuard, REDIRECTED_CONNECTIONS},
 };
 
+mod body_utils;
 mod copy_bidirectional;
 pub mod http;
 mod http_task;

@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    ops::Not,
     time::Duration,
 };
 
@@ -15,10 +14,7 @@ use mirrord_config::{
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
-    tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION},
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
 use mirrord_tls_util::SecureChannelSetup;
@@ -223,38 +219,12 @@ impl MirrordExecution {
             _ => None,
         };
 
-        if config.feature.network.incoming.http_filter.is_composite()
-            && agent_protocol_version
-                .as_ref()
-                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(version))
-                .unwrap_or(false)
-                .not()
-        {
-            Err(ConfigError::Conflict(format!(
-                "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. \
-                    Consider using a newer version of mirrord-agent",
-                *HTTP_COMPOSITE_FILTER_VERSION
-            )))?
-        }
-
-        if config
+        config
             .feature
             .network
             .incoming
             .http_filter
-            .has_method_filter()
-            && agent_protocol_version
-                .as_ref()
-                .map(|version| HTTP_METHOD_FILTER_VERSION.matches(version))
-                .unwrap_or(false)
-                .not()
-        {
-            Err(ConfigError::Conflict(format!(
-                "Cannot use 'method' HTTP filter type, protocol version used by mirrord-agent must match {}. \
-                    Consider using a newer version of mirrord-agent",
-                *HTTP_METHOD_FILTER_VERSION
-            )))?
-        }
+            .ensure_usable_with(agent_protocol_version)?;
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
