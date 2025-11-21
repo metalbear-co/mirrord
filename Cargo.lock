@@ -4508,6 +4508,7 @@ dependencies = [
  "socket2 0.5.10",
  "str-win",
  "tar",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tokio-rustls 0.26.4",
