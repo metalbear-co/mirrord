@@ -762,10 +762,10 @@ flowchart TB
 ## Release PR
 
 1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
-2. On the new branch, bump the workspace version in `Cargo.toml` and generate the changelog with:
-`towncrier build --version <new-version>`
-3. Review the generated changelog and fix any issues or typos.
-4. Push the release branch and open a PR.
+2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
+3. Generate the changelog with: `towncrier build --version <new-version>`.
+4. Review the generated changelog and fix any issues or typos.
+5. Push the release branch and open a PR.
 
 **Note:** All the steps above can also be completed by running: `./scripts/release.sh 3.333.0`.
 Before running the script, ensure there are no uncommitted changes in your repository.
