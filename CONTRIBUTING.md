@@ -772,8 +772,11 @@ Before running the script, ensure there are no uncommitted changes in your repos
 
 ## Create a new GitHub release
 
-1. After the release PR is merged, create a new GitHub release with a new tag.  
-   Use the new version for both the tag name and the release title.  
-   Use the changelog from the release PR as the release description, excluding the `Internal` section if present.
+1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both 
+   the tag name and the release title. Use the changelog from the release PR as the release description, 
+   excluding the `Internal` section if present.
+
+   **Note**: Ensure the tag is attached to the release commit.
+
 2. Creating the release will trigger the `Release` workflow, which builds and publishes all artifacts, including images.
 3. When the `Release` workflow completes successfully, update the relevant environment variables in the analytics server.
