@@ -111,6 +111,10 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
+    /// Closes the whole mirrord session.
+    ///
+    /// This notifies the other side that all mirrord-protocol connections within this session can
+    /// be immediately closed.
     Close,
     /// TCP sniffer message.
     ///
