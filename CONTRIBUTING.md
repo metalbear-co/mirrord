@@ -17,6 +17,7 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
 - [Architecture](#architecture)
+- [Release mirrord](#release-mirrord)
 
 # Getting Started
 
@@ -660,7 +661,7 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 **Category:**
 Check `towncrier.toml` for available categories (`added`, `changed`, `fixed`, etc.) and choose the one that fits your change.
 
-## Architecture
+# Architecture
 
 A high level view of mirrord.
 
@@ -755,3 +756,27 @@ flowchart TB
     style Pod fill:#e6ffe6,stroke:#006600,stroke-width:2px
     style Binary fill:#f9f9f9,stroke:#333,stroke-width:2px
 ```
+
+# Release mirrord
+
+## Release PR
+
+1. Create a new branch named after the new version, e.g. `3.333.0`. This will trigger additional CI jobs.
+2. On the new branch, bump the workspace version in `Cargo.toml` and run `cargo update -w` to update `Cargo.lock`.
+3. Generate the changelog with: `towncrier build --version <new-version>`.
+4. Review the generated changelog and fix any issues or typos.
+5. Push the release branch and open a PR.
+
+**Note:** All the steps above can also be completed by running: `./scripts/release.sh 3.333.0`.
+Before running the script, ensure there are no uncommitted changes in your repository.
+
+## Create a new GitHub release
+
+1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both 
+   the tag name and the release title. Use the changelog from the release PR as the release description, 
+   excluding the `Internal` section if present.
+
+   **Note**: Ensure the tag is attached to the release commit.
+
+2. Creating the release will trigger the `Release` workflow, which builds and publishes all artifacts, including images.
+3. When the `Release` workflow completes successfully, update the relevant environment variables in the analytics server.
