@@ -57,8 +57,6 @@ pub struct RedirectedHttp {
 
 #[derive(thiserror::Error, Debug)]
 pub enum BufferBodyError {
-    #[error("hyper error while receiving http body: {0}")]
-    Hyper(#[from] hyper::Error),
     #[error(transparent)]
     Conn(#[from] ConnError),
     #[error("body size exceeded max configured size of {} bytes", *MAX_BODY_BUFFER_SIZE)]
