@@ -10,8 +10,8 @@ set -e
 ./scripts/build_layer_mac.sh "$@"
 
 # build mirrord package - both targets require MIRRORD_LAYER_FILE_MACOS_ARM64 var
-MIRRORD_LAYER_FILE_MACOS_ARM64=../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib MIRRORD_LAYER_FILE=../../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo build "$@" -p mirrord --target=aarch64-apple-darwin
-MIRRORD_LAYER_FILE_MACOS_ARM64=../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib MIRRORD_LAYER_FILE=../../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo build "$@" -p mirrord --target=x86_64-apple-darwin
+MIRRORD_LAYER_FILE_MACOS_ARM64=../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib MIRRORD_LAYER_FILE=../../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo build "$@" -p mirrord --target=aarch64-apple-darwin --features wizard
+MIRRORD_LAYER_FILE_MACOS_ARM64=../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib MIRRORD_LAYER_FILE=../../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo build "$@" -p mirrord --target=x86_64-apple-darwin --features wizard
 
 # create universal binary for mirrord and sign
 lipo -create -output target/universal-apple-darwin/debug/mirrord target/aarch64-apple-darwin/debug/mirrord target/x86_64-apple-darwin/debug/mirrord
