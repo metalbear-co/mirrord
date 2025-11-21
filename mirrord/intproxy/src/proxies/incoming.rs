@@ -51,6 +51,8 @@ mod port_subscription_ext;
 mod subscriptions;
 mod tasks;
 mod tcp_proxy;
+#[cfg(test)]
+mod tests;
 mod tls;
 
 /// Maps IDs of remote connections to `T`.
