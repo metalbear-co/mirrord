@@ -40,7 +40,7 @@ pub struct TcpStealerTask {
     clients: HashMap<ClientId, Client>,
     /// Futures that resolve when clients disconnect (drop their [`StealerMessage`] receivers).
     disconnected_clients: FuturesUnordered<ChannelClosedFuture>,
-    /// For tracking http requests whose bodes are being buffered
+    /// For tracking http requests whose bodies are being buffered
     ongoing_requests: JoinSet<RedirectedHttp>,
 }
 
