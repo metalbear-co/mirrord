@@ -917,7 +917,8 @@ async fn port_forward(
     result?;
 
     if args.steal && args.reverse_port_mapping.is_empty() {
-        progress.warning("`--steal` has no effect without reverse port mappings; ignoring the flag.");
+        progress
+            .warning("`--steal` has no effect without reverse port mappings; ignoring the flag.");
     }
 
     if !args.reverse_port_mapping.is_empty()
