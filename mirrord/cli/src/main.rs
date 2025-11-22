@@ -898,6 +898,10 @@ async fn port_forward(
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
+    if args.steal && !args.reverse_port_mapping.is_empty() {
+        config.feature.network.incoming.mode = IncomingMode::Steal;
+    }
+
     let mut analytics = AnalyticsReporter::new(
         config.telemetry,
         ExecutionKind::PortForward,
@@ -911,6 +915,18 @@ async fn port_forward(
         progress.warning(&warning);
     }
     result?;
+
+    if args.steal && args.reverse_port_mapping.is_empty() {
+        progress.warning("`--steal` has no effect without reverse port mappings; ignoring the flag.");
+    }
+
+    if !args.reverse_port_mapping.is_empty()
+        && matches!(config.feature.network.incoming.mode, IncomingMode::Mirror)
+    {
+        progress.warning(
+            "Reverse port forwarding currently mirrors traffic. Remote targets must also listen on the forwarded ports; rerun with --steal to serve requests exclusively from your local machine."
+        );
+    }
 
     let branch_name = get_user_git_branch().await;
 
@@ -1182,6 +1198,21 @@ mod tests {
             Commands::PortForward(params) if *args.get(1).unwrap() == "port-forward" => {
                 assert_eq!(params.accept_invalid_certificates, expected_value)
             }
+            other => panic!("unexpected args parsed: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_port_forward_steal_flag() {
+        let args = ["mirrord", "port-forward", "--steal", "-R", "8080:8080"];
+        match Cli::parse_from(args).commands {
+            Commands::PortForward(params) => assert!(params.steal),
+            other => panic!("unexpected args parsed: {other:?}"),
+        }
+
+        let args = ["mirrord", "port-forward", "-R", "8080:8080"];
+        match Cli::parse_from(args).commands {
+            Commands::PortForward(params) => assert!(!params.steal),
             other => panic!("unexpected args parsed: {other:?}"),
         }
     }
