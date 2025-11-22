@@ -5,6 +5,7 @@ use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
 use rand::distr::{Alphanumeric, SampleString};
+use serde::{Deserialize, Serialize};
 
 use crate::{api::kubernetes::AgentKubernetesConnectInfo, error::Result};
 
@@ -33,7 +34,7 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 });
 
 /// Configuration of the mirrord-agent container.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ContainerConfig {
     /// Predefined port on which the agent will accept client connections.
     pub port: Option<u16>,
