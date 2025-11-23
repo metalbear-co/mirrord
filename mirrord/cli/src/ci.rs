@@ -6,8 +6,6 @@ use std::{
     process::Stdio,
     time::SystemTime,
 };
-#[cfg(not(target_os = "windows"))]
-use os::unix::process::ExitStatusExt;
 
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
@@ -16,6 +14,8 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
+#[cfg(not(target_os = "windows"))]
+use os::unix::process::ExitStatusExt;
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use tokio::{
