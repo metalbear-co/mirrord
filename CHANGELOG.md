@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.174.0](https://github.com/metalbear-co/mirrord/tree/3.174.0) - 2025-11-20
+
+
+### Added
+
+- Added HM Courts & Tribunal Service to ADOPTERS.md.
+- Added a new option under `mirrord ci start` to run the binary and wait for it
+  to complete.
+
+
+### Changed
+
+- Allow an overlap in the configuration for `incoming.ports` and
+  `incoming.http_filter.ports`.
+
+
+### Fixed
+
+- Fixed minor edge case where intproxy might hit code that's supposed to be
+  unreachable and panic
+  [#intproxy-panic](https://github.com/metalbear-co/mirrord/issues/intproxy-panic)
+- Fixed a DNS regression that happens when user's DNS library bind their
+  outgoing
+  socket to unspecified address before send UDP message to the nameserver.
+
 ## [3.173.2](https://github.com/metalbear-co/mirrord/tree/3.173.2) - 2025-11-18
 
 

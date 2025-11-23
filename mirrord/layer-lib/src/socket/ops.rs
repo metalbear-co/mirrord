@@ -207,18 +207,23 @@ where
             // Our socket can be bound to any local interface,
             // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
             // We need to fill the exact IP here.
-            let replacement_ip = match &user_socket_info.state {
-                SocketState::Bound(Bound { address, .. })
-                | SocketState::Listening(Bound { address, .. })
-                    if !address.ip().is_unspecified() =>
-                {
-                    address.ip()
+            match &user_socket_info.state {
+                SocketState::Bound(Bound { address, .. }) => {
+                    if interceptor_address.ip().is_unspecified() {
+                        if interceptor_address.is_ipv4() {
+                            interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                        } else {
+                            interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into())
+                        }
+                    } else {
+                        interceptor_address.set_ip(address.ip());
+                    }
                 }
-                _ if interceptor_address.is_ipv4() => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                _ => IpAddr::V6(Ipv6Addr::LOCALHOST),
-            };
-
-            interceptor_address.set_ip(replacement_ip);
+                _ if interceptor_address.is_ipv4() => {
+                    interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                }
+                _ => interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into()),
+            }
         }
 
         // Connect to the interceptor socket that is listening.
