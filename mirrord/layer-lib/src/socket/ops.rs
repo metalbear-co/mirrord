@@ -2,7 +2,7 @@
 use std::os::unix::io::RawFd;
 use std::{
     convert::TryFrom,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 
@@ -125,10 +125,24 @@ impl From<ConnectResult> for i32 {
 }
 
 // Platform-specific error handling
+#[cfg(unix)]
+fn errno_location() -> *mut libc::c_int {
+    unsafe {
+        #[cfg(target_os = "macos")]
+        {
+            libc::__error()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            libc::__errno_location()
+        }
+    }
+}
+
 fn get_last_error() -> i32 {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location()
+        *errno_location()
     }
 
     #[cfg(windows)]
@@ -141,7 +155,7 @@ fn get_last_error() -> i32 {
 fn set_last_error(error: i32) {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location() = error
+        *errno_location() = error
     };
 
     #[cfg(windows)]

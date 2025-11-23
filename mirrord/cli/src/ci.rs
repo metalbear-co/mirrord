@@ -1,8 +1,9 @@
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
     fs::File,
-    os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
     process::Stdio,
     time::SystemTime,
