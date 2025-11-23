@@ -2,7 +2,7 @@
 use std::os::unix::io::RawFd;
 use std::{
     convert::TryFrom,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 
