@@ -41,6 +41,8 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::JSON_LOG.as_k8s_spec(&agent.json_log),
         envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
         envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&agent.passthrough_mirroring),
+        envs::MAX_BODY_BUFFER_SIZE.as_k8s_spec(&agent.max_body_buffer_size),
+        envs::MAX_BODY_BUFFER_TIMEOUT.as_k8s_spec(&agent.max_body_buffer_timeout),
     ];
 
     if let Some(nftables) = agent.nftables {

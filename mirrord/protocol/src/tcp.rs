@@ -241,6 +241,12 @@ pub enum HttpMethodFilter {
     Other(String),
 }
 
+/// Filter based on the contents of the body.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
+pub enum HttpBodyFilter {
+    Json { query: String, matches: Filter },
+}
+
 /// Describes different types of HTTP filtering available
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HttpFilter {
@@ -257,6 +263,9 @@ pub enum HttpFilter {
     },
     /// Filter by method ("POST")
     Method(HttpMethodFilter),
+
+    /// Filter by body
+    Body(HttpBodyFilter),
 }
 
 impl Display for HttpFilter {
@@ -293,6 +302,7 @@ impl Display for HttpFilter {
                     Ok(())
                 }
             },
+            HttpFilter::Body(filter) => write!(f, "body={filter}"),
         }
     }
 }
@@ -498,6 +508,11 @@ pub static MODE_AGNOSTIC_HTTP_REQUESTS: LazyLock<VersionReq> =
 /// using [`LayerTcp::PortSubscribeFilteredHttp`]
 pub static MIRROR_HTTP_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.1".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows HTTP body filtering
+/// ([`HttpFilter::Body`]) by JSON.
+pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.23.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
