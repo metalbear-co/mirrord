@@ -3,7 +3,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use super::{CiResult, MirrordCi};
-use crate::{CliResult, ExecArgs, ci::error::CiError, exec, user_data::UserData};
+use crate::{CiStartArgs, CliResult, ExecArgs, ci::error::CiError, exec, user_data::UserData};
 
 /// Handles the `mirrord ci start` command.
 ///
@@ -34,13 +34,13 @@ impl<'a> CiStartCommandHandler<'a> {
     /// requirements have been met.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn new(
-        exec_args: Box<ExecArgs>,
+        args: Box<CiStartArgs>,
         watch: Watch,
         user_data: &'a mut UserData,
     ) -> CiResult<Self> {
         let mut progress = ProgressTracker::from_env("mirrord ci start");
 
-        let mirrord_for_ci = MirrordCi::get().await?;
+        let mirrord_for_ci = MirrordCi::new(&args).await?;
 
         if mirrord_for_ci.store.intproxy_pid.is_some() {
             progress.failure(Some("Detected existing intproxy pid file!"));
@@ -51,7 +51,7 @@ impl<'a> CiStartCommandHandler<'a> {
         } else {
             Ok(Self {
                 mirrord_for_ci,
-                exec_args,
+                exec_args: args.exec_args,
                 watch,
                 user_data,
                 progress,

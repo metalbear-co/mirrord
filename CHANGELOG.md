@@ -8,6 +8,70 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.174.0](https://github.com/metalbear-co/mirrord/tree/3.174.0) - 2025-11-20
+
+
+### Added
+
+- Added HM Courts & Tribunal Service to ADOPTERS.md.
+- Added a new option under `mirrord ci start` to run the binary and wait for it
+  to complete.
+
+
+### Changed
+
+- Allow an overlap in the configuration for `incoming.ports` and
+  `incoming.http_filter.ports`.
+
+
+### Fixed
+
+- Fixed minor edge case where intproxy might hit code that's supposed to be
+  unreachable and panic
+  [#intproxy-panic](https://github.com/metalbear-co/mirrord/issues/intproxy-panic)
+- Fixed a DNS regression that happens when user's DNS library bind their
+  outgoing
+  socket to unspecified address before send UDP message to the nameserver.
+
+## [3.173.2](https://github.com/metalbear-co/mirrord/tree/3.173.2) - 2025-11-18
+
+
+### Changed
+
+- Exclude `GOPATH` and `GOMODCACHE` from env fetched
+
+## [3.173.1](https://github.com/metalbear-co/mirrord/tree/3.173.1) - 2025-11-16
+
+
+### Internal
+
+- Add cleanup of unnecessary items in CI builder for docker builds.
+  [#add-cleanup-before-docker-build](https://github.com/metalbear-co/mirrord/issues/add-cleanup-before-docker-build)
+
+## [3.173.0](https://github.com/metalbear-co/mirrord/tree/3.173.0) - 2025-11-16
+
+
+### Changed
+
+- Update `experimental.non_blocking_tcp_connect` config default to `false`.
+
+
+### Fixed
+
+- Fixed the security advisories of the config's template engine by updating it
+  to the newest version
+  [#3657](https://github.com/metalbear-co/mirrord/issues/3657)
+
+
+### Internal
+
+- Fix the way release script gets workspace version.
+- Kubernetes-related packages have been removed from the devshell, they should
+  be installed system-wide instead.
+- Use the pip from the setup action, not the one preinstalled on the runner.
+- make CI workflow trigger for PRs targeted to `windows-support` branch
+  (windows main)
+
 ## [3.172.0](https://github.com/metalbear-co/mirrord/tree/3.172.0) - 2025-11-06
 
 

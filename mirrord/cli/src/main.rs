@@ -243,7 +243,12 @@
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
-use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    env::vars,
+    net::SocketAddr,
+    time::Duration,
+};
 #[cfg(not(target_os = "windows"))]
 use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
@@ -639,20 +644,24 @@ pub(crate) fn print_config<P>(
     if config.feature.network.incoming.is_steal()
         && config.feature.network.incoming.http_filter.is_filter_set()
     {
-        let filtered_ports_str = config
+        let filtered_ports = config
             .feature
             .network
             .incoming
             .http_filter
             .get_filtered_ports()
-            .and_then(|filtered_ports| match filtered_ports.len() {
-                0 => None,
-                1 => Some(format!(
-                    "port {} (filtered)",
-                    filtered_ports.first().unwrap()
-                )),
-                _ => Some(format!("ports {filtered_ports:?} (filtered)")),
-            });
+            .unwrap_or_default();
+        let filtered_ports_str = match filtered_ports.len() {
+            0 => None,
+            1 => Some(format!(
+                "port {} (filtered)",
+                filtered_ports.first().unwrap()
+            )),
+            _ => Some(format!("ports {filtered_ports:?} (filtered)")),
+        };
+
+        // since filter ports and `incoming.ports` are not required to be disjoint, let
+        // `unfiltered_ports_str` contain `incoming.ports` - filter ports
         let unfiltered_ports_str =
             config
                 .feature
@@ -660,21 +669,22 @@ pub(crate) fn print_config<P>(
                 .incoming
                 .ports
                 .as_ref()
-                .and_then(|ports| match ports.len() {
-                    0 => None,
-                    1 => Some(format!(
-                        "port {} (unfiltered)",
-                        ports.iter().next().unwrap()
-                    )),
-                    _ => Some(format!(
-                        "ports [{}] (unfiltered)",
-                        ports
-                            .iter()
-                            .copied()
-                            .map(|n| n.to_string())
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    )),
+                .and_then(|ports| {
+                    let filtered = filtered_ports.iter().copied().collect::<HashSet<_>>();
+                    let ports: Vec<&u16> = ports.difference(&filtered).collect();
+                    match ports.len() {
+                        0 => None,
+                        1 => Some(format!("port {} (unfiltered)", ports.first().unwrap())),
+                        _ => Some(format!(
+                            "ports [{}] (unfiltered)",
+                            ports
+                                .iter()
+                                .copied()
+                                .map(|n| n.to_string())
+                                .collect::<Vec<String>>()
+                                .join(", ")
+                        )),
+                    }
                 });
         let and = if filtered_ports_str.is_some() && unfiltered_ports_str.is_some() {
             " and "

@@ -306,7 +306,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, } } ```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, \"max_body_buffer_size\": 65535, \"max_body_buffer_timeout\": 1000 } } ```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -449,6 +449,26 @@
             "string",
             "null"
           ]
+        },
+        "max_body_buffer_size": {
+          "title": "agent.max_body_buffer_size {#agent-max_body_buffer_size}",
+          "description": "Maximum size, in bytes, of HTTP request body buffers. Used for temporarily storing bodies of incoming HTTP requests to run body filters. HTTP body filters will not match any requests with bodies larger than this.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_body_buffer_timeout": {
+          "title": "agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}",
+          "description": "Maximum timeout, in milliseconds, for receiving HTTP request bodies. HTTP body filters will not match any requests whose bodies do not arrive within this timeout.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
         },
         "metrics": {
           "title": "agent.metrics {#agent-metrics}",
@@ -614,6 +634,34 @@
           "type": "string"
         }
       }
+    },
+    "BodyFilter": {
+      "oneOf": [
+        {
+          "title": "feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}",
+          "description": "Tries to parse the body as a JSON object and find (a) matching subobjects(s).\n\n`query` should be a valid JSONPath (RFC 9535) query string. `matches` should be a regex. Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate\n\nExample: ```json \"http_filter\": { \"body_filter\": { \"body\": \"json\", \"query\": \"$.library.books[*]\", \"matches\": \"^\\\\d{3,5}$\" } } ``` will match ```json { \"library\": { \"books\": [ 34555, 1233, 234 23432 ] } } ```\n\nThe filter will match if there is at least one query result.\n\nNon-string matches are stringified before being compared to the regex. To filter query results by type, the `typeof` [function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions) is provided. It takes in a single `NodesType` parameter and returns `\"null\" | \"bool\" | \"number\" | \"string\" | \"array\" | \"object\"`, depending on the type of the argument. If not all nodes in the argument have the same type, it returns `nothing`.\n\nExample:\n\n```json \"body_filter\": { \"body\": \"json\", \"query\": \"$.books[?(typeof(@) == 'number')]\", \"matches\": \"4$\" } ``` will match\n\n```json { \"books\": [ 1111, 2222, 4444 ] } ```\n\nbut not\n\n```json { \"books\": [ \"1111\", \"2222\", \"4444\" ] } ```\n\nTo use with with `all_of` or `any_of`, use the following syntax: ```json \"http_filter\": { \"all_of\": [ { \"path\": \"/buildings\" }, { \"body\": \"json\", \"query\": \"$.library.books[*]\", \"matches\": \"^\\\\d{3,5}$\" } ] } ```",
+          "type": "object",
+          "required": [
+            "body",
+            "matches",
+            "query"
+          ],
+          "properties": {
+            "body": {
+              "type": "string",
+              "enum": [
+                "json"
+              ]
+            },
+            "matches": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+      ]
     },
     "CiFileConfig": {
       "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"output_dir\": \"/tmp/mirrord/\", } } ```",
@@ -1493,6 +1541,18 @@
             "$ref": "#/definitions/InnerFilter"
           }
         },
+        "body_filter": {
+          "title": "feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}",
+          "description": "Matches the request based on the contents of its body. Currently only JSON body filtering is supported.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BodyFilter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "header_filter": {
           "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
           "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
@@ -1767,6 +1827,15 @@
               "type": "string"
             }
           }
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.body_filter {#feature-network-incoming-inner-body-filter}",
+          "description": "Matches the request based on the contents of its body. Currently only JSON body filtering is supported.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyFilter"
+            }
+          ]
         }
       ]
     },

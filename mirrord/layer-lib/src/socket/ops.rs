@@ -2,7 +2,7 @@
 use std::os::unix::io::RawFd;
 use std::{
     convert::TryFrom,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 
@@ -125,10 +125,24 @@ impl From<ConnectResult> for i32 {
 }
 
 // Platform-specific error handling
+#[cfg(unix)]
+fn errno_location() -> *mut libc::c_int {
+    unsafe {
+        #[cfg(target_os = "macos")]
+        {
+            libc::__error()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            libc::__errno_location()
+        }
+    }
+}
+
 fn get_last_error() -> i32 {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location()
+        *errno_location()
     }
 
     #[cfg(windows)]
@@ -141,7 +155,7 @@ fn get_last_error() -> i32 {
 fn set_last_error(error: i32) {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location() = error
+        *errno_location() = error
     };
 
     #[cfg(windows)]
@@ -207,18 +221,23 @@ where
             // Our socket can be bound to any local interface,
             // so the interceptor listens on an unspecified IP address, e.g. 0.0.0.0
             // We need to fill the exact IP here.
-            let replacement_ip = match &user_socket_info.state {
-                SocketState::Bound(Bound { address, .. })
-                | SocketState::Listening(Bound { address, .. })
-                    if !address.ip().is_unspecified() =>
-                {
-                    address.ip()
+            match &user_socket_info.state {
+                SocketState::Bound(Bound { address, .. }) => {
+                    if interceptor_address.ip().is_unspecified() {
+                        if interceptor_address.is_ipv4() {
+                            interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                        } else {
+                            interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into())
+                        }
+                    } else {
+                        interceptor_address.set_ip(address.ip());
+                    }
                 }
-                _ if interceptor_address.is_ipv4() => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                _ => IpAddr::V6(Ipv6Addr::LOCALHOST),
-            };
-
-            interceptor_address.set_ip(replacement_ip);
+                _ if interceptor_address.is_ipv4() => {
+                    interceptor_address.set_ip(Ipv4Addr::LOCALHOST.into())
+                }
+                _ => interceptor_address.set_ip(Ipv6Addr::LOCALHOST.into()),
+            }
         }
 
         // Connect to the interceptor socket that is listening.
