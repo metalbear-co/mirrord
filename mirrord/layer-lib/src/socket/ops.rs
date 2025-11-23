@@ -128,9 +128,12 @@ impl From<ConnectResult> for i32 {
 #[cfg(unix)]
 fn errno_location() -> *mut libc::c_int {
     unsafe {
-        if cfg!(target_os = "macos") {
+        #[cfg(target_os = "macos")]
+        {
             libc::__error()
-        } else {
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
             libc::__errno_location()
         }
     }
