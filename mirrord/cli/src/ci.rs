@@ -1,3 +1,5 @@
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
@@ -14,8 +16,6 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
-#[cfg(not(target_os = "windows"))]
-use os::unix::process::ExitStatusExt;
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use tokio::{
