@@ -9,7 +9,7 @@ use mirrord_config::{
         NetworkConfig,
         incoming::{
             IncomingConfig, IncomingMode as ConfigIncomingMode,
-            http_filter::{HttpFilterConfig, InnerFilter, PortList},
+            http_filter::{BodyFilter, HttpFilterConfig, InnerFilter},
         },
         outgoing::OutgoingConfig,
     },
@@ -18,7 +18,7 @@ use mirrord_config::{
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     Port,
-    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType},
+    tcp::{Filter, HttpFilter, HttpMethodFilter, MirrorType, StealType, HttpBodyFilter},
 };
 
 use crate::socket::{DnsSelector, OutgoingSelector};
@@ -194,9 +194,10 @@ impl IncomingMode {
             let ports = config
                 .http_filter
                 .ports
-                .as_ref()
-                .map(|port_list| port_list.iter().copied().collect())
-                .unwrap_or(PortList::default().into());
+                .get_or_insert_default()
+                .iter()
+                .copied()
+                .collect();
 
             let filter = Self::parse_http_filter(&config.http_filter);
 
@@ -209,12 +210,23 @@ impl IncomingMode {
         }
     }
 
+    fn parse_body_filter(filter: &BodyFilter) -> HttpBodyFilter {
+        match filter {
+            BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
+                query: query.clone(),
+                matches: Filter::new(matches.clone())
+                    .expect("invalid json body filter `matches` string"),
+            },
+        }
+    }
+
     fn parse_http_filter(http_filter_config: &HttpFilterConfig) -> HttpFilter {
         match http_filter_config {
             HttpFilterConfig {
                 path_filter: Some(path),
                 header_filter: None,
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -224,6 +236,7 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: Some(header),
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -233,6 +246,7 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: None,
                 method_filter: Some(method),
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -244,6 +258,17 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: None,
                 method_filter: None,
+                body_filter: Some(filter),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Body(Self::parse_body_filter(filter)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
@@ -253,6 +278,7 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: None,
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
@@ -275,6 +301,9 @@ impl IncomingMode {
                 InnerFilter::Method { method } => HttpFilter::Method(
                     HttpMethodFilter::from_str(method).expect("invalid method filter string"),
                 ),
+                InnerFilter::Body(body_filter) => {
+                    HttpFilter::Body(Self::parse_body_filter(body_filter))
+                }
             })
             .collect();
 
