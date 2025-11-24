@@ -17,6 +17,69 @@ use crate::{
     config::{DbBranchesArgs, DbBranchesCommand},
 };
 
+#[derive(Debug)]
+struct BranchInfo {
+    name: String,
+    db_type: &'static str,
+    phase: Option<String>,
+    ttl: u64,
+    database: Option<String>,
+    users: Option<String>,
+    expire_time: Option<String>,
+}
+
+impl From<&MysqlBranchDatabase> for BranchInfo {
+    fn from(branch: &MysqlBranchDatabase) -> Self {
+        Self {
+            name: branch.metadata.name.clone().unwrap_or_default(),
+            db_type: "MySQL",
+            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
+            ttl: branch.spec.ttl_secs,
+            database: branch.spec.database_name.clone(),
+            users: branch.status.as_ref().and_then(|s| {
+                if s.session_info.is_empty() {
+                    None
+                } else {
+                    let mut user_list: Vec<_> = s
+                        .session_info
+                        .values()
+                        .map(|session| session.owner.k8s_username.clone())
+                        .collect();
+                    user_list.sort();
+                    Some(user_list.join("\n"))
+                }
+            }),
+            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+        }
+    }
+}
+
+impl From<&PgBranchDatabase> for BranchInfo {
+    fn from(branch: &PgBranchDatabase) -> Self {
+        Self {
+            name: branch.metadata.name.clone().unwrap_or_default(),
+            db_type: "PostgreSQL",
+            phase: branch.status.as_ref().map(|s| s.phase.to_string()),
+            ttl: branch.spec.ttl_secs,
+            database: branch.spec.database_name.clone(),
+            users: branch.status.as_ref().and_then(|s| {
+                if s.session_info.is_empty() {
+                    None
+                } else {
+                    let mut user_list: Vec<_> = s
+                        .session_info
+                        .values()
+                        .map(|session| session.owner.k8s_username.clone())
+                        .collect();
+                    user_list.sort();
+                    Some(user_list.join("\n"))
+                }
+            }),
+            expire_time: branch.status.as_ref().map(|s| s.expire_time.0.to_rfc3339()),
+        }
+    }
+}
+
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
@@ -86,105 +149,23 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
     })?;
 
-    // Create a unified view with database type information
-    #[derive(Debug)]
-    struct BranchInfo {
-        name: String,
-        db_type: &'static str,
-        phase: String,
-        ttl: u64,
-        database: String,
-        users: String,
-        expire_time: String,
-    }
-
-    let mut all_branches = Vec::new();
+    let mut all_branches = Vec::with_capacity(mysql_branches.items.len() + pg_branches.items.len());
 
     // Process MySQL branches
-    for branch in mysql_branches {
+    for branch in &mysql_branches.items {
         if let Some(name) = &branch.metadata.name
             && (names.is_empty() || names.contains(name))
         {
-            all_branches.push(BranchInfo {
-                name: name.clone(),
-                db_type: "MySQL",
-                phase: branch
-                    .status
-                    .as_ref()
-                    .map(|s| s.phase.to_string())
-                    .unwrap_or_else(|| "Unknown".to_string()),
-                ttl: branch.spec.ttl_secs,
-                database: branch
-                    .spec
-                    .database_name
-                    .unwrap_or_else(|| "<none>".to_string()),
-                users: branch
-                    .status
-                    .as_ref()
-                    .map(|s| {
-                        if s.session_info.is_empty() {
-                            "none".to_string()
-                        } else {
-                            let mut user_list: Vec<_> = s
-                                .session_info
-                                .values()
-                                .map(|session| session.owner.k8s_username.clone())
-                                .collect();
-                            user_list.sort();
-                            user_list.join("\n")
-                        }
-                    })
-                    .unwrap_or_else(|| "none".to_string()),
-                expire_time: branch
-                    .status
-                    .as_ref()
-                    .map(|s| s.expire_time.0.to_rfc3339())
-                    .unwrap_or_else(|| "Unknown".to_string()),
-            });
+            all_branches.push(BranchInfo::from(branch));
         }
     }
 
     // Process PostgreSQL branches
-    for branch in pg_branches {
+    for branch in &pg_branches.items {
         if let Some(name) = &branch.metadata.name
             && (names.is_empty() || names.contains(name))
         {
-            all_branches.push(BranchInfo {
-                name: name.clone(),
-                db_type: "PostgreSQL",
-                phase: branch
-                    .status
-                    .as_ref()
-                    .map(|s| s.phase.to_string())
-                    .unwrap_or_else(|| "Unknown".to_string()),
-                ttl: branch.spec.ttl_secs,
-                database: branch
-                    .spec
-                    .database_name
-                    .unwrap_or_else(|| "<none>".to_string()),
-                users: branch
-                    .status
-                    .as_ref()
-                    .map(|s| {
-                        if s.session_info.is_empty() {
-                            "none".to_string()
-                        } else {
-                            let mut user_list: Vec<_> = s
-                                .session_info
-                                .values()
-                                .map(|session| session.owner.k8s_username.clone())
-                                .collect();
-                            user_list.sort();
-                            user_list.join("\n")
-                        }
-                    })
-                    .unwrap_or_else(|| "none".to_string()),
-                expire_time: branch
-                    .status
-                    .as_ref()
-                    .map(|s| s.expire_time.0.to_rfc3339())
-                    .unwrap_or_else(|| "Unknown".to_string()),
-            });
+            all_branches.push(BranchInfo::from(branch));
         }
     }
 
@@ -211,11 +192,11 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         table.add_row(row![
             branch.name,
             branch.db_type,
-            branch.phase,
+            branch.phase.unwrap_or_else(|| "Unknown".to_string()),
             branch.ttl,
-            branch.database,
-            branch.users,
-            branch.expire_time
+            branch.database.unwrap_or_else(|| "<none>".to_string()),
+            branch.users.unwrap_or_else(|| "none".to_string()),
+            branch.expire_time.unwrap_or_else(|| "Unknown".to_string())
         ]);
     }
 
@@ -319,7 +300,6 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
             crate::CliError::ListTargetsFailed(mirrord_kube::error::KubeApiError::KubeError(e))
         })?;
 
-        // Build sets of names by type for efficient lookup
         let mysql_names: HashSet<String> = mysql_branches
             .into_iter()
             .filter_map(|b| b.metadata.name)
@@ -335,8 +315,10 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
         for name in names {
             let mut branch_progress = destroy_progress.subtask(&format!("destroying {name}"));
 
-            // Check which type this branch is and delete from the correct API
+            let mut found = false;
+
             if mysql_names.contains(name) {
+                found = true;
                 match mysql_api.delete(name, &delete_params).await {
                     Ok(_) => {
                         branch_progress.success(Some(&format!("destroyed MySQL branch: {name}")))
@@ -344,7 +326,10 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
                     Err(e) => branch_progress
                         .failure(Some(&format!("failed to destroy MySQL branch {name}: {e}"))),
                 }
-            } else if pg_names.contains(name) {
+            }
+
+            if pg_names.contains(name) {
+                found = true;
                 match pg_api.delete(name, &delete_params).await {
                     Ok(_) => branch_progress
                         .success(Some(&format!("destroyed PostgreSQL branch: {name}"))),
@@ -352,7 +337,9 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &Vec<String>) 
                         "failed to destroy PostgreSQL branch {name}: {e}"
                     ))),
                 }
-            } else {
+            }
+
+            if !found {
                 branch_progress.failure(Some(&format!("branch not found: {name}")));
             }
         }

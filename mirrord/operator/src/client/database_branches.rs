@@ -172,7 +172,7 @@ pub(crate) async fn list_reusable_mysql_branches<P: Progress>(
     Ok(reusable_mysql_branches)
 }
 
-/// Create MySQL branch databases and wait for their readiness.
+/// Create PostgreSQL branch databases and wait for their readiness.
 ///
 /// Timeout after the duration specified by `timeout`.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
@@ -248,9 +248,9 @@ pub(crate) async fn create_pg_branches<P: Progress>(
 
     Ok(created_branches)
 }
-/// Given parameters of all MySQL branch databases needed for a session, list reusable ones.
+/// Given parameters of all PostgreSQL branch databases needed for a session, list reusable ones.
 ///
-/// A MySQL branch is considered reusable if
+/// A PostgreSQL branch is considered reusable if
 /// 1. it has a user specified unique ID, and
 /// 2. it is in the "Ready" phase.
 pub(crate) async fn list_reusable_pg_branches<P: Progress>(
