@@ -62,7 +62,6 @@ pub fn ensure_vt_or_dumb_progress() {
             } else {
                 warn!(error = ?error, "SetConsoleMode probe on stdout failed");
             }
-            return;
         }
 
         // VT is now enabled for this console session.

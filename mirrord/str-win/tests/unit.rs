@@ -93,3 +93,15 @@ fn string_to_u16() {
     assert_eq!(bytes.len(), 5);
     assert_eq!(bytes.as_slice(), &[97u16, 98u16, 99u16, 100u16, 0]);
 }
+
+#[test]
+fn try_get_unix_path() {
+    use std::path::Path;
+
+    const WINDOWS_PATH: &str = r#"\??\C:\home\gabrielaelae\dev\MIRRORD\mirrord\target\debug"#;
+    const UNIX_PATH: &str = r#"/home/gabrielaelae/dev/MIRRORD/mirrord/target/debug"#;
+
+    let new_path = path_to_unix_path(WINDOWS_PATH);
+    assert!(&new_path.is_some());
+    assert_eq!(Path::new(&new_path.unwrap()), Path::new(UNIX_PATH));
+}
