@@ -614,6 +614,13 @@ pub(super) struct PortForwardArgs {
     /// Can be used multiple times.
     #[arg(short = 'R', long)]
     pub reverse_port_mapping: Vec<PortOnlyMapping>,
+
+    /// Steal remote traffic instead of mirroring it when using reverse port forwarding.
+    ///
+    /// When enabled, requests are handled exclusively by the local machine and are not
+    /// forwarded back to the remote target.
+    #[arg(long = "steal")]
+    pub steal: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
