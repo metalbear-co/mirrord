@@ -4,6 +4,7 @@
 ))]
 use std::ffi::CStr;
 
+use frida_gum::NativePointer;
 use nix::errno::Errno;
 use tracing::trace;
 
@@ -231,14 +232,28 @@ unsafe extern "C" fn raw_vfork_handler(
 /// Extracts version of the Go runtime in the current process.
 fn get_go_runtime_version(hook_manager: &mut HookManager) -> Option<f32> {
     let version_symbol = hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")?;
+    get_version_from_symbol(version_symbol)
+}
+
+/// Extracts version of the Go rutime from all modules.
+fn get_go_runtime_version_in_module(
+    hook_manager: &mut HookManager,
+    module_name: &str,
+) -> Option<f32> {
+    let version_symbol =
+        hook_manager.resolve_symbol_in_module(module_name, "runtime.buildVersion.str")?;
+    get_version_from_symbol(version_symbol)
+}
+
+/// buildVersion can look a bit complex:
+/// devel go1.25-ecc06f0 Wed Apr 9 00:32:10 2025 -0700
+///
+/// We need to find the word starting with 'go', and parse the next 4 characters.
+fn get_version_from_symbol(version_symbol: NativePointer) -> Option<f32> {
     let version = unsafe {
         let cstr = CStr::from_ptr(version_symbol.0 as _);
         std::str::from_utf8_unchecked(cstr.to_bytes())
     };
-    // buildVersion can look a bit complex:
-    // devel go1.25-ecc06f0 Wed Apr 9 00:32:10 2025 -0700
-    //
-    // We need to find the word starting with 'go', and parse the next 4 characters.
     version
         .split_ascii_whitespace()
         .find_map(|chunk| chunk.strip_prefix("go"))
