@@ -19,6 +19,7 @@ workspace = true
 [dependencies]
 mirrord-config-derive = { path = "./derive" }
 mirrord-analytics = { path = "../analytics" }
+mirrord-protocol = { path = "../protocol" }
 
 serde.workspace = true
 serde_json.workspace = true
@@ -39,6 +40,7 @@ rand.workspace = true
 rustls.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true

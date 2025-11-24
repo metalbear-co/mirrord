@@ -88,19 +88,19 @@ pub struct MysqlBranchConfig {
 ///
 /// - Empty
 ///
-/// Create an empty database. If the source DB connection options are found from the chosen
-/// target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
-/// operator looks for the `name` field from the branch DB config object. This option is useful for
-/// users that run DB migrations themselves before starting the application.
+///   Creates an empty database. If the source DB connection options are found from the chosen
+///   target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+///   operator looks for the `name` field from the branch DB config object. This option is useful
+///   for users that run DB migrations themselves before starting the application.
 ///
 /// - Schema
 ///
-/// Create an empty database and copy schema of all tables.
+///   Creates an empty database and copies schema of all tables.
 ///
 /// - All
 ///
-/// Copy both schema and data of all tables. This option shall only be used
-/// when the data volume of the source database is minimal.
+///   Copies both schema and data of all tables. This option shall only be used
+///   when the data volume of the source database is minimal.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum MysqlBranchCopyConfig {
@@ -135,7 +135,7 @@ impl Default for MysqlBranchCopyConfig {
 ///   },
 ///   "orders": {
 ///     "filter": "my_db.orders.created_at > 1759948761"
-///   },
+///   }
 /// }
 /// ```
 ///
@@ -172,6 +172,14 @@ pub struct DatabaseBranchBaseConfig {
     /// resource usage. For this reason, branch database TTL caps out at 15 min.
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
+
+    /// ### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+    ///
+    /// The timeout in seconds to wait for a database branch to become ready after creation.
+    /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
+    /// performance.
+    #[serde(default = "default_creation_timeout_secs")]
+    pub creation_timeout_secs: u64,
 
     /// ### feature.db_branches.base.version {#feature-db_branches-base-version}
     ///
@@ -242,4 +250,8 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
 
 fn default_ttl_secs() -> u64 {
     300
+}
+
+pub fn default_creation_timeout_secs() -> u64 {
+    60
 }

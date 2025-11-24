@@ -19,49 +19,57 @@
           let
             fenix = inputs.fenix.packages.${system};
 
-            toolchainDesc = {
+            toolchainName = {
               name = (pkgs.lib.importTOML ./rust-toolchain.toml).toolchain.channel;
               sha256 = "sha256-JE+aoEa897IBKa03oVUOOnW+sbyUgXGrhkwzWFzCnnI=";
             };
 
-            toolchain = (fenix.fromToolchainName toolchainDesc).withComponents [
+            toolchain = fenix.fromToolchainName toolchainName;
+
+            components = toolchain.withComponents [
               "cargo"
               "clippy"
-              "rust-analyzer"
               "rust-src"
               "rustc"
               "rustfmt"
             ];
+
+            # Getting rust-analyzer from nixpkgs allows us to update it without updating the toolchain
+            rust-analyzer = pkgs.rust-analyzer.override {
+              rustSrc = "${toolchain.rust-src}/lib/rustlib/src/rust/library";
+            };
           in
           # On darwin we need both x86 and arm toolchains in order to compile universal binaries
           if pkgs.stdenv.isDarwin then
             let
               # aarch64 -> x86_64
               # x86_64 -> aarch64
-              crossTriplet =
+              crossTarget =
                 if pkgs.stdenv.hostPlatform.isAarch then "x86_64-apple-darwin" else "aarch64-apple-darwin";
 
               # Fewer components are required for the cross-compilation toolchain because we don't need IDE functionality
-              crossToolchain = (fenix.targets.${crossTriplet}.fromToolchainName toolchainDesc).withComponents [
+              crossComponents = (fenix.targets.${crossTarget}.fromToolchainName toolchainName).withComponents [
                 "rustc"
                 "rust-src"
               ];
             in
-            fenix.combine [
-              toolchain
-              crossToolchain
-            ]
+            {
+              components = fenix.combine [
+                components
+                crossComponents
+              ];
+              inherit rust-analyzer;
+            }
           else
-            toolchain;
+            {
+              inherit components rust-analyzer;
+            };
       in
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            nightlyRustToolchain
-
-            # Kubernetes
-            kubectl
-            minikube
+            nightlyRustToolchain.components
+            nightlyRustToolchain.rust-analyzer
 
             # E2E testing
             go

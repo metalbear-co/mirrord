@@ -9,7 +9,7 @@ use std::{
 use futures::StreamExt;
 use mirrord_config::feature::network::incoming::{
     IncomingConfig,
-    http_filter::{HttpFilterConfig, InnerFilter},
+    http_filter::{BodyFilter, HttpFilterConfig, InnerFilter},
 };
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
@@ -28,7 +28,8 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
     tcp::{
-        Filter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType,
+        Filter, HttpBodyFilter, HttpFilter, HttpMethodFilter, MIRROR_HTTP_FILTER_VERSION,
+        MirrorType, StealType,
     },
 };
 use mirrord_protocol_io::{Client, Connection};
@@ -956,11 +957,13 @@ impl IncomingMode {
         let http_filter_config = &config.http_filter;
 
         // Matching all fields to make this check future-proof.
+        // TODO(areg) unify this with mirrord_layer::setup::parse_http_filter
         let filter = match http_filter_config {
             HttpFilterConfig {
                 path_filter: Some(path),
                 header_filter: None,
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -970,6 +973,7 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: Some(header),
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -979,6 +983,7 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: None,
                 method_filter: Some(method),
+                body_filter: None,
                 all_of: None,
                 any_of: None,
                 ports: _ports,
@@ -990,6 +995,26 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: None,
                 method_filter: None,
+                body_filter: Some(filter),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => HttpFilter::Body(
+                // TODO(areg) unification
+                match filter {
+                    BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
+                        query: query.clone(),
+                        matches: Filter::new(matches.clone())
+                            .expect("invalid json body filter `matches` string"),
+                    },
+                },
+            ),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                method_filter: None,
+                body_filter: None,
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
@@ -999,6 +1024,7 @@ impl IncomingMode {
                 path_filter: None,
                 header_filter: None,
                 method_filter: None,
+                body_filter: None,
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
@@ -1013,6 +1039,7 @@ impl IncomingMode {
         }
     }
 
+    // TODO(areg) unify this with mirrord_layer::setup::parse_http_filter
     fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
         let filters = filters
             .iter()
@@ -1025,6 +1052,16 @@ impl IncomingMode {
                 ),
                 InnerFilter::Method { method } => HttpFilter::Method(
                     HttpMethodFilter::from_str(method).expect("invalid method filter string"),
+                ),
+                InnerFilter::Body(body_filter) => HttpFilter::Body(
+                    // TODO(areg) unify
+                    match body_filter {
+                        BodyFilter::Json { query, matches } => HttpBodyFilter::Json {
+                            query: query.clone(),
+                            matches: Filter::new(matches.clone())
+                                .expect("invalid json body filter `matches` string"),
+                        },
+                    },
                 ),
             })
             .collect();
