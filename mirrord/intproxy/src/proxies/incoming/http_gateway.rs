@@ -404,14 +404,19 @@ impl BackgroundTask for HttpGatewayTask {
             }
         };
 
-        let response = mirrord_error_response(
-            Report::new(error).pretty(true),
-            self.request.version(),
-            self.request.connection_id,
-            self.request.request_id,
-            self.request.port,
-        );
-        message_bus.send(HttpOut::ResponseBasic(response)).await;
+        // If we send an error response here IncomingProxy may hit an
+        // unreachable!() and panic as it doesn't expect responses in
+        // mirror mode
+        if self.response_mode.is_some() {
+            let response = mirrord_error_response(
+                Report::new(error).pretty(true),
+                self.request.version(),
+                self.request.connection_id,
+                self.request.request_id,
+                self.request.port,
+            );
+            message_bus.send(HttpOut::ResponseBasic(response)).await;
+        }
 
         Ok(())
     }

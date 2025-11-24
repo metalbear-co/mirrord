@@ -557,7 +557,15 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                     bound: Bound { address, .. },
                     ..
                 } => {
-                    interceptor_addr.set_ip(address.ip());
+                    if interceptor_addr.ip().is_unspecified() {
+                        if interceptor_addr.is_ipv4() {
+                            interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
+                        } else {
+                            interceptor_addr.set_ip(Ipv6Addr::LOCALHOST.into())
+                        }
+                    } else {
+                        interceptor_addr.set_ip(address.ip());
+                    }
                 }
                 _ if interceptor_addr.is_ipv4() => {
                     interceptor_addr.set_ip(Ipv4Addr::LOCALHOST.into())
