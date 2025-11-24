@@ -3,6 +3,7 @@
 
 use std::{env, path::PathBuf};
 
+#[cfg(windows)]
 use str_win::path_to_unix_path;
 
 pub fn get_home_path() -> Option<PathBuf> {
