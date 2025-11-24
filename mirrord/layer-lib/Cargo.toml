@@ -62,3 +62,4 @@ serde_json.workspace = true
 rstest.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "fs"] }
 tempfile.workspace = true
+rand.workspace = true
