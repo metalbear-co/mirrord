@@ -14,10 +14,8 @@ use mirrord_config::{
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel,
-    tcp::{HTTP_COMPOSITE_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION},
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
+use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{SipPatchOptions, sip_patch};
 use mirrord_tls_util::SecureChannelSetup;
