@@ -70,7 +70,6 @@ fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 is_ci = "1.2.0"
-rand.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }

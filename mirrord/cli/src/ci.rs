@@ -3,10 +3,7 @@ use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
-    fs::File,
     path::{Path, PathBuf},
-    process::Stdio,
-    time::SystemTime,
 };
 
 use drain::Watch;
@@ -16,10 +13,9 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
-use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    fs::{self, create_dir_all},
+    fs::{self},
     io::AsyncWriteExt,
 };
 use tracing::Level;
@@ -157,6 +153,7 @@ impl MirrordCiStore {
     }
 
     /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
+    #[cfg_attr(windows, allow(unused))]
     async fn remove_file() -> CiResult<()> {
         match tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
             Ok(_) => Ok(()),
@@ -176,6 +173,7 @@ pub(super) struct MirrordCi {
     ci_api_key: Option<CiApiKey>,
 
     /// Arguments that are specific to `mirrord ci start`.
+    #[cfg_attr(windows, allow(unused))]
     start_args: StartArgs,
 
     /// [`MirrordCiStore`] holds the intproxy pid, and the user process pid so we can kill them
@@ -311,7 +309,7 @@ impl MirrordCi {
         }
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg_attr(windows, allow(unused))]
     pub(super) async fn prepare_command<P: Progress>(
         self,
         progress: &mut P,
@@ -349,6 +347,7 @@ impl MirrordCi {
 
 #[derive(Debug, Default)]
 struct StartArgs {
+    #[cfg_attr(windows, allow(unused))]
     foreground: bool,
 }
 
