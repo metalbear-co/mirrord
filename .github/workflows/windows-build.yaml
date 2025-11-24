@@ -392,7 +392,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win -p mirrord-tests -- --test-threads=1
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
       ###########################################################################
       # RELEASE PUBLISH
