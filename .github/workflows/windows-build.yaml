@@ -14,19 +14,14 @@ on:
         options: [no, draft, prerelease, release]
         default: no
       release_tag:
-        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
         required: false
         type: string
       sign_artifacts:
-        description: "Code-sign EXE & DLL (uses limited signing tokens)"
+        description: "Code-sign EXE & DLL"
         type: choice
         options: ["false", "true"]
         default: false
-  
-  push:
-    paths-ignore:
-      - '*.md'
-      - '**/*.md'
 
   pull_request:
     branches: ["main", "*staging*", "windows-support"]
@@ -36,11 +31,12 @@ on:
       - "**/*.md"
 
 permissions:
-  contents: write   # needed for GitHub Releases
+  contents: write
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
-  ARTIFACT_SUBPATH: windows/mirrord-3.163.0-run70-0932953
+  MSI_BUCKET_URI: gs://mirrord-windows-msi
+  ARTIFACT_SUBPATH: windows/mirrord-latest
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
@@ -67,389 +63,418 @@ jobs:
 
       - name: Toolchain info
         run: |
-          $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = "Stop"
           whoami
           rustc -V
           cargo -V
           rustup show
 
-      - name: Prepare artifacts (download OR build+sign)
+      ###########################################################################
+      # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
+      ###########################################################################
+
+      - name: Prepare artifacts
         id: prep
         run: |
-          $ErrorActionPreference = 'Stop'
-          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append }
-          $Target = 'x86_64-pc-windows-msvc'
+          $ErrorActionPreference = "Stop"
+          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
+
+          $Target = "x86_64-pc-windows-msvc"
           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
-          $Tmp    = Join-Path $env:RUNNER_TEMP 'prep'
-          New-Item -ItemType Directory -Path $Tmp -Force | Out-Null
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
 
-          if ($env:MODE -eq 'reuse') {
+          $Tmp = Join-Path $env:RUNNER_TEMP "prep"
+          New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
+
+          if ($env:MODE -eq "reuse") {
+            # DOWNLOAD FROM GCS
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-              throw "gcloud not found on PATH. Ensure the runner is authenticated."
+              throw "gcloud not found"
             }
-            $dest = Join-Path $Tmp 'picked'
-            New-Item -ItemType Directory -Path $dest -Force | Out-Null
-            Write-Host "Downloading from: $($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*"
-            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
-            if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed (check path or perms)" }
-            $exe = (Get-ChildItem -Path $dest -Filter 'mirrord.exe' -File -Recurse | Select-Object -First 1).FullName
-            $dll = (Get-ChildItem -Path $dest -Filter 'mirrord_layer_win.dll' -File -Recurse | Select-Object -First 1).FullName
-            if (-not $dll) { $dll = (Get-ChildItem -Path $dest -Filter 'mirrord-layer-win.dll' -File -Recurse | Select-Object -First 1).FullName }
-            if (-not $exe -or -not $dll) { throw "Did not find mirrord.exe or layer DLL under $dest" }
+            $dest = Join-Path $Tmp "picked"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
+            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
+
+            $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
+            $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
+
+            if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
+
+            # SIGN IF NEEDED
             if ($shouldSign) {
-              if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
-                throw "SIGN_ARTIFACTS=true but signtool.exe not found."
-              }
-              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
-              & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
-              # refresh .sha256 because files changed
-              foreach ($f in @($exe,$dll)) {
-                $sha = "$f.sha256"
-                $h = (Get-FileHash -Algorithm SHA256 $f).Hash
-                "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
-              }
-            } else {
-              # Ensure .sha256 exist even if not signing
-              foreach ($f in @($exe,$dll)) {
-                $sha = "$f.sha256"
-                if (-not (Test-Path $sha)) {
-                  $h = (Get-FileHash -Algorithm SHA256 $f).Hash
-                  "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
-                }
-              }
-              Write-Host "Signing disabled (SIGN_ARTIFACTS=false)."
+              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
             }
 
             Set-Env "MIRRORD_EXE" $exe
             Set-Env "MIRRORD_LAYER_FILE" $dll
-            Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
             Set-Env "MIRRORD_VERSION" "unknown"
-            Write-Host "Picked EXE: $exe"
-            Write-Host "Picked DLL: $dll"
+
             exit 0
           }
 
-          # === build_sign path ===
+          ####################################################################
+          # BUILD + SIGN ARTIFACTS
+          ####################################################################
+
           rustup target add $Target
-          # 1) Build layer (DLL)
+
+          # BUILD DLL
           cargo build -p mirrord-layer-win --target $Target
-          $dll = if (Test-Path (Join-Path $DbgDir  'mirrord_layer_win.dll')) { Join-Path $DbgDir  'mirrord_layer_win.dll' }
-                 elseif (Test-Path (Join-Path $RelDir 'mirrord_layer_win.dll')) { Join-Path $RelDir 'mirrord_layer_win.dll' }
-                 else { throw "Layer DLL not found in debug or release directories." }
+          $dll = Join-Path $DbgDir "mirrord_layer_win.dll"
+          if (-not (Test-Path $dll)) {
+            $dll = Join-Path $RelDir "mirrord_layer_win.dll"
+          }
+          if (-not (Test-Path $dll)) { throw "DLL not found" }
 
           if ($shouldSign) {
-            if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
-              throw "SIGN_ARTIFACTS=true but signtool.exe not found."
-            }
-            # 2) Sign DLL
-            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for DLL" }
-            & signtool.exe verify /pa "$dll"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for DLL" }
-          } else {
-            Write-Host "Signing disabled for DLL."
+            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           }
 
-          # 3) Build CLI with (optionally) signed DLL embedded
+          # BUILD CLI
           $env:MIRRORD_LAYER_FILE = $dll
-          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $pkg  = $meta.packages | Where-Object { $_.targets | Where-Object { $_.kind -contains 'bin' -and $_.name -eq 'mirrord' } } | Select-Object -First 1
-          if (-not $pkg) { throw "No bin target named 'mirrord' found in workspace." }
-          cargo build -p $pkg.name --bin mirrord --target $Target
-          $exe = if (Test-Path (Join-Path $DbgDir  'mirrord.exe')) { Join-Path $DbgDir  'mirrord.exe' }
-                 elseif (Test-Path (Join-Path $RelDir 'mirrord.exe')) { Join-Path $RelDir 'mirrord.exe' }
-                 else { throw "mirrord.exe not found (debug/release)" }
+          cargo build -p mirrord --bin mirrord --target $Target
+          $exe = Join-Path $DbgDir "mirrord.exe"
+          if (-not (Test-Path $exe)) {
+            $exe = Join-Path $RelDir "mirrord.exe"
+          }
+          if (-not (Test-Path $exe)) { throw "EXE not found" }
 
           if ($shouldSign) {
-            # 4) Sign EXE
-            & signtool.exe sign /sha1 bfa0bea8d22265cb382d2d5dec55a6ffcff70bcb /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for EXE" }
-            & signtool.exe verify /pa "$exe"; if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for EXE" }
-          } else {
-            Write-Host "Signing disabled for EXE."
+            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           }
 
-          # 5) Checksums (always generate with the final bytes)
-          foreach ($f in @($exe,$dll)) {
-            $sha = "$f.sha256"
-            $h = (Get-FileHash -Algorithm SHA256 $f).Hash
-            "$h  $(Split-Path $f -Leaf)" | Out-File -FilePath $sha -Encoding ascii
-          }
-
-          # 6) Export env
-          Set-Env "MIRRORD_LAYER_FILE" $dll
+          # EXPORT ENV
           Set-Env "MIRRORD_EXE" $exe
-          Set-Env "MIRRORD_PKG" $pkg.name
+          Set-Env "MIRRORD_LAYER_FILE" $dll
+
+          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
           Set-Env "MIRRORD_VERSION" $pkg.version
-          Set-Env "MIRRORD_TEST_USE_EXISTING_LIB" $dll
 
-      - name: Upload to GCS (build_sign only)
-        if: ${{ env.MODE == 'build_sign' }}
+      ###########################################################################
+      # ENSURE WIX TOOLSET IS INSTALLED
+      ###########################################################################
+
+      - name: Ensure WiX Toolset
         run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-            throw "gcloud not found on PATH. Ensure the runner is authenticated."
+          $ErrorActionPreference = "Stop"
+
+          function Write-Env([string]$k,[string]$v) {
+            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
           }
-          $exe = $env:MIRRORD_EXE; $dll = $env:MIRRORD_LAYER_FILE
-          if (-not (Test-Path $exe) -or -not (Test-Path $dll)) { throw "EXE/DLL missing" }
-          $staging = Join-Path $env:RUNNER_TEMP 'artifacts'
-          New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item $exe $staging -Force
-          Copy-Item $dll $staging -Force
-          Copy-Item "$exe.sha256" $staging -Force
-          Copy-Item "$dll.sha256" $staging -Force
-          $version = if ($env:MIRRORD_VERSION) { $env:MIRRORD_VERSION } else { 'unknown' }
-          $sha7 = $env:GITHUB_SHA.Substring(0,7)
-          $artifactDir = "windows/mirrord-$version-run$($env:GITHUB_RUN_NUMBER)-$sha7"
-          $dest = "$($env:BUCKET_URI)/$artifactDir/"
-          Write-Host "Uploading to $dest"
-          Get-ChildItem $staging -File | % { gcloud --quiet storage cp $_.FullName $dest; if ($LASTEXITCODE -ne 0) { throw "gcloud cp failed for $($_.Name)" } }
-          gcloud --quiet storage ls $dest
 
-      - name: Run Rust unit tests (single loop)
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $Target = 'x86_64-pc-windows-msvc'
-          $tests = @(
-            @{ name='mirrord-layer-win'; args='' },
-            @{ name='mirrord-protocol' ; args='' },
-            @{ name='mirrord-config'   ; args='' },
-            @{ name='mirrord-kube'     ; args='--all-features' },
-            @{ name='mirrord-intproxy' ; args='' },
-            @{ name='mirrord-auth'     ; args='' },
-            @{ name='mirrord-operator' ; args='--features "crd, client"' },
-            @{ name='mirrord'          ; args='' }
-          )
-          foreach ($t in $tests) {
-            Write-Host "==> cargo test -p $($t.name) $($t.args)"
-            if ($t.args) {
-              Invoke-Expression "cargo test --target $Target -p $($t.name) $($t.args)"
-            } else {
-              cargo test --target $Target -p $($t.name)
+          function Find-Candle {
+            param(
+              [switch]$DeepSearch
+            )
+
+            Write-Host "Searching for WiX candle.exe in known locations..."
+
+            $candidateDirs = @()
+
+            if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
+              $candidateDirs += @(
+                (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
+                (Join-Path $Env:ChocolateyInstall "tools"),
+                (Join-Path $Env:ChocolateyInstall "bin")
+              )
             }
-            if ($LASTEXITCODE -ne 0) { throw "Tests failed for $($t.name)" }
+
+            $candidateDirs += @(
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
+              "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.14\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.13\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.12\bin",
+              "$Env:ProgramFiles\WiX Toolset v3.11\bin",
+              "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
+              "$Env:ProgramData\chocolatey\bin"
+            )
+
+            $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
+
+            foreach ($dir in $candidateDirs) {
+              $candlePath = Join-Path $dir "candle.exe"
+              if (Test-Path $candlePath) {
+                Write-Host "Found candle.exe at $candlePath."
+                return $candlePath
+              }
+            }
+
+            if ($DeepSearch) {
+              Write-Host "No candle.exe in known dirs. Deep searching C:\ for candle.exe (may take time)..."
+              try {
+                $hit = Get-ChildItem -Path 'C:\' -Filter 'candle.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) {
+                  Write-Host "Deep search found candle.exe at $($hit.FullName)."
+                  return $hit.FullName
+                } else {
+                  Write-Host "Deep search did not find candle.exe on C:\."
+                }
+              } catch {
+                Write-Warning "Deep search failed: $($_.Exception.Message)"
+              }
+            }
+
+            return $null
           }
 
-      # -----------------------------
-      # GitHub Release (optional)
-      # -----------------------------
+          # 1. Try PATH directly
+          $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $candlePath = $null
+          if ($candleCmd) {
+            $candlePath = $candleCmd.Source
+            Write-Host "candle.exe found on PATH at $candlePath"
+          } else {
+            # 2. Try common locations
+            $candlePath = Find-Candle
+          }
+
+          # 3. If still not found, try installing via Chocolatey (best effort)
+          if (-not $candlePath) {
+            Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
+
+            if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+              Write-Host "Chocolatey not found, installing Chocolatey..."
+              Set-ExecutionPolicy Bypass -Scope Process -Force
+              [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+              Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+            }
+
+            try {
+              choco install wixtoolset -y --no-progress
+            } catch {
+              Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
+            }
+
+            # 4. After choco, re-check (including deep search)
+            $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+            if ($candleCmd) {
+              $candlePath = $candleCmd.Source
+              Write-Host "After Chocolatey, candle.exe found on PATH at $candlePath"
+            } else {
+              $candlePath = Find-Candle -DeepSearch
+            }
+          }
+
+          if (-not $candlePath -or -not (Test-Path $candlePath)) {
+            throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists (e.g., via Chocolatey or MSI)."
+          }
+
+          # Resolve light.exe in same directory (or via PATH as fallback)
+          $wixDir = Split-Path $candlePath -Parent
+          $lightPath = Join-Path $wixDir "light.exe"
+          if (-not (Test-Path $lightPath)) {
+            $lightCmd = Get-Command light.exe -ErrorAction SilentlyContinue
+            if ($lightCmd) {
+              $lightPath = $lightCmd.Source
+            }
+          }
+
+          if (-not (Test-Path $lightPath)) {
+            throw "Found candle.exe at '$candlePath' but could not find light.exe in the same directory or on PATH. Please ensure a full WiX Toolset 3.x install (candle.exe and light.exe)."
+          }
+
+          Write-Host "Resolved WiX tools:"
+          Write-Host "  candle.exe = $candlePath"
+          Write-Host "  light.exe  = $lightPath"
+
+          # Export for subsequent steps
+          Write-Env "CANDLE_EXE" $candlePath
+          Write-Env "LIGHT_EXE"  $lightPath
+
+      ###########################################################################
+      # BUILD MSI USING main.wxs
+      ###########################################################################
+
+      - name: Build MSI
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:CANDLE_EXE -or -not (Test-Path $env:CANDLE_EXE)) {
+            throw "CANDLE_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+          }
+          if (-not $env:LIGHT_EXE -or -not (Test-Path $env:LIGHT_EXE)) {
+            throw "LIGHT_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+          }
+
+          $candle = $env:CANDLE_EXE
+          $light  = $env:LIGHT_EXE
+
+          Write-Host "Using candle.exe at: $candle"
+          Write-Host "Using light.exe  at: $light"
+
+          $Root = "C:\wix\mirrord"
+          New-Item -ItemType Directory -Force -Path $Root | Out-Null
+
+          # COPY ARTIFACTS + ASSETS
+          Copy-Item $env:MIRRORD_EXE "$Root\mirrord.exe" -Force
+          Copy-Item $env:MIRRORD_LAYER_FILE "$Root\mirrord_layer_win.dll" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico" "$Root\mirrord.ico" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
+
+          $Obj = "$Root\main.wixobj"
+          $Msi = "$Root\mirrord.msi"
+
+          if (Test-Path $Msi) { Remove-Item $Msi -Force }
+
+          & $candle -nologo -v "$Root\main.wxs" -out $Obj
+          & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
+
+          if (-not (Test-Path $Msi)) { throw "MSI not produced" }
+
+          "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # SIGN MSI (optional, same cert as EXE/DLL)
+      ###########################################################################
+
+      - name: Sign MSI
+        if: env.SIGN_ARTIFACTS == 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msi = $env:MSI_PATH
+          if (-not (Test-Path $msi)) {
+            throw "MSI_PATH '$msi' does not exist."
+          }
+          & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+              /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
+
+      ###########################################################################
+      # UPLOAD TO GCS
+      ###########################################################################
+
+      - name: Upload MSI to GCS
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msi = $env:MSI_PATH
+          if (-not (Test-Path $msi)) {
+            throw "MSI_PATH '$msi' does not exist."
+          }
+
+          # Build a unique folder per run:
+          # gs://mirrord-windows-msi/<ref-name>/run-<run-id>/mirrord.msi
+          $runId = $env:GITHUB_RUN_ID
+          $refName = $env:GITHUB_REF_NAME
+          if (-not $refName) {
+            $refName = "unknown"
+          }
+
+          # Sanitize ref name for use in path
+          $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
+
+          $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
+          $destFolder = "$bucketBase/$refSafe/run-$runId"
+          $destUri = "$destFolder/mirrord.msi"
+
+          Write-Host "Uploading MSI to $destUri"
+          gcloud --quiet storage cp $msi $destUri
+
+          # Export for later (summary, logs)
+          "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # UNIT TESTS (Windows-only crates)
+      ###########################################################################
+
+      - name: Run Rust unit tests (Windows crates)
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+
+      ###########################################################################
+      # RELEASE PUBLISH
+      ###########################################################################
+
       - name: Compute release tag
         id: tag
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = $null
+          $ErrorActionPreference = "Stop"
           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
             $tag = "$env:GITHUB_REF".Substring(10)
           } elseif ($env:RELEASE_TAG_INPUT) {
             $tag = $env:RELEASE_TAG_INPUT
-          } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
-            $tag = "v$($env:MIRRORD_VERSION)"
           } else {
-            throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
+            $tag = "v$env:MIRRORD_VERSION"
           }
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Release tag: $tag"
+          "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
 
-
-      - name: Publish GitHub Release and upload artifacts (github-script)
+      - name: Upload artifacts to GitHub Release (custom)
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
         uses: actions/github-script@v7
         env:
-          RELEASE_TAG: ${{ env.RELEASE_TAG }}
-          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}     # draft|prerelease|release|no
+          MSI_PATH: ${{ env.MSI_PATH }}
           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
-          SIGN_ARTIFACTS: ${{ env.SIGN_ARTIFACTS }} # "true" | "false"
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         with:
           script: |
-            const fs = require('fs');
-            const path = require('path');
+            const fs = require("fs");
+            const path = require("path");
             const { owner, repo } = context.repo;
 
             const tag = process.env.RELEASE_TAG;
-            const isDraft = process.env.PUBLISH_MODE === 'draft';
-            const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
-            const signed = /^true$/i.test(process.env.SIGN_ARTIFACTS || '');
-            const signedBlockStart = '<!-- SIGNED_STATUS_START -->';
-            const signedBlockEnd   = '<!-- SIGNED_STATUS_END -->';
-            const signedLine       = `**Signed artifacts:** ${signed ? 'Yes' : 'No'}`;
+            const versionForName = tag.startsWith("v") ? tag.substring(1) : tag;
 
-            // Find or create the release
+            // Ensure release exists
             let rel;
             try {
               const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
               rel = r.data;
             } catch (e) {
-              if (e.status !== 404) throw e;
               const r = await github.rest.repos.createRelease({
                 owner, repo,
                 tag_name: tag,
-                name: `Windows build ${tag}`,
-                target_commitish: context.sha,
-                draft: isDraft,
-                prerelease: isPrerelease,
-                generate_release_notes: true,
+                name: `Windows build ${versionForName}`,
+                draft: false,
+                prerelease: false
               });
               rel = r.data;
             }
 
-            // Ensure flags (draft/prerelease) match input
-            if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
-              const r = await github.rest.repos.updateRelease({
-                owner, repo, release_id: rel.id,
-                draft: isDraft, prerelease: isPrerelease,
-                name: `Windows build ${tag}`,
-                target_commitish: context.sha,
-              });
-              rel = r.data;
-            }
+            async function upload(filePath) {
+              if (!fs.existsSync(filePath)) return;
 
-            // Upload helper (replaces asset if it already exists)
-            async function upload(file) {
-              if (!file || !fs.existsSync(file)) {
-                core.warning(`Missing file: ${file}`);
-                return;
-              }
-              const name = path.basename(file);
-              const assets = await github.paginate(
-                github.rest.repos.listReleaseAssets,
-                { owner, repo, release_id: rel.id, per_page: 100 }
-              );
-              const existing = assets.find(a => a.name === name);
-              if (existing) {
-                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
-              }
-              const data = fs.readFileSync(file);
+              const name = path.basename(filePath);
+              const data = fs.readFileSync(filePath);
+
               await github.rest.repos.uploadReleaseAsset({
-                owner, repo, release_id: rel.id, name,
-                headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
+                owner, repo,
+                release_id: rel.id,
+                name,
                 data,
+                headers: {
+                  "content-type": "application/octet-stream",
+                  "content-length": data.length
+                }
               });
-              core.info(`Uploaded ${name}`);
             }
 
-            // Upload artifacts
-            const files = [
-              process.env.MIRRORD_EXE,
-              `${process.env.MIRRORD_EXE}.sha256`,
-              process.env.MIRRORD_LAYER_FILE,
-              `${process.env.MIRRORD_LAYER_FILE}.sha256`,
-            ];
-            for (const f of files) { await upload(f); }
+            await upload(process.env.MIRRORD_EXE);
+            await upload(process.env.MIRRORD_LAYER_FILE);
+            await upload(process.env.MSI_PATH);
 
-            // Append/refresh a small, explicit signed-status block in the body (idempotent)
-            const currentBody = rel.body || '';
-            const block = `${signedBlockStart}\n${signedLine}\n${signedBlockEnd}`;
-            const hasBlock = currentBody.includes(signedBlockStart) && currentBody.includes(signedBlockEnd);
-            const newBody = hasBlock
-              ? currentBody.replace(new RegExp(`${signedBlockStart}[\\s\\S]*?${signedBlockEnd}`,'m'), block)
-              : (currentBody + (currentBody ? '\n\n' : '') + block);
+      ###########################################################################
+      # SUMMARY
+      ###########################################################################
 
-            if (newBody !== currentBody) {
-              await github.rest.repos.updateRelease({
-                owner, repo, release_id: rel.id,
-                body: newBody,
-              });
-              core.info(`Release body updated with signed status: ${signed ? 'Yes' : 'No'}`);
-            } else {
-              core.info('Signed status already up to date in release body.');
-            }
-
-
-
-      # ==================================
-      # === Pretty summary to step tab ===
-      # ==================================
-      - name: Publish Windows test results (summary table, sandboxed)
+      - name: Summary
         if: always()
         run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = $env:MIRRORD_EXE
-          $dll = $env:MIRRORD_LAYER_FILE
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, 'true', 'InvariantCultureIgnoreCase')
-          if (-not (Test-Path $exe)) { throw "Missing exe at $exe" }
-          if (-not (Test-Path $dll)) { throw "Missing dll at $dll" }
-          $base = Split-Path $exe -Parent
-          function Get-ExpectedSha256([string]$shaFile) {
-            if (-not (Test-Path $shaFile)) { return $null }
-            $raw = Get-Content $shaFile -Raw
-            $raw.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[0].Trim().ToLower()
-          }
-          $exeShaFile = Join-Path $base 'mirrord.exe.sha256'
-          $dllShaFile = Join-Path $base ((Split-Path $dll -Leaf) + '.sha256')
-          if (-not (Test-Path $dllShaFile)) { $dllShaFile = Join-Path $base 'mirrord_layer_win.dll.sha256' }
-          $exeHash   = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-          $dllHash   = (Get-FileHash -Algorithm SHA256 $dll).Hash.ToLower()
-          $exeExpect = Get-ExpectedSha256 $exeShaFile
-          $dllExpect = Get-ExpectedSha256 $dllShaFile
-          $shaExeOk  = ($exeExpect -and $exeHash -eq $exeExpect)
-          $shaDllOk  = ($dllExpect -and $dllHash -eq $dllExpect)
-          $sigExe = $null; $sigDll = $null
-          if ($shouldSign -and (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
-            & signtool.exe verify /pa $exe | Out-Null; $sigExe = ($LASTEXITCODE -eq 0)
-            & signtool.exe verify /pa $dll | Out-Null; $sigDll = ($LASTEXITCODE -eq 0)
-          }
-          $dllLoadOk = $false
-          $dllCrash = $false
-          $loader = @"
-          try {
-            Add-Type -TypeDefinition @'
-          using System;
-          using System.Runtime.InteropServices;
-          public static class L {
-            [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-            public static extern IntPtr LoadLibrary(string lpFileName);
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern bool FreeLibrary(IntPtr hModule);
-          }
-          '@;
-            var ptr = L.LoadLibrary(@"{($dll -replace '"','""')}");
-            if (ptr == IntPtr.Zero) Environment.Exit(2);
-            L.FreeLibrary(ptr);
-            Environment.Exit(0);
-          } catch { Environment.Exit(3); }
-          "@
-          $loaderPath = Join-Path $env:RUNNER_TEMP 'dll_load_test.ps1'
-          Set-Content -Path $loaderPath -Value $loader -Encoding UTF8
-          $p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File', $loaderPath -Wait -PassThru
-          $childExit = $p.ExitCode
-          if ($childExit -eq 0) { $dllLoadOk = $true }
-          if ($childExit -eq 3221225477 -or $childExit -eq -1073741819) { $dllCrash = $true }
-          $verRc = $null; $verText = ""
-          try { $verText = & $exe --version 2>&1; $verRc = $LASTEXITCODE } catch { $verRc = -1; $verText = $_.ToString() }
-          $helpRc = $null; $helpText = ""
-          try { $helpText = & $exe --help 2>&1;    $helpRc = $LASTEXITCODE } catch { $helpRc = -1; $helpText = $_.ToString() }
-          $exeSize = (Get-Item $exe).Length
-          $dllSize = (Get-Item $dll).Length
-          $rows = @()
-          $rows += [pscustomobject]@{ Check='SHA256 (exe)';  Result=($(if($shaExeOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$exeHash expected=$exeExpect" }
-          $rows += [pscustomobject]@{ Check='SHA256 (dll)';  Result=($(if($shaDllOk){'✅ OK'}else{'❌ Mismatch/None'})); Notes= "hash=$dllHash expected=$dllExpect" }
-          $rows += [pscustomobject]@{ Check='Signing (exe)'; Result=($(if($shouldSign -and $sigExe -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-          $rows += [pscustomobject]@{ Check='Signing (dll)'; Result=($(if($shouldSign -and $sigDll -eq $true){'✅ Verified'}elseif($shouldSign){'❌ Failed'}else{'⚠️ Skipped'})); Notes= 'signtool verify /pa' }
-          $rows += [pscustomobject]@{ Check='DLL load/unload'; Result=($(if($dllLoadOk){'✅ OK'}elseif($dllCrash){'❌ Crash'}else{'❌ Failed'})); Notes= "child-exit=$childExit" }
-          $rows += [pscustomobject]@{ Check='CLI --version';  Result="exit $verRc"; Notes= ($verText -split "`n")[0] }
-          $rows += [pscustomobject]@{ Check='CLI --help';     Result="exit $helpRc"; Notes= ($helpText -split "`n")[0] }
-          $rows += [pscustomobject]@{ Check='File sizes';     Result=''; Notes= "exe=$exeSize bytes; dll=$dllSize bytes" }
-          $md = @()
-          $md += '### Windows test results'
-          $md += ''
-          $md += ('**Mode:** `{0}` • **Sign artifacts:** `{1}`  ' -f $env:MODE, $env:SIGN_ARTIFACTS)
-          $md += ('**EXE:** `{0}`  ' -f $exe)
-          $md += ('**DLL:** `{0}`' -f $dll)
-          $md += ''
-          $md += '| Check | Result | Notes |'
-          $md += '|------:|:------:|-------|'
-          foreach ($r in $rows) {
-            $c = ($r.Check  -replace '\|','\|')
-            $res = ($r.Result -replace '\|','\|')
-            $n = ($r.Notes  -replace '\r',' ' -replace '\n',' ' -replace '\|','\|')
-            $md += "| $c | $res | $n |"
-          }
-          $md += ''
-          $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
-          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+          Write-Host "MSI (local): $env:MSI_PATH"
+          Write-Host "MSI (GCS):   $env:MSI_GCS_URI"
+          Write-Host "EXE:         $env:MIRRORD_EXE"
+          Write-Host "DLL:         $env:MIRRORD_LAYER_FILE"
