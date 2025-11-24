@@ -10,7 +10,6 @@ use std::{
 
 use base64::prelude::*;
 use bincode::{Decode, Encode};
-use hooks::FN_FCNTL;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -80,7 +79,11 @@ pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = La
             Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
                 |(fd, socket)| {
                     // Do not inherit sockets that are `FD_CLOEXEC`.
-                    if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
+                    // NOTE: The original `fcntl` is called instead of `FN_FCNTL` because the latter
+                    // may be null at this point, likely due to child-spawning functions that mess
+                    // with memory such as fork/exec.
+                    // See: https://github.com/metalbear-co/mirrord-intellij/issues/374
+                    if unsafe { libc::fcntl(fd, libc::F_GETFD, 0) != -1 } {
                         Some((fd, Arc::new(socket)))
                     } else {
                         None
