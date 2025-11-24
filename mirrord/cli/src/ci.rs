@@ -176,6 +176,7 @@ pub(super) struct MirrordCi {
     ci_api_key: Option<CiApiKey>,
 
     /// Arguments that are specific to `mirrord ci start`.
+    #[cfg_attr(windows, allow(unused))]
     start_args: StartArgs,
 
     /// [`MirrordCiStore`] holds the intproxy pid, and the user process pid so we can kill them
@@ -311,7 +312,7 @@ impl MirrordCi {
         }
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg_attr(windows, allow(unused))]
     pub(super) async fn prepare_command<P: Progress>(
         self,
         progress: &mut P,
