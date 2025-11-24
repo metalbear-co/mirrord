@@ -1,15 +1,20 @@
-use std::io::Cursor;
-use std::net::SocketAddr;
-use axum::http::header;
-use axum::Router;
-use tokio::process::Command;
-use tower_http::{services::ServeDir, trace::TraceLayer};
-use tar::Archive;
+use std::{io::Cursor, net::SocketAddr, time::Duration};
+
+use axum::{Router, http::header, Json};
+use axum::extract::Path;
+use axum::routing::get;
 use flate2::read::GzDecoder;
+use tar::Archive;
 use tempfile::TempDir;
+use tokio::{process::Command, time::sleep};
 use tower::ServiceBuilder;
-use tower_http::services::ServeFile;
-use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::{
+    services::{ServeDir, ServeFile},
+    set_header::SetResponseHeaderLayer,
+    trace::TraceLayer,
+};
+
+use crate::user_data::UserData;
 
 const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.gz");
 #[cfg(target_os = "linux")]
@@ -31,18 +36,18 @@ fn get_open_command() -> Command {
     Command::new("cmd.exe").arg("/C").arg("start").arg("")
 }
 
-pub async fn wizard_command() {
-    // TODO: ascii <|:)
-    // TODO: serve wizard <|:)
+pub async fn wizard_command(user_data: &mut UserData) {
+    // TODO: ascii <|:) printout
+    let is_returning = user_data.is_returning_wizard();
 
     // unpack frontend into dir
-    let tmp_dir = TempDir::new().unwrap(); // TODO dont do that
+    let tmp_dir = TempDir::new().unwrap(); // FIXME: remove unwraps
     let temp_dir_path = tmp_dir.path();
 
     let tar_gz = Cursor::new(COMPRESSED_FRONTEND);
     let tar = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(tar);
-    archive.unpack(temp_dir_path).unwrap(); // TODO dont do that
+    archive.unpack(temp_dir_path).unwrap(); // FIXME: remove unwraps
 
     let serve_client = {
         let index_service = ServiceBuilder::new()
@@ -72,11 +77,13 @@ pub async fn wizard_command() {
             )
     };
 
-    // prepare temp dir as SPA
-    let app = Router::new().fallback_service(serve_client);
+    // prepare temp dir as SPA with endpoints behind `/api` path
+    let app = Router::new()
+        .fallback_service(serve_client)
+        .route("/api/v1/{key}", get(api_handler));
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    tracing::debug!("listening on {}", listener.local_addr().unwrap());
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap(); // FIXME: remove unwraps
+    tracing::debug!("listening on {}", listener.local_addr().unwrap()); // FIXME: remove unwraps
 
     // open browser window
     let url = "http://localhost:3000/";
@@ -91,10 +98,31 @@ pub async fn wizard_command() {
         }
     }
 
-    // TODO: join the serve and window opening (to prevent race condition)
-    // serve maybe
+    // when 10 seconds elapses, update user data from new to returning
+    if !is_returning {
+        tokio::spawn(async {
+            sleep(Duration::from_secs(10)).await;
+            let _ = user_data.update_is_returning_wizard().await;
+        });
+    }
 
     axum::serve(listener, app.layer(TraceLayer::new_for_http()))
         .await
-        .unwrap();
+        .unwrap(); // FIXME: remove unwraps
+}
+
+struct TargetInfo {
+    target_path: String,
+}
+enum WizardData {
+    IsReturning(bool),
+    ClusterData(Vec<TargetInfo>),
+}
+
+async fn api_handler(Path(path): Path<String>) -> Json<WizardData> {
+    match path.as_str() {
+        "get-returning" => WizardData::IsReturning(true).into(),
+        "get-cluster-data" => (),
+        _ => () // unknown api endpoint, ignore
+    }
 }
