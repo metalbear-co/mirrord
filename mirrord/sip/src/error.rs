@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use std::box::Box;
+use std::boxed::Box;
 
 pub type Result<T> = std::result::Result<T, SipError>;
 
