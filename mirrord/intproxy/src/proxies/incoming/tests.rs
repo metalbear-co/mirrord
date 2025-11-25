@@ -109,7 +109,7 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
             .serve_connection(TokioIo::new(conn), SseService);
         tokio::select! {
             _ = local_listener.accept() => panic!("expected only one connection"),
-            res = conn => if let Ok(..) = res {
+            res = conn => if res.is_ok() {
                 panic!("connection should fail");
             }
         }
