@@ -1151,6 +1151,14 @@
             "null"
           ]
         },
+        "dlopen_cgo": {
+          "title": "_experimental_ dlopen_cgo {#experimental-dlopen_cgo}",
+          "description": "Useful when the user's application loads a c-shared golang library dynamically.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "dns_permission_error_fatal": {
           "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
           "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true`",
