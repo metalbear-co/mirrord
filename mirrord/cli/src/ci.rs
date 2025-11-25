@@ -2,11 +2,13 @@ use std::{
     collections::HashMap,
     env::{self, temp_dir},
     fs::File,
-    os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
     process::Stdio,
     time::SystemTime,
 };
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
