@@ -116,6 +116,10 @@ fancy-regex = { version = "0.14" }
 enum_dispatch = "0.3"
 dotenvy = "0.15"
 
+# Used by `agent`, `protocol`
+serde_json_path = "0.7.2"
+serde_json_path_macros = "0.1.6"
+
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
 # There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
 hyper = { version = "1", features = ["full"] }
@@ -203,7 +207,7 @@ fs4 = { version = "0.13", features = ["tokio"], default-features = false }
 # Used by `cli`, `sip`
 hex = "0.4"
 
-# Used by `config`, `protocol`.
+# Used by `config`, `protocol`, `agent`
 strum = "0.27.1"
 strum_macros = "0.27.1"
 

@@ -228,6 +228,10 @@ impl PortSubscriptions {
             );
         }
     }
+
+    pub fn get(&mut self, port: u16) -> Option<&PortSubscription> {
+        self.subscriptions.get(&port)
+    }
 }
 
 /// Steal subscription for a port.
