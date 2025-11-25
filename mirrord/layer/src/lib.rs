@@ -66,10 +66,14 @@
 extern crate alloc;
 extern crate core;
 
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use std::ffi::c_void;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    ffi::c_void,
     fs::File,
     io::Read,
     net::SocketAddr,
@@ -83,7 +87,12 @@ use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
-use libc::{c_char, c_int, pid_t};
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use libc::c_char;
+use libc::{c_int, pid_t};
 use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
