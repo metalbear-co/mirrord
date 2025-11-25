@@ -12,7 +12,6 @@ permissions:
 jobs:
   check_latest_release:
     runs-on: ubuntu-24.04
-    # Expose latest tag & URL to other jobs (used by install tests)
     outputs:
       tag: ${{ steps.check.outputs.tag }}
       html_url: ${{ steps.check.outputs.html_url }}
@@ -96,7 +95,9 @@ jobs:
               // All required are present. Optional may still be missing.
               core.info("All required assets are present on latest release.");
               if (missingOptional.length > 0) {
-                core.warning(`Missing OPTIONAL (Windows) assets on latest release ${tag}: ${missingOptional.join(", ")}`);
+                core.warning(
+                  `Missing OPTIONAL (Windows) assets on latest release ${tag}: ${missingOptional.join(", ")}`
+                );
               }
               core.setOutput("ok", "true");
               core.setOutput("error", "");
@@ -174,6 +175,9 @@ jobs:
         run: |
           echo "✅ Release monitor: all required and optional assets are present on latest release."
 
+  # -----------------------------------
+  # Install-path tests (curl + brew)
+  # -----------------------------------
   test_install_paths:
     needs: check_latest_release
     strategy:
@@ -226,7 +230,6 @@ jobs:
           echo "error=" >> "$GITHUB_OUTPUT"
 
       - name: Remove mirrord binary between installers
-        # Run on both OSes: we want a clean slate before brew.
         shell: bash
         run: |
           set -euo pipefail
@@ -237,7 +240,6 @@ jobs:
           else
             echo "No mirrord binary found to remove."
           fi
-          # Clear shell hash cache just in case
           hash -r || true
 
       - name: Test Homebrew install (macOS only)
@@ -331,3 +333,122 @@ jobs:
         if: steps.curl.outputs.ok == 'true' && (runner.os != 'macOS' || steps.brew.outputs.ok == 'true')
         run: |
           echo "✅ Install monitor: installers succeeded on ${{ runner.os }}."
+
+  # ---------------------------------------------------
+  # Version endpoint vs GitHub release URLs consistency
+  # ---------------------------------------------------
+  check_version_endpoint:
+    needs: check_latest_release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check version endpoint vs release download URLs
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_url="https://version.mirrord.dev/v1/version"
+          echo "Fetching version from: $api_url"
+
+          # The endpoint returns plain text like: 3.174.0%
+          if ! curl -fsSL "$api_url" -o /tmp/version.txt; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Failed to fetch $api_url" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "missing_urls=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Raw version.mirrord.dev response:"
+          cat /tmp/version.txt || true
+
+          # Strip whitespace and trailing '%' if present
+          ver="$(tr -d '\r' < /tmp/version.txt | sed 's/[[:space:]]*$//' | sed 's/%$//')"
+
+          if [ -z "$ver" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Empty version string from version.mirrord.dev" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "missing_urls=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Normalized version from API: '$ver'"
+
+          base="https://github.com/metalbear-co/mirrord/releases/download"
+          urls=(
+            "$base/$ver/mirrord_linux_x86_64"
+            "$base/$ver/mirrord_linux_aarch64"
+            "$base/$ver/mirrord_mac_universal"
+          )
+
+          echo "Checking URLs:"
+          printf '  - %s\n' "${urls[@]}"
+
+          missing=()
+          for u in "${urls[@]}"; do
+            # HEAD to avoid downloading full binaries
+            if ! curl -fsSIL "$u" >/dev/null 2>&1; then
+              echo "URL appears unreachable (HEAD failed): $u"
+              missing+=("$u")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Some URLs are missing or unreachable for version $ver:"
+            printf '  - %s\n' "${missing[@]}"
+
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Some download URLs are missing or not reachable for version $ver" >> "$GITHUB_OUTPUT"
+            printf 'missing_urls=%s\n' "$(IFS=','; echo "${missing[*]}")" >> "$GITHUB_OUTPUT"
+          else
+            echo "All download URLs for version $ver are reachable."
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "error=" >> "$GITHUB_OUTPUT"
+            echo "missing_urls=" >> "$GITHUB_OUTPUT"
+          fi
+
+          printf 'version=%s\n' "$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack on version API / URL mismatch
+        if: steps.version.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ needs.check_latest_release.outputs.tag }}
+          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
+          VER: ${{ steps.version.outputs.version }}
+          ERROR: ${{ steps.version.outputs.error }}
+          MISSING_URLS: ${{ steps.version.outputs.missing_urls }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          ver="${VER:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          error="${ERROR:-Unknown error}"
+          missing_urls="${MISSING_URLS:-(none listed)}"
+
+          text=":rotating_light: *Version endpoint check FAILED for \`$repo\`*\n\
+          • *Version from API:* \`$ver\`\n\
+          • *Latest release tag (from monitor):* \`$tag\`\n\
+          • *Problem:* $error\n\
+          • *Missing/broken URLs:* $missing_urls\n\
+          • *Release page:* $html_url\n\
+          • *API endpoint:* https://version.mirrord.dev/v1/version"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          exit 1
+
+      - name: Log version endpoint success
+        if: steps.version.outputs.ok == 'true'
+        run: |
+          echo "✅ Version endpoint check passed. version.mirrord.dev -> ${{ steps.version.outputs.version }}"
