@@ -1,33 +1,35 @@
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
-    fs::File,
     path::{Path, PathBuf},
+};
+
+#[cfg(not(target_os = "windows"))]
+use std::{
+    fs::File,
+    os::unix::process::ExitStatusExt,
     process::Stdio,
     time::SystemTime,
 };
-
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
 
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
-use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
+use mirrord_config::{ci::CiConfig, config::ConfigContext, LayerConfig};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
-use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    fs::{self, create_dir_all},
-    io::AsyncWriteExt,
-};
+use tokio::fs;
 use tracing::Level;
 
-use crate::{
-    CiArgs, CiCommand, CiStartArgs, CliError, CliResult, ci::error::CiError, user_data::UserData,
-};
+#[cfg(not(target_os = "windows"))]
+use rand::distr::{Alphanumeric, SampleString};
+
+#[cfg(not(target_os = "windows"))]
+use tokio::{fs::create_dir_all, io::AsyncWriteExt};
+
+use crate::{ci::error::CiError, CiArgs, CiCommand, CiStartArgs, CliError, CliResult, user_data::UserData};
 
 pub(crate) mod error;
 pub(super) mod start;
@@ -40,7 +42,7 @@ pub(crate) mod stop;
 const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 
 /// Alias for mirrord-for-ci results.
-type CiResult<T> = Result<T, crate::ci::error::CiError>;
+type CiResult<T> = Result<T, CiError>;
 
 /// Handle commands related to CI `mirrord ci ...`
 pub(crate) async fn ci_command(
@@ -50,17 +52,19 @@ pub(crate) async fn ci_command(
 ) -> CliResult<()> {
     match args.command {
         CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file).await,
-        CiCommand::Start(exec_args) => Ok(start::CiStartCommandHandler::new(
-            exec_args, watch, user_data,
-        )
-        .await?
-        .handle()
-        .await?),
-        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new()
-            .await?
-            .handle()
-            .await
-            .map(|_| ())?),
+        CiCommand::Start(exec_args) => Ok(
+            start::CiStartCommandHandler::new(exec_args, watch, user_data)
+                .await?
+                .handle()
+                .await?,
+        ),
+        CiCommand::Stop => Ok(
+            stop::CiStopCommandHandler::new()
+                .await?
+                .handle()
+                .await
+                .map(|_| ())?,
+        ),
     }
 }
 
@@ -92,6 +96,7 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
         .inspect_err(|error| {
             subtask.failure(Some(&format!("failed to create API key: {error}")));
         })?;
+
     subtask.success(Some(&format!(
         r#"mirrord CI API key:
 {api_key}
@@ -126,9 +131,11 @@ impl MirrordCiStore {
     /// creating a new file if it needed.
     async fn write_to_file(&self) -> CiResult<()> {
         let file_path = temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH);
+
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
+
         let mut store_file = fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -138,6 +145,7 @@ impl MirrordCiStore {
 
         if store_file.try_lock_exclusive()? {
             let contents = serde_json::to_vec(self)?;
+            use tokio::io::AsyncWriteExt as _;
             store_file.write_all(contents.as_slice()).await?;
             store_file.unlock()?;
         }
@@ -280,7 +288,8 @@ impl MirrordCi {
         let child_pid = child
             .id()
             .map(|pid| pid.to_string())
-            .unwrap_or("unknown".to_string());
+            .unwrap_or_else(|| "unknown".to_string());
+
         if self.start_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
             match child.wait().await {
@@ -292,8 +301,10 @@ impl MirrordCi {
                             SIGKILL => progress.success(Some("process killed by SIGKILL")),
                             SIGTERM => progress.success(Some("process terminated by SIGTERM")),
                             SIGINT => progress.success(Some("process interrupted by SIGINT")),
-                            _ => progress
-                                .failure(Some(&format!("process exited with status: {}", status))),
+                            _ => progress.failure(Some(&format!(
+                                "process exited with status: {}",
+                                status
+                            ))),
                         };
                     }
                     Ok::<_, CiError>(())
@@ -313,16 +324,22 @@ impl MirrordCi {
     }
 
     #[cfg(target_os = "windows")]
+    #[tracing::instrument(level = Level::TRACE, skip(progress))]
     pub(super) async fn prepare_command<P: Progress>(
         self,
         progress: &mut P,
-        binary: &str,
-        binary_path: &Path,
-        binary_args: &[String],
-        env_vars: &HashMap<String, String>,
-        CiConfig { output_dir }: &CiConfig,
+        _binary: &str,
+        _binary_path: &Path,
+        _binary_args: &[String],
+        _env_vars: &HashMap<String, String>,
+        _config: &CiConfig,
     ) -> CiResult<()> {
-        unimplemented!("Not supported on windows.");
+        progress.failure(Some(
+            "`mirrord ci start` is not implemented on Windows targets yet.",
+        ));
+        Err(CiError::UnsupportedPlatform(
+            "mirrord ci is not supported on Windows".to_string(),
+        ))
     }
 
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
