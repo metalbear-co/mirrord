@@ -676,7 +676,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        if state.experimental().dl_go {
+        if state.experimental().dlopen_cgo {
             unsafe {
                 replace!(
                     &mut hook_manager,
