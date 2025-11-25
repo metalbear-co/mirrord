@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
