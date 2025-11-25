@@ -242,16 +242,15 @@ jobs:
           fi
           hash -r || true
 
-      - name: Test Homebrew install (macOS only)
+      - name: Test Homebrew install (Linux + macOS)
         id: brew
-        if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
 
           if ! command -v brew >/dev/null 2>&1; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "error=Homebrew (brew) is not installed on this macOS runner." >> "$GITHUB_OUTPUT"
+            echo "error=Homebrew (brew) is not installed on this runner." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -285,8 +284,8 @@ jobs:
           echo "error=" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack on install failures
-        # Fail if curl fails on any OS, or if brew fails on macOS.
-        if: steps.curl.outputs.ok != 'true' || (runner.os == 'macOS' && steps.brew.outputs.ok != 'true')
+        # Fail if curl fails or brew fails (on any OS in the matrix).
+        if: steps.curl.outputs.ok != 'true' || steps.brew.outputs.ok != 'true'
         env:
           SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
           BREW_OK: ${{ steps.brew.outputs.ok }}
@@ -316,7 +315,7 @@ jobs:
           • *Tag (from monitor):* \`$tag\`\n\
           • *curl|bash installer ok?:* ${curl_status}\n\
           • *curl error:* ${curl_error}\n\
-          • *brew install ok? (macOS only):* ${brew_status}\n\
+          • *brew install ok?:* ${brew_status}\n\
           • *brew error:* ${brew_error}\n\
           • *Release page:* ${html_url}"
 
@@ -330,9 +329,9 @@ jobs:
           exit 1
 
       - name: Log install success
-        if: steps.curl.outputs.ok == 'true' && (runner.os != 'macOS' || steps.brew.outputs.ok == 'true')
+        if: steps.curl.outputs.ok == 'true' && steps.brew.outputs.ok == 'true'
         run: |
-          echo "✅ Install monitor: installers succeeded on ${{ runner.os }}."
+          echo "✅ Install monitor: curl and Homebrew installers succeeded on ${{ runner.os }}."
 
   # ---------------------------------------------------
   # Version endpoint vs GitHub release URLs consistency
