@@ -9,9 +9,6 @@ use std::{
     time::SystemTime,
 };
 
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
-
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
@@ -317,14 +314,18 @@ impl MirrordCi {
     #[cfg(target_os = "windows")]
     pub(super) async fn prepare_command<P: Progress>(
         self,
-        progress: &mut P,
-        binary: &str,
-        binary_path: &Path,
-        binary_args: &[String],
-        env_vars: &HashMap<String, String>,
-        CiConfig { output_dir }: &CiConfig,
+        _progress: &mut P,
+        _binary: &str,
+        _binary_path: &Path,
+        _binary_args: &[String],
+        _env_vars: &HashMap<String, String>,
+        CiConfig { output_dir: _ }: &CiConfig,
     ) -> CiResult<()> {
-        unimplemented!("Not supported on windows.");
+        // Not supported on Windows yet; keep this stub so the file compiles on Windows targets.
+        Err(CiError::BinaryExecuteFailed(
+            "mirrord ci".to_string(),
+            vec!["Not supported on Windows".to_string()],
+        ))
     }
 
     /// Reads the [`MirrordCiStore`], and the env var [`MIRRORD_CI_API_KEY`] to return a valid
