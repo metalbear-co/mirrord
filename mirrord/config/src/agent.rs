@@ -69,6 +69,8 @@ impl fmt::Display for LinuxCapability {
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
 ///     "inject_headers": false,
+///     "max_body_buffer_size": 65535,
+///     "max_body_buffer_timeout": 1000
 ///   }
 /// }
 /// ```
@@ -462,6 +464,23 @@ pub struct AgentConfig {
     /// - `forwarded-to-client`: set when the request was sent to the local app
     #[config(default = false)]
     pub inject_headers: bool,
+
+    /// ### agent.max_body_buffer_size {#agent-max_body_buffer_size}
+    ///
+    /// Maximum size, in bytes, of HTTP request body buffers. Used for
+    /// temporarily storing bodies of incoming HTTP requests to run
+    /// body filters. HTTP body filters will not match any requests
+    /// with bodies larger than this.
+    #[config(default = 65535)]
+    pub max_body_buffer_size: u32,
+
+    /// ### agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}
+    ///
+    /// Maximum timeout, in milliseconds, for receiving HTTP request
+    /// bodies. HTTP body filters will not match any requests whose
+    /// bodies do not arrive within this timeout.
+    #[config(default = 1000)]
+    pub max_body_buffer_timeout: u32,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

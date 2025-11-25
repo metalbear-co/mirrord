@@ -162,6 +162,8 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "flush_connections": false,
     "exclude_from_mesh": false
     "inject_headers": false,
+    "max_body_buffer_size": 65535,
+    "max_body_buffer_timeout": 1000
   }
 }
 ```
@@ -353,6 +355,19 @@ with `RUST_LOG`.
   }
 }
 ```
+
+### agent.max_body_buffer_size {#agent-max_body_buffer_size}
+
+Maximum size, in bytes, of HTTP request body buffers. Used for
+temporarily storing bodies of incoming HTTP requests to run
+body filters. HTTP body filters will not match any requests
+with bodies larger than this.
+
+### agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}
+
+Maximum timeout, in milliseconds, for receiving HTTP request
+bodies. HTTP body filters will not match any requests whose
+bodies do not arrive within this timeout.
 
 ### agent.metrics {#agent-metrics}
 
@@ -1603,6 +1618,11 @@ Example:
   ]
 }
 ```
+
+##### feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}
+
+Matches the request based on the contents of its body. Currently only JSON body filtering
+is supported.
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 

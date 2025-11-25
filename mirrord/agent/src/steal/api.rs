@@ -216,10 +216,10 @@ impl TcpStealerApi {
                     connection_id,
                     request_id: Self::REQUEST_ID,
                     request: InternalHttpRequest {
-                        method: request_head.method,
-                        uri: request_head.uri,
-                        headers: request_head.headers,
-                        version: request_head.version,
+                        method: request_head.parts.method,
+                        uri: request_head.parts.uri,
+                        headers: request_head.parts.headers,
+                        version: request_head.parts.version,
                         body: InternalHttpBodyNew {
                             frames: request_head.body_head,
                             is_last: request_head.body_finished,
@@ -243,10 +243,10 @@ impl TcpStealerApi {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
                 ChunkedRequest::StartV1(HttpRequest {
                     internal_request: InternalHttpRequest {
-                        method: request_head.method,
-                        uri: request_head.uri,
-                        headers: request_head.headers,
-                        version: request_head.version,
+                        method: request_head.parts.method,
+                        uri: request_head.parts.uri,
+                        headers: request_head.parts.headers,
+                        version: request_head.parts.version,
                         body: request_head.body_head,
                     },
                     connection_id,
@@ -270,10 +270,10 @@ impl TcpStealerApi {
         } else if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestFramed(HttpRequest {
                 internal_request: InternalHttpRequest {
-                    method: request_head.method,
-                    uri: request_head.uri,
-                    headers: request_head.headers,
-                    version: request_head.version,
+                    method: request_head.parts.method,
+                    uri: request_head.parts.uri,
+                    headers: request_head.parts.headers,
+                    version: request_head.parts.version,
                     body: InternalHttpBody(request_head.body_head.into()),
                 },
                 connection_id,
@@ -284,10 +284,10 @@ impl TcpStealerApi {
         } else {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(HttpRequest {
                 internal_request: InternalHttpRequest {
-                    method: request_head.method,
-                    uri: request_head.uri,
-                    headers: request_head.headers,
-                    version: request_head.version,
+                    method: request_head.parts.method,
+                    uri: request_head.parts.uri,
+                    headers: request_head.parts.headers,
+                    version: request_head.parts.version,
                     body: frames_to_legacy(request_head.body_head),
                 },
                 connection_id,
@@ -440,10 +440,10 @@ impl TcpStealerApi {
                 let message = if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
                     DaemonTcp::HttpRequestFramed(HttpRequest {
                         internal_request: InternalHttpRequest {
-                            method: request.request_head.method,
-                            uri: request.request_head.uri,
-                            headers: request.request_head.headers,
-                            version: request.request_head.version,
+                            method: request.request_head.parts.method,
+                            uri: request.request_head.parts.uri,
+                            headers: request.request_head.parts.headers,
+                            version: request.request_head.parts.version,
                             body: InternalHttpBody(
                                 request.request_head.body_head.into_iter().collect(),
                             ),
@@ -455,10 +455,10 @@ impl TcpStealerApi {
                 } else {
                     DaemonTcp::HttpRequest(HttpRequest {
                         internal_request: InternalHttpRequest {
-                            method: request.request_head.method,
-                            uri: request.request_head.uri,
-                            headers: request.request_head.headers,
-                            version: request.request_head.version,
+                            method: request.request_head.parts.method,
+                            uri: request.request_head.parts.uri,
+                            headers: request.request_head.parts.headers,
+                            version: request.request_head.parts.version,
                             body: frames_to_legacy(request.request_head.body_head),
                         },
                         connection_id,
