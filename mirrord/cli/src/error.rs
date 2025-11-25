@@ -1,5 +1,6 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+use axum::response::{IntoResponse, Response};
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -566,6 +567,12 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
         }
+    }
+}
+
+impl IntoResponse for CliError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
