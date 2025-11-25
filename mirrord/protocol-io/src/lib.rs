@@ -122,7 +122,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
 
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
-        let shared_state = Arc::new(SharedState::new(inbound_tx.clone(), None));
+        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade(), None));
 
         tokio::spawn(io_task::<_, Type>(
             framed,
@@ -158,7 +158,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
 
         let shared_state = Arc::new(SharedState::new(
-            inbound_tx.clone(),
+            inbound_tx.downgrade(),
             filter.map(|f| Box::new(f) as _),
         ));
 
@@ -178,7 +178,7 @@ impl<Type: ProtocolEndpoint> Connection<Type> {
     pub fn dummy() -> (Self, mpsc::Sender<Type::InMsg>, ConnectionOutput<Type>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(32);
 
-        let shared_state = Arc::new(SharedState::new(inbound_tx.clone(), None));
+        let shared_state = Arc::new(SharedState::new(inbound_tx.downgrade(), None));
 
         let connection = Connection {
             rx: inbound_rx,
@@ -326,8 +326,12 @@ struct SharedState<Type: ProtocolEndpoint> {
     queues: Mutex<Queues>,
     nonempty: Arc<Notify>,
 
-    /// Used for injecting "fake" incoming messages.
-    in_tx: mpsc::Sender<Type::InMsg>,
+    /// Used for injecting "fake" incoming messages. It's a weak
+    /// sender because the "main" strong (i.e. normal) sender is owned
+    /// by the [`io_task`], and we want the channel to close once it
+    /// exits. There's no point injecting messages anyway if the IO
+    /// task is dead.
+    in_tx: mpsc::WeakSender<Type::InMsg>,
 
     /// Used for doing a sort of filter_map and message faking. If
     /// Some, all outgoing messages are passed to this function, and
@@ -344,7 +348,7 @@ struct SharedState<Type: ProtocolEndpoint> {
 impl<Type: ProtocolEndpoint> SharedState<Type> {
     const MAX_CAPACITY: usize = 1024 * 16;
     fn new(
-        in_tx: mpsc::Sender<Type::InMsg>,
+        in_tx: mpsc::WeakSender<Type::InMsg>,
         out_filter: Option<Box<FilterFn<Type::InMsg, Type::OutMsg>>>,
     ) -> Self {
         Self {
@@ -408,7 +412,16 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
             match filter(msg) {
                 Either::Left(out) => msg = out,
                 Either::Right(inj) => {
-                    let _ = self.in_tx.send(inj).await;
+                    match self.in_tx.upgrade() {
+                        Some(tx) => {
+                            let _ = tx.send(inj).await;
+                        }
+                        None => {
+                            tracing::warn!(
+                                "Cannot inject response to filtered message because the IO task has closed. Dropping."
+                            )
+                        }
+                    }
                     return;
                 }
             }

@@ -633,6 +633,7 @@ impl IntProxy {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_connection_refresh(
         &mut self,
         kind: ConnectionRefresh,
