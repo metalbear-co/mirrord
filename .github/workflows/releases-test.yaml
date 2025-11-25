@@ -12,6 +12,9 @@ permissions:
 jobs:
   check_latest_release:
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      html_url: ${{ steps.check.outputs.html_url }}
     steps:
       - name: Check latest GitHub Release assets
         id: check
@@ -169,3 +172,101 @@ jobs:
         if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional == ''
         run: |
           echo "✅ Release monitor: all required and optional assets are present on latest release."
+
+  test_install_paths:
+    runs-on: ubuntu-24.04
+    needs: check_latest_release
+    if: always()
+    steps:
+      - name: Show latest release info (from monitor)
+        run: |
+          echo "Latest tag from monitor: '${{ needs.check_latest_release.outputs.tag }}'"
+          echo "Release URL from monitor: '${{ needs.check_latest_release.outputs.html_url }}'"
+
+      - name: Test Homebrew install (brew install metalbear-co/mirrord/mirrord)
+        id: brew
+        run: |
+          set -u
+          if ! command -v brew >/dev/null 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Homebrew (brew) is not installed on this runner" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Try to install mirrord via Homebrew tap
+          if ! brew install metalbear-co/mirrord/mirrord >/tmp/brew_install.log 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=brew install metalbear-co/mirrord/mirrord failed. See logs in this step." >> "$GITHUB_OUTPUT"
+            echo "----- brew output -----"
+            cat /tmp/brew_install.log || true
+            exit 0
+          fi
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "error=" >> "$GITHUB_OUTPUT"
+          echo "brew install succeeded."
+
+      - name: Test curl|bash installer
+        id: curl
+        run: |
+          set -u
+          url="https://raw.githubusercontent.com/metalbearco/mirrord/main/scripts/install.sh"
+          # Pipefail semantics: we check the pipeline with `if ! ... | bash;`
+          if ! curl -fsSL "$url" | bash >/tmp/install_sh.log 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=curl|bash installer failed from $url. See logs in this step." >> "$GITHUB_OUTPUT"
+            echo "----- installer output -----"
+            cat /tmp/install_sh.log || true
+            exit 0
+          fi
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "error=" >> "$GITHUB_OUTPUT"
+          echo "curl|bash installer succeeded."
+
+      - name: Notify Slack on install failures
+        if: steps.brew.outputs.ok != 'true' || steps.curl.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          BREW_OK: ${{ steps.brew.outputs.ok }}
+          BREW_ERROR: ${{ steps.brew.outputs.error }}
+          CURL_OK: ${{ steps.curl.outputs.ok }}
+          CURL_ERROR: ${{ steps.curl.outputs.error }}
+          TAG: ${{ needs.check_latest_release.outputs.tag }}
+          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+
+          brew_status="${BREW_OK:-unknown}"
+          curl_status="${CURL_OK:-unknown}"
+          brew_error="${BREW_ERROR:-none}"
+          curl_error="${CURL_ERROR:-none}"
+
+          text=":warning: *Release install-path check FAILED for \`$repo\`*\n\
+          • *Tag (from monitor):* \`$tag\`\n\
+          • *brew install metalbear-co/mirrord/mirrord:* ${brew_status}\n\
+          • *brew error:* ${brew_error}\n\
+          • *curl|bash installer:* ${curl_status}\n\
+          • *curl error:* ${curl_error}\n\
+          • *Release page:* ${html_url}"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          # Mark job as failed if any path failed.
+          exit 1
+
+      - name: Log install success
+        if: steps.brew.outputs.ok == 'true' && steps.curl.outputs.ok == 'true'
+        run: |
+          echo "✅ Install monitor: both Homebrew and curl|bash installers succeeded."
