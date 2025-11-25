@@ -284,7 +284,7 @@ jobs:
           echo "error=" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack on install failures
-        # Fail if curl fails or brew fails (on any OS in the matrix).
+        # Fail if curl fails or brew fails.
         if: steps.curl.outputs.ok != 'true' || steps.brew.outputs.ok != 'true'
         env:
           SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
