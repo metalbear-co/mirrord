@@ -14,7 +14,7 @@ on:
         options: [no, draft, prerelease, release]
         default: no
       release_tag:
-        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
         required: false
         type: string
       sign_artifacts:
@@ -248,7 +248,7 @@ jobs:
           } elseif ($env:RELEASE_TAG_INPUT) {
             $tag = $env:RELEASE_TAG_INPUT
           } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
-            $tag = "v$($env:MIRRORD_VERSION)"
+            $tag = "$($env:MIRRORD_VERSION)"
           } else {
             throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
           }
