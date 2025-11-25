@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use std::box::Box;
+
 pub type Result<T> = std::result::Result<T, SipError>;
 
 #[derive(Debug, Error)]
@@ -42,5 +44,11 @@ pub enum SipError {
     BinaryMoveFailed(std::io::Error),
 
     #[error("Code sign error: `{0}`")]
-    CodeSignError(#[from] apple_codesign::AppleCodesignError),
+    CodeSignError(#[from] Box<apple_codesign::AppleCodesignError>),
+}
+
+impl From<apple_codesign::AppleCodesignError> for SipError {
+    fn from(value: apple_codesign::AppleCodesignError) -> Self {
+        Self::CodeSignError(Box::new(value))
+    }
 }
