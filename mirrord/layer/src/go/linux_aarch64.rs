@@ -90,7 +90,7 @@ fn post_go1_19(hook_manager: &mut HookManager, module_name: Option<&str>) {
                 std::option::Option<unsafe extern "C" fn()>,
             >(
                 hook_manager
-                    .resolve_symbol_main_module(module_name, "runtime.asmcgocall")
+                    .resolve_symbol_in_module(module_name, "runtime.asmcgocall")
                     .expect("found go but couldn't find runtime.asmcgocall please file a bug"),
             );
         }
