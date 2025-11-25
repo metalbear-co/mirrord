@@ -1,0 +1,171 @@
+name: Release Monitor
+
+on:
+  schedule:
+    # Every 5 minutes (for testing)
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check_latest_release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check latest GitHub Release assets
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            // === REQUIRED ASSETS ===
+            // These must exist on every production release.
+            const requiredAssets = [
+              // Linux x86_64
+              "mirrord_linux_x86_64.zip",
+              "mirrord_linux_x86_64.shasum256",
+              "mirrord_linux_x86_64",
+              "libmirrord_layer_linux_x86_64.so",
+
+              // Linux aarch64
+              "mirrord_linux_aarch64.zip",
+              "mirrord_linux_aarch64.shasum256",
+              "mirrord_linux_aarch64",
+              "libmirrord_layer_linux_aarch64.so",
+
+              // macOS universal
+              "mirrord_mac_universal.zip",
+              "mirrord_mac_universal.shasum256",
+              "mirrord_mac_universal",
+              "libmirrord_layer_mac_universal.dylib"
+            ];
+
+            // === OPTIONAL ASSETS ===
+            // Windows artifacts: warn if missing, but don't fail the job.
+            const optionalAssets = [
+              "mirrord.exe",
+              "mirrord.exe.sha256",
+              "mirrord_layer_win.dll",
+              "mirrord_layer_win.dll.sha256"
+            ];
+
+            core.info(`Checking latest release for ${owner}/${repo}...`);
+
+            let release;
+            try {
+              const res = await github.rest.repos.getLatestRelease({ owner, repo });
+              release = res.data;
+            } catch (error) {
+              const msg = `Failed to get latest release: ${error.message}`;
+              core.warning(msg);
+              core.setOutput("ok", "false");
+              core.setOutput("error", msg);
+              core.setOutput("tag", "");
+              core.setOutput("html_url", "");
+              core.setOutput("missing_required", "");
+              core.setOutput("missing_optional", "");
+              return;
+            }
+
+            const tag = release.tag_name;
+            const htmlUrl = release.html_url;
+            const assetNames = release.assets.map(a => a.name);
+            core.info(`Latest release tag: ${tag}`);
+            core.info(`Assets on release: ${assetNames.join(", ") || "(none)"}`);
+
+            const missingRequired = requiredAssets.filter(name => !assetNames.includes(name));
+            const missingOptional = optionalAssets.filter(name => !assetNames.includes(name));
+
+            core.setOutput("tag", tag);
+            core.setOutput("html_url", htmlUrl);
+            core.setOutput("missing_required", missingRequired.join(", "));
+            core.setOutput("missing_optional", missingOptional.join(", "));
+
+            if (missingRequired.length > 0) {
+              const msg = `Missing REQUIRED assets on latest release ${tag}: ${missingRequired.join(", ")}`;
+              core.warning(msg);
+              core.setOutput("ok", "false");
+              core.setOutput("error", msg);
+            } else {
+              // All required are present. Optional may still be missing.
+              core.info("All required assets are present on latest release.");
+              if (missingOptional.length > 0) {
+                core.warning(`Missing OPTIONAL (Windows) assets on latest release ${tag}: ${missingOptional.join(", ")}`);
+              }
+              core.setOutput("ok", "true");
+              core.setOutput("error", "");
+            }
+
+      # Hard failures: required assets missing or API failure
+      - name: Notify Slack on REQUIRED asset failure
+        if: steps.check.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ steps.check.outputs.tag }}
+          HTML_URL: ${{ steps.check.outputs.html_url }}
+          ERROR: ${{ steps.check.outputs.error }}
+          MISSING_REQUIRED: ${{ steps.check.outputs.missing_required }}
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          error="${ERROR:-Unknown error}"
+          missing_required="${MISSING_REQUIRED:-(none listed)}"
+
+          text=":rotating_light: *Release monitor FAILURE for \`$repo\`*\n\
+          • *Tag:* \`$tag\`\n\
+          • *Problem:* $error\n\
+          • *Missing REQUIRED assets:* $missing_required\n\
+          • *Release page:* $html_url"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          # Mark the job as failed for required-asset issues
+          exit 1
+
+      # Soft warnings: only optional Windows assets missing
+      - name: Notify Slack on OPTIONAL Windows asset warning
+        if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional != ''
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ steps.check.outputs.tag }}
+          HTML_URL: ${{ steps.check.outputs.html_url }}
+          MISSING_OPTIONAL: ${{ steps.check.outputs.missing_optional }}
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          missing_optional="${MISSING_OPTIONAL:-(none listed)}"
+
+          text=":warning: *Release monitor WARNING for \`$repo\`*\n\
+          • *Tag:* \`$tag\`\n\
+          • *Missing OPTIONAL (Windows) assets:* $missing_optional\n\
+          • *Note:* Linux/macOS assets are OK. This is a warning only.\n\
+          • *Release page:* $html_url"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+      - name: Log success
+        if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional == ''
+        run: |
+          echo "✅ Release monitor: all required and optional assets are present on latest release."
