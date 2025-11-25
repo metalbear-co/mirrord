@@ -1071,7 +1071,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
-            Commands::Wizard => { wizard::wizard_command().await }
+            Commands::Wizard => { wizard::wizard_command(user_data).await }
         };
 
         Ok(())

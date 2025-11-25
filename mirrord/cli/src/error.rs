@@ -1,5 +1,5 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
-
+use axum::response::{IntoResponse, Response};
 #[cfg(target_os = "windows")]
 use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
@@ -587,6 +587,12 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
         }
+    }
+}
+
+impl IntoResponse for CliError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
