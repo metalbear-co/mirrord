@@ -181,6 +181,98 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
     }
 }
 
+/// Emulates sendfile using a sequence of read + write operations at the layer level.
+/// This allows copying files when the input/output fds are on different
+/// machines.
+///
+/// Returns (bytes_written, new_offset) on success.
+unsafe fn sendfile_impl(
+    in_fd: RawFd,
+    out_fd: RawFd,
+    offset: Option<off_t>,
+    count: size_t,
+) -> Option<(ssize_t, off_t)> {
+    let mut buffer = vec![0u8; count];
+
+    let bytes_read = unsafe {
+        if let Some(offset) = offset {
+            libc::pread(in_fd, buffer.as_mut_ptr() as *mut c_void, count, offset)
+        } else {
+            libc::read(in_fd, buffer.as_mut_ptr() as *mut c_void, count)
+        }
+    };
+
+    if bytes_read < 0 {
+        return None;
+    }
+
+    let written = unsafe {
+        libc::write(
+            out_fd,
+            buffer.as_ptr() as *const c_void,
+            bytes_read as usize,
+        )
+    };
+
+    if written < 0 {
+        return None;
+    }
+
+    Some((written, offset.unwrap_or(0) + bytes_read as off_t))
+}
+
+/// Hook for macos's [`libc::sendfile`].
+#[cfg(target_os = "macos")]
+#[hook_fn]
+pub(super) unsafe extern "C" fn sendfile_detour(
+    fd: c_int,
+    s: c_int,
+    offset: off_t,
+    len: *mut off_t,
+    _hdtr: *const libc::sf_hdtr,
+    _flags: c_int,
+) -> c_int {
+    unsafe {
+        let Some(count) = len.as_mut() else {
+            return -1;
+        };
+
+        sendfile_impl(fd, s, Some(offset), *count as usize)
+            .map(|(written, _)| {
+                *count = written as off_t;
+                0
+            })
+            .unwrap_or(-1)
+    }
+}
+
+/// Hook for linux's [`libc::sendfile`].
+#[cfg(target_os = "linux")]
+#[hook_fn]
+pub(super) unsafe extern "C" fn sendfile_detour(
+    out_fd: c_int,
+    in_fd: c_int,
+    offset: *mut off_t,
+    count: size_t,
+) -> ssize_t {
+    unsafe {
+        let offset_val = if offset.is_null() {
+            None
+        } else {
+            Some(*offset)
+        };
+
+        sendfile_impl(in_fd, out_fd, offset_val, count)
+            .map(|(written, new_offset)| {
+                if !offset.is_null() {
+                    *offset = new_offset;
+                }
+                written
+            })
+            .unwrap_or(-1)
+    }
+}
+
 /// see below, to have nice code we also implement it for other archs.
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
@@ -1718,5 +1810,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
                 FN_OPENDIR
             );
         }
+
+        replace!(
+            hook_manager,
+            "sendfile",
+            sendfile_detour,
+            FnSendfile,
+            FN_SENDFILE
+        );
     }
 }
