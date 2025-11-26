@@ -40,24 +40,31 @@
             };
           in
           # On darwin we need both x86 and arm toolchains in order to compile universal binaries
+          # as well as a linux toolchain in order to work on mirrord-agent, which is linux-only
           if pkgs.stdenv.isDarwin then
             let
               # aarch64 -> x86_64
               # x86_64 -> aarch64
-              crossTarget =
+              darwinCrossTarget =
                 if pkgs.stdenv.hostPlatform.isAarch then "x86_64-apple-darwin" else "aarch64-apple-darwin";
 
-              # Fewer components are required for the cross-compilation toolchain because we don't need IDE functionality
-              crossComponents = (fenix.targets.${crossTarget}.fromToolchainName toolchainName).withComponents [
-                "rustc"
-                "rust-src"
-              ];
+              crossComponents =
+                builtins.map
+                  (
+                    target:
+                    (fenix.targets.${target}.fromToolchainName toolchainName).withComponents [
+                      # Fewer components are required for the cross-compilation toolchains because we don't need IDE functionality
+                      "rustc"
+                      "rust-src"
+                    ]
+                  )
+                  [
+                    darwinCrossTarget
+                    "x86_64-unknown-linux-gnu"
+                  ];
             in
             {
-              components = fenix.combine [
-                components
-                crossComponents
-              ];
+              components = fenix.combine ([ components ] ++ crossComponents);
               inherit rust-analyzer;
             }
           else
@@ -70,6 +77,7 @@
           packages = with pkgs; [
             nightlyRustToolchain.components
             nightlyRustToolchain.rust-analyzer
+            cargo-zigbuild
 
             # E2E testing
             go
@@ -82,6 +90,13 @@
               ]
             ))
           ];
+
+          env =
+            with pkgs;
+            lib.optionalAttrs stdenv.isDarwin {
+              # Tells bindgen which C compiler to compile frida with when targetting linux
+              CC_x86_64_unknown_linux_gnu = lib.getExe pkgsCross.gnu64.stdenv.cc;
+            };
         };
       }
     );
