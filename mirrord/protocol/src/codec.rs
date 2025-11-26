@@ -102,6 +102,8 @@ pub enum FileRequest {
     /// Same as StatFs, but results in the V2 response.
     StatFsV2(StatFsRequestV2),
     Rename(RenameRequest),
+
+    Sendfile(SendfileRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -174,6 +176,7 @@ pub enum FileResponse {
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
     Rename(RemoteResult<()>),
+    Sendfile(RemoteResult<SendfileResponse>),
 }
 
 /// `-agent` --> `-layer` messages.

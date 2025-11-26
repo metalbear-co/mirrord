@@ -21,8 +21,9 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        RenameRequest, SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest,
-        WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
+        RenameRequest, SeekFileResponse, SendfileRequest, SendfileResponse, StatFsRequestV2,
+        UnlinkAtRequest, UnlinkRequest, WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2,
+        XstatResponse,
     },
 };
 use nix::errno::Errno;
@@ -848,6 +849,24 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
         old_path,
         new_path,
     })??)
+}
+
+pub(crate) fn sendfile(
+    in_fd: RawFd,
+    out_fd: RawFd,
+    offset: i64,
+    count: usize,
+) -> Detour<SendfileResponse> {
+    let in_fd = get_remote_fd(in_fd)?;
+    let out_fd = get_remote_fd(out_fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        SendfileRequest {
+            in_fd,
+            out_fd,
+            offset,
+            count,
+        },
+    )??)
 }
 
 #[cfg(test)]

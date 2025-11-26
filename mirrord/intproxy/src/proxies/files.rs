@@ -58,6 +58,7 @@ impl From<AgentLostFileResponse> for ToLayer {
             FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
             FileResponse::Unlink(..) => FileResponse::Unlink(Err(error)),
             FileResponse::Rename(..) => FileResponse::Rename(Err(error)),
+            FileResponse::Sendfile(..) => FileResponse::Sendfile(Err(error)),
         };
 
         debug_assert_eq!(
@@ -116,6 +117,7 @@ impl FileRequestExt for FileRequest {
             Self::StatFs(..) => dummy_file_response!(XstatFs),
             Self::StatFsV2(..) => dummy_file_response!(XstatFsV2),
             Self::Rename(..) => dummy_file_response!(Rename),
+            Self::Sendfile(..) => dummy_file_response!(Sendfile),
         };
 
         Some(AgentLostFileResponse(layer_id, message_id, response))
@@ -326,6 +328,19 @@ impl RouterFileOps {
 
                 *remote_fd -= self.current_fd_offset;
             }
+
+            FileRequest::Sendfile(SendfileRequest { in_fd, out_fd, .. }) => {
+                if *in_fd < self.current_fd_offset || *out_fd < self.current_fd_offset {
+                    let error_response = request
+                        .agent_lost_response(layer_id, message_id)
+                        .expect("these requests require responses")
+                        .into();
+                    return Err(Box::new(error_response));
+                }
+
+                *in_fd -= self.current_fd_offset;
+                *out_fd -= self.current_fd_offset;
+            }
         };
 
         if let Some(response) = request.agent_lost_response(layer_id, message_id) {
@@ -358,7 +373,8 @@ impl RouterFileOps {
             | FileResponse::MakeDir(..)
             | FileResponse::Unlink(..)
             | FileResponse::Rename(..)
-            | FileResponse::RemoveDir(..) => {}
+            | FileResponse::RemoveDir(..)
+            | FileResponse::Sendfile(..) => {}
 
             FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd: remote_fd, .. }))
             | FileResponse::Open(Ok(OpenFileResponse { fd: remote_fd }))

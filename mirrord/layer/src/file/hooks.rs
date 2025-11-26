@@ -181,6 +181,52 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
     }
 }
 
+/// Hook for macos's [`libc::sendfile`].
+#[cfg(target_os = "macos")]
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendfile_macos_detour(
+    fd: c_int,
+    s: c_int,
+    offset: off_t,
+    len: *mut off_t,
+    hdtr: *const libc::sf_hdtr,
+    flags: c_int,
+) -> c_int {
+    unsafe {
+        let Some(count) = len.as_mut() else {
+            return EINVAL;
+        };
+
+        sendfile(fd, s, offset, *count as usize)
+            .map(|response| {
+                *count = response.written_amount;
+                0
+            })
+            .unwrap_or_bypass_with(|_| FN_SENDFILE_MACOS(fd, s, offset, len, hdtr, flags))
+    }
+}
+
+/// Hook for linux's [`libc::sendfile`].
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendfile_linux_detour(
+    out_fd: c_int,
+    in_fd: c_int,
+    offset: *mut off_t,
+    count: size_t,
+) -> c_int {
+    unsafe {
+        sendfile(out_fd, in_fd, offset, count)
+            .map(|response| {
+                if !offset.is_null() {
+                    *offset = response.last_byte_read_offset;
+                }
+                response.written_amount
+            })
+            .unwrap_or_bypass_with(|_| FN_SENDFILE_LINUX(out_fd, in_fd, offset, count))
+    }
+}
+
 /// see below, to have nice code we also implement it for other archs.
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
@@ -1716,6 +1762,28 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
                 opendir_detour,
                 FnOpendir,
                 FN_OPENDIR
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            replace!(
+                hook_manager,
+                "sendfile",
+                sendfile_macos_detour,
+                FnSendfile_macos,
+                FN_SENDFILE_MACOS
+            );
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            replace!(
+                hook_manager,
+                "sendfile",
+                sendfile_linux_detour,
+                FnSendfile_linux,
+                FN_SENDFILE_LINUX
             );
         }
     }

@@ -553,3 +553,10 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Rename,
     res_path = ProxyToLayerMessage::File => FileResponse::Rename,
 );
+
+impl_request!(
+    req = SendfileRequest,
+    res = RemoteResult<SendfileResponse>,
+    req_path = LayerToProxyMessage::File => FileRequest::Sendfile,
+    res_path = ProxyToLayerMessage::File => FileResponse::Sendfile,
+);

@@ -655,3 +655,17 @@ pub struct RenameRequest {
     pub old_path: PathBuf,
     pub new_path: PathBuf,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SendfileRequest {
+    pub in_fd: u64,
+    pub out_fd: u64,
+    pub offset: i64,
+    pub count: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SendfileResponse {
+    pub written_amount: i64,
+    pub last_byte_read_offset: i64,
+}

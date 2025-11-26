@@ -7,7 +7,7 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::RawFd,
+        fd::{AsRawFd, RawFd},
         unix::{fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf},
@@ -228,6 +228,14 @@ impl FileManager {
                 pathname,
                 flags,
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
+            FileRequest::Sendfile(SendfileRequest {
+                in_fd,
+                out_fd,
+                offset,
+                count,
+            }) => Some(FileResponse::Sendfile(
+                self.sendfile(in_fd, out_fd, offset, count),
+            )),
         })
     }
 
@@ -517,6 +525,49 @@ impl FileManager {
 
         nix::unistd::unlinkat(fd, path.as_ref(), flags)
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
+    }
+
+    pub(crate) fn sendfile(
+        &mut self,
+        in_fd: u64,
+        out_fd: u64,
+        mut offset: i64,
+        count: usize,
+    ) -> RemoteResult<SendfileResponse> {
+        let in_file = self
+            .open_files
+            .get(&in_fd)
+            .ok_or(ResponseError::NotFound(in_fd))?;
+
+        let out_file = self
+            .open_files
+            .get(&out_fd)
+            .ok_or(ResponseError::NotFound(out_fd))?;
+
+        match (in_file, out_file) {
+            (RemoteFile::File(in_file), RemoteFile::File(out_file)) => {
+                let result = unsafe {
+                    libc::sendfile(
+                        out_file.as_raw_fd(),
+                        in_file.as_raw_fd(),
+                        &raw mut offset,
+                        count,
+                    )
+                };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    written => Ok(SendfileResponse {
+                        written_amount: written as i64,
+                        last_byte_read_offset: offset,
+                    }),
+                }
+            }
+            (RemoteFile::File(_), _) => Err(ResponseError::NotFile(out_fd)),
+            (_, RemoteFile::File(_)) => Err(ResponseError::NotFile(in_fd)),
+            // Ideally we should report that neither fds are a file but that would
+            // require too many changes, this is good enough
+            (_, _) => Err(ResponseError::NotFile(in_fd)),
+        }
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
