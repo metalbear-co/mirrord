@@ -1,7 +1,9 @@
 use tracing::Level;
 
 use super::CiResult;
-use crate::ci::{MirrordCiStore, error::CiError};
+use crate::ci::MirrordCiStore;
+#[cfg(unix)]
+use crate::ci::error::CiError;
 
 /// Handles the `mirrord ci stop` command.
 ///
@@ -10,6 +12,7 @@ use crate::ci::{MirrordCiStore, error::CiError};
 pub(super) struct CiStopCommandHandler {
     /// The [`MirrordCiStore`] we retrieve from the user's environment (env var and temp files) so
     /// we can kill the intproxy and the user's process.
+    #[cfg_attr(windows, allow(unused))]
     pub(crate) store: MirrordCiStore,
 }
 
@@ -61,6 +64,7 @@ impl CiStopCommandHandler {
         intproxy_killed.and(user_killed)
     }
 
+    #[cfg_attr(windows, allow(unused))]
     #[cfg(target_os = "windows")]
     pub(super) async fn handle(self) -> CiResult<()> {
         unimplemented!("Command not supported on windows.");
