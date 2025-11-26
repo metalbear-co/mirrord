@@ -1,0 +1,453 @@
+name: Release Monitor
+
+on:
+  schedule:
+    # Every 5 minutes (for testing)
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check_latest_release:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      html_url: ${{ steps.check.outputs.html_url }}
+    steps:
+      - name: Check latest GitHub Release assets
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            // === REQUIRED ASSETS ===
+            // These must exist on every production release.
+            const requiredAssets = [
+              // Linux x86_64
+              "mirrord_linux_x86_64.zip",
+              "mirrord_linux_x86_64.shasum256",
+              "mirrord_linux_x86_64",
+              "libmirrord_layer_linux_x86_64.so",
+
+              // Linux aarch64
+              "mirrord_linux_aarch64.zip",
+              "mirrord_linux_aarch64.shasum256",
+              "mirrord_linux_aarch64",
+              "libmirrord_layer_linux_aarch64.so",
+
+              // macOS universal
+              "mirrord_mac_universal.zip",
+              "mirrord_mac_universal.shasum256",
+              "mirrord_mac_universal",
+              "libmirrord_layer_mac_universal.dylib"
+            ];
+
+            // === OPTIONAL ASSETS ===
+            // Windows artifacts: warn if missing, but don't fail the job.
+            const optionalAssets = [
+              "mirrord.exe",
+              "mirrord.exe.sha256",
+              "mirrord_layer_win.dll",
+              "mirrord_layer_win.dll.sha256"
+            ];
+
+            core.info(`Checking latest release for ${owner}/${repo}...`);
+
+            let release;
+            try {
+              const res = await github.rest.repos.getLatestRelease({ owner, repo });
+              release = res.data;
+            } catch (error) {
+              const msg = `Failed to get latest release: ${error.message}`;
+              core.warning(msg);
+              core.setOutput("ok", "false");
+              core.setOutput("error", msg);
+              core.setOutput("tag", "");
+              core.setOutput("html_url", "");
+              core.setOutput("missing_required", "");
+              core.setOutput("missing_optional", "");
+              return;
+            }
+
+            const tag = release.tag_name;
+            const htmlUrl = release.html_url;
+            const assetNames = release.assets.map(a => a.name);
+            core.info(`Latest release tag: ${tag}`);
+            core.info(`Assets on release: ${assetNames.join(", ") || "(none)"}`);
+
+            const missingRequired = requiredAssets.filter(name => !assetNames.includes(name));
+            const missingOptional = optionalAssets.filter(name => !assetNames.includes(name));
+
+            core.setOutput("tag", tag);
+            core.setOutput("html_url", htmlUrl);
+            core.setOutput("missing_required", missingRequired.join(", "));
+            core.setOutput("missing_optional", missingOptional.join(", "));
+
+            if (missingRequired.length > 0) {
+              const msg = `Missing REQUIRED assets on latest release ${tag}: ${missingRequired.join(", ")}`;
+              core.warning(msg);
+              core.setOutput("ok", "false");
+              core.setOutput("error", msg);
+            } else {
+              // All required are present. Optional may still be missing.
+              core.info("All required assets are present on latest release.");
+              if (missingOptional.length > 0) {
+                core.warning(
+                  `Missing OPTIONAL (Windows) assets on latest release ${tag}: ${missingOptional.join(", ")}`
+                );
+              }
+              core.setOutput("ok", "true");
+              core.setOutput("error", "");
+            }
+
+      # Hard failures: required assets missing or API failure
+      - name: Notify Slack on REQUIRED asset failure
+        if: steps.check.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ steps.check.outputs.tag }}
+          HTML_URL: ${{ steps.check.outputs.html_url }}
+          ERROR: ${{ steps.check.outputs.error }}
+          MISSING_REQUIRED: ${{ steps.check.outputs.missing_required }}
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          error="${ERROR:-Unknown error}"
+          missing_required="${MISSING_REQUIRED:-(none listed)}"
+
+          text=":rotating_light: *Release monitor FAILURE for \`$repo\`*\n\
+          • *Tag:* \`$tag\`\n\
+          • *Problem:* $error\n\
+          • *Missing REQUIRED assets:* $missing_required\n\
+          • *Release page:* $html_url"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          # Mark the job as failed for required-asset issues
+          exit 1
+
+      # Soft warnings: only optional Windows assets missing
+      - name: Notify Slack on OPTIONAL Windows asset warning
+        if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional != ''
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ steps.check.outputs.tag }}
+          HTML_URL: ${{ steps.check.outputs.html_url }}
+          MISSING_OPTIONAL: ${{ steps.check.outputs.missing_optional }}
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          missing_optional="${MISSING_OPTIONAL:-(none listed)}"
+
+          text=":warning: *Release monitor WARNING for \`$repo\`*\n\
+          • *Tag:* \`$tag\`\n\
+          • *Missing OPTIONAL (Windows) assets:* $missing_optional\n\
+          • *Note:* Linux/macOS assets are OK. This is a warning only.\n\
+          • *Release page:* $html_url"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+      - name: Log success
+        if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional == ''
+        run: |
+          echo "✅ Release monitor: all required and optional assets are present on latest release."
+
+  # -----------------------------------
+  # Install-path tests (curl + brew)
+  # -----------------------------------
+  test_install_paths:
+    needs: check_latest_release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Show env + release info
+        run: |
+          echo "Running on OS: ${{ runner.os }}"
+          echo "Latest tag from monitor: '${{ needs.check_latest_release.outputs.tag }}'"
+          echo "Release URL from monitor: '${{ needs.check_latest_release.outputs.html_url }}'"
+
+      - name: Test curl|bash installer
+        id: curl
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh"
+
+          echo "Installing mirrord via curl|bash from: $url"
+          if ! curl -fsSL "$url" | bash >/tmp/install_sh.log 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=curl|bash installer failed from $url. See logs in this step." >> "$GITHUB_OUTPUT"
+            echo "----- installer output -----"
+            cat /tmp/install_sh.log || true
+            exit 0
+          fi
+
+          # Verify mirrord is on PATH and prints a version
+          if ! command -v mirrord >/dev/null 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=mirrord is not on PATH after curl|bash install." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! mirrord --version >/tmp/mirrord_version_curl.log 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=mirrord --version failed after curl|bash install." >> "$GITHUB_OUTPUT"
+            echo "----- mirrord --version output (curl) -----"
+            cat /tmp/mirrord_version_curl.log || true
+            exit 0
+          fi
+
+          echo "curl|bash installer succeeded. Version:"
+          cat /tmp/mirrord_version_curl.log || true
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "error=" >> "$GITHUB_OUTPUT"
+
+      - name: Remove mirrord binary between installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$(command -v mirrord || true)"
+          if [ -n "$BIN" ]; then
+            echo "Removing mirrord binary at: $BIN"
+            rm -f "$BIN" || true
+          else
+            echo "No mirrord binary found to remove."
+          fi
+          hash -r || true
+
+      - name: Test Homebrew install (Linux + macOS)
+        id: brew
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! command -v brew >/dev/null 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Homebrew (brew) is not installed on this runner." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Installing mirrord via Homebrew: metalbear-co/mirrord/mirrord"
+          if ! brew install metalbear-co/mirrord/mirrord >/tmp/brew_install.log 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=brew install metalbear-co/mirrord/mirrord failed. See logs in this step." >> "$GITHUB_OUTPUT"
+            echo "----- brew output -----"
+            cat /tmp/brew_install.log || true
+            exit 0
+          fi
+
+          if ! command -v mirrord >/dev/null 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=mirrord not on PATH after brew install." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! mirrord --version >/tmp/mirrord_version_brew.log 2>&1; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=mirrord --version failed after brew install." >> "$GITHUB_OUTPUT"
+            echo "----- mirrord --version output (brew) -----"
+            cat /tmp/mirrord_version_brew.log || true
+            exit 0
+          fi
+
+          echo "brew install succeeded. Version:"
+          cat /tmp/mirrord_version_brew.log || true
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "error=" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack on install failures
+        # Fail if curl fails or brew fails.
+        if: steps.curl.outputs.ok != 'true' || steps.brew.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          BREW_OK: ${{ steps.brew.outputs.ok }}
+          BREW_ERROR: ${{ steps.brew.outputs.error }}
+          CURL_OK: ${{ steps.curl.outputs.ok }}
+          CURL_ERROR: ${{ steps.curl.outputs.error }}
+          TAG: ${{ needs.check_latest_release.outputs.tag }}
+          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
+          RUNNER_OS: ${{ runner.os }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+
+          brew_status="${BREW_OK:-not-run}"
+          curl_status="${CURL_OK:-unknown}"
+          brew_error="${BREW_ERROR:-none}"
+          curl_error="${CURL_ERROR:-none}"
+
+          text=":warning: *Release install-path check FAILED for \`$repo\` on \`${RUNNER_OS}\`*\n\
+          • *Tag (from monitor):* \`$tag\`\n\
+          • *curl|bash installer ok?:* ${curl_status}\n\
+          • *curl error:* ${curl_error}\n\
+          • *brew install ok?:* ${brew_status}\n\
+          • *brew error:* ${brew_error}\n\
+          • *Release page:* ${html_url}"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          # Mark job as failed if any required path failed.
+          exit 1
+
+      - name: Log install success
+        if: steps.curl.outputs.ok == 'true' && steps.brew.outputs.ok == 'true'
+        run: |
+          echo "✅ Install monitor: curl and Homebrew installers succeeded on ${{ runner.os }}."
+
+  # ---------------------------------------------------
+  # Version endpoint vs GitHub release URLs consistency
+  # ---------------------------------------------------
+  check_version_endpoint:
+    needs: check_latest_release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check version endpoint vs release download URLs
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_url="https://version.mirrord.dev/v1/version"
+          echo "Fetching version from: $api_url"
+
+          # The endpoint returns plain text like: 3.174.0%
+          if ! curl -fsSL "$api_url" -o /tmp/version.txt; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Failed to fetch $api_url" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "missing_urls=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Raw version.mirrord.dev response:"
+          cat /tmp/version.txt || true
+
+          # Strip whitespace and trailing '%' if present
+          ver="$(tr -d '\r' < /tmp/version.txt | sed 's/[[:space:]]*$//' | sed 's/%$//')"
+
+          if [ -z "$ver" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Empty version string from version.mirrord.dev" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "missing_urls=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Normalized version from API: '$ver'"
+
+          base="https://github.com/metalbear-co/mirrord/releases/download"
+          urls=(
+            "$base/$ver/mirrord_linux_x86_64"
+            "$base/$ver/mirrord_linux_aarch64"
+            "$base/$ver/mirrord_mac_universal"
+          )
+
+          echo "Checking URLs:"
+          printf '  - %s\n' "${urls[@]}"
+
+          missing=()
+          for u in "${urls[@]}"; do
+            # HEAD to avoid downloading full binaries
+            if ! curl -fsSIL "$u" >/dev/null 2>&1; then
+              echo "URL appears unreachable (HEAD failed): $u"
+              missing+=("$u")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Some URLs are missing or unreachable for version $ver:"
+            printf '  - %s\n' "${missing[@]}"
+
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=Some download URLs are missing or not reachable for version $ver" >> "$GITHUB_OUTPUT"
+            printf 'missing_urls=%s\n' "$(IFS=','; echo "${missing[*]}")" >> "$GITHUB_OUTPUT"
+          else
+            echo "All download URLs for version $ver are reachable."
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "error=" >> "$GITHUB_OUTPUT"
+            echo "missing_urls=" >> "$GITHUB_OUTPUT"
+          fi
+
+          printf 'version=%s\n' "$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack on version API / URL mismatch
+        if: steps.version.outputs.ok != 'true'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          TAG: ${{ needs.check_latest_release.outputs.tag }}
+          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
+          VER: ${{ steps.version.outputs.version }}
+          ERROR: ${{ steps.version.outputs.error }}
+          MISSING_URLS: ${{ steps.version.outputs.missing_urls }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          ver="${VER:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          error="${ERROR:-Unknown error}"
+          missing_urls="${MISSING_URLS:-(none listed)}"
+
+          text=":rotating_light: *Version endpoint check FAILED for \`$repo\`*\n\
+          • *Version from API:* \`$ver\`\n\
+          • *Latest release tag (from monitor):* \`$tag\`\n\
+          • *Problem:* $error\n\
+          • *Missing/broken URLs:* $missing_urls\n\
+          • *Release page:* $html_url\n\
+          • *API endpoint:* https://version.mirrord.dev/v1/version"
+
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          exit 1
+
+      - name: Log version endpoint success
+        if: steps.version.outputs.ok == 'true'
+        run: |
+          echo "✅ Version endpoint check passed. version.mirrord.dev -> ${{ steps.version.outputs.version }}"
