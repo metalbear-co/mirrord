@@ -332,7 +332,9 @@ impl RestartableBackgroundTask for AgentConnection {
                     Ok(Some(connection)) => {
                         *self = connection;
                         message_bus
-                            .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::End))
+                            .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::End(
+                                self.connection.tx_handle(),
+                            )))
                             .await;
 
                         ControlFlow::Continue(())

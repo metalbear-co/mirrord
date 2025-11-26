@@ -4,6 +4,7 @@ use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, MessageId, ProcessInfo, ProxyToLayerMessage,
 };
 use mirrord_protocol::DaemonMessage;
+use mirrord_protocol_io::{Client, TxHandle};
 use tokio::net::TcpStream;
 
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
@@ -136,10 +137,23 @@ pub struct LayerClosed {
 }
 
 /// Notification about start and end of reconnection to agent.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum ConnectionRefresh {
     Start,
-    End,
+    End(TxHandle<Client>),
     Request,
+}
+
+impl ConnectionRefresh {
+    /// Clone this object with a *FRESH* [`TxHandle`] created with
+    /// [`TxHandle::another`]. Clones created with this method are
+    /// appropriate to send to distinct background tasks.
+    pub fn clone_with_another_handle(&self) -> Self {
+        match self {
+            Self::Start => Self::Start,
+            Self::End(tx) => Self::End(tx.another()),
+            Self::Request => Self::Request,
+        }
+    }
 }

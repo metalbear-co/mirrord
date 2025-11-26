@@ -11,6 +11,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
     ResponseError, file::*,
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
@@ -136,7 +137,7 @@ pub enum FilesProxyMessage {
     /// Layer instance closed.
     LayerClosed(LayerClosed),
     /// Agent connection was refreshed
-    ConnectionRefresh,
+    ConnectionRefresh(TxHandle<Client>),
 }
 
 /// Error that can occur in [`FilesProxy`].
@@ -1120,7 +1121,7 @@ impl FilesProxy {
     }
 
     #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
-    async fn handle_reconnect(&mut self, message_bus: &mut MessageBus<Self>) {
+    async fn handle_reconnect(&mut self, message_bus: &mut MessageBus<Self>, new_agent_tx: TxHandle<Client>) {
         let files_to_drop = self
             .remote_files
             .drain()
@@ -1149,6 +1150,7 @@ impl FilesProxy {
         for response in self.reconnect_tracker.agent_lost() {
             message_bus.send(ToLayer::from(response)).await;
         }
+        message_bus.set_agent_tx(new_agent_tx);
     }
 }
 
@@ -1185,7 +1187,7 @@ impl BackgroundTask for FilesProxy {
                 }
                 FilesProxyMessage::LayerForked(forked) => self.layer_forked(forked),
                 FilesProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
-                FilesProxyMessage::ConnectionRefresh => self.handle_reconnect(message_bus).await,
+                FilesProxyMessage::ConnectionRefresh(new_agent_tx) => self.handle_reconnect(message_bus, new_agent_tx).await,
             }
         }
 

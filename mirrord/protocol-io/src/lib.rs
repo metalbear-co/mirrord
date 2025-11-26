@@ -345,6 +345,16 @@ struct SharedState<Type: ProtocolEndpoint> {
     cancel: CancellationToken,
 }
 
+impl<Type: ProtocolEndpoint> fmt::Debug for SharedState<Type> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SharedState")
+            .field("address", &(&self as *const _))
+            .field("in_tx_strong_count", &self.in_tx.strong_count())
+            .field("next_queue_id", &self.next_queue_id)
+            .finish()
+    }
+}
+
 impl<Type: ProtocolEndpoint> SharedState<Type> {
     const MAX_CAPACITY: usize = 1024 * 16;
     fn new(
@@ -512,6 +522,22 @@ impl<Type: ProtocolEndpoint> SharedState<Type> {
 pub struct TxHandle<Type: ProtocolEndpoint> {
     shared_state: Arc<SharedState<Type>>,
     id: QueueId,
+}
+
+impl<Type: ProtocolEndpoint> PartialEq for TxHandle<Type> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared_state, &other.shared_state) && self.id == other.id
+    }
+}
+impl<Type: ProtocolEndpoint> Eq for TxHandle<Type> {}
+
+impl<Type: ProtocolEndpoint> fmt::Debug for TxHandle<Type> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TxHandle")
+            .field("shared_state", &self.shared_state)
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 impl<Type: ProtocolEndpoint> TxHandle<Type> {

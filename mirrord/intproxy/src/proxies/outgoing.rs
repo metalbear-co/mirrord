@@ -15,6 +15,7 @@ use mirrord_protocol::{
     },
     uid::Uid,
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
@@ -481,7 +482,11 @@ impl OutgoingProxy {
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
-    async fn handle_connection_refresh(&mut self, message_bus: &mut MessageBus<Self>) {
+    async fn handle_connection_refresh(
+        &mut self,
+        message_bus: &mut MessageBus<Self>,
+        new_agent_tx: TxHandle<Client>,
+    ) {
         tracing::debug!("Closing all local connections");
         self.txs.clear();
         self.background_tasks.as_mut().unwrap().clear();
@@ -523,6 +528,8 @@ impl OutgoingProxy {
                 )))
                 .await;
         }
+
+        message_bus.set_agent_tx(new_agent_tx);
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err(level = Level::DEBUG))]
@@ -569,7 +576,7 @@ pub enum OutgoingProxyMessage {
     AgentDatagrams(DaemonUdpOutgoing),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
-    ConnectionRefresh,
+    ConnectionRefresh(TxHandle<Client>),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
 }
@@ -634,7 +641,7 @@ impl BackgroundTask for OutgoingProxy {
                             self.agent_local_addresses.remove(&id);
                         }
                     }
-                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
+                    Some(OutgoingProxyMessage::ConnectionRefresh(new_agent_tx)) => self.handle_connection_refresh(message_bus, new_agent_tx).await,
                     Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
                         self.protocol_version.replace(version);
                     }
@@ -746,7 +753,7 @@ mod test {
             }
 
             // Connection with the operator was reset.
-            outgoing.send(OutgoingProxyMessage::ConnectionRefresh).await;
+            outgoing.send(OutgoingProxyMessage::ConnectionRefresh(connection.tx_handle())).await;
         }
 
         std::mem::drop(outgoing);

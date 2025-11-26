@@ -56,6 +56,11 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
         self.agent_tx.clone()
     }
 
+    /// Updates the agent tx handle
+    pub fn set_agent_tx(&mut self, new_agent_tx: TxHandle<Client>) {
+        self.agent_tx = new_agent_tx;
+    }
+
     /// Returns a [`CancellationToken`] that will be cancelled once this message bus is closed.
     ///
     /// Enables waiting for message bus close without consuming messages buffered in the channel.

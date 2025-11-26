@@ -9,6 +9,7 @@ use mirrord_protocol::{
     ResolveErrorKindInternal, ResponseError,
     dns::{ADDRINFO_V2_VERSION, AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
@@ -29,7 +30,7 @@ pub enum SimpleProxyMessage {
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
-    ConnectionRefresh,
+    ConnectionRefresh(TxHandle<Client>),
 }
 
 #[derive(Error, Debug)]
@@ -120,11 +121,12 @@ impl SimpleProxy {
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
 
-    #[tracing::instrument(level = Level::INFO, skip_all, ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle_connection_refresh(
         &mut self,
         message_bus: &mut MessageBus<Self>,
-    ) -> Result<(), SimpleProxyError> {
+        new_agent_tx: TxHandle<Client>,
+    ) {
         tracing::debug!(
             num_responses = self.addr_info_reqs.len(),
             "Flushing error responses to GetAddrInfoRequests"
@@ -149,7 +151,7 @@ impl SimpleProxy {
                 .await;
         }
 
-        Ok(())
+        message_bus.set_agent_tx(new_agent_tx);
     }
 }
 
@@ -224,8 +226,9 @@ impl BackgroundTask for SimpleProxy {
                         .await
                 }
                 SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
-                SimpleProxyMessage::ConnectionRefresh => {
-                    self.handle_connection_refresh(message_bus).await?
+                SimpleProxyMessage::ConnectionRefresh(new_agent_tx) => {
+                    self.handle_connection_refresh(message_bus, new_agent_tx)
+                        .await
                 }
             }
         }

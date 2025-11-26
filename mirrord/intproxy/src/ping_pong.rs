@@ -132,9 +132,10 @@ impl BackgroundTask for PingPong {
                                 self.awaiting_pongs = 0;
                                 self.reconnecting = true;
                             }
-                            ConnectionRefresh::End => {
+                            ConnectionRefresh::End(new_agent_tx) => {
                                 self.reconnecting = false;
                                 self.ticker.reset();
+                                message_bus.set_agent_tx(new_agent_tx);
                             }
                             ConnectionRefresh::Request => {}
                         }

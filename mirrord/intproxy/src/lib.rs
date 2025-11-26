@@ -640,29 +640,23 @@ impl IntProxy {
     ) -> Result<(), ProxyRuntimeError> {
         self.task_txs
             .ping_pong
-            .send(PingPongMessage::ConnectionRefresh(kind))
+            .send(PingPongMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
             .await;
 
         match kind {
             ConnectionRefresh::Start => {
                 // Initialise default reconnect message queue
                 self.reconnect_task_queue.get_or_insert_default();
-
-                self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::ConnectionRefresh)
-                    .await;
-
-                self.task_txs
-                    .outgoing
-                    .send(OutgoingProxyMessage::ConnectionRefresh)
-                    .await;
             }
-            ConnectionRefresh::End => {
+            ConnectionRefresh::End(new_agent_tx) => {
                 let task_queue = self.reconnect_task_queue.take().unwrap_or_else(|| {
                     tracing::error!("Unexpected state: agent reconnect finished without correctly initializing a reconnect");
                     panic!("agent reconnect finished without correctly initializing a reconnect");
                 });
+
+                self.agent_tx = new_agent_tx;
 
                 self.agent_tx
                     .send(ClientMessage::SwitchProtocolVersion(
@@ -675,12 +669,22 @@ impl IntProxy {
 
                 self.task_txs
                     .files
-                    .send(FilesProxyMessage::ConnectionRefresh)
+                    .send(FilesProxyMessage::ConnectionRefresh(self.agent_tx.another()))
                     .await;
 
                 self.task_txs
                     .incoming
-                    .send(IncomingProxyMessage::ConnectionRefresh)
+                    .send(IncomingProxyMessage::ConnectionRefresh(self.agent_tx.another()))
+                    .await;
+
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::ConnectionRefresh(self.agent_tx.another()))
+                    .await;
+
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::ConnectionRefresh(self.agent_tx.another()))
                     .await;
 
                 Box::pin(async {

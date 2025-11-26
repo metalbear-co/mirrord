@@ -27,6 +27,7 @@ use mirrord_protocol::{
         NewTcpConnectionV2,
     },
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
@@ -107,7 +108,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
-    ConnectionRefresh,
+    ConnectionRefresh(TxHandle<Client>),
 }
 
 /// Handle to a running [`HttpGatewayTask`].
@@ -697,12 +698,17 @@ impl IncomingProxy {
                 self.protocol_version.replace(protocol_version);
             }
 
-            IncomingProxyMessage::ConnectionRefresh => {
+            IncomingProxyMessage::ConnectionRefresh(new_agent_tx) => {
                 self.tcp_proxies.mirror.clear();
                 self.tcp_proxies.steal.clear();
                 self.http_gateways.mirror.clear();
                 self.http_gateways.steal.clear();
-                self.tasks.as_mut().unwrap().clear();
+
+                let tasks = self.tasks.as_mut().unwrap();
+                tasks.clear();
+
+                message_bus.set_agent_tx(new_agent_tx);
+                tasks.set_agent_tx(message_bus.clone_agent_tx());
 
                 for subscription in self.subscriptions.iter_mut() {
                     tracing::info!(?subscription, "Resubscribing after connection refresh");
