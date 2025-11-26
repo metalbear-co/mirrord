@@ -50,6 +50,7 @@ pub async fn init_tracing_registry(
                     .with_writer(std::io::stderr)
                     .with_file(true)
                     .with_line_number(true)
+                    .with_ansi(false)
                     .pretty(),
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())

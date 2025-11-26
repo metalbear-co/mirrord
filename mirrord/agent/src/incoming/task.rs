@@ -126,7 +126,8 @@ where
                 },
 
                 Some(message) = self.internal_rx.recv() => match message {
-                    InternalMessage::DeadChannel(port) => {
+                    InternalMessage::DeadChannel(port)
+                     => {
                         self.handle_dead_channel(port).await?;
                     }
                     InternalMessage::ConnInitialized(conn) => {
