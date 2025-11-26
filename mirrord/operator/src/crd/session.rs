@@ -208,6 +208,8 @@ pub struct MirrordClusterSessionAgent {
     /// Agent connection info to target's agents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_info: Option<AgentKubernetesConnectInfo>,
+    /// If the agent is of the ephemeral variaty
+    pub ephemeral: bool,
     /// Agent's container id
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container_id: Option<String>,
@@ -227,7 +229,7 @@ pub struct MirrordClusterSessionAgent {
 pub struct MirrordClusterSessionStatus {
     /// Running agents status
     #[serde(default)]
-    pub agents: BTreeMap<Uuid, MirrordClusterSessionAgent>,
+    pub agents: Vec<MirrordClusterSessionAgent>,
     /// Last time when the session was observed to have an open user connection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connected_timestamp: Option<MicroTime>,
