@@ -20,13 +20,10 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
         process::initialize_hooks(guard)?;
     }
 
-    // Conditionally enable file hooks
-    if setup.fs_hooks_enabled() {
-        tracing::info!("Enabling file system hooks");
-        files::initialize_hooks(guard)?;
-    } else {
-        tracing::info!("File system hooks disabled by configuration (fs.mode = Local)");
-    }
+    // NOTE(gabriela): currently I believe the ideal way to handle this is
+    // through hook-level checks
+    tracing::info!("Enabling file system hooks");
+    files::initialize_hooks(guard)?;
 
     // Conditionally enable socket hooks
     if setup.socket_hooks_enabled() || setup.dns_hooks_enabled() {
