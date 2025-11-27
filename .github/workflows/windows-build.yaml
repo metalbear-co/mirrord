@@ -51,9 +51,7 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
-  # Public HTTP base for the public bucket
   MSI_HTTP_BASE: "https://storage.googleapis.com/mirrord-windows-builds-public"
-  # WinGet package identifier for mirrord in microsoft/winget-pkgs
   WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
@@ -402,7 +400,7 @@ jobs:
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # UNIT TESTS (Windows-only crates). Disabled for testing purposes
+      # UNIT TESTS (Windows-only crates) Disabled for testing
       ###########################################################################
 
       # - name: Run Rust unit tests (Windows crates)
@@ -554,6 +552,16 @@ jobs:
           }
 
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # INSTALL .NET RUNTIME FOR WINGETCREATE
+      ###########################################################################
+
+      - name: Install .NET runtime for wingetcreate
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
       ###########################################################################
       # UPDATE WinGet MANIFEST (optional)
