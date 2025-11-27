@@ -1,7 +1,6 @@
-use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
-use axum::response::{IntoResponse, Response};
 #[cfg(target_os = "windows")]
 use ::windows::core as windows_core;
+use axum::response::{IntoResponse, Response};
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -16,6 +15,7 @@ use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOpera
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
+use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 use thiserror::Error;
 
 use crate::{
@@ -398,6 +398,9 @@ pub(crate) enum CliError {
 
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
+
+    #[error("An error occurred in the wizard while fetching target data: {0}")]
+    WizardTargetError(#[from] KubeApiError),
 
     #[error("Failed to execute authentication command specified in kubeconfig: {0}")]
     #[diagnostic(help("
