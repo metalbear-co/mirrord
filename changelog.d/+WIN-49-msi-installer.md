@@ -1,0 +1,1 @@
+This PR adds MSI installer for the windows builds
