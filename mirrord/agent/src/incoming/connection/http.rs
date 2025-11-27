@@ -1,26 +1,38 @@
-use std::fmt;
+use std::{
+    fmt::{self, Debug},
+    str::FromStr,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use futures::StreamExt;
-use http_body_util::{StreamBody, combinators::BoxBody};
+use http::{header::CONTENT_LENGTH, request::Parts};
+use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
 use hyper::{
     Response,
     body::Frame,
-    http::{HeaderMap, Method, StatusCode, Uri, Version, request, response},
+    http::{StatusCode, request, response},
 };
+use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     runtime::Handle,
     sync::{broadcast, mpsc, oneshot},
+    time::error::Elapsed,
 };
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
+use tracing::instrument;
 
-use super::{ConnectionInfo, IncomingStream};
+use super::{ConnectionInfo, IncomingStream, body_utils::FramesReader};
 use crate::{
     http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
     incoming::{
-        IncomingStreamItem, RedirectorTaskConfig,
-        connection::http_task::{HttpTask, StealingClient, UpgradeDataRx},
+        ConnError, IncomingStreamItem, RedirectorTaskConfig,
+        connection::{
+            http_task::{HttpTask, StealingClient, UpgradeDataRx},
+            optional_broadcast::OptionalBroadcast,
+        },
     },
 };
 
@@ -41,6 +53,16 @@ pub struct RedirectedHttp {
 
     /// Configuration of the RedirectorTask that created this
     redirector_config: RedirectorTaskConfig,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BufferBodyError {
+    #[error(transparent)]
+    Conn(#[from] ConnError),
+    #[error("body size exceeded max configured size of {} bytes", *MAX_BODY_BUFFER_SIZE)]
+    BodyTooBig,
+    #[error("receiving body took longer than the max configured timeout of {}ms", MAX_BODY_BUFFER_TIMEOUT.as_millis())]
+    Timeout(#[from] Elapsed),
 }
 
 impl RedirectedHttp {
@@ -69,10 +91,6 @@ impl RedirectedHttp {
         &self.request.parts
     }
 
-    pub fn parts_mut(&mut self) -> &mut request::Parts {
-        &mut self.request.parts
-    }
-
     /// Acquires a mirror handle to this request.
     ///
     /// For the data to flow, you must start the request task with either [`Self::steal`] or
@@ -90,10 +108,7 @@ impl RedirectedHttp {
         MirroredHttp {
             info: self.info.clone(),
             request_head: RequestHead {
-                uri: self.request.parts.uri.clone(),
-                method: self.request.parts.method.clone(),
-                headers: self.request.parts.headers.clone(),
-                version: self.request.parts.version,
+                parts: self.request.parts.clone(),
                 body_head: self
                     .request
                     .body_head
@@ -115,7 +130,6 @@ impl RedirectedHttp {
                     .collect(),
                 body_finished: self.request.body_tail.is_none(),
             },
-            parts: self.request.parts.clone(),
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
         }
     }
@@ -129,10 +143,7 @@ impl RedirectedHttp {
         let (upgrade_tx, upgrade_rx) = oneshot::channel();
 
         let request_head = RequestHead {
-            uri: self.request.parts.uri,
-            method: self.request.parts.method,
-            headers: self.request.parts.headers,
-            version: self.request.parts.version,
+            parts: self.request.parts.clone(),
             body_head: self
                 .request
                 .body_head
@@ -177,9 +188,72 @@ impl RedirectedHttp {
         );
         self.runtime_handle.spawn(task.run());
     }
+
+    pub fn parts_and_body(&mut self) -> (&mut Parts, Option<FramesReader<'_, Frame<Bytes>>>) {
+        (
+            &mut self.request.parts,
+            self.request
+                .body_tail
+                .is_none()
+                .then_some(FramesReader::from(&*self.request.body_head)),
+        )
+    }
+
+    #[instrument(level = "trace", ret)]
+    pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        let Some(tail) = self.request.body_tail.as_mut() else {
+            return Ok(());
+        };
+
+        let content_length = self
+            .request
+            .parts
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|t| t.to_str().ok())
+            .and_then(|t| usize::from_str(t).ok());
+
+        if content_length.is_some_and(|l| l > *MAX_BODY_BUFFER_SIZE) {
+            return Err(BufferBodyError::BodyTooBig);
+        }
+
+        let mut rxd: usize = self
+            .request
+            .body_head
+            .iter()
+            .map(|f| f.data_ref().map(Bytes::len).unwrap_or(0))
+            .sum();
+
+        let result = tokio::time::timeout(*MAX_BODY_BUFFER_TIMEOUT, async {
+            let mut mirror = OptionalBroadcast::from(self.mirror_tx.clone());
+            while rxd < *MAX_BODY_BUFFER_SIZE {
+                match tail.frame().await {
+                    None => {
+                        mirror.send_item(IncomingStreamItem::NoMoreFrames);
+                        return Ok(());
+                    }
+                    Some(Ok(frame)) => {
+                        rxd += frame.data_ref().map(|f| f.len()).unwrap_or(0);
+                        mirror.send_frame(&frame);
+                        self.request.body_head.push(frame);
+                    }
+                    Some(Err(error)) => {
+                        let error = ConnError::IncomingHttpError(Arc::new(error));
+                        mirror.send_item(IncomingStreamItem::Finished(Err(error.clone())));
+                        Err(error)?
+                    }
+                }
+            }
+            Err(BufferBodyError::BodyTooBig)
+        })
+        .await?;
+
+        // Set body_tail to none since we've extracted everything from it
+        result.inspect(|_| self.request.body_tail = None)
+    }
 }
 
-impl fmt::Debug for RedirectedHttp {
+impl Debug for RedirectedHttp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedirectedHttp")
             .field("info", &self.info)
@@ -188,6 +262,49 @@ impl fmt::Debug for RedirectedHttp {
     }
 }
 
+static MAX_BODY_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
+    match envs::MAX_BODY_BUFFER_SIZE.try_from_env() {
+        Ok(Some(t)) => Some(t as usize),
+        Ok(None) => {
+            tracing::warn!("{} not set, using default", envs::MAX_BODY_BUFFER_SIZE.name);
+            None
+        }
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "failed to parse {}, using default",
+                envs::MAX_BODY_BUFFER_SIZE.name
+            );
+            None
+        }
+    }
+    .unwrap_or(64 * 1024)
+});
+
+static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
+    Duration::from_millis(
+        match envs::MAX_BODY_BUFFER_TIMEOUT.try_from_env() {
+            Ok(Some(t)) => Some(t),
+            Ok(None) => {
+                tracing::warn!(
+                    "{} not set, using default",
+                    envs::MAX_BODY_BUFFER_TIMEOUT.name
+                );
+                None
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "failed to parse {}, using default",
+                    envs::MAX_BODY_BUFFER_TIMEOUT.name
+                );
+                None
+            }
+        }
+        .unwrap_or(1000)
+        .into(),
+    )
+});
 /// Steal handle to a redirected HTTP request.
 pub struct StolenHttp {
     pub info: ConnectionInfo,
@@ -198,7 +315,7 @@ pub struct StolenHttp {
     pub redirector_config: RedirectorTaskConfig,
 }
 
-impl fmt::Debug for StolenHttp {
+impl Debug for StolenHttp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StolenHttp")
             .field("info", &self.info)
@@ -210,10 +327,7 @@ impl fmt::Debug for StolenHttp {
 /// Head of a redirected HTTP request.
 #[derive(Debug)]
 pub struct RequestHead {
-    pub uri: Uri,
-    pub method: Method,
-    pub headers: HeaderMap,
-    pub version: Version,
+    pub parts: Parts,
     pub body_head: Vec<InternalHttpBodyFrame>,
     pub body_finished: bool,
 }
@@ -300,25 +414,86 @@ impl ResponseBodyProvider {
 pub struct MirroredHttp {
     pub info: ConnectionInfo,
     pub request_head: RequestHead,
-    /// The original request parts from ExtractedRequest, used for HTTP filtering
-    pub parts: request::Parts,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
 }
 
 impl MirroredHttp {
-    /// Returns a mutable reference to the request parts
-    pub fn parts_mut(&mut self) -> &mut request::Parts {
-        &mut self.parts
+    /// Returns a mutable reference to the request parts and a shared
+    /// reference to buffered body, if any.
+    pub fn parts_and_body(
+        &mut self,
+    ) -> (
+        &mut request::Parts,
+        Option<FramesReader<'_, InternalHttpBodyFrame>>,
+    ) {
+        (
+            &mut self.request_head.parts,
+            self.request_head
+                .body_finished
+                .then_some(FramesReader::from(&*self.request_head.body_head)),
+        )
+    }
+
+    #[instrument(level = "trace", ret)]
+    pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        if self.request_head.body_finished {
+            return Ok(());
+        }
+
+        let content_length = self
+            .request_head
+            .parts
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|t| t.to_str().ok())
+            .and_then(|t| usize::from_str(t).ok());
+
+        if content_length.is_some_and(|l| l > *MAX_BODY_BUFFER_SIZE) {
+            return Err(BufferBodyError::BodyTooBig);
+        }
+
+        let mut rxd: usize = self
+            .request_head
+            .body_head
+            .iter()
+            .map(|f| match f {
+                InternalHttpBodyFrame::Data(p) => p.len(),
+                InternalHttpBodyFrame::Trailers(_) => 0,
+            })
+            .sum();
+
+        let result = tokio::time::timeout(*MAX_BODY_BUFFER_TIMEOUT, async {
+            while rxd < *MAX_BODY_BUFFER_SIZE {
+                match self.stream.next().await {
+                    Some(IncomingStreamItem::Frame(f)) => {
+                        if let InternalHttpBodyFrame::Data(data) = &f {
+                            rxd += data.len();
+                        }
+                        self.request_head.body_head.push(f);
+                    }
+                    Some(IncomingStreamItem::NoMoreFrames) => return Ok(()),
+                    Some(IncomingStreamItem::Finished(error @ Err(_))) => error?,
+                    other =>
+                        Err(ConnError::AgentBug(format!(
+                            "received an unexpected IncomingStreamItem when buffering HTTP request body: {other:?}"
+                        )))?
+                }
+            }
+            Err(BufferBodyError::BodyTooBig)
+        })
+        .await?;
+
+        // Set body_tail to none since we've extracted everything from it
+        result.inspect(|_| self.request_head.body_finished = true)
     }
 }
 
-impl fmt::Debug for MirroredHttp {
+impl Debug for MirroredHttp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MirroredHttp")
             .field("info", &self.info)
             .field("request_head", &self.request_head)
-            .field("parts", &self.parts)
             .finish()
     }
 }

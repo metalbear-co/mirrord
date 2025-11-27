@@ -504,31 +504,6 @@ impl LayerConfig {
             ))?
         }
 
-        if let (Some(unfiltered_ports), Some(filtered_ports)) = (
-            self.feature.network.incoming.ports.as_ref(),
-            self.feature
-                .network
-                .incoming
-                .http_filter
-                .get_filtered_ports(),
-        ) {
-            let intersection = filtered_ports
-                .iter()
-                .copied()
-                .filter(|port| unfiltered_ports.contains(port))
-                .collect::<Vec<_>>();
-            if intersection.is_empty().not() {
-                Err(ConfigError::Conflict(format!(
-                    "Ports {intersection:?} are present in both `feature.network.incoming.ports` and \
-                    `feature.network.incoming.http_filter.ports`. These lists must remain disjoint. \
-                    If you want traffic to a port to be filtered, \
-                    include it only in `feature.network.incoming.http_filter.ports`. \
-                    To steal all the traffic from that port without filtering, \
-                    include it only in `feature.network.incoming.ports`."
-                )))?
-            }
-        }
-
         match (
             &self.feature.network.incoming.https_delivery,
             &self.feature.network.incoming.tls_delivery,
