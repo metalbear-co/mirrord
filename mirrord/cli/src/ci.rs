@@ -162,6 +162,11 @@ impl MirrordCiStore {
             Err(e) => Err(e.into()),
         }
     }
+
+    /// Check if the store is empty. Return `true` if no process is found.
+    fn is_empty(&self) -> bool {
+        self.intproxy_pid.is_none() && self.user_pid.is_none()
+    }
 }
 
 /// mirrord-for-ci operations require a [`CiApiKey`] to run.
