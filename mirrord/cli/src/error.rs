@@ -393,6 +393,9 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
+    #[error("An error occurred in the wizard while fetching target data: {0}")]
+    WizardTargetError(#[from] KubeApiError),
+
     #[error("Failed to execute authentication command specified in kubeconfig: {0}")]
     #[diagnostic(help("
         mirrord failed to execute Kube authentication command.

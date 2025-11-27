@@ -234,21 +234,11 @@
 //! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
 //! prints a nice little message to stdout.
 #![feature(try_blocks)]
+#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
-
-use std::{
-    collections::{HashMap, HashSet},
-    env::vars,
-    net::SocketAddr,
-    time::Duration,
-};
-#[cfg(not(target_os = "windows"))]
-use std::{ffi::CString, os::unix::ffi::OsStrExt};
-#[cfg(target_os = "macos")]
-use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -283,6 +273,16 @@ use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::Version;
+use std::{
+    collections::{HashMap, HashSet},
+    env::vars,
+    net::SocketAddr,
+    time::Duration,
+};
+#[cfg(not(target_os = "windows"))]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
+#[cfg(target_os = "macos")]
+use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use tracing::{error, info, trace, warn};
 use which::which;
 
@@ -1055,7 +1055,7 @@ fn main() -> miette::Result<()> {
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
-            Commands::Wizard => { wizard::wizard_command(user_data).await }
+            Commands::Wizard(args) => wizard::wizard_command(user_data, *args).await?,
         };
 
         Ok(())

@@ -191,10 +191,10 @@ pub(super) enum Commands {
     /// Execute a command related to mirrord CI.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
-    
+
     /// Launch the config wizard
     #[cfg(feature = "wizard")]
-    Wizard,
+    Wizard(Box<WizardArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1179,6 +1179,22 @@ pub(super) enum DbBranchesCommand {
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
+}
+
+#[derive(Args, Debug)]
+pub struct WizardArgs {
+    /// Accept/reject invalid certificates.
+    #[arg(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true
+    )]
+    pub accept_invalid_certificates: Option<bool>,
+
+    /// Kube context to use from Kubeconfig
+    #[arg(env = "MIRRORD_KUBE_CONTEXT", long)]
+    pub context: Option<String>,
+
+    /// Kubeconfig
+    #[arg(env = "MIRRORD_KUBECONFIG", long)]
+    pub kubeconfig: Option<String>,
 }
 
 #[cfg(test)]
