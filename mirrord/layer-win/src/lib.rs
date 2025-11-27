@@ -81,20 +81,21 @@ fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
     let mut config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
 
     // Check if we're in trace only mode (no agent)
-    if is_trace_only_mode() {
+    let trace_only = is_trace_only_mode();
+    let proxy_address = if trace_only {
         modify_config_for_trace_only(&mut config);
-
+    
         // In trace-only mode, we still need to initialize setup but with a dummy proxy address
         // since no actual proxy communication will occur
-        let dummy_proxy_address = "127.0.0.1:0".parse().unwrap();
-        init_setup(config, dummy_proxy_address)?;
+        "127.0.0.1:0".parse().unwrap()
     } else {
         // Normal mode - get the real proxy address for layer setup
-        let setup_address = get_setup_address(context)?;
-        init_setup(config, setup_address)?;
-    }
+        get_setup_address(context)?
+    };
+    
+    let local_hostname = trace_only || !config.feature.hostname;
 
-    Ok(())
+    init_setup(config, proxy_address, local_hostname)
 }
 
 fn mirrord_start() -> LayerResult<()> {
