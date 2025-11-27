@@ -698,6 +698,11 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(layer_config)?;
 
+        let mirrord_ci_info = Some(MirrordCiInfo {
+            vendor: Some("Dummy".to_string()),
+            branch_name: Some("Dummy-branch".to_string()),
+        });
+
         let use_proxy_api = self
             .operator
             .spec
