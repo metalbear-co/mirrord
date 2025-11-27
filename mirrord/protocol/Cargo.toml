@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.22.0"
+version = "1.23.1"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -42,5 +42,5 @@ strum_macros.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs"] }
 
-[features]	
+[features]
 windows_build = []

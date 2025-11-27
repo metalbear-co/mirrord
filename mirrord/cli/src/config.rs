@@ -424,6 +424,16 @@ pub(super) struct DumpArgs {
     pub ports: Vec<u16>,
 }
 
+// `mirrord ci start` command
+#[derive(Args, Debug)]
+pub(super) struct CiStartArgs {
+    #[clap(flatten)]
+    pub exec_args: Box<ExecArgs>,
+
+    #[arg(long)]
+    pub foreground: bool,
+}
+
 /// Target-related parameters, present in more than one command.
 #[derive(Args, Debug)]
 pub(super) struct TargetParams {
@@ -1097,10 +1107,10 @@ pub(super) enum CiCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
-    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec`.
+    /// Starts mirrord for ci. Takes the same arguments as `mirrord exec` plus ci specific options.
     ///
     /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
-    Start(Box<ExecArgs>),
+    Start(Box<CiStartArgs>),
 
     /// Stops mirrord for ci.
     ///

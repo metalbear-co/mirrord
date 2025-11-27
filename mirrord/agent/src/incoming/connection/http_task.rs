@@ -19,6 +19,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::instrument;
 
 use crate::{
     http::{
@@ -56,6 +57,7 @@ where
     ///
     /// This method must ensure that [`Self::destination`] is notified about the result with
     /// [`RequestDestination::send_result`].
+    #[instrument(level = "trace", skip(self))]
     pub async fn run(mut self) {
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
@@ -123,10 +125,12 @@ impl HttpTask<PassthroughConnection> {
                 .map(ReceiverStream::new)
                 .map(|stream| stream.map(Ok))
                 .map(StreamBody::new);
+
             let body = RolledBackBody {
                 head: request.body_head.into_iter(),
                 tail: body_tail,
             };
+
             let hyper_request = Request::from_parts(request.parts, body);
 
             let mut response = match Self::send_request(&info, hyper_request).await {

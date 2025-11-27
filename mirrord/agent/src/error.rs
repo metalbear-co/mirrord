@@ -3,8 +3,9 @@ use std::{process::ExitStatus, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    client_connection::TlsSetupError, incoming::RedirectorTaskError, namespace::NamespaceError,
-    runtime, util::error::AgentRuntimeError,
+    client_connection::TlsSetupError, http::filter::FilterCreationError,
+    incoming::RedirectorTaskError, namespace::NamespaceError, runtime,
+    util::error::AgentRuntimeError,
 };
 
 #[derive(Debug, Error)]
@@ -48,7 +49,7 @@ pub(crate) enum AgentError {
     ExhaustedConnectionId,
 
     #[error("Failed to parse the given HTTP filter: {0}")]
-    InvalidHttpFilter(#[from] fancy_regex::Error),
+    InvalidHttpFilter(#[from] FilterCreationError),
 
     #[error("Timeout on accepting first client connection")]
     FirstConnectionTimeout,
