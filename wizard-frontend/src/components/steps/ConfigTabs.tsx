@@ -1,14 +1,6 @@
 import { useToast } from "@/hooks/use-toast";
 import { useState, useContext } from "react";
-import {
-  Copy,
-  Save,
-  Server,
-  AlertCircle,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { Copy, Save, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,42 +9,27 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import DownloadButton from "../DownloadButton";
 import {
   getConfigString,
-  readCurrentPorts,
   readCurrentTargetDetails,
   readIncoming,
-  updateConfigTarget,
 } from "../JsonUtils";
 import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
 import NetworkTab from "./NetworkTab";
+import TargetTab from "./TargetTab";
 
 const ConfigTabs = () => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config } = useContext(ConfigDataContext);
   const [currentTab, setCurrentTab] = useState<string>("target");
-  const [namespace, setNamespace] = useState<string>("default");
-  const [targetType, setTargetType] = useState<string>("");
   const [savedIncoming, setSavedIncoming] = useState<any>(readIncoming(config));
   const [portConflicts, setPortConflicts] = useState<boolean>(false);
+  const [targetPorts, setTargetPorts] = useState<number[]>([]);
 
   // For copying to clipboard
   const { toast } = useToast();
@@ -64,51 +41,6 @@ const ConfigTabs = () => {
       description: "Configuration JSON has been copied to your clipboard.",
     });
   };
-
-  const mockTargetTypes = [
-    "Deployment",
-    "Stateful Set",
-    "Daemon Set",
-    "Pod",
-    "Cron Job",
-    "Job",
-  ];
-  const mockTargets = [
-    {
-      name: "api-service",
-      namespace: "default",
-      kind: "deployment",
-    },
-    {
-      name: "frontend-app",
-      namespace: "default",
-      kind: "deployment",
-    },
-    {
-      name: "database",
-      namespace: "production",
-      kind: "statefulset",
-    },
-    {
-      name: "worker-queue",
-      namespace: "default",
-      kind: "deployment",
-    },
-    {
-      name: "backup-job",
-      namespace: "system",
-      kind: "cronjob",
-    },
-  ];
-  const mockNamespaces = [
-    "default",
-    "production",
-    "system",
-    "kube-system",
-    "monitoring",
-  ];
-
-  const [targetSearchText, setTargetSearchText] = useState<string>("");
 
   const nextTab = () => {
     if (currentTab === "target") setCurrentTab("network");
@@ -169,125 +101,11 @@ const ConfigTabs = () => {
         }}
         className="w-full"
       >
-        <TabsContent value="target" className="space-y-3 mt-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Server className="h-4 w-4" />
-                Target Selection
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-left">
-              <div>
-                <Label htmlFor="namespace">Namespace</Label>
-                <Select
-                  value={namespace}
-                  onValueChange={(value) => setNamespace(value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a namespace" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockNamespaces.map((namespace) => (
-                      <SelectItem key={namespace} value={namespace}>
-                        {namespace}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="target-type">Target Type</Label>
-                <Select
-                  value={targetType}
-                  onValueChange={(value) => setTargetType(value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select resource type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockTargetTypes.map((ttype) => {
-                      return <SelectItem value={ttype}>{ttype}</SelectItem>;
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="target-search">Choose Target</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="w-full justify-between"
-                    >
-                      {readCurrentTargetDetails(config).name ??
-                        "Search for target..."}
-                      <ChevronDown className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="p-0 w-[--radix-popover-trigger-width]"
-                    align="start"
-                  >
-                    <div className="p-2">
-                      <Input
-                        placeholder="Search targets..."
-                        className="mb-2"
-                        onChange={(event) => {
-                          setTargetSearchText(event.target.value);
-                        }}
-                      />
-                      <div className="max-h-48 overflow-y-auto space-y-1">
-                        {mockTargets
-                          .filter((target) => {
-                            return target.name.includes(targetSearchText);
-                          })
-                          .map((target) => (
-                            <div
-                              key={`${target.namespace}/${target.name}`}
-                              className="flex items-center justify-between p-2 hover:bg-muted rounded-md cursor-pointer"
-                              onClick={() => {
-                                const targetValue = `${target.kind}/${target.name}`;
-                                const updated = updateConfigTarget(
-                                  config,
-                                  targetValue,
-                                  target.namespace
-                                );
-                                setConfig(updated);
-                                document.dispatchEvent(
-                                  new KeyboardEvent("keydown", {
-                                    key: "Escape",
-                                  })
-                                );
-                              }}
-                            >
-                              <div className="flex flex-col">
-                                <span className="font-medium">
-                                  {target.name}
-                                </span>
-                              </div>
-                              <Badge variant="outline">{target.kind}</Badge>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                {!config.target && (
-                  <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                    <AlertCircle className="h-4 w-4" />
-                    Please select a target to continue
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <TargetTab setTargetPorts={setTargetPorts} />
 
         <NetworkTab
           savedIncoming={savedIncoming}
+          targetPorts={targetPorts}
           setSavedIncoming={setSavedIncoming}
           setPortConflicts={setPortConflicts}
         />
