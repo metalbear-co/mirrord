@@ -1,0 +1,1 @@
+This PR tests winget releases

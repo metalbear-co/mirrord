@@ -22,6 +22,11 @@ on:
         type: choice
         options: ["false", "true"]
         default: false
+      winget:
+        description: "Update WinGet manifest (wingetcreate)?"
+        type: choice
+        options: ["false", "true"]
+        default: "false"
 
   push:
     paths-ignore:
@@ -40,12 +45,16 @@ permissions:
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
-  MSI_BUCKET_URI: gs://mirrord-windows-msi
+  MSI_BUCKET_URI: gs://mirrord-windows-builds-public
   ARTIFACT_SUBPATH: windows/mirrord-latest
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+  # Public HTTP base for the public bucket
+  MSI_HTTP_BASE: "https://storage.googleapis.com/mirrord-windows-builds-public"
+  # WinGet package identifier for mirrord in microsoft/winget-pkgs
+  WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
   windows_tests:
@@ -58,6 +67,7 @@ jobs:
       PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
+      PUBLISH_WINGET: ${{ github.event.inputs.winget || 'false' }}
 
     steps:
       - name: Checkout
@@ -369,7 +379,7 @@ jobs:
           }
 
           # Build a unique folder per run:
-          # gs://mirrord-windows-msi/<ref-name>/run-<run-id>/mirrord.msi
+          # gs://mirrord-windows-msi-public/<ref-name>/run-<run-id>/mirrord.msi
           $runId = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
@@ -386,7 +396,9 @@ jobs:
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
 
-          # Export for later (summary, logs)
+          # Export for later (summary, logs, HTTP URL computation)
+          "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MSI_GCS_RUN_ID=$runId" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
@@ -405,7 +417,7 @@ jobs:
 
       - name: Compute release tag
         id: tag
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_WINGET == 'true') }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -483,13 +495,104 @@ jobs:
             await upload(process.env.MSI_PATH);
 
       ###########################################################################
+      # COMPUTE MSI DOWNLOAD URL (GitHub Release OR GCS HTTP)
+      ###########################################################################
+
+      - name: Compute MSI download URL for WinGet
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_WINGET == 'true') }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $repoFull = $env:GITHUB_REPOSITORY
+          if (-not $repoFull) {
+            throw "GITHUB_REPOSITORY is not set."
+          }
+
+          $tag = $env:RELEASE_TAG
+          if (-not $tag) {
+            throw "RELEASE_TAG is not set; ensure 'Compute release tag' step ran."
+          }
+
+          $publishMode = $env:PUBLISH_MODE
+          $isTag = "$env:GITHUB_REF".StartsWith("refs/tags/")
+
+          if ($isTag -or $publishMode -ne "no") {
+            # Use GitHub Releases URL when we're actually publishing a release
+            $url = "https://github.com/$repoFull/releases/download/$tag/mirrord.msi"
+            Write-Host "Computed MSI download URL from GitHub Releases: $url"
+          } else {
+            # Winget-only / no GitHub Release: use GCS HTTP path
+            $httpBase = $env:MSI_HTTP_BASE.TrimEnd('/')
+            if (-not $httpBase) {
+              throw "MSI_HTTP_BASE must be set for WinGet without GitHub Releases."
+            }
+
+            $refSafe = $env:MSI_GCS_REF_SAFE
+            $runId = $env:MSI_GCS_RUN_ID
+            if (-not $refSafe -or -not $runId) {
+              throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
+            }
+
+            # Matches the object path used in 'Upload MSI to GCS'
+            $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
+            Write-Host "Computed MSI download URL from GCS HTTP: $url"
+          }
+
+          "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # UPDATE WinGet MANIFEST (optional)
+      ###########################################################################
+
+      - name: Update WinGet manifest (wingetcreate)
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $packageId = $env:WINGET_PACKAGE_ID
+          if (-not $packageId) {
+            throw "WINGET_PACKAGE_ID env var is not set."
+          }
+
+          $version = $env:RELEASE_TAG
+          if (-not $version) {
+            throw "RELEASE_TAG env var is not set."
+          }
+
+          $installerUrl = $env:MSI_DOWNLOAD_URL
+          if (-not $installerUrl) {
+            throw "MSI_DOWNLOAD_URL env var is not set."
+          }
+
+          $gitToken = "${{ secrets.WINGET_TOKEN }}"
+          if (-not $gitToken) {
+            throw "secrets.WINGET_TOKEN is not configured in this repo."
+          }
+
+          Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
+          Write-Host "Installer URL: $installerUrl"
+
+          # Download latest single-file wingetcreate.exe
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+          # Non-interactive update + submit PR to microsoft/winget-pkgs
+          .\wingetcreate.exe update $packageId `
+            --version $version `
+            --urls "$installerUrl" `
+            --submit `
+            --token $gitToken
+
+      ###########################################################################
       # SUMMARY
       ###########################################################################
 
       - name: Summary
         if: always()
         run: |
-          Write-Host "MSI (local): $env:MSI_PATH"
-          Write-Host "MSI (GCS):   $env:MSI_GCS_URI"
-          Write-Host "EXE:         $env:MIRRORD_EXE"
-          Write-Host "DLL:         $env:MIRRORD_LAYER_FILE"
+          Write-Host "MSI (local):       $env:MSI_PATH"
+          Write-Host "MSI (GCS URI):     $env:MSI_GCS_URI"
+          Write-Host "EXE:               $env:MIRRORD_EXE"
+          Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
+          Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
+          Write-Host "Publish mode:      $env:PUBLISH_MODE"
+          Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
