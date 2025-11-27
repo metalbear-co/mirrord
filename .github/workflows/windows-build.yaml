@@ -220,7 +220,7 @@ jobs:
 
             foreach ($dir in $candidateDirs) {
               $candlePath = Join-Path $dir "candle.exe"
-              if (Test-Path $candlePath)) {
+              if (Test-Path $candlePath) {
                 Write-Host "Found candle.exe at $candlePath."
                 return $candlePath
               }
@@ -408,7 +408,6 @@ jobs:
       - name: Run Rust unit tests (Windows crates)
         run: |
           $ErrorActionPreference = "Stop"
-          # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
           cargo test -p mirrord -p mirrord-layer-win
 
       ###########################################################################
