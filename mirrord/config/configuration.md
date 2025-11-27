@@ -653,8 +653,7 @@ occurs during DNS resolution. This error often means that the Kubernetes cluster
 hardened, and the mirrord-agent is not fully functional without `agent.privileged`
 enabled.
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
+Defaults to `true`
 
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
@@ -721,14 +720,6 @@ Enables trusting any certificate on macOS, useful for <https://github.com/golang
 ### _experimental_ use_dev_null {#experimental-use_dev_null}
 
 Uses /dev/null for creating local fake files (should be better than using /tmp)
-
-### _experimental_ vfork_emulation {#experimental-vfork_emulation}
-
-Enables vfork emulation within the mirrord-layer.
-Might solve rare stack corruption issues.
-
-Note that for Go applications on ARM64, this feature is not yet supported,
-and this setting is ignored.
 
 ## external_proxy {#root-external_proxy}
 

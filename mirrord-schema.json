@@ -1153,7 +1153,7 @@
         },
         "dns_permission_error_fatal": {
           "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
-          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
+          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true`",
           "type": [
             "boolean",
             "null"
@@ -1244,14 +1244,6 @@
         "use_dev_null": {
           "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
           "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "vfork_emulation": {
-          "title": "_experimental_ vfork_emulation {#experimental-vfork_emulation}",
-          "description": "Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.\n\nNote that for Go applications on ARM64, this feature is not yet supported, and this setting is ignored.",
           "type": [
             "boolean",
             "null"
