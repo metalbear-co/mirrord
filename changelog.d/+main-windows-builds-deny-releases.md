@@ -1,1 +1,1 @@
-This PR fixes the issue with windows builds that steal the latest release
+This PR fixes the issue with windows builds that steal the latest release for the main branch
