@@ -648,21 +648,6 @@ impl LayerConfig {
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
 
-        if self.experimental.readlink {
-            context.add_warning(
-                "experimental.readlink config has been deprecated, and `readlink` is now\
-                    enabled by default! You may remove it from your config."
-                    .into(),
-            );
-        }
-
-        if self.experimental.readonly_file_buffer.is_some() {
-            return Err(ConfigError::Conflict(
-                "cannot use experimental.readonly_file_buffer, as it has been moved. Use feature.fs.readonly_file_buffer instead."
-                    .to_string(),
-            ));
-        }
-
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
             return Err(ConfigError::InvalidValue {
                 name: "feature.fs.readonly_file_buffer",
