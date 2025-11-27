@@ -563,7 +563,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       ###########################################################################
-      # UPDATE WinGet MANIFEST (optional)
+      # UPDATE WinGet MANIFEST (optional, best-effort)
       ###########################################################################
 
       - name: Update WinGet manifest (wingetcreate)
@@ -597,12 +597,30 @@ jobs:
           # Download latest single-file wingetcreate.exe
           Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
 
-          # Non-interactive update + submit PR to microsoft/winget-pkgs
-          .\wingetcreate.exe update $packageId `
-            --version $version `
-            --urls "$installerUrl" `
-            --submit `
-            --token $gitToken
+          # Run wingetcreate update and capture output
+          $args = @(
+            "update", $packageId,
+            "--version", $version,
+            "--urls", $installerUrl,
+            "--submit",
+            "--token", $gitToken
+          )
+
+          Write-Host "Running: wingetcreate.exe $($args -join ' ')"
+          $output = & .\wingetcreate.exe @args 2>&1
+          $exitCode = $LASTEXITCODE
+
+          $output | ForEach-Object { Write-Host $_ }
+
+          if ($exitCode -ne 0) {
+            if ($output -match "was not found") {
+              Write-Warning "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Skipping update (non-fatal)."
+              Write-Warning "To create the initial package, run 'wingetcreate new' manually and submit the first PR."
+              exit 0
+            } else {
+              throw "wingetcreate update failed with exit code $exitCode"
+            }
+          }
 
       ###########################################################################
       # SUMMARY
