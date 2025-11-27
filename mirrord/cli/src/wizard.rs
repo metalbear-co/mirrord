@@ -2,11 +2,10 @@ use std::{io::Cursor, net::SocketAddr, sync::Arc};
 
 use axum::{
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::header,
     routing::get,
 };
-use axum::extract::Path;
 use flate2::read::GzDecoder;
 use mirrord_config::target::TargetType;
 use serde::{Deserialize, Serialize};
@@ -118,6 +117,12 @@ pub async fn wizard_command(user_data: UserData) {
 }
 
 #[derive(Debug, Serialize)]
+struct ClusterDetails {
+    namespaces: Vec<String>,
+    target_types: Vec<TargetType>,
+}
+
+#[derive(Debug, Serialize)]
 struct TargetInfo {
     target_path: String,
     target_namespace: String,
@@ -129,9 +134,7 @@ struct Params {
     target_type: Option<TargetType>,
 }
 
-async fn cluster_details(
-    State(user_data): State<Arc<Mutex<UserData>>>,
-) -> CliResult<String> {
+async fn cluster_details(State(user_data): State<Arc<Mutex<UserData>>>) -> CliResult<String> {
     let mut user_guard = user_data.lock().await;
     // consider the user a returning user in future runs
     if !user_guard.is_returning_wizard() {
@@ -140,15 +143,50 @@ async fn cluster_details(
     }
 
     // TODO: return available namespaces and target types
-    let res = "TODO: return available namespaces and target types".to_string();
-    Ok(res)
+
+    let res = ClusterDetails {
+        namespaces: vec![
+            "default".to_string(),
+            "production".to_string(),
+            "system".to_string(),
+            "kube-system".to_string(),
+            "monitoring".to_string(),
+        ],
+        target_types: TargetType::all().collect(),
+    };
+    Ok(serde_json::to_string(&res)?)
 }
 
 async fn list_targets(
-    Query(_query_params): Query<Params>,
-    Path(_namespace): Path<String>,
+    Query(query_params): Query<Params>,
+    Path(namespace): Path<String>,
 ) -> CliResult<String> {
     // TODO: return target info using mirrord ls
-    let res = "TODO: return list of targets".to_string();
-    Ok(res)
+
+    let targets = vec![
+        TargetInfo {
+            target_path: "deployment/api-service".to_string(),
+            target_namespace: "default".to_string(),
+            detected_ports: vec![8080, 3000, 5432, 9000, 4000],
+        },
+        TargetInfo {
+            target_path: "deployment/worker-queue".to_string(),
+            target_namespace: "production".to_string(),
+            detected_ports: vec![8080, 3000, 4000, 6379, 5672, 3306],
+        },
+        TargetInfo {
+            target_path: "cronjob/backup-job".to_string(),
+            target_namespace: "system".to_string(),
+            detected_ports: vec![3000, 5432, 9000, 4000, 6379, 5672],
+        },
+    ];
+
+    let thing = query_params.target_type;
+    println!("{:?}", thing);
+
+    let res = targets
+        .iter()
+        .filter(|target| target.target_namespace == namespace)
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string(&res)?)
 }
