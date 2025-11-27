@@ -186,7 +186,7 @@ pub(crate) async fn create_pg_branches<P: Progress>(
         return Ok(HashMap::new());
     }
 
-    let mut subtask = progress.subtask("creating new MySQL branch databases");
+    let mut subtask = progress.subtask("creating new PostgreSQL branch databases");
     let mut created_branches = HashMap::new();
 
     for (id, params) in params {
@@ -206,7 +206,7 @@ pub(crate) async fn create_pg_branches<P: Progress>(
             Err(e) => {
                 return Err(OperatorApiError::KubeError {
                     error: e,
-                    operation: OperatorOperation::MysqlBranching,
+                    operation: OperatorOperation::PgBranching,
                 });
             }
         };
@@ -285,7 +285,7 @@ pub(crate) async fn list_reusable_pg_branches<P: Progress>(
         .await
         .map_err(|e| OperatorApiError::KubeError {
             error: e,
-            operation: OperatorOperation::MysqlBranching,
+            operation: OperatorOperation::PgBranching,
         })?
         .into_iter()
         .filter(|db| {
