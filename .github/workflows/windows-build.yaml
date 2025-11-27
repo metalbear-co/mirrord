@@ -220,7 +220,7 @@ jobs:
 
             foreach ($dir in $candidateDirs) {
               $candlePath = Join-Path $dir "candle.exe"
-              if (Test-Path $candlePath) {
+              if (Test-Path $candlePath)) {
                 Write-Host "Found candle.exe at $candlePath."
                 return $candlePath
               }
@@ -440,8 +440,7 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # UPLOAD ARTIFACTS TO GITHUB RELEASE
-      # (ONLY when PUBLISH_MODE != 'no', never during tests)
+      # UPLOAD ARTIFACTS TO GITHUB RELEASE (ONLY WHEN PUBLISH_MODE != 'no')
       ###########################################################################
 
       - name: Upload artifacts to GitHub Release (custom)
@@ -450,13 +449,12 @@ jobs:
         env:
           MSI_PATH: ${{ env.MSI_PATH }}
           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
-          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+          MIRRORD_LAYER_FILE: ${{ env:MIRRORD_LAYER_FILE }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         with:
           script: |
             const fs = require("fs");
             const path = require("path");
-            const core = require("@actions/core");
             const { owner, repo } = context.repo;
 
             const tag = process.env.RELEASE_TAG;
