@@ -12,7 +12,7 @@ use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
-use mirrord_operator::{MirrordCiInfo, client::OperatorApi};
+use mirrord_operator::{client::OperatorApi, crd::session::MirrordCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};

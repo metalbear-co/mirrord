@@ -35,7 +35,6 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    MirrordCiInfo,
     client::database_branches::{
         DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
     },
@@ -44,6 +43,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
+        session::MirrordCiInfo,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CI_INFO_HEADER,
