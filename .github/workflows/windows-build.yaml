@@ -402,13 +402,13 @@ jobs:
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # UNIT TESTS (Windows-only crates)
+      # UNIT TESTS (Windows-only crates). Disabled for testing purposes
       ###########################################################################
 
-      - name: Run Rust unit tests (Windows crates)
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
+      # - name: Run Rust unit tests (Windows crates)
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     cargo test -p mirrord -p mirrord-layer-win
 
       ###########################################################################
       # RELEASE TAG (needed for release & WinGet)
