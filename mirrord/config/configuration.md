@@ -703,17 +703,7 @@ Disables any system wide proxy configuration for affecting the running applicati
 
 Enables better support for outgoing connections using non-blocking TCP sockets.
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
-
-### _experimental_ readlink {#experimental-readlink}
-
-DEPRECATED, WILL BE REMOVED
-
-### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
-
-DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
-stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
+Defaults to `false`.
 
 ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
 
@@ -925,7 +915,6 @@ A list of configurations for database branches.
       {
         "name": "my-database-name",
         "ttl_secs": 120,
-        "creation_timeout_secs": 60,
         "type": "mysql",
         "version": "8.0",
         "connection": {
@@ -949,7 +938,6 @@ Example:
   "id": "my-branch-db",
   "name": "my-database-name",
   "ttl_secs": 120,
-  "creation_timeout_secs": 60,
   "type": "mysql",
   "version": "8.0",
   "connection": {
@@ -989,6 +977,12 @@ the target pod template.
 
 Different ways to source the connection options.
 
+### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
 ### feature.db_branches.base.id {#feature-db_branches-base-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
@@ -1007,12 +1001,6 @@ The time-to-live (TTL) for the branch database is set to 300 seconds by default.
 Users can set `ttl_secs` to customize this value according to their need. Please note
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
-
-### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.
-If branch creation takes longer than expected, increase this value to prevent timeout errors.
 
 ### feature.db_branches.base.version {#feature-db_branches-base-version}
 
@@ -1035,6 +1023,25 @@ Users can choose from the following copy mode to bootstrap their MySQL branch da
 
   Copies both schema and data of all tables. This option shall only be used
   when the data volume of the source database is minimal.
+
+In addition to copying an empty database or all tables' schema, mirrord operator
+will copy data from the source DB when an array of table configs are specified.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
+  },
+  "orders": {
+    "filter": "my_db.orders.created_at > 1759948761"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` table and orders
+created after the given timestamp will be copied.
 
 In addition to copying an empty database or all tables' schema, mirrord operator
 will copy data from the source DB when an array of table configs are specified.

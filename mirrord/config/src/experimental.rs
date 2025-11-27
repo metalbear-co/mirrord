@@ -19,12 +19,6 @@ pub struct ExperimentalConfig {
     #[config(default = true)]
     pub tcp_ping4_mock: bool,
 
-    /// ### _experimental_ readlink {#experimental-readlink}
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(default = false)]
-    pub readlink: bool,
-
     /// ### _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
     ///
     /// Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
@@ -60,12 +54,6 @@ pub struct ExperimentalConfig {
     /// Uses /dev/null for creating local fake files (should be better than using /tmp)
     #[config(default = true)]
     pub use_dev_null: bool,
-
-    /// ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
-    ///
-    /// DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
-    /// stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
-    pub readonly_file_buffer: Option<u64>,
 
     /// ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
     ///
@@ -157,7 +145,6 @@ pub struct ExperimentalConfig {
 impl CollectAnalytics for &ExperimentalConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("tcp_ping4_mock", self.tcp_ping4_mock);
-        analytics.add("readlink", self.readlink);
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);

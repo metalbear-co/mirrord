@@ -1217,24 +1217,6 @@
             "null"
           ]
         },
-        "readlink": {
-          "title": "_experimental_ readlink {#experimental-readlink}",
-          "description": "DEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "readonly_file_buffer": {
-          "title": "_experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}",
-          "description": "DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
           "description": "Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.",
