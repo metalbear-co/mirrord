@@ -632,9 +632,7 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
-        if state.experimental().vfork_emulation {
-            replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
-        }
+        replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
     };
 
     unsafe {
@@ -671,7 +669,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager, state.experimental());
+        go_hooks::enable_hooks(&mut hook_manager);
     }
 }
 
