@@ -161,61 +161,25 @@ const PortsConfigToggle = ({
         setToggleEnabled(!toggleEnabled);
       }}
     />
-    // <Button
-    //   key={"filtersEnabledToggle"}
-    //   variant={toggleEnabled ? "default" : "outline"}
-    //   size="sm"
-    //   className={`rounded-full px-4 py-2 font-mono transition-all ${
-    //     toggleEnabled
-    //       ? "bg-primary text-primary-foreground hover:bg-primary/90"
-    //       : "hover:bg-primary/10"
-    //   }`}
-      // onClick={() => {
-      //   if (toggleEnabled) {
-      //     // user turned incoming from "on" to "off"
-      //     // save state, in case the user turns the toggle back on
-      //     setSavedPorts([
-      //       readCurrentPorts(config),
-      //       readCurrentPortMapping(config),
-      //     ]);
-      //     const newConfig = disablePortsAndMapping(config);
-      //     setConfig(newConfig);
-      //   } else {
-      //     // user turned incoming from "off" to "on"
-      //     // restore the last state that was saved
-      //     const [savedPortsOnly, savedMapping] = savedPorts;
-      //     const partialNewConfig = updateConfigPorts(savedPortsOnly, config);
-      //     const newConfig = updateConfigPortMapping(
-      //       savedMapping,
-      //       partialNewConfig
-      //     );
-      //     setConfig(newConfig);
-      //   }
-
-      //   setToggleEnabled(!toggleEnabled);
-      // }}
-    // >
-    //   {toggleEnabled ? "On" : "Off"}
-    // </Button>
   );
 };
 
 const NetworkTab = ({
   savedIncoming,
+  targetPorts,
   setSavedIncoming,
   setPortConflicts
 }: {
   savedIncoming: any;
+  targetPorts: number[];
   setSavedIncoming: (any) => void;
-  setPortConflicts: React.Dispatch<React.SetStateAction<boolean>>
+  setPortConflicts: (boolean) => void;
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext);
   const [toggleFiltersEnabled, setToggleFiltersEnabled] =
     useState<boolean>(false);
   const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false);
   const [newRemotePort, setNewRemotePort] = useState<number>();
-
-  const mockPorts = [8080, 3000, 5432, 9000, 4000, 6379, 5672, 3306];
 
   const handleOnSubmit = (e) => {
     e.preventDefault();
@@ -380,7 +344,7 @@ const NetworkTab = ({
                       <PortsConfigToggle
                         toggleEnabled={togglePortsEnabled}
                         setToggleEnabled={setTogglePortsEnabled}
-                        detectedPorts={mockPorts}
+                        detectedPorts={targetPorts}
                       />
                     </h3>
                     <p className="text-xs text-muted-foreground">
@@ -393,7 +357,7 @@ const NetworkTab = ({
                   {togglePortsEnabled && (
                     <div className="space-y-4">
                       <p className="text-xs text-muted-foreground mb-3">
-                        {mockPorts.length} ports were detected automatically in
+                        {targetPorts.length} ports were detected automatically in
                         the target.
                       </p>
                       <div className="space-y-3">
@@ -421,7 +385,7 @@ const NetworkTab = ({
                             <PortMapping
                               key={remotePort}
                               remotePort={remotePort}
-                              detectedPort={mockPorts.includes(remotePort)}
+                              detectedPort={targetPorts.includes(remotePort)}
                               setPortConflicts={setPortConflicts}
                             />
                           ))}
