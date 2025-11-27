@@ -367,7 +367,7 @@ jobs:
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD TO GCS
+      # UPLOAD MSI TO PUBLIC GCS BUCKET
       ###########################################################################
 
       - name: Upload MSI to GCS
@@ -379,7 +379,7 @@ jobs:
           }
 
           # Build a unique folder per run:
-          # gs://mirrord-windows-msi-public/<ref-name>/run-<run-id>/mirrord.msi
+          # gs://mirrord-windows-builds-public/<ref-name>/run-<run-id>/mirrord.msi
           $runId = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
@@ -412,12 +412,12 @@ jobs:
           cargo test -p mirrord -p mirrord-layer-win
 
       ###########################################################################
-      # RELEASE PUBLISH (upload-only, no creation)
+      # RELEASE TAG (needed for release & WinGet)
       ###########################################################################
 
       - name: Compute release tag
         id: tag
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_WINGET == 'true') }}
+        if: ${{ github.event_name != 'pull_request' && (env.PUBLISH_MODE != 'no' || env.PUBLISH_WINGET == 'true') }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -439,8 +439,13 @@ jobs:
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
 
+      ###########################################################################
+      # UPLOAD ARTIFACTS TO GITHUB RELEASE
+      # (ONLY when PUBLISH_MODE != 'no', never during tests)
+      ###########################################################################
+
       - name: Upload artifacts to GitHub Release (custom)
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_MODE != 'no' }}
         uses: actions/github-script@v7
         env:
           MSI_PATH: ${{ env.MSI_PATH }}
@@ -451,11 +456,11 @@ jobs:
           script: |
             const fs = require("fs");
             const path = require("path");
+            const core = require("@actions/core");
             const { owner, repo } = context.repo;
 
             const tag = process.env.RELEASE_TAG;
 
-            // Look up existing release — DO NOT create one here
             let rel;
             try {
               const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
@@ -476,10 +481,23 @@ jobs:
               }
 
               const name = path.basename(filePath);
+
+              // Replace existing asset with same name (only in real release mode)
+              const existing = rel.assets?.find(a => a.name === name);
+              if (existing) {
+                core.info(`Asset '${name}' already exists (id=${existing.id}), deleting before re-upload...`);
+                await github.rest.repos.deleteReleaseAsset({
+                  owner,
+                  repo,
+                  asset_id: existing.id,
+                });
+              }
+
               const data = fs.readFileSync(filePath);
 
               await github.rest.repos.uploadReleaseAsset({
-                owner, repo,
+                owner,
+                repo,
                 release_id: rel.id,
                 name,
                 data,
@@ -488,6 +506,8 @@ jobs:
                   "content-length": data.length
                 }
               });
+
+              core.info(`Uploaded asset '${name}' (${data.length} bytes)`);
             }
 
             await upload(process.env.MIRRORD_EXE);
@@ -495,11 +515,11 @@ jobs:
             await upload(process.env.MSI_PATH);
 
       ###########################################################################
-      # COMPUTE MSI DOWNLOAD URL (GitHub Release OR GCS HTTP)
+      # COMPUTE MSI DOWNLOAD URL (GitHub Release OR PUBLIC GCS)
       ###########################################################################
 
       - name: Compute MSI download URL for WinGet
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_WINGET == 'true') }}
+        if: ${{ github.event_name != 'pull_request' && (env.PUBLISH_MODE != 'no' || env.PUBLISH_WINGET == 'true') }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -514,14 +534,13 @@ jobs:
           }
 
           $publishMode = $env:PUBLISH_MODE
-          $isTag = "$env:GITHUB_REF".StartsWith("refs/tags/")
 
-          if ($isTag -or $publishMode -ne "no") {
-            # Use GitHub Releases URL when we're actually publishing a release
+          if ($publishMode -ne "no") {
+            # Real release mode -> GitHub Releases URL
             $url = "https://github.com/$repoFull/releases/download/$tag/mirrord.msi"
             Write-Host "Computed MSI download URL from GitHub Releases: $url"
           } else {
-            # Winget-only / no GitHub Release: use GCS HTTP path
+            # Test / WinGet-only mode -> Public GCS URL
             $httpBase = $env:MSI_HTTP_BASE.TrimEnd('/')
             if (-not $httpBase) {
               throw "MSI_HTTP_BASE must be set for WinGet without GitHub Releases."
@@ -533,7 +552,6 @@ jobs:
               throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
             }
 
-            # Matches the object path used in 'Upload MSI to GCS'
             $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
             Write-Host "Computed MSI download URL from GCS HTTP: $url"
           }
