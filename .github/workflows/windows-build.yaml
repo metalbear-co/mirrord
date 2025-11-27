@@ -400,13 +400,14 @@ jobs:
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # UNIT TESTS (Windows-only crates) Disabled for testing
+      # UNIT TESTS (Windows-only crates) - TEMPORARILY DISABLED
       ###########################################################################
 
-      # - name: Run Rust unit tests (Windows crates)
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord -p mirrord-layer-win
+      - name: Run Rust unit tests (Windows crates)
+        if: ${{ false }} # temporarily disabled
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord -p mirrord-layer-win
 
       ###########################################################################
       # RELEASE TAG (needed for release & WinGet)
@@ -477,15 +478,11 @@ jobs:
 
               const name = path.basename(filePath);
 
-              // Replace existing asset with same name (only in real release mode)
+              // If asset exists, DO NOT delete or re-upload – just log and skip
               const existing = rel.assets?.find(a => a.name === name);
               if (existing) {
-                core.info(`Asset '${name}' already exists (id=${existing.id}), deleting before re-upload...`);
-                await github.rest.repos.deleteReleaseAsset({
-                  owner,
-                  repo,
-                  asset_id: existing.id,
-                });
+                core.info(`Asset '${name}' already exists (id=${existing.id}), skipping upload.`);
+                return;
               }
 
               const data = fs.readFileSync(filePath);
@@ -554,12 +551,14 @@ jobs:
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
-      # INSTALL .NET RUNTIME FOR WINGETCREATE
+      # INSTALL .NET RUNTIME FOR WINGETCREATE (non-admin-friendly)
       ###########################################################################
 
       - name: Install .NET runtime for wingetcreate
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
         with:
           dotnet-version: '8.0.x'
 
