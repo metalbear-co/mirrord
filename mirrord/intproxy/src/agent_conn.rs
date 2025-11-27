@@ -159,7 +159,6 @@ impl AgentConnection {
 
         let (agent_tx, agent_rx, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
-                // TODO(alex) [high] 1: Do we need ci info here too?
                 let connection =
                     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
                         .await?;
