@@ -69,7 +69,6 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
-is_ci = "1.2.0"
 ci_info = "0.14"
 
 [target.'cfg(unix)'.dependencies]

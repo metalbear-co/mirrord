@@ -4421,7 +4421,6 @@ dependencies = [
  "humantime",
  "hyper 1.8.0",
  "hyper-util",
- "is_ci",
  "k8s-openapi",
  "kube",
  "libc",
