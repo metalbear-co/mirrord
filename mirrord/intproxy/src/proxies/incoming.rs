@@ -707,6 +707,10 @@ impl IncomingProxy {
                 let tasks = self.tasks.as_mut().unwrap();
                 tasks.clear();
 
+
+                // Reset protocol version since we'll need another negotiation
+                // round for the new connection.
+                self.protocol_version = None;
                 message_bus.set_agent_tx(new_agent_tx);
                 tasks.set_agent_tx(message_bus.clone_agent_tx());
 

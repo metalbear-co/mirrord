@@ -1150,6 +1150,9 @@ impl FilesProxy {
         for response in self.reconnect_tracker.agent_lost() {
             message_bus.send(ToLayer::from(response)).await;
         }
+        // Reset protocol version since we'll need another negotiation
+        // round for the new connection.
+        self.protocol_version = None;
         message_bus.set_agent_tx(new_agent_tx);
     }
 }
