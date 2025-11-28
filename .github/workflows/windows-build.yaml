@@ -444,3 +444,10 @@ jobs:
           $md += ''
           $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+  
+  post_release_checks_windows:
+    needs: [windows_tests]
+    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no')
+    uses: ./.github/workflows/release-tests.yaml
+    secrets:
+      SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}

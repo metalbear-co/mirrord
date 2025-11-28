@@ -430,3 +430,10 @@ jobs:
           update-latest: true
           # Don't update the vX.Y tags
           update-minor: false
+
+  post_release_checks:
+    needs: [update_latest]
+    if: github.event_name != 'workflow_dispatch'
+    uses: ./.github/workflows/release-tests.yaml
+    secrets:
+      SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
