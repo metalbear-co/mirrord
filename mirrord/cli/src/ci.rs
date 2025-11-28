@@ -352,6 +352,7 @@ impl MirrordCi {
         })
     }
 
+    /// Converts a [`CiInfo`] into a [`MirrordCiInfo`] used by the operator.
     pub(super) fn info(&self) -> MirrordCiInfo {
         let CiInfo {
             vendor: _,

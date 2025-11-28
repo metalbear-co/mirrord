@@ -48,6 +48,7 @@ pub struct MirrordClusterSessionSpec {
 }
 
 impl MirrordClusterSession {
+    /// Deep clones a [`MirrordClusterSession`], so we can get a owned version from an `Arc`.
     pub fn clone_owned(&self) -> Self {
         let Self {
             metadata,
