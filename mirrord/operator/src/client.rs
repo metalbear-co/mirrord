@@ -132,6 +132,7 @@ pub struct OperatorSession {
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
 
+    /// [`MirrordCiInfo`] is available when the session was started by `mirrord ci start`.
     pub mirrord_ci_info: Option<MirrordCiInfo>,
 }
 
@@ -147,6 +148,7 @@ impl fmt::Debug for OperatorSession {
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("allow_reconnect", &self.allow_reconnect)
+            .field("mirrord_ci_info", &self.mirrord_ci_info)
             .finish()
     }
 }
@@ -832,8 +834,6 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
-            // TODO(alex) [high] 2: Seems like we should add the ci stuff in
-            // `make_operator_session`, the connect params doesn't seem to fit it.
             let session = self.make_operator_session(None, connect_url, mirrord_ci_info.clone())?;
 
             (session, false)
@@ -903,7 +903,6 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::LayerReconnect);
 
-        // TODO(alex) [high] 3: Probably add ci info here.
         Ok(OperatorSession {
             id,
             connect_url,

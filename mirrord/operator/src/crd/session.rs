@@ -64,7 +64,7 @@ impl MirrordClusterSession {
 }
 
 /// Describes an owner of a mirrord session.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionOwner {
     /// Unique ID.
@@ -78,7 +78,7 @@ pub struct SessionOwner {
 }
 
 /// Describes a target of a mirrord session.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTarget {
     /// Kubernetes resource apiVersion.
@@ -92,7 +92,7 @@ pub struct SessionTarget {
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionJiraMetrics {
     /// The user's current git branch.
@@ -167,7 +167,7 @@ pub struct SessionClosed {
 ///
 /// Implements this conversion so we can easily send this as a request header in
 /// `OperatorApi::connect_target`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct MirrordCiInfo {
     /// CI vendor, e.g. "github", "gitlab", ...
     pub vendor: Option<String>,
