@@ -47,6 +47,7 @@ async fn operator_setup(
         kafka_splitting,
         application_auto_pause,
         mysql_branching,
+        pg_branching,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     eprintln!(
@@ -100,6 +101,7 @@ async fn operator_setup(
             kafka_splitting,
             application_auto_pause,
             mysql_branching,
+            pg_branching,
         });
 
         match file {

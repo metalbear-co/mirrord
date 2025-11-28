@@ -33,6 +33,7 @@ use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
     patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
+    pg_branching::PgBranchDatabase,
     policy::{MirrordClusterPolicy, MirrordPolicy},
     profile::{MirrordClusterProfile, MirrordProfile},
     session::MirrordClusterSession,
@@ -106,6 +107,7 @@ pub struct SetupOptions {
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
     pub mysql_branching: bool,
+    pub pg_branching: bool,
 }
 
 #[derive(Debug)]
@@ -126,6 +128,7 @@ pub struct Operator {
     sqs_splitting: bool,
     kafka_splitting: bool,
     mysql_branching: bool,
+    pg_branching: bool,
 }
 
 impl Operator {
@@ -139,6 +142,7 @@ impl Operator {
             kafka_splitting,
             application_auto_pause,
             mysql_branching,
+            pg_branching,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -155,10 +159,13 @@ impl Operator {
             kafka_splitting,
             application_auto_pause,
             mysql_branching,
+            pg_branching,
         });
         let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
-        let user_cluster_role =
-            OperatorClusterUserRole::new(OperatorClusterUserRoleOptions { mysql_branching });
+        let user_cluster_role = OperatorClusterUserRole::new(OperatorClusterUserRoleOptions {
+            mysql_branching,
+            pg_branching,
+        });
 
         let (role, role_binding) = kafka_splitting
             .then(|| {
@@ -181,6 +188,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             mysql_branching,
+            pg_branching,
             application_auto_pause,
         );
 
@@ -205,6 +213,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             mysql_branching,
+            pg_branching,
         }
     }
 }
@@ -306,6 +315,10 @@ impl OperatorSetup for Operator {
             MysqlBranchDatabase::crd().to_writer(&mut writer)?;
         }
 
+        if self.pg_branching {
+            writer.write_all(b"---\n")?;
+            PgBranchDatabase::crd().to_writer(&mut writer)?;
+        }
         Ok(())
     }
 }
@@ -349,6 +362,7 @@ impl OperatorDeployment {
         sqs_splitting: bool,
         kafka_splitting: bool,
         mysql_branching: bool,
+        pg_branching: bool,
         application_auto_pause: bool,
     ) -> Self {
         let mut envs = vec![
@@ -440,6 +454,14 @@ impl OperatorDeployment {
         if mysql_branching {
             envs.push(EnvVar {
                 name: "OPERATOR_MYSQL_BRANCHING".into(),
+                value: Some("true".into()),
+                value_from: None,
+            });
+        }
+
+        if pg_branching {
+            envs.push(EnvVar {
+                name: "OPERATOR_PG_BRANCHING".into(),
                 value: Some("true".into()),
                 value_from: None,
             });
@@ -576,6 +598,7 @@ pub struct OperatorClusterRoleOptions {
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
     pub mysql_branching: bool,
+    pub pg_branching: bool,
 }
 
 #[derive(Debug)]
@@ -845,6 +868,31 @@ impl OperatorClusterRole {
             ])
         }
 
+        if options.pg_branching {
+            rules.extend([
+                PolicyRule {
+                    api_groups: Some(vec![PgBranchDatabase::group(&()).into_owned()]),
+                    resources: Some(vec![PgBranchDatabase::plural(&()).into_owned()]),
+                    verbs: ["list", "get", "watch", "delete", "update", "patch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec![PgBranchDatabase::group(&()).into_owned()]),
+                    resources: Some(vec![format!(
+                        "{}/status",
+                        PgBranchDatabase::plural(&()).into_owned()
+                    )]),
+                    verbs: ["get", "update", "patch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+            ])
+        }
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_CLUSTER_ROLE_NAME.to_owned()),
@@ -1048,6 +1096,7 @@ impl OperatorApiService {
 #[derive(Debug, Default)]
 pub struct OperatorClusterUserRoleOptions {
     pub mysql_branching: bool,
+    pub pg_branching: bool,
 }
 
 #[derive(Debug)]
@@ -1119,6 +1168,17 @@ impl OperatorClusterUserRole {
             }]);
         }
 
+        if options.pg_branching {
+            rules.extend([PolicyRule {
+                api_groups: Some(vec![PgBranchDatabase::group(&()).into_owned()]),
+                resources: Some(vec![PgBranchDatabase::plural(&()).into_owned()]),
+                verbs: vec!["create", "list", "get", "watch"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            }]);
+        }
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
