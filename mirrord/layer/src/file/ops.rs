@@ -19,10 +19,11 @@ use libc::{c_char, statx, statx_timestamp};
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
-        FtruncateRequest, MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse,
-        OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse,
-        RemoveDirRequest, RenameRequest, SeekFileResponse, StatFsRequestV2, UnlinkAtRequest,
-        UnlinkRequest, WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
+        FtruncateRequest, FutimensRequest, MakeDirAtRequest, MakeDirRequest, OpenFileRequest,
+        OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest,
+        ReadLinkFileResponse, RemoveDirRequest, RenameRequest, SeekFileResponse, StatFsRequestV2,
+        Timespec, UnlinkAtRequest, UnlinkRequest, WriteFileResponse, XstatFsRequestV2,
+        XstatFsResponseV2, XstatResponse,
     },
 };
 use nix::errno::Errno;
@@ -854,6 +855,13 @@ pub(crate) fn ftruncate(fd: RawFd, length: i64) -> Detour<()> {
     let fd = get_remote_fd(fd)?;
     Detour::Success(common::make_proxy_request_with_response(
         FtruncateRequest { fd, length },
+    )??)
+}
+
+pub(crate) fn futimens(fd: RawFd, times: Option<[Timespec; 2]>) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        FutimensRequest { fd, times },
     )??)
 }
 

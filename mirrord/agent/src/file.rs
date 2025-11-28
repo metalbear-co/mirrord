@@ -11,6 +11,7 @@ use std::{
         unix::{fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf},
+    ptr,
 };
 
 use faccess::{AccessMode, PathExt};
@@ -230,6 +231,9 @@ impl FileManager {
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
             FileRequest::Ftruncate(FtruncateRequest { fd, length }) => {
                 Some(FileResponse::Ftruncate(self.ftruncate(fd, length)))
+            }
+            FileRequest::Futimens(FutimensRequest { fd, times }) => {
+                Some(FileResponse::Futimens(self.futimens(fd, times)))
             }
         })
     }
@@ -531,6 +535,41 @@ impl FileManager {
         match file {
             RemoteFile::File(file) => {
                 let result = unsafe { libc::ftruncate(file.as_raw_fd(), length) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn futimens(&mut self, fd: u64, times: Option<[Timespec; 2]>) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let times = times.map(|times| {
+                    [
+                        libc::timespec {
+                            tv_sec: times[0].tv_sec,
+                            tv_nsec: times[0].tv_nsec,
+                        },
+                        libc::timespec {
+                            tv_sec: times[1].tv_sec,
+                            tv_nsec: times[1].tv_nsec,
+                        },
+                    ]
+                });
+                let result = unsafe {
+                    libc::futimens(
+                        file.as_raw_fd(),
+                        times.map(|times| times.as_ptr()).unwrap_or(ptr::null()),
+                    )
+                };
                 match result {
                     -1 => Err(ResponseError::from(io::Error::last_os_error())),
                     _ => Ok(()),

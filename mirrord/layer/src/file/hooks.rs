@@ -15,7 +15,7 @@ use std::{
 
 use libc::{
     self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
-    iovec, off_t, size_t, ssize_t, stat, statfs,
+    iovec, off_t, size_t, ssize_t, stat, statfs, timespec,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
@@ -23,7 +23,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use mirrord_protocol::file::{
-    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
+    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, Timespec,
     WriteFileResponse,
 };
 use nix::errno::Errno;
@@ -279,6 +279,34 @@ pub(super) unsafe extern "C" fn ftruncate_detour(fd: c_int, length: off_t) -> c_
     ftruncate(fd, length)
         .map(|()| 0)
         .unwrap_or_bypass_with(|_| unsafe { FN_FTRUNCATE(fd, length) })
+}
+
+/// Hook for [`libc::futimens`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn futimens_detour(fd: c_int, raw_times: *const timespec) -> c_int {
+    unsafe {
+        let times = if !raw_times.is_null() {
+            let [first, second] = slice::from_raw_parts(raw_times, 2) else {
+                unreachable!("We create the slice with two elements")
+            };
+
+            Some([
+                Timespec {
+                    tv_sec: first.tv_sec,
+                    tv_nsec: first.tv_nsec,
+                },
+                Timespec {
+                    tv_sec: second.tv_sec,
+                    tv_nsec: second.tv_nsec,
+                },
+            ])
+        } else {
+            None
+        };
+        futimens(fd, times)
+            .map(|()| 0)
+            .unwrap_or_bypass_with(|_| FN_FUTIMENS(fd, raw_times))
+    }
 }
 
 /// see below, to have nice code we also implement it for other archs.
@@ -1833,6 +1861,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
             ftruncate_detour,
             FnFtruncate,
             FN_FTRUNCATE
+        );
+
+        replace!(
+            hook_manager,
+            "futimens",
+            futimens_detour,
+            FnFutimens,
+            FN_FUTIMENS
         );
     }
 }

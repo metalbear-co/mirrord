@@ -661,3 +661,15 @@ pub struct FtruncateRequest {
     pub fd: u64,
     pub length: i64,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Timespec {
+    pub tv_sec: i64,
+    pub tv_nsec: i64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FutimensRequest {
+    pub fd: u64,
+    pub times: Option<[Timespec; 2]>,
+}
