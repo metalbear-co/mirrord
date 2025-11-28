@@ -60,6 +60,7 @@ impl From<AgentLostFileResponse> for ToLayer {
             FileResponse::Rename(..) => FileResponse::Rename(Err(error)),
             FileResponse::Sendfile(..) => FileResponse::Sendfile(Err(error)),
             FileResponse::Ftruncate(..) => FileResponse::Ftruncate(Err(error)),
+            FileResponse::Futimens(..) => FileResponse::Futimens(Err(error)),
         };
 
         debug_assert_eq!(
@@ -120,6 +121,7 @@ impl FileRequestExt for FileRequest {
             Self::Rename(..) => dummy_file_response!(Rename),
             Self::Sendfile(..) => dummy_file_response!(Sendfile),
             Self::Ftruncate(..) => dummy_file_response!(Ftruncate),
+            Self::Futimens(..) => dummy_file_response!(Futimens),
         };
 
         Some(AgentLostFileResponse(layer_id, message_id, response))
@@ -320,7 +322,8 @@ impl RouterFileOps {
                 dirfd: Some(remote_fd),
                 ..
             })
-            | FileRequest::Ftruncate(FtruncateRequest { fd: remote_fd, .. }) => {
+            | FileRequest::Ftruncate(FtruncateRequest { fd: remote_fd, .. })
+            | FileRequest::Futimens(FutimensRequest { fd: remote_fd, .. }) => {
                 if *remote_fd < self.current_fd_offset {
                     let error_response = request
                         .agent_lost_response(layer_id, message_id)
@@ -378,7 +381,8 @@ impl RouterFileOps {
             | FileResponse::Rename(..)
             | FileResponse::RemoveDir(..)
             | FileResponse::Sendfile(..)
-            | FileResponse::Ftruncate(..) => {}
+            | FileResponse::Ftruncate(..)
+            | FileResponse::Futimens(..) => {}
 
             FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd: remote_fd, .. }))
             | FileResponse::Open(Ok(OpenFileResponse { fd: remote_fd }))
