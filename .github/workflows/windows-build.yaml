@@ -28,10 +28,10 @@ on:
         options: ["false", "true"]
         default: "false"
 
-  push:
-    paths-ignore:
-      - "*.md"
-      - "**/*.md"
+  # push:
+  #   paths-ignore:
+  #     - "*.md"
+  #     - "**/*.md"
 
   pull_request:
     branches: ["main", "*staging*", "windows-support"]
