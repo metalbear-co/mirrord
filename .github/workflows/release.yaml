@@ -434,6 +434,7 @@ jobs:
   post_release_checks:
     needs: [update_latest]
     if: github.event_name != 'workflow_dispatch'
+    permissions: {}
     uses: ./.github/workflows/release-tests.yaml
     secrets:
       SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
