@@ -669,22 +669,30 @@ impl IntProxy {
 
                 self.task_txs
                     .files
-                    .send(FilesProxyMessage::ConnectionRefresh(self.agent_tx.another()))
+                    .send(FilesProxyMessage::ConnectionRefresh(
+                        self.agent_tx.another(),
+                    ))
                     .await;
 
                 self.task_txs
                     .incoming
-                    .send(IncomingProxyMessage::ConnectionRefresh(self.agent_tx.another()))
+                    .send(IncomingProxyMessage::ConnectionRefresh(
+                        self.agent_tx.another(),
+                    ))
                     .await;
 
                 self.task_txs
                     .simple
-                    .send(SimpleProxyMessage::ConnectionRefresh(self.agent_tx.another()))
+                    .send(SimpleProxyMessage::ConnectionRefresh(
+                        self.agent_tx.another(),
+                    ))
                     .await;
 
                 self.task_txs
                     .outgoing
-                    .send(OutgoingProxyMessage::ConnectionRefresh(self.agent_tx.another()))
+                    .send(OutgoingProxyMessage::ConnectionRefresh(
+                        self.agent_tx.another(),
+                    ))
                     .await;
 
                 Box::pin(async {

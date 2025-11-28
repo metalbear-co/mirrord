@@ -1121,7 +1121,11 @@ impl FilesProxy {
     }
 
     #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
-    async fn handle_reconnect(&mut self, message_bus: &mut MessageBus<Self>, new_agent_tx: TxHandle<Client>) {
+    async fn handle_reconnect(
+        &mut self,
+        message_bus: &mut MessageBus<Self>,
+        new_agent_tx: TxHandle<Client>,
+    ) {
         let files_to_drop = self
             .remote_files
             .drain()
@@ -1190,7 +1194,9 @@ impl BackgroundTask for FilesProxy {
                 }
                 FilesProxyMessage::LayerForked(forked) => self.layer_forked(forked),
                 FilesProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
-                FilesProxyMessage::ConnectionRefresh(new_agent_tx) => self.handle_reconnect(message_bus, new_agent_tx).await,
+                FilesProxyMessage::ConnectionRefresh(new_agent_tx) => {
+                    self.handle_reconnect(message_bus, new_agent_tx).await
+                }
             }
         }
 

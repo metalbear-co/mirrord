@@ -756,7 +756,11 @@ mod test {
             }
 
             // Connection with the operator was reset.
-            outgoing.send(OutgoingProxyMessage::ConnectionRefresh(connection.tx_handle())).await;
+            outgoing
+                .send(OutgoingProxyMessage::ConnectionRefresh(
+                    connection.tx_handle(),
+                ))
+                .await;
         }
 
         std::mem::drop(outgoing);
