@@ -464,19 +464,15 @@ jobs:
 
           $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
 
+          # IMPORTANT: single-quoted strings so $packageName / $msiPath stay literal in the script
           $installLines = @()
-          $installLines += "$ErrorActionPreference = 'Stop'"
-          $installLines += ""
-          $installLines += "$packageName = 'mirrord'"
-          $installLines += "$toolsDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition"
-          $installLines += "$msiPath     = Join-Path $toolsDir 'mirrord.msi'"
-          $installLines += ""
-          $installLines += "Install-ChocolateyInstallPackage `"
-          $installLines += "  -PackageName $packageName `"
-          $installLines += "  -FileType 'msi' `"
-          $installLines += "  -SilentArgs '/qn /norestart' `"
-          $installLines += "  -ValidExitCodes @(0, 3010) `"
-          $installLines += "  -File $msiPath"
+          $installLines += '$ErrorActionPreference = ''Stop'''
+          $installLines += ''
+          $installLines += '$packageName = ''mirrord'''
+          $installLines += '$toolsDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition'
+          $installLines += '$msiPath     = Join-Path $toolsDir ''mirrord.msi'''
+          $installLines += ''
+          $installLines += 'Install-ChocolateyInstallPackage -PackageName $packageName -FileType ''msi'' -SilentArgs ''/qn /norestart'' -ValidExitCodes @(0, 3010) -File $msiPath'
 
           $installLines | Set-Content -Encoding UTF8 -Path $installScript
 
@@ -529,6 +525,7 @@ jobs:
           Write-Host "EXE:           $env:MIRRORD_EXE"
           Write-Host "DLL:           $env:MIRRORD_LAYER_FILE"
           Write-Host "Choco package: $env:CHOCO_NUPKG_PATH"
+
 
 
 # name: Windows Build
