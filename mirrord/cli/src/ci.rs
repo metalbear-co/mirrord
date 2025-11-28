@@ -6,12 +6,13 @@ use std::{
 #[cfg(unix)]
 use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
+use ci_info::types::CiInfo;
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
-use mirrord_operator::client::OperatorApi;
+use mirrord_operator::{client::OperatorApi, crd::session::MirrordCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};
@@ -349,6 +350,22 @@ impl MirrordCi {
             start_args,
             store,
         })
+    }
+
+    /// Converts a [`CiInfo`] into a [`MirrordCiInfo`] used by the operator.
+    pub(super) fn info(&self) -> MirrordCiInfo {
+        let CiInfo {
+            vendor: _,
+            name,
+            ci: _,
+            pr: _,
+            branch_name,
+        } = ci_info::get();
+
+        MirrordCiInfo {
+            vendor: name,
+            branch_name,
+        }
     }
 }
 

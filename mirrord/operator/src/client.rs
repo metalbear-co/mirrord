@@ -43,10 +43,11 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
+        session::MirrordCiInfo,
     },
     types::{
-        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
-        SESSION_ID_HEADER,
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CI_INFO_HEADER,
+        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
 };
 
@@ -130,6 +131,9 @@ pub struct OperatorSession {
 
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
+
+    /// [`MirrordCiInfo`] is available when the session was started by `mirrord ci start`.
+    pub mirrord_ci_info: Option<MirrordCiInfo>,
 }
 
 impl fmt::Debug for OperatorSession {
@@ -144,6 +148,7 @@ impl fmt::Debug for OperatorSession {
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("allow_reconnect", &self.allow_reconnect)
+            .field("mirrord_ci_info", &self.mirrord_ci_info)
             .finish()
     }
 }
@@ -688,11 +693,17 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
+        mirrord_ci_info: Option<MirrordCiInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
         self.check_feature_support(layer_config)?;
+
+        let mirrord_ci_info = Some(MirrordCiInfo {
+            vendor: Some("Dummy".to_string()),
+            branch_name: Some("Dummy-branch".to_string()),
+        });
 
         let use_proxy_api = self
             .operator
@@ -760,7 +771,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
             );
-            let session = self.make_operator_session(id, connect_url)?;
+            let session = self.make_operator_session(id, connect_url, mirrord_ci_info.clone())?;
 
             (session, reused)
         } else {
@@ -823,7 +834,7 @@ impl OperatorApi<PreparedClientCert> {
                 mysql_branch_names.clone().unwrap_or_default(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
-            let session = self.make_operator_session(None, connect_url)?;
+            let session = self.make_operator_session(None, connect_url, mirrord_ci_info.clone())?;
 
             (session, false)
         };
@@ -852,7 +863,8 @@ impl OperatorApi<PreparedClientCert> {
                     .status
                     .as_ref()
                     .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
-                let session = self.make_operator_session(session_id, connect_url)?;
+                let session =
+                    self.make_operator_session(session_id, connect_url, mirrord_ci_info)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
                 let (tx, rx) = Self::connect_target(&self.client, &session).await?;
@@ -873,6 +885,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
+        mirrord_ci_info: Option<MirrordCiInfo>,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
@@ -897,6 +910,7 @@ impl OperatorApi<PreparedClientCert> {
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
             allow_reconnect,
+            mirrord_ci_info,
         })
     }
 
@@ -1238,9 +1252,21 @@ impl OperatorApi<PreparedClientCert> {
         client: &Client,
         session: &OperatorSession,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
-        let request = Request::builder()
+        let request_builder = Request::builder()
             .uri(&session.connect_url)
-            .header(SESSION_ID_HEADER, session.id.to_string())
+            .header(SESSION_ID_HEADER, session.id.to_string());
+
+        let request_builder = match session
+            .mirrord_ci_info
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()?
+        {
+            Some(ci_info) => request_builder.header(MIRRORD_CI_INFO_HEADER, ci_info),
+            None => request_builder,
+        };
+
+        let request = request_builder
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 

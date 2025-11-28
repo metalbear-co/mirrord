@@ -33,11 +33,35 @@ pub struct MirrordClusterSessionSpec {
     /// None for targetless sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<SessionTarget>,
+
+    /// CI info when a session is started with `mirrord ci start`.
+    ///
+    /// All the values here will be hashed before being sent to the license-server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci_info: Option<MirrordCiInfo>,
+
     /// Copy target configuration for this session.
     ///
     /// Set when the session uses a copied pod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_target: Option<SessionCopyTarget>,
+}
+
+impl MirrordClusterSession {
+    /// Deep clones a [`MirrordClusterSession`], so we can get a owned version from an `Arc`.
+    pub fn clone_owned(&self) -> Self {
+        let Self {
+            metadata,
+            spec,
+            status,
+        } = self;
+
+        Self {
+            metadata: metadata.clone(),
+            spec: spec.clone(),
+            status: status.clone(),
+        }
+    }
 }
 
 /// Describes an owner of a mirrord session.
@@ -133,4 +157,31 @@ pub struct SessionClosed {
     /// Optional human friendly message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Information about the CI session started from `mirrord ci start`.
+///
+/// These values are passed to the operator, and handled by the `ci_controller`, at some point
+/// they're sent to the license-server, but as hashed `u64`s.
+///
+/// ## `TryFrom<http::HeaderValue>`
+///
+/// Implements this conversion so we can easily send this as a request header in
+/// `OperatorApi::connect_target`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct MirrordCiInfo {
+    /// CI vendor, e.g. "github", "gitlab", ...
+    pub vendor: Option<String>,
+
+    /// Name of the git branch.
+    pub branch_name: Option<String>,
+}
+
+#[cfg(feature = "client")]
+impl TryFrom<http::HeaderValue> for MirrordCiInfo {
+    type Error = serde_json::Error;
+
+    fn try_from(value: http::HeaderValue) -> Result<Self, Self::Error> {
+        serde_json::from_slice(value.as_bytes())
+    }
 }
