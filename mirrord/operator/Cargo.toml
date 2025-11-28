@@ -48,7 +48,7 @@ crd = [
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
-  "dep:uuid",
+  # "dep:uuid",
 ]
 setup = ["crd", "dep:serde_yaml"]
 
