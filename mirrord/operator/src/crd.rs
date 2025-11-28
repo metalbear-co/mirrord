@@ -22,6 +22,7 @@ use crate::{
 };
 
 pub mod copy_target;
+pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;

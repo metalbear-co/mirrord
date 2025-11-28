@@ -30,6 +30,7 @@ use thiserror::Error;
 use crate::crd::{
     MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordSqsSession,
     MirrordWorkloadQueueRegistry, TargetCrd,
+    external::MirrordClusterExternalResource,
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     mysql_branching::MysqlBranchDatabase,
     patch::{MirrordClusterWorkloadPatch, MirrordClusterWorkloadPatchRequest},
@@ -297,6 +298,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordClusterWorkloadPatchRequest::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterExternalResource::crd().to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         MirrordClusterSession::crd().to_writer(&mut writer)?;
@@ -691,6 +695,7 @@ impl OperatorClusterRole {
                     MirrordClusterWorkloadPatchRequest::plural(&()).into_owned(),
                     format!("{}/status", MirrordClusterWorkloadPatchRequest::plural(&())),
                     MirrordClusterSession::plural(&()).into_owned(),
+                    MirrordClusterExternalResource::plural(&()).into_owned(),
                 ]),
                 verbs: vec!["*".to_owned()],
                 ..Default::default()
