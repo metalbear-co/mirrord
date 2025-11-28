@@ -655,3 +655,48 @@ pub struct RenameRequest {
     pub old_path: PathBuf,
     pub new_path: PathBuf,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SendfileRequest {
+    pub in_fd: u64,
+    pub out_fd: u64,
+    pub offset: i64,
+    pub count: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SendfileResponse {
+    pub written_amount: i64,
+    pub last_byte_read_offset: i64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FtruncateRequest {
+    pub fd: u64,
+    pub length: i64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Timespec {
+    pub tv_sec: i64,
+    pub tv_nsec: i64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FutimensRequest {
+    pub fd: u64,
+    pub times: Option<[Timespec; 2]>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FchownRequest {
+    pub fd: u64,
+    pub owner: u32,
+    pub group: u32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FchmodRequest {
+    pub fd: u64,
+    pub mode: u32,
+}

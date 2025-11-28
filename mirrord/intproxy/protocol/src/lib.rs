@@ -553,3 +553,38 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Rename,
     res_path = ProxyToLayerMessage::File => FileResponse::Rename,
 );
+
+impl_request!(
+    req = SendfileRequest,
+    res = RemoteResult<SendfileResponse>,
+    req_path = LayerToProxyMessage::File => FileRequest::Sendfile,
+    res_path = ProxyToLayerMessage::File => FileResponse::Sendfile,
+);
+
+impl_request!(
+    req = FtruncateRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Ftruncate,
+    res_path = ProxyToLayerMessage::File => FileResponse::Ftruncate,
+);
+
+impl_request!(
+    req = FutimensRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Futimens,
+    res_path = ProxyToLayerMessage::File => FileResponse::Futimens,
+);
+
+impl_request!(
+    req = FchownRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Fchown,
+    res_path = ProxyToLayerMessage::File => FileResponse::Fchown,
+);
+
+impl_request!(
+    req = FchmodRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Fchmod,
+    res_path = ProxyToLayerMessage::File => FileResponse::Fchmod,
+);

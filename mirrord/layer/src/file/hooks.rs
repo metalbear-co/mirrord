@@ -15,7 +15,7 @@ use std::{
 
 use libc::{
     self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
-    iovec, off_t, size_t, ssize_t, stat, statfs,
+    gid_t, iovec, mode_t, off_t, size_t, ssize_t, stat, statfs, timespec, uid_t,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
@@ -23,7 +23,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use mirrord_protocol::file::{
-    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
+    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, Timespec,
     WriteFileResponse,
 };
 use nix::errno::Errno;
@@ -179,6 +179,104 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
                 opendir_bypass(raw_filename)
             })
     }
+}
+
+/// Hook for macos's [`libc::sendfile`].
+#[cfg(target_os = "macos")]
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendfile_macos_detour(
+    fd: c_int,
+    s: c_int,
+    offset: off_t,
+    len: *mut off_t,
+    hdtr: *const libc::sf_hdtr,
+    flags: c_int,
+) -> c_int {
+    unsafe {
+        let Some(count) = len.as_mut() else {
+            return EINVAL;
+        };
+
+        sendfile(fd, s, offset, *count as usize)
+            .map(|response| {
+                *count = response.written_amount;
+                0
+            })
+            .unwrap_or_bypass_with(|_| FN_SENDFILE_MACOS(fd, s, offset, len, hdtr, flags))
+    }
+}
+
+/// Hook for linux's [`libc::sendfile`].
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendfile_linux_detour(
+    out_fd: c_int,
+    in_fd: c_int,
+    offset: *mut off_t,
+    count: size_t,
+) -> c_int {
+    unsafe {
+        sendfile(out_fd, in_fd, offset, count)
+            .map(|response| {
+                if !offset.is_null() {
+                    *offset = response.last_byte_read_offset;
+                }
+                response.written_amount
+            })
+            .unwrap_or_bypass_with(|_| FN_SENDFILE_LINUX(out_fd, in_fd, offset, count))
+    }
+}
+
+/// Hook for [`libc::ftruncate`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn ftruncate_detour(fd: c_int, length: off_t) -> c_int {
+    ftruncate(fd, length)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FTRUNCATE(fd, length) })
+}
+
+/// Hook for [`libc::futimens`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn futimens_detour(fd: c_int, raw_times: *const timespec) -> c_int {
+    unsafe {
+        let times = if !raw_times.is_null() {
+            let [first, second] = slice::from_raw_parts(raw_times, 2) else {
+                unreachable!("We create the slice with two elements")
+            };
+
+            Some([
+                Timespec {
+                    tv_sec: first.tv_sec,
+                    tv_nsec: first.tv_nsec,
+                },
+                Timespec {
+                    tv_sec: second.tv_sec,
+                    tv_nsec: second.tv_nsec,
+                },
+            ])
+        } else {
+            None
+        };
+        futimens(fd, times)
+            .map(|()| 0)
+            .unwrap_or_bypass_with(|_| FN_FUTIMENS(fd, raw_times))
+    }
+}
+
+/// Hook for [`libc::fchown`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn fchown_detour(fd: c_int, owner: uid_t, group: gid_t) -> c_int {
+    fchown(fd, owner, group)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FCHOWN(fd, owner, group) })
+}
+
+/// Hook for [`libc::fchmod`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn fchmod_detour(fd: c_int, mode: mode_t) -> c_int {
+    fchmod(fd, mode as u32)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FCHMOD(fd, mode) })
 }
 
 /// see below, to have nice code we also implement it for other archs.
@@ -1718,5 +1816,47 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
                 FN_OPENDIR
             );
         }
+
+        #[cfg(target_os = "macos")]
+        {
+            replace!(
+                hook_manager,
+                "sendfile",
+                sendfile_macos_detour,
+                FnSendfile_macos,
+                FN_SENDFILE_MACOS
+            );
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            replace!(
+                hook_manager,
+                "sendfile",
+                sendfile_linux_detour,
+                FnSendfile_linux,
+                FN_SENDFILE_LINUX
+            );
+        }
+
+        replace!(
+            hook_manager,
+            "ftruncate",
+            ftruncate_detour,
+            FnFtruncate,
+            FN_FTRUNCATE
+        );
+
+        replace!(
+            hook_manager,
+            "futimens",
+            futimens_detour,
+            FnFutimens,
+            FN_FUTIMENS
+        );
+
+        replace!(hook_manager, "fchown", fchown_detour, FnFchown, FN_FCHOWN);
+
+        replace!(hook_manager, "fchmod", fchmod_detour, FnFchmod, FN_FCHMOD);
     }
 }

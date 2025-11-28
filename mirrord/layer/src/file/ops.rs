@@ -19,10 +19,12 @@ use libc::{c_char, statx, statx_timestamp};
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
-        MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        RenameRequest, SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest,
-        WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
+        FchmodRequest, FchownRequest, FtruncateRequest, FutimensRequest, MakeDirAtRequest,
+        MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+        ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest, RenameRequest,
+        SeekFileResponse, SendfileRequest, SendfileResponse, StatFsRequestV2, Timespec,
+        UnlinkAtRequest, UnlinkRequest, WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2,
+        XstatResponse,
     },
 };
 use nix::errno::Errno;
@@ -848,6 +850,52 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
         old_path,
         new_path,
     })??)
+}
+
+pub(crate) fn sendfile(
+    in_fd: RawFd,
+    out_fd: RawFd,
+    offset: i64,
+    count: usize,
+) -> Detour<SendfileResponse> {
+    let in_fd = get_remote_fd(in_fd)?;
+    let out_fd = get_remote_fd(out_fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        SendfileRequest {
+            in_fd,
+            out_fd,
+            offset,
+            count,
+        },
+    )??)
+}
+
+pub(crate) fn ftruncate(fd: RawFd, length: i64) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        FtruncateRequest { fd, length },
+    )??)
+}
+
+pub(crate) fn futimens(fd: RawFd, times: Option<[Timespec; 2]>) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        FutimensRequest { fd, times },
+    )??)
+}
+
+pub(crate) fn fchown(fd: RawFd, owner: u32, group: u32) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(FchownRequest {
+        fd,
+        owner,
+        group,
+    })??)
+}
+
+pub(crate) fn fchmod(fd: RawFd, mode: u32) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(FchmodRequest { fd, mode })??)
 }
 
 #[cfg(test)]
