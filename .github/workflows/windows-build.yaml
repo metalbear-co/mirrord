@@ -1,4 +1,4 @@
-name: Windows Build
+name: Windows Build Choco Test
 
 on:
   workflow_dispatch:
@@ -8,17 +8,12 @@ on:
         type: choice
         options: [build_sign, reuse]
         default: build_sign
-      release:
-        description: "Publish a GitHub Release?"
-        type: choice
-        options: [no, draft, prerelease, release]
-        default: no
       release_tag:
-        description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
+        description: "Version to use for Chocolatey package (e.g. 0.0.1-test1). Defaults to MIRRORD_VERSION."
         required: false
         type: string
       sign_artifacts:
-        description: "Code-sign EXE & DLL"
+        description: "Code-sign EXE & DLL & MSI"
         type: choice
         options: ["false", "true"]
         default: false
@@ -26,22 +21,10 @@ on:
         description: "Publish a Chocolatey package?"
         type: choice
         options: ["false", "true"]
-        default: "false"
-
-  # push:
-  #   paths-ignore:
-  #     - "*.md"
-  #     - "**/*.md"
-
-  pull_request:
-    branches: ["main", "*staging*", "windows-support"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - "*.md"
-      - "**/*.md"
+        default: "true"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -53,17 +36,16 @@ env:
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
 
 jobs:
-  windows_tests:
+  windows_choco_test:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: pwsh
     env:
       MODE: ${{ github.event.inputs.mode || 'build_sign' }}
-      PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
-      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'false' }}
+      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'true' }}
 
     steps:
       - name: Checkout
@@ -363,7 +345,7 @@ jobs:
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD TO GCS
+      # UPLOAD TO GCS (optional, safe)
       ###########################################################################
 
       - name: Upload MSI to GCS
@@ -374,15 +356,12 @@ jobs:
             throw "MSI_PATH '$msi' does not exist."
           }
 
-          # Build a unique folder per run:
-          # gs://mirrord-windows-msi/<ref-name>/run-<run-id>/mirrord.msi
           $runId = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
             $refName = "unknown"
           }
 
-          # Sanitize ref name for use in path
           $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
 
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
@@ -392,7 +371,6 @@ jobs:
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
 
-          # Export for later (summary, logs)
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
@@ -402,98 +380,40 @@ jobs:
       - name: Run Rust unit tests (Windows crates)
         run: |
           $ErrorActionPreference = "Stop"
-          # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
       ###########################################################################
-      # RELEASE PUBLISH (upload-only, no creation)
+      # COMPUTE VERSION FOR CHOCOLATEY (NO GITHUB RELEASE)
       ###########################################################################
 
-      - name: Compute release tag
+      - name: Compute release tag for Chocolatey
         id: tag
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_CHOCO == 'true') }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
-            # From tag ref, e.g. refs/tags/v3.174.0 or refs/tags/3.174.0
-            $tag = "$env:GITHUB_REF".Substring(10)
-          } elseif ($env:RELEASE_TAG_INPUT) {
-            # From manual input
+          if ($env:RELEASE_TAG_INPUT) {
             $tag = $env:RELEASE_TAG_INPUT
           } else {
-            # Fall back to MIRRORD_VERSION (no v prefix)
             $tag = $env:MIRRORD_VERSION
           }
 
-          # Remove leading 'v' prefix if present (normalize to e.g. 3.174.0)
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Could not determine version for Chocolatey (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
+          }
+
           if ($tag.StartsWith("v")) {
             $tag = $tag.Substring(1)
           }
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
-
-      - name: Upload artifacts to GitHub Release (custom)
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
-        uses: actions/github-script@v7
-        env:
-          MSI_PATH: ${{ env.MSI_PATH }}
-          MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
-          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
-          RELEASE_TAG: ${{ env.RELEASE_TAG }}
-        with:
-          script: |
-            const fs = require("fs");
-            const path = require("path");
-            const { owner, repo } = context.repo;
-
-            const tag = process.env.RELEASE_TAG;
-
-            // Look up existing release — DO NOT create one here
-            let rel;
-            try {
-              const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
-              rel = r.data;
-            } catch (e) {
-              core.setFailed(
-                `Release with tag '${tag}' was not found. ` +
-                `Ensure the main Release workflow created it before running Windows Build.`
-              );
-              return;
-            }
-
-            async function upload(filePath) {
-              if (!filePath) return;
-              if (!fs.existsSync(filePath)) {
-                core.warning(`File not found, skipping upload: ${filePath}`);
-                return;
-              }
-
-              const name = path.basename(filePath);
-              const data = fs.readFileSync(filePath);
-
-              await github.rest.repos.uploadReleaseAsset({
-                owner, repo,
-                release_id: rel.id,
-                name,
-                data,
-                headers: {
-                  "content-type": "application/octet-stream",
-                  "content-length": data.length
-                }
-              });
-            }
-
-            await upload(process.env.MIRRORD_EXE);
-            await upload(process.env.MIRRORD_LAYER_FILE);
-            await upload(process.env.MSI_PATH);
+          Write-Host "Using RELEASE_TAG (Chocolatey version): $tag"
 
       ###########################################################################
-      # CHOCOLATEY PACKAGE BUILD & PUBLISH
+      # CHOCOLATEY PACKAGE BUILD & PUBLISH (NO GITHUB RELEASE)
       ###########################################################################
 
       - name: Build Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
+        if: ${{ env.PUBLISH_CHOCO == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -502,7 +422,7 @@ jobs:
           }
 
           if (-not $env:RELEASE_TAG) {
-            throw "RELEASE_TAG is not set. Ensure 'Compute release tag' ran successfully."
+            throw "RELEASE_TAG is not set. Ensure 'Compute release tag for Chocolatey' ran successfully."
           }
 
           $pkgRoot  = Join-Path $env:RUNNER_TEMP "choco"
@@ -580,7 +500,7 @@ jobs:
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
 
       - name: Push Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
+        if: ${{ env.PUBLISH_CHOCO == 'true' }}
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
@@ -609,3 +529,616 @@ jobs:
           Write-Host "EXE:           $env:MIRRORD_EXE"
           Write-Host "DLL:           $env:MIRRORD_LAYER_FILE"
           Write-Host "Choco package: $env:CHOCO_NUPKG_PATH"
+
+
+# name: Windows Build
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       mode:
+#         description: "Pick artifacts from GCS (reuse) or build & sign now"
+#         type: choice
+#         options: [build_sign, reuse]
+#         default: build_sign
+#       release:
+#         description: "Publish a GitHub Release?"
+#         type: choice
+#         options: [no, draft, prerelease, release]
+#         default: no
+#       release_tag:
+#         description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
+#         required: false
+#         type: string
+#       sign_artifacts:
+#         description: "Code-sign EXE & DLL"
+#         type: choice
+#         options: ["false", "true"]
+#         default: false
+#       choco_publish:
+#         description: "Publish a Chocolatey package?"
+#         type: choice
+#         options: ["false", "true"]
+#         default: "false"
+
+#   # push:
+#   #   paths-ignore:
+#   #     - "*.md"
+#   #     - "**/*.md"
+
+#   pull_request:
+#     branches: ["main", "*staging*", "windows-support"]
+#     types: [opened, synchronize, reopened, ready_for_review]
+#     paths-ignore:
+#       - "*.md"
+#       - "**/*.md"
+
+# permissions:
+#   contents: write
+
+# env:
+#   BUCKET_URI: gs://mirrord-windows-builds
+#   MSI_BUCKET_URI: gs://mirrord-windows-msi
+#   ARTIFACT_SUBPATH: windows/mirrord-latest
+#   RUST_BACKTRACE: "1"
+#   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+#   MIRRORD_TELEMETRY: "false"
+#   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+
+# jobs:
+#   windows_tests:
+#     runs-on: [self-hosted, Windows]
+#     defaults:
+#       run:
+#         shell: pwsh
+#     env:
+#       MODE: ${{ github.event.inputs.mode || 'build_sign' }}
+#       PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
+#       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
+#       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
+#       PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'false' }}
+
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#           submodules: recursive
+
+#       - name: Toolchain info
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           whoami
+#           rustc -V
+#           cargo -V
+#           rustup show
+
+#       ###########################################################################
+#       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
+#       ###########################################################################
+
+#       - name: Prepare artifacts
+#         id: prep
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
+
+#           $Target = "x86_64-pc-windows-msvc"
+#           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
+#           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
+
+#           $Tmp = Join-Path $env:RUNNER_TEMP "prep"
+#           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+
+#           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
+
+#           if ($env:MODE -eq "reuse") {
+#             # DOWNLOAD FROM GCS
+#             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+#               throw "gcloud not found"
+#             }
+#             $dest = Join-Path $Tmp "picked"
+#             New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+#             gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
+
+#             $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
+#             $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
+
+#             if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
+
+#             # SIGN IF NEEDED
+#             if ($shouldSign) {
+#               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+#                   /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+#               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+#                   /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+#             }
+
+#             Set-Env "MIRRORD_EXE" $exe
+#             Set-Env "MIRRORD_LAYER_FILE" $dll
+#             Set-Env "MIRRORD_VERSION" "unknown"
+
+#             exit 0
+#           }
+
+#           ####################################################################
+#           # BUILD + SIGN ARTIFACTS
+#           ####################################################################
+
+#           rustup target add $Target
+
+#           # BUILD DLL
+#           cargo build -p mirrord-layer-win --target $Target
+#           $dll = Join-Path $DbgDir "mirrord_layer_win.dll"
+#           if (-not (Test-Path $dll)) {
+#             $dll = Join-Path $RelDir "mirrord_layer_win.dll"
+#           }
+#           if (-not (Test-Path $dll)) { throw "DLL not found" }
+
+#           if ($shouldSign) {
+#             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+#                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+#           }
+
+#           # BUILD CLI
+#           $env:MIRRORD_LAYER_FILE = $dll
+#           cargo build -p mirrord --bin mirrord --target $Target
+#           $exe = Join-Path $DbgDir "mirrord.exe"
+#           if (-not (Test-Path $exe)) {
+#             $exe = Join-Path $RelDir "mirrord.exe"
+#           }
+#           if (-not (Test-Path $exe)) { throw "EXE not found" }
+
+#           if ($shouldSign) {
+#             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+#                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+#           }
+
+#           # EXPORT ENV
+#           Set-Env "MIRRORD_EXE" $exe
+#           Set-Env "MIRRORD_LAYER_FILE" $dll
+
+#           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+#           $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
+#           Set-Env "MIRRORD_VERSION" $pkg.version
+
+#       ###########################################################################
+#       # ENSURE WIX TOOLSET IS INSTALLED
+#       ###########################################################################
+
+#       - name: Ensure WiX Toolset
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           function Write-Env([string]$k,[string]$v) {
+#             "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
+#           }
+
+#           function Find-Candle {
+#             param(
+#               [switch]$DeepSearch
+#             )
+
+#             Write-Host "Searching for WiX candle.exe in known locations..."
+
+#             $candidateDirs = @()
+
+#             if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
+#               $candidateDirs += @(
+#                 (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
+#                 (Join-Path $Env:ChocolateyInstall "tools"),
+#                 (Join-Path $Env:ChocolateyInstall "bin")
+#               )
+#             }
+
+#             $candidateDirs += @(
+#               "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
+#               "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
+#               "$Env:ProgramFiles(x86)\WiX Toolset v3.12\bin",
+#               "$Env:ProgramFiles(x86)\WiX Toolset v3.11\bin",
+#               "$Env:ProgramFiles\WiX Toolset v3.14\bin",
+#               "$Env:ProgramFiles\WiX Toolset v3.13\bin",
+#               "$Env:ProgramFiles\WiX Toolset v3.12\bin",
+#               "$Env:ProgramFiles\WiX Toolset v3.11\bin",
+#               "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
+#               "$Env:ProgramData\chocolatey\bin"
+#             )
+
+#             $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
+
+#             foreach ($dir in $candidateDirs) {
+#               $candlePath = Join-Path $dir "candle.exe"
+#               if (Test-Path $candlePath) {
+#                 Write-Host "Found candle.exe at $candlePath."
+#                 return $candlePath
+#               }
+#             }
+
+#             if ($DeepSearch) {
+#               Write-Host "No candle.exe in known dirs. Deep searching C:\ for candle.exe (may take time)..."
+#               try {
+#                 $hit = Get-ChildItem -Path 'C:\' -Filter 'candle.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+#                 if ($hit) {
+#                   Write-Host "Deep search found candle.exe at $($hit.FullName)."
+#                   return $hit.FullName
+#                 } else {
+#                   Write-Host "Deep search did not find candle.exe on C:\."
+#                 }
+#               } catch {
+#                 Write-Warning "Deep search failed: $($_.Exception.Message)"
+#               }
+#             }
+
+#             return $null
+#           }
+
+#           # 1. Try PATH directly
+#           $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+#           $candlePath = $null
+#           if ($candleCmd) {
+#             $candlePath = $candleCmd.Source
+#             Write-Host "candle.exe found on PATH at $candlePath"
+#           } else {
+#             # 2. Try common locations
+#             $candlePath = Find-Candle
+#           }
+
+#           # 3. If still not found, try installing via Chocolatey (best effort)
+#           if (-not $candlePath) {
+#             Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
+
+#             if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+#               Write-Host "Chocolatey not found, installing Chocolatey..."
+#               Set-ExecutionPolicy Bypass -Scope Process -Force
+#               [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+#               Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+#             }
+
+#             try {
+#               choco install wixtoolset -y --no-progress
+#             } catch {
+#               Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
+#             }
+
+#             # 4. After choco, re-check (including deep search)
+#             $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+#             if ($candleCmd) {
+#               $candlePath = $candleCmd.Source
+#               Write-Host "After Chocolatey, candle.exe found on PATH at $candlePath"
+#             } else {
+#               $candlePath = Find-Candle -DeepSearch
+#             }
+#           }
+
+#           if (-not $candlePath -or -not (Test-Path $candlePath)) {
+#             throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists (e.g., via Chocolatey or MSI)."
+#           }
+
+#           # Resolve light.exe in same directory (or via PATH as fallback)
+#           $wixDir = Split-Path $candlePath -Parent
+#           $lightPath = Join-Path $wixDir "light.exe"
+#           if (-not (Test-Path $lightPath)) {
+#             $lightCmd = Get-Command light.exe -ErrorAction SilentlyContinue
+#             if ($lightCmd) {
+#               $lightPath = $lightCmd.Source
+#             }
+#           }
+
+#           if (-not (Test-Path $lightPath)) {
+#             throw "Found candle.exe at '$candlePath' but could not find light.exe in the same directory or on PATH. Please ensure a full WiX Toolset 3.x install (candle.exe and light.exe)."
+#           }
+
+#           Write-Host "Resolved WiX tools:"
+#           Write-Host "  candle.exe = $candlePath"
+#           Write-Host "  light.exe  = $lightPath"
+
+#           # Export for subsequent steps
+#           Write-Env "CANDLE_EXE" $candlePath
+#           Write-Env "LIGHT_EXE"  $lightPath
+
+#       ###########################################################################
+#       # BUILD MSI USING main.wxs
+#       ###########################################################################
+
+#       - name: Build MSI
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if (-not $env:CANDLE_EXE -or -not (Test-Path $env:CANDLE_EXE)) {
+#             throw "CANDLE_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+#           }
+#           if (-not $env:LIGHT_EXE -or -not (Test-Path $env:LIGHT_EXE)) {
+#             throw "LIGHT_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+#           }
+
+#           $candle = $env:CANDLE_EXE
+#           $light  = $env:LIGHT_EXE
+
+#           Write-Host "Using candle.exe at: $candle"
+#           Write-Host "Using light.exe  at: $light"
+
+#           $Root = "C:\wix\mirrord"
+#           New-Item -ItemType Directory -Force -Path $Root | Out-Null
+
+#           # COPY ARTIFACTS + ASSETS
+#           Copy-Item $env:MIRRORD_EXE "$Root\mirrord.exe" -Force
+#           Copy-Item $env:MIRRORD_LAYER_FILE "$Root\mirrord_layer_win.dll" -Force
+#           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico" "$Root\mirrord.ico" -Force
+#           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
+#           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
+
+#           $Obj = "$Root\main.wixobj"
+#           $Msi = "$Root\mirrord.msi"
+
+#           if (Test-Path $Msi) { Remove-Item $Msi -Force }
+
+#           & $candle -nologo -v "$Root\main.wxs" -out $Obj
+#           & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
+
+#           if (-not (Test-Path $Msi)) { throw "MSI not produced" }
+
+#           "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+#       ###########################################################################
+#       # SIGN MSI (optional, same cert as EXE/DLL)
+#       ###########################################################################
+
+#       - name: Sign MSI
+#         if: env.SIGN_ARTIFACTS == 'true'
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           $msi = $env:MSI_PATH
+#           if (-not (Test-Path $msi)) {
+#             throw "MSI_PATH '$msi' does not exist."
+#           }
+#           & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+#               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
+
+#       ###########################################################################
+#       # UPLOAD TO GCS
+#       ###########################################################################
+
+#       - name: Upload MSI to GCS
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           $msi = $env:MSI_PATH
+#           if (-not (Test-Path $msi)) {
+#             throw "MSI_PATH '$msi' does not exist."
+#           }
+
+#           # Build a unique folder per run:
+#           # gs://mirrord-windows-msi/<ref-name>/run-<run-id>/mirrord.msi
+#           $runId = $env:GITHUB_RUN_ID
+#           $refName = $env:GITHUB_REF_NAME
+#           if (-not $refName) {
+#             $refName = "unknown"
+#           }
+
+#           # Sanitize ref name for use in path
+#           $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
+
+#           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
+#           $destFolder = "$bucketBase/$refSafe/run-$runId"
+#           $destUri = "$destFolder/mirrord.msi"
+
+#           Write-Host "Uploading MSI to $destUri"
+#           gcloud --quiet storage cp $msi $destUri
+
+#           # Export for later (summary, logs)
+#           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+#       ###########################################################################
+#       # UNIT TESTS (Windows-only crates)
+#       ###########################################################################
+
+#       - name: Run Rust unit tests (Windows crates)
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
+#           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+
+#       ###########################################################################
+#       # RELEASE PUBLISH (upload-only, no creation)
+#       ###########################################################################
+
+#       - name: Compute release tag
+#         id: tag
+#         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_CHOCO == 'true') }}
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
+#             # From tag ref, e.g. refs/tags/v3.174.0 or refs/tags/3.174.0
+#             $tag = "$env:GITHUB_REF".Substring(10)
+#           } elseif ($env:RELEASE_TAG_INPUT) {
+#             # From manual input
+#             $tag = $env:RELEASE_TAG_INPUT
+#           } else {
+#             # Fall back to MIRRORD_VERSION (no v prefix)
+#             $tag = $env:MIRRORD_VERSION
+#           }
+
+#           # Remove leading 'v' prefix if present (normalize to e.g. 3.174.0)
+#           if ($tag.StartsWith("v")) {
+#             $tag = $tag.Substring(1)
+#           }
+
+#           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+#       - name: Upload artifacts to GitHub Release (custom)
+#         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+#         uses: actions/github-script@v7
+#         env:
+#           MSI_PATH: ${{ env.MSI_PATH }}
+#           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
+#           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+#           RELEASE_TAG: ${{ env.RELEASE_TAG }}
+#         with:
+#           script: |
+#             const fs = require("fs");
+#             const path = require("path");
+#             const { owner, repo } = context.repo;
+
+#             const tag = process.env.RELEASE_TAG;
+
+#             // Look up existing release — DO NOT create one here
+#             let rel;
+#             try {
+#               const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+#               rel = r.data;
+#             } catch (e) {
+#               core.setFailed(
+#                 `Release with tag '${tag}' was not found. ` +
+#                 `Ensure the main Release workflow created it before running Windows Build.`
+#               );
+#               return;
+#             }
+
+#             async function upload(filePath) {
+#               if (!filePath) return;
+#               if (!fs.existsSync(filePath)) {
+#                 core.warning(`File not found, skipping upload: ${filePath}`);
+#                 return;
+#               }
+
+#               const name = path.basename(filePath);
+#               const data = fs.readFileSync(filePath);
+
+#               await github.rest.repos.uploadReleaseAsset({
+#                 owner, repo,
+#                 release_id: rel.id,
+#                 name,
+#                 data,
+#                 headers: {
+#                   "content-type": "application/octet-stream",
+#                   "content-length": data.length
+#                 }
+#               });
+#             }
+
+#             await upload(process.env.MIRRORD_EXE);
+#             await upload(process.env.MIRRORD_LAYER_FILE);
+#             await upload(process.env.MSI_PATH);
+
+#       ###########################################################################
+#       # CHOCOLATEY PACKAGE BUILD & PUBLISH
+#       ###########################################################################
+
+#       - name: Build Chocolatey package
+#         if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if (-not $env:MSI_PATH -or -not (Test-Path $env:MSI_PATH)) {
+#             throw "MSI_PATH is not set or file does not exist. Cannot build Chocolatey package."
+#           }
+
+#           if (-not $env:RELEASE_TAG) {
+#             throw "RELEASE_TAG is not set. Ensure 'Compute release tag' ran successfully."
+#           }
+
+#           $pkgRoot  = Join-Path $env:RUNNER_TEMP "choco"
+#           $toolsDir = Join-Path $pkgRoot "tools"
+
+#           if (Test-Path $pkgRoot) {
+#             Remove-Item $pkgRoot -Recurse -Force
+#           }
+#           New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+#           # Copy MSI into tools directory
+#           Copy-Item $env:MSI_PATH (Join-Path $toolsDir "mirrord.msi") -Force
+
+#           $nuspecPath = Join-Path $pkgRoot "mirrord.nuspec"
+#           $version    = $env:RELEASE_TAG
+
+#           $nuspecLines = @()
+#           $nuspecLines += '<?xml version="1.0"?>'
+#           $nuspecLines += '<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">'
+#           $nuspecLines += '  <metadata>'
+#           $nuspecLines += '    <id>mirrord</id>'
+#           $nuspecLines += "    <version>$version</version>"
+#           $nuspecLines += '    <title>mirrord</title>'
+#           $nuspecLines += '    <authors>MetalBear</authors>'
+#           $nuspecLines += '    <owners>MetalBear</owners>'
+#           $nuspecLines += '    <licenseUrl>https://github.com/metalbear-co/mirrord/blob/main/LICENSE</licenseUrl>'
+#           $nuspecLines += '    <projectUrl>https://github.com/metalbear-co/mirrord</projectUrl>'
+#           $nuspecLines += '    <iconUrl>https://raw.githubusercontent.com/metalbear-co/mirrord/main/assets/icon.png</iconUrl>'
+#           $nuspecLines += '    <requireLicenseAcceptance>false</requireLicenseAcceptance>'
+#           $nuspecLines += '    <description>mirrord lets you run local code in the context of your cloud environment (Kubernetes).</description>'
+#           $nuspecLines += '    <tags>mirrord kubernetes debugging cloud</tags>'
+#           $nuspecLines += '  </metadata>'
+#           $nuspecLines += '  <files>'
+#           $nuspecLines += '    <file src="tools\**" target="tools" />'
+#           $nuspecLines += '  </files>'
+#           $nuspecLines += '</package>'
+
+#           $nuspecLines | Set-Content -Encoding UTF8 -Path $nuspecPath
+
+#           $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
+
+#           $installLines = @()
+#           $installLines += "$ErrorActionPreference = 'Stop'"
+#           $installLines += ""
+#           $installLines += "$packageName = 'mirrord'"
+#           $installLines += "$toolsDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition"
+#           $installLines += "$msiPath     = Join-Path $toolsDir 'mirrord.msi'"
+#           $installLines += ""
+#           $installLines += "Install-ChocolateyInstallPackage `"
+#           $installLines += "  -PackageName $packageName `"
+#           $installLines += "  -FileType 'msi' `"
+#           $installLines += "  -SilentArgs '/qn /norestart' `"
+#           $installLines += "  -ValidExitCodes @(0, 3010) `"
+#           $installLines += "  -File $msiPath"
+
+#           $installLines | Set-Content -Encoding UTF8 -Path $installScript
+
+#           # Ensure choco is available
+#           if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+#             throw "choco.exe not found on PATH. Ensure Chocolatey is installed on this runner."
+#           }
+
+#           choco pack $nuspecPath --outputdirectory $pkgRoot
+
+#           $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord.$version.nupkg" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+#           if (-not $nupkg) {
+#             $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord*.nupkg" -File | Select-Object -First 1
+#           }
+
+#           if (-not $nupkg) {
+#             throw "Failed to find generated mirrord nupkg in $pkgRoot"
+#           }
+
+#           "CHOCO_NUPKG_PATH=$($nupkg.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
+#           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
+
+#       - name: Push Chocolatey package
+#         if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
+#         env:
+#           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if (-not $env:CHOCO_NUPKG_PATH -or -not (Test-Path $env:CHOCO_NUPKG_PATH)) {
+#             throw "CHOCO_NUPKG_PATH is not set or file does not exist. Cannot push package."
+#           }
+
+#           if (-not $env:CHOCO_API_KEY) {
+#             throw "CHOCO_API_KEY is not set. Configure the repository secret 'CHOCO_API_KEY' with your Chocolatey API key."
+#           }
+
+#           Write-Host "Pushing Chocolatey package $env:CHOCO_NUPKG_PATH to Chocolatey.org..."
+#           choco push $env:CHOCO_NUPKG_PATH --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+
+#       ###########################################################################
+#       # SUMMARY
+#       ###########################################################################
+
+#       - name: Summary
+#         if: always()
+#         run: |
+#           Write-Host "MSI (local):   $env:MSI_PATH"
+#           Write-Host "MSI (GCS):     $env:MSI_GCS_URI"
+#           Write-Host "EXE:           $env:MIRRORD_EXE"
+#           Write-Host "DLL:           $env:MIRRORD_LAYER_FILE"
+#           Write-Host "Choco package: $env:CHOCO_NUPKG_PATH"
