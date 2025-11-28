@@ -488,7 +488,7 @@
         },
         "network_interface": {
           "title": "agent.network_interface {#agent-network_interface}",
-          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.",
+          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
           "type": [
             "string",
             "null"
@@ -515,7 +515,7 @@
         },
         "passthrough_mirroring": {
           "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
-          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.",
+          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
           "type": [
             "boolean",
             "null"
