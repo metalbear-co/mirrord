@@ -655,3 +655,9 @@ pub struct RenameRequest {
     pub old_path: PathBuf,
     pub new_path: PathBuf,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FtruncateRequest {
+    pub fd: u64,
+    pub length: i64,
+}

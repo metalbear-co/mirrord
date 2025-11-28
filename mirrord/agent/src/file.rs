@@ -7,7 +7,7 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::RawFd,
+        fd::{AsRawFd, RawFd},
         unix::{fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf},
@@ -228,6 +228,9 @@ impl FileManager {
                 pathname,
                 flags,
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
+            FileRequest::Ftruncate(FtruncateRequest { fd, length }) => {
+                Some(FileResponse::Ftruncate(self.ftruncate(fd, length)))
+            }
         })
     }
 
@@ -517,6 +520,24 @@ impl FileManager {
 
         nix::unistd::unlinkat(fd, path.as_ref(), flags)
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
+    }
+
+    pub(crate) fn ftruncate(&mut self, fd: u64, length: i64) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::ftruncate(file.as_raw_fd(), length) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {

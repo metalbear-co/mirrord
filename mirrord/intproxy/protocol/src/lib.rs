@@ -553,3 +553,10 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Rename,
     res_path = ProxyToLayerMessage::File => FileResponse::Rename,
 );
+
+impl_request!(
+    req = FtruncateRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Ftruncate,
+    res_path = ProxyToLayerMessage::File => FileResponse::Ftruncate,
+);
