@@ -14,7 +14,7 @@ on:
         options: [no, draft, prerelease, release]
         default: no
       release_tag:
-        description: "Release tag (defaults to pushed tag or v<MIRRORD_VERSION>)"
+        description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
         required: false
         type: string
       sign_artifacts:
@@ -235,7 +235,7 @@ jobs:
           }
 
       # -----------------------------
-      # GitHub Release (optional)
+      # GitHub Release (upload-only)
       # -----------------------------
       - name: Compute release tag
         id: tag
@@ -244,24 +244,32 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = $null
           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
+            # From tag ref, e.g. refs/tags/v3.174.0 or refs/tags/3.174.0
             $tag = "$env:GITHUB_REF".Substring(10)
           } elseif ($env:RELEASE_TAG_INPUT) {
+            # From manual input
             $tag = $env:RELEASE_TAG_INPUT
           } elseif ($env:MIRRORD_VERSION -and $env:MIRRORD_VERSION -ne 'unknown') {
-            $tag = "v$($env:MIRRORD_VERSION)"
+            # Fall back to MIRRORD_VERSION (no v prefix)
+            $tag = $env:MIRRORD_VERSION
           } else {
             throw "No release_tag provided and MIRRORD_VERSION is unknown. Provide workflow input 'release_tag' or push a tag."
           }
+
+          # Normalize: remove leading 'v' if present
+          if ($tag.StartsWith('v')) {
+            $tag = $tag.Substring(1)
+          }
+
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Release tag: $tag"
+          Write-Host "Release tag (normalized): $tag"
 
-
-      - name: Publish GitHub Release and upload artifacts (github-script)
+      - name: Publish GitHub Release artifacts (upload only, no creation)
         if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
         uses: actions/github-script@v7
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
-          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}     # draft|prerelease|release|no
+          PUBLISH_MODE: ${{ env.PUBLISH_MODE }}     # kept for compatibility, but not used to mutate release
           MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
           MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
           SIGN_ARTIFACTS: ${{ env.SIGN_ARTIFACTS }} # "true" | "false"
@@ -272,41 +280,22 @@ jobs:
             const { owner, repo } = context.repo;
 
             const tag = process.env.RELEASE_TAG;
-            const isDraft = process.env.PUBLISH_MODE === 'draft';
-            const isPrerelease = process.env.PUBLISH_MODE === 'prerelease';
             const signed = /^true$/i.test(process.env.SIGN_ARTIFACTS || '');
             const signedBlockStart = '<!-- SIGNED_STATUS_START -->';
             const signedBlockEnd   = '<!-- SIGNED_STATUS_END -->';
             const signedLine       = `**Signed artifacts:** ${signed ? 'Yes' : 'No'}`;
 
-            // Find or create the release
+            // Look up existing release — DO NOT create or modify flags/name here
             let rel;
             try {
               const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
               rel = r.data;
             } catch (e) {
-              if (e.status !== 404) throw e;
-              const r = await github.rest.repos.createRelease({
-                owner, repo,
-                tag_name: tag,
-                name: `Windows build ${tag}`,
-                target_commitish: context.sha,
-                draft: isDraft,
-                prerelease: isPrerelease,
-                generate_release_notes: true,
-              });
-              rel = r.data;
-            }
-
-            // Ensure flags (draft/prerelease) match input
-            if (rel.draft !== isDraft || rel.prerelease !== isPrerelease) {
-              const r = await github.rest.repos.updateRelease({
-                owner, repo, release_id: rel.id,
-                draft: isDraft, prerelease: isPrerelease,
-                name: `Windows build ${tag}`,
-                target_commitish: context.sha,
-              });
-              rel = r.data;
+              core.setFailed(
+                `Release with tag '${tag}' was not found. ` +
+                `Ensure the main Release workflow created it before running Windows Build.`
+              );
+              return;
             }
 
             // Upload helper (replaces asset if it already exists)
@@ -316,6 +305,7 @@ jobs:
                 return;
               }
               const name = path.basename(file);
+
               const assets = await github.paginate(
                 github.rest.repos.listReleaseAssets,
                 { owner, repo, release_id: rel.id, per_page: 100 }
@@ -324,6 +314,7 @@ jobs:
               if (existing) {
                 await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
               }
+
               const data = fs.readFileSync(file);
               await github.rest.repos.uploadReleaseAsset({
                 owner, repo, release_id: rel.id, name,
@@ -340,7 +331,9 @@ jobs:
               process.env.MIRRORD_LAYER_FILE,
               `${process.env.MIRRORD_LAYER_FILE}.sha256`,
             ];
-            for (const f of files) { await upload(f); }
+            for (const f of files) {
+              await upload(f);
+            }
 
             // Append/refresh a small, explicit signed-status block in the body (idempotent)
             const currentBody = rel.body || '';
@@ -359,8 +352,6 @@ jobs:
             } else {
               core.info('Signed status already up to date in release body.');
             }
-
-
 
       # ==================================
       # === Pretty summary to step tab ===
