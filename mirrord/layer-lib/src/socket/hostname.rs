@@ -96,7 +96,7 @@ pub trait HostnameResolver {
     fn is_enabled(check_enabled: bool) -> bool {
         // Check if hostname feature is enabled
         #[cfg(target_os = "windows")]
-        let hostname_enabled = layer_setup().local_hostname();
+        let hostname_enabled = !layer_setup().local_hostname();
         #[cfg(not(target_os = "windows"))]
         let hostname_enabled = false; // Default for non-Windows platforms
 
