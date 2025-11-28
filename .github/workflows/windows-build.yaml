@@ -22,6 +22,11 @@ on:
         type: choice
         options: ["false", "true"]
         default: false
+      choco_publish:
+        description: "Publish a Chocolatey package?"
+        type: choice
+        options: ["false", "true"]
+        default: "false"
 
   push:
     paths-ignore:
@@ -58,6 +63,7 @@ jobs:
       PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
+      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'false' }}
 
     steps:
       - name: Checkout
@@ -483,13 +489,123 @@ jobs:
             await upload(process.env.MSI_PATH);
 
       ###########################################################################
+      # CHOCOLATEY PACKAGE BUILD & PUBLISH
+      ###########################################################################
+
+      - name: Build Chocolatey package
+        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE == 'release') }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:MSI_PATH -or -not (Test-Path $env:MSI_PATH)) {
+            throw "MSI_PATH is not set or file does not exist. Cannot build Chocolatey package."
+          }
+
+          if (-not $env:RELEASE_TAG) {
+            throw "RELEASE_TAG is not set. Ensure 'Compute release tag' ran successfully."
+          }
+
+          $pkgRoot  = Join-Path $env:RUNNER_TEMP "choco"
+          $toolsDir = Join-Path $pkgRoot "tools"
+
+          if (Test-Path $pkgRoot) {
+            Remove-Item $pkgRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+          # Copy MSI into tools directory
+          Copy-Item $env:MSI_PATH (Join-Path $toolsDir "mirrord.msi") -Force
+
+          $nuspecPath = Join-Path $pkgRoot "mirrord.nuspec"
+          $version    = $env:RELEASE_TAG
+
+          $nuspecLines = @()
+          $nuspecLines += '<?xml version="1.0"?>'
+          $nuspecLines += '<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">'
+          $nuspecLines += '  <metadata>'
+          $nuspecLines += '    <id>mirrord</id>'
+          $nuspecLines += "    <version>$version</version>"
+          $nuspecLines += '    <title>mirrord</title>'
+          $nuspecLines += '    <authors>MetalBear</authors>'
+          $nuspecLines += '    <owners>MetalBear</owners>'
+          $nuspecLines += '    <licenseUrl>https://github.com/metalbear-co/mirrord/blob/main/LICENSE</licenseUrl>'
+          $nuspecLines += '    <projectUrl>https://github.com/metalbear-co/mirrord</projectUrl>'
+          $nuspecLines += '    <iconUrl>https://storage.googleapis.com/mirrord-windows-builds-public/misc/mirrord.ico/iconUrl>'
+          $nuspecLines += '    <requireLicenseAcceptance>false</requireLicenseAcceptance>'
+          $nuspecLines += '    <description>mirrord lets you run local code in the context of your cloud environment (Kubernetes).</description>'
+          $nuspecLines += '    <tags>mirrord kubernetes debugging cloud</tags>'
+          $nuspecLines += '  </metadata>'
+          $nuspecLines += '  <files>'
+          $nuspecLines += '    <file src="tools\**" target="tools" />'
+          $nuspecLines += '  </files>'
+          $nuspecLines += '</package>'
+
+          $nuspecLines | Set-Content -Encoding UTF8 -Path $nuspecPath
+
+          $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
+
+          $installLines = @()
+          $installLines += "$ErrorActionPreference = 'Stop'"
+          $installLines += ""
+          $installLines += "$packageName = 'mirrord'"
+          $installLines += "$toolsDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition"
+          $installLines += "$msiPath     = Join-Path $toolsDir 'mirrord.msi'"
+          $installLines += ""
+          $installLines += "Install-ChocolateyInstallPackage `"
+          $installLines += "  -PackageName $packageName `"
+          $installLines += "  -FileType 'msi' `"
+          $installLines += "  -SilentArgs '/qn /norestart' `"
+          $installLines += "  -ValidExitCodes @(0, 3010) `"
+          $installLines += "  -File $msiPath"
+
+          $installLines | Set-Content -Encoding UTF8 -Path $installScript
+
+          # Ensure choco is available
+          if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+            throw "choco.exe not found on PATH. Ensure Chocolatey is installed on this runner."
+          }
+
+          choco pack $nuspecPath --outputdirectory $pkgRoot
+
+          $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord.$version.nupkg" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $nupkg) {
+            $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord*.nupkg" -File | Select-Object -First 1
+          }
+
+          if (-not $nupkg) {
+            throw "Failed to find generated mirrord nupkg in $pkgRoot"
+          }
+
+          "CHOCO_NUPKG_PATH=$($nupkg.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
+          Write-Host "Built Chocolatey package: $($nupkg.FullName)"
+
+      - name: Push Chocolatey package
+        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE == 'release') }}
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:CHOCO_NUPKG_PATH -or -not (Test-Path $env:CHOCO_NUPKG_PATH)) {
+            throw "CHOCO_NUPKG_PATH is not set or file does not exist. Cannot push package."
+          }
+
+          if (-not $env:CHOCO_API_KEY) {
+            throw "CHOCO_API_KEY is not set. Configure the repository secret 'CHOCO_API_KEY' with your Chocolatey API key."
+          }
+
+          Write-Host "Pushing Chocolatey package $env:CHOCO_NUPKG_PATH to Chocolatey.org..."
+          choco push $env:CHOCO_NUPKG_PATH --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+
+      ###########################################################################
       # SUMMARY
       ###########################################################################
 
       - name: Summary
         if: always()
         run: |
-          Write-Host "MSI (local): $env:MSI_PATH"
-          Write-Host "MSI (GCS):   $env:MSI_GCS_URI"
-          Write-Host "EXE:         $env:MIRRORD_EXE"
-          Write-Host "DLL:         $env:MIRRORD_LAYER_FILE"
+          Write-Host "MSI (local):   $env:MSI_PATH"
+          Write-Host "MSI (GCS):     $env:MSI_GCS_URI"
+          Write-Host "EXE:           $env:MIRRORD_EXE"
+          Write-Host "DLL:           $env:MIRRORD_LAYER_FILE"
+          Write-Host "Choco package: $env:CHOCO_NUPKG_PATH"
