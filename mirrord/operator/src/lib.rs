@@ -2,9 +2,6 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 #[cfg(feature = "client")]
 pub mod client;
 
@@ -17,9 +14,3 @@ pub mod setup;
 
 /// Types used in the operator that don't require any special dependencies
 pub mod types;
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub enum CiTrigger {
-    Pr,
-    Unknown,
-}
