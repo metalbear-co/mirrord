@@ -229,7 +229,14 @@ pub struct AgentConfig {
     ///
     /// The default behavior is try to access the internet and use that interface. If that fails
     /// it uses `eth0`.
-    #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
+    ///
+    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+    /// and will be removed in the future. This field will be removed, and the agent will always
+    /// use iptables redirects for mirroring traffic.
+    #[config(
+        env = "MIRRORD_AGENT_NETWORK_INTERFACE",
+        deprecated = "agent.network_interface is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
+    )]
     pub network_interface: Option<String>,
 
     /// ### agent.flush_connections {#agent-flush_connections}
@@ -448,7 +455,14 @@ pub struct AgentConfig {
     /// When this is set, `network_interface` setting is ignored.
     ///
     /// Defaults to true.
-    #[config(default = true)]
+    ///
+    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+    /// and will be removed in the future. This field will be removed, and the agent will always
+    /// use iptables redirects for mirroring traffic.
+    #[config(
+        default = true,
+        deprecated = "agent.passthrough_mirroring is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
+    )]
     pub passthrough_mirroring: bool,
 
     /// ### agent.inject_headers {#agent-inject_headers}

@@ -1,0 +1,1 @@
+Added a unit test verifying that the internal proxy properly handles remote termination of stolen HTTP requests.

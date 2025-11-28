@@ -1,6 +1,5 @@
 use std::arch::naked_asm;
 
-use mirrord_config::experimental::ExperimentalConfig;
 use nix::errno::Errno;
 use tracing::trace;
 
@@ -573,7 +572,7 @@ fn post_go1_23(hook_manager: &mut HookManager) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &ExperimentalConfig) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
@@ -589,13 +588,11 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager, experimental: &Experi
         pre_go1_19(hook_manager);
     }
 
-    if experimental.vfork_emulation {
-        hook_symbol!(
-            hook_manager,
-            "syscall.rawVforkSyscall.abi0",
-            raw_vfork_detour
-        );
-    }
+    hook_symbol!(
+        hook_manager,
+        "syscall.rawVforkSyscall.abi0",
+        raw_vfork_detour
+    );
 }
 
 /// Implementation for Go runtime 1.25.
