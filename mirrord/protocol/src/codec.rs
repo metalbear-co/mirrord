@@ -107,6 +107,7 @@ pub enum FileRequest {
     Ftruncate(FtruncateRequest),
     Futimens(FutimensRequest),
     Fchown(FchownRequest),
+    Fchmod(FchmodRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -183,6 +184,7 @@ pub enum FileResponse {
     Ftruncate(RemoteResult<()>),
     Futimens(RemoteResult<()>),
     Fchown(RemoteResult<()>),
+    Fchmod(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
