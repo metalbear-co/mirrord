@@ -669,3 +669,9 @@ pub struct SendfileResponse {
     pub written_amount: i64,
     pub last_byte_read_offset: i64,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FtruncateRequest {
+    pub fd: u64,
+    pub length: i64,
+}

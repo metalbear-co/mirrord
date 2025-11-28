@@ -236,6 +236,9 @@ impl FileManager {
             }) => Some(FileResponse::Sendfile(
                 self.sendfile(in_fd, out_fd, offset, count),
             )),
+            FileRequest::Ftruncate(FtruncateRequest { fd, length }) => {
+                Some(FileResponse::Ftruncate(self.ftruncate(fd, length)))
+            }
         })
     }
 
@@ -567,6 +570,24 @@ impl FileManager {
             // Ideally we should report that neither fds are a file but that would
             // require too many changes, this is good enough
             (_, _) => Err(ResponseError::NotFile(in_fd)),
+        }
+    }
+
+    pub(crate) fn ftruncate(&mut self, fd: u64, length: i64) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::ftruncate(file.as_raw_fd(), length) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
         }
     }
 

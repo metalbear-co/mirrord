@@ -560,3 +560,10 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Sendfile,
     res_path = ProxyToLayerMessage::File => FileResponse::Sendfile,
 );
+
+impl_request!(
+    req = FtruncateRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Ftruncate,
+    res_path = ProxyToLayerMessage::File => FileResponse::Ftruncate,
+);

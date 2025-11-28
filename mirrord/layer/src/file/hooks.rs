@@ -227,6 +227,14 @@ pub(super) unsafe extern "C" fn sendfile_linux_detour(
     }
 }
 
+/// Hook for [`libc::ftruncate`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn ftruncate_detour(fd: c_int, length: off_t) -> c_int {
+    ftruncate(fd, length)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FTRUNCATE(fd, length) })
+}
+
 /// see below, to have nice code we also implement it for other archs.
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
@@ -1786,5 +1794,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
                 FN_SENDFILE_LINUX
             );
         }
+
+        replace!(
+            hook_manager,
+            "ftruncate",
+            ftruncate_detour,
+            FnFtruncate,
+            FN_FTRUNCATE
+        );
     }
 }

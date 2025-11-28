@@ -104,6 +104,7 @@ pub enum FileRequest {
     Rename(RenameRequest),
 
     Sendfile(SendfileRequest),
+    Ftruncate(FtruncateRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -177,6 +178,7 @@ pub enum FileResponse {
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
     Rename(RemoteResult<()>),
     Sendfile(RemoteResult<SendfileResponse>),
+    Ftruncate(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
