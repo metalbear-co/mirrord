@@ -84,7 +84,7 @@ fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
     let trace_only = is_trace_only_mode();
     let proxy_address = if trace_only {
         modify_config_for_trace_only(&mut config);
-    
+
         // In trace-only mode, we still need to initialize setup but with a dummy proxy address
         // since no actual proxy communication will occur
         "127.0.0.1:0".parse().unwrap()
@@ -92,7 +92,7 @@ fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
         // Normal mode - get the real proxy address for layer setup
         get_setup_address(context)?
     };
-    
+
     let local_hostname = trace_only || !config.feature.hostname;
 
     init_setup(config, proxy_address, local_hostname)

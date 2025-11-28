@@ -265,6 +265,23 @@ pub fn get_bound_address(socket: SocketDescriptor) -> Option<SocketAddr> {
     })
 }
 
+/// Find the actual bound address of a listening socket that matches the given port and protocol.
+/// Used to detect local self-connections so they can be handled without proxying.
+pub fn find_listener_address_by_port(port: u16, protocol: i32) -> Option<SocketAddr> {
+    SOCKETS.lock().ok().and_then(|sockets| {
+        sockets.iter().find_map(|(_, socket)| match socket.state {
+            SocketState::Listening(bound) => {
+                if bound.requested_address.port() == port && socket.protocol == protocol {
+                    Some(bound.address)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+    })
+}
+
 /// Get connected addresses for a socket if it's in connected state
 pub fn get_connected_addresses(
     socket: SocketDescriptor,

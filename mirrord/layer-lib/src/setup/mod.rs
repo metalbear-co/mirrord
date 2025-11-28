@@ -24,7 +24,11 @@ pub fn layer_setup() -> &'static LayerSetup {
 }
 
 #[cfg(target_os = "windows")]
-pub fn init_setup(config: LayerConfig, proxy_address: SocketAddr, local_hostname: bool) -> LayerResult<()> {
+pub fn init_setup(
+    config: LayerConfig,
+    proxy_address: SocketAddr,
+    local_hostname: bool,
+) -> LayerResult<()> {
     let state = LayerSetup::new(config, proxy_address, local_hostname);
     SETUP
         .set(state)
