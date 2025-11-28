@@ -235,6 +235,9 @@ impl FileManager {
             FileRequest::Futimens(FutimensRequest { fd, times }) => {
                 Some(FileResponse::Futimens(self.futimens(fd, times)))
             }
+            FileRequest::Fchown(FchownRequest { fd, owner, group }) => {
+                Some(FileResponse::Fchown(self.fchown(fd, owner, group)))
+            }
         })
     }
 
@@ -570,6 +573,24 @@ impl FileManager {
                         times.map(|times| times.as_ptr()).unwrap_or(ptr::null()),
                     )
                 };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn fchown(&mut self, fd: u64, owner: u32, group: u32) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::fchown(file.as_raw_fd(), owner, group) };
                 match result {
                     -1 => Err(ResponseError::from(io::Error::last_os_error())),
                     _ => Ok(()),

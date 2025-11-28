@@ -673,3 +673,10 @@ pub struct FutimensRequest {
     pub fd: u64,
     pub times: Option<[Timespec; 2]>,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FchownRequest {
+    pub fd: u64,
+    pub owner: u32,
+    pub group: u32,
+}

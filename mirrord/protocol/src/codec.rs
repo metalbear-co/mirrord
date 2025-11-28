@@ -111,6 +111,7 @@ pub enum FileRequest {
     Rename(RenameRequest),
     Ftruncate(FtruncateRequest),
     Futimens(FutimensRequest),
+    Fchown(FchownRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -185,6 +186,7 @@ pub enum FileResponse {
     Rename(RemoteResult<()>),
     Ftruncate(RemoteResult<()>),
     Futimens(RemoteResult<()>),
+    Fchown(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.

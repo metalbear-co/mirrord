@@ -567,3 +567,10 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Futimens,
     res_path = ProxyToLayerMessage::File => FileResponse::Futimens,
 );
+
+impl_request!(
+    req = FchownRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Fchown,
+    res_path = ProxyToLayerMessage::File => FileResponse::Fchown,
+);

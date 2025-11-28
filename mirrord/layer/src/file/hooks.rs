@@ -15,7 +15,7 @@ use std::{
 
 use libc::{
     self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
-    iovec, off_t, size_t, ssize_t, stat, statfs, timespec,
+    gid_t, iovec, off_t, size_t, ssize_t, stat, statfs, timespec, uid_t,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
@@ -307,6 +307,14 @@ pub(super) unsafe extern "C" fn futimens_detour(fd: c_int, raw_times: *const tim
             .map(|()| 0)
             .unwrap_or_bypass_with(|_| FN_FUTIMENS(fd, raw_times))
     }
+}
+
+/// Hook for [`libc::fchown`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn fchown_detour(fd: c_int, owner: uid_t, group: gid_t) -> c_int {
+    fchown(fd, owner, group)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FCHOWN(fd, owner, group) })
 }
 
 /// see below, to have nice code we also implement it for other archs.
@@ -1870,5 +1878,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
             FnFutimens,
             FN_FUTIMENS
         );
+
+        replace!(hook_manager, "fchown", fchown_detour, FnFchown, FN_FCHOWN);
     }
 }
