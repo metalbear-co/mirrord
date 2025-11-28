@@ -1,12 +1,10 @@
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
-    fs::File,
-    os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
-    process::Stdio,
-    time::SystemTime,
 };
+#[cfg(unix)]
+use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
@@ -15,12 +13,12 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
+#[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    fs::{self, create_dir_all},
-    io::AsyncWriteExt,
-};
+#[cfg(unix)]
+use tokio::fs::create_dir_all;
+use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
 use crate::{
@@ -156,12 +154,18 @@ impl MirrordCiStore {
     }
 
     /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
+    #[cfg_attr(windows, allow(unused))]
     async fn remove_file() -> CiResult<()> {
         match tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
             Ok(_) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Check if the store is empty. Return `true` if no process is found.
+    fn is_empty(&self) -> bool {
+        self.intproxy_pid.is_none() && self.user_pid.is_none()
     }
 }
 
@@ -175,6 +179,7 @@ pub(super) struct MirrordCi {
     ci_api_key: Option<CiApiKey>,
 
     /// Arguments that are specific to `mirrord ci start`.
+    #[cfg_attr(windows, allow(unused))]
     start_args: StartArgs,
 
     /// [`MirrordCiStore`] holds the intproxy pid, and the user process pid so we can kill them
@@ -310,6 +315,7 @@ impl MirrordCi {
         }
     }
 
+    #[cfg_attr(windows, allow(unused))]
     #[cfg(target_os = "windows")]
     pub(super) async fn prepare_command<P: Progress>(
         self,
@@ -348,6 +354,7 @@ impl MirrordCi {
 
 #[derive(Debug, Default)]
 struct StartArgs {
+    #[cfg_attr(windows, allow(dead_code))]
     foreground: bool,
 }
 

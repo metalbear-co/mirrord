@@ -10,6 +10,9 @@ permissions:
   contents: read
 
 jobs:
+  # ============================================================
+  # 1) Check latest GitHub Release has all required assets
+  # ============================================================
   check_latest_release:
     runs-on: ubuntu-24.04
     outputs:
@@ -112,6 +115,7 @@ jobs:
           HTML_URL: ${{ steps.check.outputs.html_url }}
           ERROR: ${{ steps.check.outputs.error }}
           MISSING_REQUIRED: ${{ steps.check.outputs.missing_required }}
+        shell: bash
         run: |
           if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
             echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
@@ -147,6 +151,7 @@ jobs:
           TAG: ${{ steps.check.outputs.tag }}
           HTML_URL: ${{ steps.check.outputs.html_url }}
           MISSING_OPTIONAL: ${{ steps.check.outputs.missing_optional }}
+        shell: bash
         run: |
           if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
             echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
@@ -172,12 +177,14 @@ jobs:
 
       - name: Log success
         if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional == ''
+        shell: bash
         run: |
           echo "✅ Release monitor: all required and optional assets are present on latest release."
 
-  # -----------------------------------
-  # Install-path tests (curl + brew)
-  # -----------------------------------
+
+  # ============================================================
+  # 2) Install-path tests (curl|bash + Homebrew) on Linux & macOS
+  # ============================================================
   test_install_paths:
     needs: check_latest_release
     strategy:
@@ -187,6 +194,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Show env + release info
+        shell: bash
         run: |
           echo "Running on OS: ${{ runner.os }}"
           echo "Latest tag from monitor: '${{ needs.check_latest_release.outputs.tag }}'"
@@ -242,6 +250,29 @@ jobs:
           fi
           hash -r || true
 
+      - name: Install Homebrew on Linux if missing
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if command -v brew >/dev/null 2>&1; then
+            echo "Homebrew already installed on this Linux runner."
+          else
+            echo "Installing Homebrew on Linux (non-interactive)..."
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+
+          # Ensure Linuxbrew is on PATH for subsequent steps
+          if [ -d "/home/linuxbrew/.linuxbrew/bin" ]; then
+            echo "Adding Linuxbrew to PATH"
+            {
+              echo "HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew"
+              echo "HOMEBREW_NO_AUTO_UPDATE=1"
+              echo "PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+            } >> "$GITHUB_ENV"
+          fi
+
       - name: Test Homebrew install (Linux + macOS)
         id: brew
         shell: bash
@@ -284,7 +315,7 @@ jobs:
           echo "error=" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack on install failures
-        # Fail if curl fails or brew fails.
+        # Fail if curl fails or brew fails (on any OS in the matrix).
         if: steps.curl.outputs.ok != 'true' || steps.brew.outputs.ok != 'true'
         env:
           SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
@@ -305,21 +336,69 @@ jobs:
           repo="${GITHUB_REPOSITORY}"
           tag="${TAG:-unknown}"
           html_url="${HTML_URL:-https://github.com/$repo/releases}"
-
           brew_status="${BREW_OK:-not-run}"
           curl_status="${CURL_OK:-unknown}"
           brew_error="${BREW_ERROR:-none}"
           curl_error="${CURL_ERROR:-none}"
+          os="${RUNNER_OS:-unknown}"
 
-          text=":warning: *Release install-path check FAILED for \`$repo\` on \`${RUNNER_OS}\`*\n\
-          • *Tag (from monitor):* \`$tag\`\n\
-          • *curl|bash installer ok?:* ${curl_status}\n\
-          • *curl error:* ${curl_error}\n\
-          • *brew install ok?:* ${brew_status}\n\
-          • *brew error:* ${brew_error}\n\
-          • *Release page:* ${html_url}"
-
-          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+          # Pretty Block Kit payload
+          payload=$(jq -n \
+            --arg repo "$repo" \
+            --arg os "$os" \
+            --arg tag "$tag" \
+            --arg curl_status "$curl_status" \
+            --arg curl_error "$curl_error" \
+            --arg brew_status "$brew_status" \
+            --arg brew_error "$brew_error" \
+            --arg html_url "$html_url" \
+            '{
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *Release install-path check FAILED for `\($repo)` on `\($os)`*"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tag (from monitor):*\n`\($tag)`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*OS:*\n`\($os)`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*curl|bash installer ok?:*\n\($curl_status)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*curl error:*\n\($curl_error)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*brew install ok?:*\n\($brew_status)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*brew error:*\n\($brew_error)"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Release page:*\n<\($html_url)|Open latest release>"
+                  }
+                }
+              ]
+            }')
 
           curl -X POST -H 'Content-type: application/json' \
                --data "$payload" \
@@ -330,12 +409,14 @@ jobs:
 
       - name: Log install success
         if: steps.curl.outputs.ok == 'true' && steps.brew.outputs.ok == 'true'
+        shell: bash
         run: |
           echo "✅ Install monitor: curl and Homebrew installers succeeded on ${{ runner.os }}."
 
-  # ---------------------------------------------------
-  # Version endpoint vs GitHub release URLs consistency
-  # ---------------------------------------------------
+
+  # ============================================================
+  # 3) Version endpoint vs GitHub release download URLs
+  # ============================================================
   check_version_endpoint:
     needs: check_latest_release
     runs-on: ubuntu-24.04
@@ -449,5 +530,6 @@ jobs:
 
       - name: Log version endpoint success
         if: steps.version.outputs.ok == 'true'
+        shell: bash
         run: |
           echo "✅ Version endpoint check passed. version.mirrord.dev -> ${{ steps.version.outputs.version }}"

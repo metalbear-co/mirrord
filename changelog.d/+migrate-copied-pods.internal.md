@@ -1,0 +1,1 @@
+On operator restart migrate copied pods.

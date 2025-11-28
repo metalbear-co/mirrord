@@ -155,7 +155,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::new(experimental.dns_permission_error_fatal.unwrap_or_default()),
+            SimpleProxy::new(experimental.dns_permission_error_fatal),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
