@@ -411,7 +411,7 @@ jobs:
 
       - name: Compute release tag
         id: tag
-        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_CHOCO == 'true') }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -493,7 +493,7 @@ jobs:
       ###########################################################################
 
       - name: Build Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE == 'release') }}
+        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -530,7 +530,7 @@ jobs:
           $nuspecLines += '    <owners>MetalBear</owners>'
           $nuspecLines += '    <licenseUrl>https://github.com/metalbear-co/mirrord/blob/main/LICENSE</licenseUrl>'
           $nuspecLines += '    <projectUrl>https://github.com/metalbear-co/mirrord</projectUrl>'
-          $nuspecLines += '    <iconUrl>https://storage.googleapis.com/mirrord-windows-builds-public/misc/mirrord.ico/iconUrl>'
+          $nuspecLines += '    <iconUrl>https://raw.githubusercontent.com/metalbear-co/mirrord/main/assets/icon.png</iconUrl>'
           $nuspecLines += '    <requireLicenseAcceptance>false</requireLicenseAcceptance>'
           $nuspecLines += '    <description>mirrord lets you run local code in the context of your cloud environment (Kubernetes).</description>'
           $nuspecLines += '    <tags>mirrord kubernetes debugging cloud</tags>'
@@ -580,7 +580,7 @@ jobs:
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
 
       - name: Push Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE == 'release') }}
+        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
