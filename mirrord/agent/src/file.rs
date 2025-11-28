@@ -238,6 +238,9 @@ impl FileManager {
             FileRequest::Fchown(FchownRequest { fd, owner, group }) => {
                 Some(FileResponse::Fchown(self.fchown(fd, owner, group)))
             }
+            FileRequest::Fchmod(FchmodRequest { fd, mode }) => {
+                Some(FileResponse::Fchmod(self.fchmod(fd, mode)))
+            }
         })
     }
 
@@ -591,6 +594,24 @@ impl FileManager {
         match file {
             RemoteFile::File(file) => {
                 let result = unsafe { libc::fchown(file.as_raw_fd(), owner, group) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn fchmod(&mut self, fd: u64, mode: u32) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::fchmod(file.as_raw_fd(), mode) };
                 match result {
                     -1 => Err(ResponseError::from(io::Error::last_os_error())),
                     _ => Ok(()),

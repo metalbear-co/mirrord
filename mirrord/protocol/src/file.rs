@@ -680,3 +680,9 @@ pub struct FchownRequest {
     pub owner: u32,
     pub group: u32,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FchmodRequest {
+    pub fd: u64,
+    pub mode: u32,
+}

@@ -574,3 +574,10 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Fchown,
     res_path = ProxyToLayerMessage::File => FileResponse::Fchown,
 );
+
+impl_request!(
+    req = FchmodRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Fchmod,
+    res_path = ProxyToLayerMessage::File => FileResponse::Fchmod,
+);

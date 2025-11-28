@@ -19,8 +19,8 @@ use libc::{c_char, statx, statx_timestamp};
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
-        FchownRequest, FtruncateRequest, FutimensRequest, MakeDirAtRequest, MakeDirRequest,
-        OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+        FchmodRequest, FchownRequest, FtruncateRequest, FutimensRequest, MakeDirAtRequest,
+        MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
         ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest, RenameRequest,
         SeekFileResponse, StatFsRequestV2, Timespec, UnlinkAtRequest, UnlinkRequest,
         WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
@@ -871,6 +871,14 @@ pub(crate) fn fchown(fd: RawFd, owner: u32, group: u32) -> Detour<()> {
         fd,
         owner,
         group,
+    })??)
+}
+
+pub(crate) fn fchmod(fd: RawFd, mode: u32) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(FchmodRequest {
+        fd,
+        mode,
     })??)
 }
 

@@ -15,7 +15,7 @@ use std::{
 
 use libc::{
     self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
-    gid_t, iovec, off_t, size_t, ssize_t, stat, statfs, timespec, uid_t,
+    gid_t, iovec, mode_t, off_t, size_t, ssize_t, stat, statfs, timespec, uid_t,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
@@ -315,6 +315,18 @@ pub(super) unsafe extern "C" fn fchown_detour(fd: c_int, owner: uid_t, group: gi
     fchown(fd, owner, group)
         .map(|()| 0)
         .unwrap_or_bypass_with(|_| unsafe { FN_FCHOWN(fd, owner, group) })
+}
+
+/// Hook for [`libc::fchmod`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn fchmod_detour(fd: c_int, mode: mode_t) -> c_int {
+    // mode_t is u16 on MacOS but u32 on Linux so clippy warns that the u32 cast is useless when
+    // targetting linux but we want to keep it to explicitly handle both platforms in a
+    // single expr
+    #[allow(clippy::unnecessary_cast)]
+    fchmod(fd, mode as u32)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FCHMOD(fd, mode) })
 }
 
 /// see below, to have nice code we also implement it for other archs.
@@ -1880,5 +1892,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
         );
 
         replace!(hook_manager, "fchown", fchown_detour, FnFchown, FN_FCHOWN);
+
+        replace!(hook_manager, "fchmod", fchmod_detour, FnFchmod, FN_FCHMOD);
     }
 }
