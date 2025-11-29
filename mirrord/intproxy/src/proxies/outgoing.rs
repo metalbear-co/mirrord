@@ -15,6 +15,7 @@ use mirrord_protocol::{
     },
     uid::Uid,
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
@@ -178,7 +179,7 @@ pub struct OutgoingProxy {
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
-    background_tasks: BackgroundTasks<InterceptorId, Bytes, io::Error>,
+    background_tasks: Option<BackgroundTasks<InterceptorId, Bytes, io::Error>>,
 
     /// Whether TCP connect requests should be handled in a non-blocking way.
     ///
@@ -382,7 +383,7 @@ impl OutgoingProxy {
             remote_address = %in_progress.remote_address,
             "Starting interceptor task"
         );
-        let interceptor = self.background_tasks.register(
+        let interceptor = self.background_tasks.as_mut().unwrap().register(
             Interceptor::new(id, prepared_socket),
             id,
             Self::CHANNEL_SIZE,
@@ -475,16 +476,20 @@ impl OutgoingProxy {
         let msg = request
             .protocol
             .wrap_agent_connect(request.remote_address, uid);
-        message_bus.send(msg).await;
+        message_bus.send_agent(msg).await;
 
         Ok(())
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
-    async fn handle_connection_refresh(&mut self, message_bus: &mut MessageBus<Self>) {
+    async fn handle_connection_refresh(
+        &mut self,
+        message_bus: &mut MessageBus<Self>,
+        new_agent_tx: TxHandle<Client>,
+    ) {
         tracing::debug!("Closing all local connections");
         self.txs.clear();
-        self.background_tasks.clear();
+        self.background_tasks.as_mut().unwrap().clear();
         self.protocol_version = None;
 
         tracing::debug!(
@@ -523,6 +528,11 @@ impl OutgoingProxy {
                 )))
                 .await;
         }
+
+        // Reset protocol version since we'll need another negotiation
+        // round for the new connection.
+        self.protocol_version = None;
+        message_bus.set_agent_tx(new_agent_tx);
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err(level = Level::DEBUG))]
@@ -569,7 +579,7 @@ pub enum OutgoingProxyMessage {
     AgentDatagrams(DaemonUdpOutgoing),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
-    ConnectionRefresh,
+    ConnectionRefresh(TxHandle<Client>),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
 }
@@ -581,6 +591,13 @@ impl BackgroundTask for OutgoingProxy {
 
     #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        match &mut self.background_tasks {
+            Some(tasks) => tasks.set_agent_tx(message_bus.clone_agent_tx()),
+            None => {
+                self.background_tasks = Some(BackgroundTasks::new(message_bus.clone_agent_tx()))
+            }
+        };
+
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
@@ -627,16 +644,16 @@ impl BackgroundTask for OutgoingProxy {
                             self.agent_local_addresses.remove(&id);
                         }
                     }
-                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
+                    Some(OutgoingProxyMessage::ConnectionRefresh(new_agent_tx)) => self.handle_connection_refresh(message_bus, new_agent_tx).await,
                     Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
                         self.protocol_version.replace(version);
                     }
                 },
 
-                Some(task_update) = self.background_tasks.next() => match task_update {
+                Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        message_bus.send_agent(msg).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
@@ -652,7 +669,7 @@ impl BackgroundTask for OutgoingProxy {
                         if self.txs.remove(&id).is_some() {
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
-                            let _ = message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                            let _ = message_bus.send_agent(msg).await;
                             self.txs.remove(&id);
                         }
                     }
@@ -677,6 +694,7 @@ mod test {
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         },
     };
+    use mirrord_protocol_io::Connection;
 
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
@@ -689,9 +707,10 @@ mod test {
     #[tokio::test]
     async fn clear_on_reconnect() {
         let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
+        let (connection, _, out) = Connection::dummy();
 
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
-            BackgroundTasks::default();
+            BackgroundTasks::new(connection.tx_handle());
         let outgoing = background_tasks.register(OutgoingProxy::new(false), (), 8);
 
         for i in 0..=1 {
@@ -706,14 +725,12 @@ mod test {
                     LayerId(0),
                 ))
                 .await;
-            let message = background_tasks.next().await.unwrap().1.unwrap_message();
+            let message = out.next().await.unwrap();
             assert_eq!(
                 message,
-                ProxyMessage::ToAgent(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                    LayerConnect {
-                        remote_address: SocketAddress::Ip(peer_addr),
-                    }
-                ))),
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                    remote_address: SocketAddress::Ip(peer_addr),
+                })),
             );
 
             // Operator confirms with connection id 0.
@@ -739,7 +756,11 @@ mod test {
             }
 
             // Connection with the operator was reset.
-            outgoing.send(OutgoingProxyMessage::ConnectionRefresh).await;
+            outgoing
+                .send(OutgoingProxyMessage::ConnectionRefresh(
+                    connection.tx_handle(),
+                ))
+                .await;
         }
 
         std::mem::drop(outgoing);

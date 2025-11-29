@@ -1,0 +1,31 @@
+[package]
+name = "mirrord-protocol-io"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+documentation.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+publish.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mirrord-protocol = { path = "../protocol" }
+
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio-util.workspace = true
+rand.workspace = true
+actix-codec.workspace = true
+bincode.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+rstest.workspace = true
+
+[lints]
+workspace = true

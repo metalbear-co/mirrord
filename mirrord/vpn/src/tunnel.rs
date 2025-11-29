@@ -27,15 +27,13 @@ where
 
         tokio::pin!(stream);
 
-        agent.open_socket().await?;
+        agent.open_socket().await;
 
         'main: loop {
             tokio::select! {
                 packet = stream.next() => {
                     let packet = packet.unwrap().unwrap();
-                    agent
-                        .send_packet(packet)
-                        .await?
+                    agent.send_packet(packet).await
                 }
                 message = agent.next() => {
                     match message {
