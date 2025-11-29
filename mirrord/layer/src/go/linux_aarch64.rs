@@ -176,18 +176,10 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
     } else {
         trace!("found version < 1.19, arm64 not supported - not hooking");
     }
-
-    if experimental.vfork_emulation {
-        tracing::warn!("vfork emulation is not yet supported for Go programs on ARM64.");
-    }
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
-pub(crate) fn enable_hooks_in_loaded_module(
-    hook_manager: &mut HookManager,
-    module_name: String,
-    experimental: &ExperimentalConfig,
-) {
+pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
         return;
     };

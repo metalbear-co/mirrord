@@ -976,7 +976,6 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     let _guard = DetourGuard::new();
 
     let mut hook_manager = HookManager::default();
-    let state = setup();
     let path_str = unsafe {
         std::ffi::CStr::from_ptr(raw_path)
             .to_string_lossy()
@@ -987,7 +986,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .expect("cannot get the filename of the dynamic library")
         .to_string_lossy()
         .into_owned();
-    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, state.experimental());
+    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename);
 
     handle
 }
