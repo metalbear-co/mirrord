@@ -22,6 +22,7 @@ use mirrord_protocol::{
         TcpClose,
     },
 };
+use mirrord_protocol_io::Connection;
 use rstest::rstest;
 use tokio::net::TcpListener;
 
@@ -60,9 +61,11 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     let local_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = local_listener.local_addr().unwrap();
 
+    let (conn, _, out) = Connection::dummy();
     let proxy = IncomingProxy::new(Duration::from_secs(3), Default::default());
     let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
-        Default::default();
+        BackgroundTasks::new(conn.tx_handle());
+
     let proxy = background_tasks.register(proxy, (), 8);
 
     proxy
@@ -83,10 +86,8 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
         ))
         .await;
     assert_eq!(
-        background_tasks.next().await.unwrap().1.unwrap_message(),
-        ProxyMessage::ToAgent(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
-            steal_type
-        ))),
+        out.next().await.unwrap(),
+        ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type)),
     );
     proxy
         .send(IncomingProxyMessage::AgentSteal(
@@ -143,11 +144,11 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     // In the background, consume HTTP response messages produced by the intproxy.
     // This ensures that the intproxy does not choke.
     let receive_frames = tokio::spawn(async move {
-        let message = background_tasks.next().await.unwrap().1.unwrap_message();
+        let message = out.next().await.unwrap();
         match message {
-            ProxyMessage::ToAgent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                 ChunkedResponse::Start(response),
-            ))) => {
+            )) => {
                 assert_eq!(response.connection_id, 0);
                 assert_eq!(response.request_id, 0);
             }
@@ -155,14 +156,14 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
         }
         loop {
             assert_eq!(
-                background_tasks.next().await.unwrap().1.unwrap_message(),
-                ProxyMessage::ToAgent(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
-                    ChunkedResponse::Body(ChunkedRequestBodyV1 {
+                out.next().await.unwrap(),
+                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(
+                    ChunkedRequestBodyV1 {
                         is_last: false,
                         connection_id: 0,
                         request_id: 0,
                         frames: vec![InternalHttpBodyFrame::Data("hello there\n".into())]
-                    })
+                    }
                 ))),
             )
         }
