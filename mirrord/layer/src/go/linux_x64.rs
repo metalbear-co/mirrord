@@ -539,32 +539,71 @@ unsafe extern "C" fn raw_vfork_detour() {
 }
 
 /// Hooks for when hooking a pre go 1.19 binary
-fn pre_go1_19(hook_manager: &mut HookManager) {
-    hook_symbol!(
-        hook_manager,
-        "syscall.RawSyscall.abi0",
-        go_rawsyscall_detour
-    );
-    hook_symbol!(hook_manager, "syscall.Syscall6.abi0", go_syscall6_detour);
-    hook_symbol!(hook_manager, "syscall.Syscall.abi0", go_syscall_detour);
+fn pre_go1_19(hook_manager: &mut HookManager, module_name: Option<&str>) {
+    if let Some(module_name) = module_name {
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            "syscall.RawSyscall.abi0",
+            go_rawsyscall_detour
+        );
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            "syscall.Syscall6.abi0",
+            go_syscall6_detour
+        );
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            "syscall.Syscall.abi0",
+            go_syscall_detour
+        );
+    } else {
+        hook_symbol!(
+            hook_manager,
+            "syscall.RawSyscall.abi0",
+            go_rawsyscall_detour
+        );
+        hook_symbol!(hook_manager, "syscall.Syscall6.abi0", go_syscall6_detour);
+        hook_symbol!(hook_manager, "syscall.Syscall.abi0", go_syscall_detour);
+    }
 }
 
 /// Hooks for when hooking a go binary between 1.19 and 1.23
-fn post_go1_19(hook_manager: &mut HookManager) {
-    hook_symbol!(
-        hook_manager,
-        "runtime/internal/syscall.Syscall6",
-        go_syscall_new_detour
-    );
+fn post_go1_19(hook_manager: &mut HookManager, module_name: Option<&str>) {
+    if let Some(module_name) = module_name {
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            "runtime/internal/syscall.Syscall6",
+            go_syscall_new_detour
+        );
+    } else {
+        hook_symbol!(
+            hook_manager,
+            "runtime/internal/syscall.Syscall6",
+            go_syscall_new_detour
+        );
+    }
 }
 
 /// Hooks for when hooking a post go 1.23 binary
-fn post_go1_23(hook_manager: &mut HookManager) {
-    hook_symbol!(
-        hook_manager,
-        "internal/runtime/syscall.Syscall6",
-        go_syscall_new_detour
-    );
+fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
+    if let Some(module_name) = module_name {
+        hook_symbol!(
+            hook_manager,
+            module_name,
+            "internal/runtime/syscall.Syscall6",
+            go_syscall_new_detour
+        );
+    } else {
+        hook_symbol!(
+            hook_manager,
+            "internal/runtime/syscall.Syscall6",
+            go_syscall_new_detour
+        );
+    }
 }
 
 /// Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
@@ -581,15 +620,39 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
     if version >= 1.25 {
         go_1_25::hook(hook_manager);
     } else if version >= 1.23 {
-        post_go1_23(hook_manager);
+        post_go1_23(hook_manager, None);
     } else if version >= 1.19 {
-        post_go1_19(hook_manager);
+        post_go1_19(hook_manager, None);
     } else {
-        pre_go1_19(hook_manager);
+        pre_go1_19(hook_manager, None);
     }
 
     hook_symbol!(
         hook_manager,
+        "syscall.rawVforkSyscall.abi0",
+        raw_vfork_detour
+    );
+}
+
+/// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
+pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
+    let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
+        return;
+    };
+
+    if version >= 1.25 {
+        go_1_25::hook_in_module(hook_manager, module_name.as_str());
+    } else if version >= 1.23 {
+        post_go1_23(hook_manager, Some(module_name.as_str()));
+    } else if version >= 1.19 {
+        post_go1_19(hook_manager, Some(module_name.as_str()));
+    } else {
+        pre_go1_19(hook_manager, Some(module_name.as_str()));
+    }
+
+    hook_symbol!(
+        hook_manager,
+        module_name.as_str(),
         "syscall.rawVforkSyscall.abi0",
         raw_vfork_detour
     );
@@ -617,6 +680,26 @@ mod go_1_25 {
 
         hook_symbol!(
             hook_manager,
+            "internal/runtime/syscall.Syscall6",
+            internal_runtime_syscall_syscall6_detour
+        );
+    }
+
+    pub fn hook_in_module(hook_manager: &mut HookManager, module_name: &str) {
+        let gosave_address = hook_manager
+            .resolve_symbol_in_module(module_name, "gosave_systemstack_switch")
+            .expect(
+                "couldn't find the address of symbol \
+                `gosave_systemstack_switch`, please file a bug",
+            );
+
+        unsafe {
+            FN_GOSAVE_SYSTEMSTACK_SWITCH = gosave_address.0;
+        }
+
+        hook_symbol!(
+            hook_manager,
+            module_name,
             "internal/runtime/syscall.Syscall6",
             internal_runtime_syscall_syscall6_detour
         );

@@ -129,6 +129,14 @@ pub struct ExperimentalConfig {
     /// Defaults to `false`.
     #[config(default = false)]
     pub non_blocking_tcp_connect: bool,
+
+    /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
+    ///
+    /// Useful when the user's application loads a c-shared golang library dynamically.
+    ///
+    /// Defaults to `false`.
+    #[config(default = false)]
+    pub dlopen_cgo: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
