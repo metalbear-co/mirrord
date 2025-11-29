@@ -635,11 +635,7 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
-pub(crate) fn enable_hooks_in_loaded_module(
-    hook_manager: &mut HookManager,
-    module_name: String,
-    experimental: &ExperimentalConfig,
-) {
+pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
         return;
     };
@@ -654,14 +650,12 @@ pub(crate) fn enable_hooks_in_loaded_module(
         pre_go1_19(hook_manager, Some(module_name.as_str()));
     }
 
-    if experimental.vfork_emulation {
-        hook_symbol!(
-            hook_manager,
-            module_name.as_str(),
-            "syscall.rawVforkSyscall.abi0",
-            raw_vfork_detour
-        );
-    }
+    hook_symbol!(
+        hook_manager,
+        module_name.as_str(),
+        "syscall.rawVforkSyscall.abi0",
+        raw_vfork_detour
+    );
 }
 
 /// Implementation for Go runtime 1.25.

@@ -164,6 +164,7 @@ impl MirrordCiStore {
     }
 
     /// Check if the store is empty. Return `true` if no process is found.
+    #[cfg_attr(windows, allow(unused))]
     fn is_empty(&self) -> bool {
         self.intproxy_pid.is_none() && self.user_pid.is_none()
     }
