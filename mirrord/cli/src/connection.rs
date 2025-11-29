@@ -227,11 +227,6 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         _ => (),
     };
 
-    config.experimental.dns_permission_error_fatal = config
-        .experimental
-        .dns_permission_error_fatal
-        .or(Some(true));
-
     Ok(())
 }
 
