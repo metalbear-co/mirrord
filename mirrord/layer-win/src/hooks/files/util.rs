@@ -151,32 +151,26 @@ impl PartialEq<u64> for WindowsTime {
 ///
 /// * `path` - The path to check.
 pub fn is_nt_path_disk_path<T: AsRef<str>>(path: T) -> bool {
-    let mut path = String::from(path.as_ref());
+    let mut path = path.as_ref();
 
     if !path.starts_with(GLOBAL_NAMESPACE_PATH) {
         return false;
     }
 
-    // Remove global namespace path.
-    path = path
-        .strip_prefix(GLOBAL_NAMESPACE_PATH)
-        .unwrap()
-        .to_string();
+    // Remove global namespace path to normalize.
+    path = &path[GLOBAL_NAMESPACE_PATH.len()..];
 
     // Make sure to support both \\??\\C: and \\??\\C:\abc
-    let volume_path = if let Some((fst, _)) = path.split_once('\\') {
-        fst.to_string()
-    } else {
-        path
-    };
+    let volume_path = path.split_once('\\').map(|(a, _)| a).unwrap_or(path);
 
     let mut path = [0u16; 512];
     let volume_path = string_to_u16_buffer(volume_path);
+
     let ret = unsafe {
         QueryDosDeviceW(
             volume_path.as_ptr() as _,
-            std::ptr::from_mut(&mut path[0]) as _,
-            (std::mem::size_of_val(&path) / std::mem::size_of_val(&path[0])) as _,
+            path.as_mut_ptr() as _,
+            path.len() as _,
         )
     };
 
