@@ -1,4 +1,4 @@
-name: Windows Build Choco Test
+name: Windows Build
 
 on:
   workflow_dispatch:
@@ -8,8 +8,13 @@ on:
         type: choice
         options: [build_sign, reuse]
         default: build_sign
+      release:
+        description: "Publish a GitHub Release? (controls upload to existing release)"
+        type: choice
+        options: [no, draft, prerelease, release]
+        default: no
       release_tag:
-        description: "Version to use for Chocolatey package (e.g. 0.0.1-test1). Defaults to MIRRORD_VERSION."
+        description: "Release tag (defaults to pushed tag or <MIRRORD_VERSION>)"
         required: false
         type: string
       sign_artifacts:
@@ -21,10 +26,23 @@ on:
         description: "Publish a Chocolatey package?"
         type: choice
         options: ["false", "true"]
-        default: "true"
+        default: "false"
+
+  # Uncomment if you ever want to run this on push:
+  # push:
+  #   paths-ignore:
+  #     - "*.md"
+  #     - "**/*.md"
+
+  pull_request:
+    branches: ["main", "*staging*", "windows-support"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "*.md"
+      - "**/*.md"
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -36,16 +54,17 @@ env:
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
 
 jobs:
-  windows_choco_test:
+  windows_tests:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: pwsh
     env:
       MODE: ${{ github.event.inputs.mode || 'build_sign' }}
+      PUBLISH_MODE: ${{ github.event.inputs.release || 'no' }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
-      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'true' }}
+      PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'false' }}
 
     steps:
       - name: Checkout
@@ -345,7 +364,7 @@ jobs:
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD TO GCS (optional, safe)
+      # UPLOAD TO GCS
       ###########################################################################
 
       - name: Upload MSI to GCS
@@ -356,12 +375,15 @@ jobs:
             throw "MSI_PATH '$msi' does not exist."
           }
 
+          # Build a unique folder per run:
+          # gs://mirrord-windows-msi/<ref-name>/run-<run-id>/mirrord.msi
           $runId = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
             $refName = "unknown"
           }
 
+          # Sanitize ref name for use in path
           $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
 
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
@@ -371,6 +393,7 @@ jobs:
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
 
+          # Export for later (summary, logs)
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
@@ -383,37 +406,99 @@ jobs:
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
       ###########################################################################
-      # COMPUTE VERSION FOR CHOCOLATEY (NO GITHUB RELEASE)
+      # RELEASE TAG (for GitHub Release + Chocolatey)
       ###########################################################################
 
-      - name: Compute release tag for Chocolatey
+      - name: Compute release tag
         id: tag
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no' || env.PUBLISH_CHOCO == 'true') }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          if ($env:RELEASE_TAG_INPUT) {
+          if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
+            # From tag ref, e.g. refs/tags/v3.174.0 or refs/tags/3.174.0
+            $tag = "$env:GITHUB_REF".Substring(10)
+          } elseif ($env:RELEASE_TAG_INPUT) {
+            # From manual input
             $tag = $env:RELEASE_TAG_INPUT
           } else {
+            # Fall back to MIRRORD_VERSION (no v prefix)
             $tag = $env:MIRRORD_VERSION
           }
 
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            throw "Could not determine version for Chocolatey (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
-          }
-
+          # Remove leading 'v' prefix if present (normalize to e.g. 3.174.0)
           if ($tag.StartsWith("v")) {
             $tag = $tag.Substring(1)
           }
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
-          Write-Host "Using RELEASE_TAG (Chocolatey version): $tag"
+          Write-Host "Using RELEASE_TAG: $tag"
 
       ###########################################################################
-      # CHOCOLATEY PACKAGE BUILD & PUBLISH (NO GITHUB RELEASE)
+      # UPLOAD ARTIFACTS TO EXISTING GITHUB RELEASE
+      ###########################################################################
+
+      - name: Upload artifacts to GitHub Release (custom)
+        if: ${{ github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no') }}
+        uses: actions/github-script@v7
+        env:
+          MSI_PATH: ${{ env.MSI_PATH }}
+          MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
+          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const { owner, repo } = context.repo;
+
+            const tag = process.env.RELEASE_TAG;
+
+            // Look up existing release — DO NOT create one here
+            let rel;
+            try {
+              const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              rel = r.data;
+            } catch (e) {
+              core.setFailed(
+                `Release with tag '${tag}' was not found. ` +
+                `Ensure the main Release workflow created it before running Windows Build.`
+              );
+              return;
+            }
+
+            async function upload(filePath) {
+              if (!filePath) return;
+              if (!fs.existsSync(filePath)) {
+                core.warning(`File not found, skipping upload: ${filePath}`);
+                return;
+              }
+
+              const name = path.basename(filePath);
+              const data = fs.readFileSync(filePath);
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo,
+                release_id: rel.id,
+                name,
+                data,
+                headers: {
+                  "content-type": "application/octet-stream",
+                  "content-length": data.length
+                }
+              });
+            }
+
+            await upload(process.env.MIRRORD_EXE);
+            await upload(process.env.MIRRORD_LAYER_FILE);
+            await upload(process.env.MSI_PATH);
+
+      ###########################################################################
+      # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
 
       - name: Build Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' }}
+        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -422,7 +507,7 @@ jobs:
           }
 
           if (-not $env:RELEASE_TAG) {
-            throw "RELEASE_TAG is not set. Ensure 'Compute release tag for Chocolatey' ran successfully."
+            throw "RELEASE_TAG is not set. Ensure 'Compute release tag' ran successfully."
           }
 
           $pkgRoot  = Join-Path $env:RUNNER_TEMP "choco"
@@ -464,7 +549,7 @@ jobs:
 
           $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
 
-          # IMPORTANT: single-quoted strings so $packageName / $msiPath stay literal in the script
+          # Use single-quoted strings so $packageName / $msiPath stay literal
           $installLines = @()
           $installLines += '$ErrorActionPreference = ''Stop'''
           $installLines += ''
@@ -496,7 +581,7 @@ jobs:
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
 
       - name: Push Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' }}
+        if: ${{ env.PUBLISH_CHOCO == 'true' && github.event_name != 'pull_request' }}
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
