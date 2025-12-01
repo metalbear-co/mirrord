@@ -77,13 +77,8 @@ pub fn get_module_name(module: *mut c_void) -> Option<String> {
 
     let mut name = [0u16; 512];
 
-    let ret = unsafe {
-        GetModuleFileNameW(
-            module as _,
-            name.as_mut_ptr() as _,
-            (std::mem::size_of_val(&name) / std::mem::size_of_val(&name[0])) as _,
-        )
-    };
+    let ret = unsafe { GetModuleFileNameW(module as _, name.as_mut_ptr() as _, name.len() as _) };
+
     if ret == 0 {
         None
     } else {
