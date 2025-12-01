@@ -32,6 +32,18 @@ on:
         options: ["false", "true"]
         default: "true"
 
+      publish_chocolatey:
+        description: "Build & publish Chocolatey package"
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+
+      publish_winget:
+        description: "Build & publish WinGet manifests"
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+
   push:
     tags:
       - "v*"
@@ -76,6 +88,8 @@ jobs:
       INPUT_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release || 'no' }}
       INPUT_SIGN: ${{ github.event_name == 'workflow_dispatch' && inputs.sign_artifacts || 'false' }}
       INPUT_ATTACH: ${{ github.event_name == 'workflow_dispatch' && inputs.attach_to_release || 'true' }}
+      INPUT_PUBLISH_CHOCO: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_chocolatey || 'true' }}
+      INPUT_PUBLISH_WINGET: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_winget || 'true' }}
 
     steps:
       # -------------------------------------------------------
@@ -94,6 +108,8 @@ jobs:
           Write-Host "Release:   $env:INPUT_RELEASE"
           Write-Host "Sign:      $env:INPUT_SIGN"
           Write-Host "Attach:    $env:INPUT_ATTACH"
+          Write-Host "Publish Choco:  $env:INPUT_PUBLISH_CHOCO"
+          Write-Host "Publish WinGet: $env:INPUT_PUBLISH_WINGET"
 
       # -------------------------------------------------------
       # Determine tag
@@ -248,10 +264,11 @@ jobs:
           Write-Host "TODO: Add gsutil command to upload $env:ZIP_OUTPUT and others to $env:BUCKET_URI"
 
       # -------------------------------------------------------
-      # Chocolatey package
+      # Chocolatey package (toggled)
       # -------------------------------------------------------
       - name: Pack Chocolatey package
         id: choco_pack
+        if: env.INPUT_PUBLISH_CHOCO == 'true'
         shell: pwsh
         run: |
           Write-Host "Packing Chocolatey package..."
@@ -263,6 +280,7 @@ jobs:
 
       - name: Push Chocolatey package
         id: choco_push
+        if: env.INPUT_PUBLISH_CHOCO == 'true'
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         shell: pwsh
@@ -277,10 +295,11 @@ jobs:
           Write-Host "TODO: Add choco push command here."
 
       # -------------------------------------------------------
-      # WinGet manifests
+      # WinGet manifests (toggled)
       # -------------------------------------------------------
       - name: Generate WinGet manifest
         id: winget_generate
+        if: env.INPUT_PUBLISH_WINGET == 'true'
         shell: pwsh
         run: |
           Write-Host "Generating WinGet manifests..."
@@ -297,6 +316,7 @@ jobs:
 
       - name: Publish WinGet package
         id: winget_publish
+        if: env.INPUT_PUBLISH_WINGET == 'true'
         env:
           WINGET_PAT: ${{ secrets.WINGET_PAT }}   # PAT for the WinGet repo
         shell: pwsh
@@ -502,15 +522,15 @@ jobs:
           "| Upload ZIP/binaries to GCS | ${{ steps.upload_zip_gcs.outcome || 'skipped' }} | ${{ env.BUCKET_URI }} |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # 🍫 Chocolatey
-          "| Chocolatey package | ${{ steps.choco_pack.outcome || 'skipped' }} | nupkg creation |" |
+          # 🍫 Chocolatey (toggled)
+          "| Chocolatey package | ${{ steps.choco_pack.outcome || 'skipped' }} | nupkg creation (toggle: ${{ env.INPUT_PUBLISH_CHOCO }}) |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
           "| Push to Chocolatey feed | ${{ steps.choco_push.outcome || 'skipped' }} | internal/external feed |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # 🪟 WinGet
-          "| Generate WinGet manifest | ${{ steps.winget_generate.outcome || 'skipped' }} | yaml manifest |" |
+          # 🪟 WinGet (toggled)
+          "| Generate WinGet manifest | ${{ steps.winget_generate.outcome || 'skipped' }} | yaml manifest (toggle: ${{ env.INPUT_PUBLISH_WINGET }}) |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
           "| Publish WinGet package | ${{ steps.winget_publish.outcome || 'skipped' }} | submit to repo |" |
