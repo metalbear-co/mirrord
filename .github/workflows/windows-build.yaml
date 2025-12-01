@@ -22,6 +22,11 @@ on:
         type: choice
         options: ["false", "true"]
         default: "false"
+      sign_artifacts:
+        description: "Code-sign EXE & DLL?"
+        type: choice
+        options: ["false", "true"]
+        default: "false"
 
   # If you want PR builds as well, uncomment and adjust:
   # pull_request:
@@ -36,7 +41,7 @@ permissions:
 
 env:
   DIST_DIR: dist/windows
-  # Package ID as it will exist in microsoft/winget-pkgs (once you've run `wingetcreate new` manually)
+  # Winget package id as registered in microsoft/winget-pkgs
   WINGET_PACKAGE_ID: MetalBear.mirrord
 
 jobs:
@@ -71,13 +76,13 @@ jobs:
           try { winget --version } catch { Write-Host "winget not found" }
 
       # ----------------------------------------------------------
-      # 3) Build mirrord_layer_win.dll and mirrord.exe
-      #    (Fixes MIRRORD_LAYER_FILE include_bytes! error)
+      # 3) Build & (optionally) sign mirrord (Windows)
       # ----------------------------------------------------------
-      - name: Build mirrord (Windows)
-        id: build
+      - name: Build & (optionally) sign mirrord (Windows)
+        id: build_and_sign
         shell: pwsh
-        continue-on-error: false
+        env:
+          SIGN_ARTIFACTS: ${{ inputs.sign_artifacts }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -104,13 +109,36 @@ jobs:
           Copy-Item $exePath "$env:DIST_DIR\mirrord.exe"
           Copy-Item $layerPath "$env:DIST_DIR\mirrord_layer_win.dll"
 
+          if ($env:SIGN_ARTIFACTS -eq "true") {
+            Write-Host "=== Signing artifacts (mirrord.exe + mirrord_layer_win.dll) ==="
+            # --------------------------------------------------------------------
+            # TODO: Replace this block with your actual signing commands
+            # (smctl login, signtool.exe, etc.)
+            # Example skeleton:
+            #
+            # & "C:\path\to\signtool.exe" sign `
+            #   /fd SHA256 /tr http://timestamp.digicert.com `
+            #   /td SHA256 /a `
+            #   "$env:DIST_DIR\mirrord.exe"
+            #
+            # & "C:\path\to\signtool.exe" sign `
+            #   /fd SHA256 /tr http://timestamp.digicert.com `
+            #   /td SHA256 /a `
+            #   "$env:DIST_DIR\mirrord_layer_win.dll"
+            #
+            # --------------------------------------------------------------------
+            Write-Host "Signing placeholder complete (replace with real signing logic)."
+          }
+          else {
+            Write-Host "SIGN_ARTIFACTS is 'false' – skipping signing."
+          }
+
       # ----------------------------------------------------------
       # 4) Run tests (workspace)
       # ----------------------------------------------------------
       - name: Run tests
         id: test
         shell: pwsh
-        continue-on-error: false
         run: |
           $ErrorActionPreference = "Stop"
           cargo test --locked --workspace
@@ -121,7 +149,6 @@ jobs:
       - name: Package ZIP
         id: package_zip
         shell: pwsh
-        continue-on-error: false
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -158,7 +185,6 @@ jobs:
         id: chocolatey
         if: github.event_name == 'workflow_dispatch' && inputs.chocolatey_release == 'true'
         shell: pwsh
-        continue-on-error: true
         env:
           CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
         run: |
@@ -187,7 +213,6 @@ jobs:
         id: winget
         if: github.event_name == 'workflow_dispatch' && inputs.winget_release == 'true'
         shell: pwsh
-        continue-on-error: false
         env:
           WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
           WINGET_PACKAGE_ID: ${{ env.WINGET_PACKAGE_ID }}
@@ -206,8 +231,10 @@ jobs:
             exit 0
           }
 
-          # NOTE: adjust this URL to wherever your MSI is actually published
-          $installerUrl = "https://storage.googleapis.com/mirrord-windows-builds-public/chocolatey-packaging/run-${{ github.run_id }}/mirrord.msi"
+          # Adjust to where your MSI is actually published.
+          # Using run_id so each CI run has its own path (match your current setup).
+          $runId        = "${{ github.run_id }}"
+          $installerUrl = "https://storage.googleapis.com/mirrord-windows-builds-public/chocolatey-packaging/run-$runId/mirrord.msi"
 
           Write-Host "=== WinGet publish (best-effort) ==="
           Write-Host "Package ID: $packageId"
@@ -222,7 +249,6 @@ jobs:
           if ($exitCode -ne 0) {
             Write-Warning "wingetcreate update failed with exit code $exitCode. This will NOT fail the workflow."
             Write-Warning "Common cause: package '$packageId' does not yet exist in microsoft/winget-pkgs."
-            # Force success for the step/job
             exit 0
           }
 
@@ -235,7 +261,6 @@ jobs:
         id: github_release
         if: github.event_name == 'workflow_dispatch' && inputs.github_release != 'no'
         shell: bash
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIST_DIR: ${{ env.DIST_DIR }}
@@ -319,7 +344,7 @@ jobs:
           "| Stage | Status | Details |"     | Out-File -FilePath $summary -Encoding utf8 -Append
           "|-------|--------|---------|"     | Out-File -FilePath $summary -Encoding utf8 -Append
 
-          "| Build binaries | ${{ steps.build.outcome || 'skipped' }} | cargo build (exe + DLL) |" |
+          "| Build & sign binaries | ${{ steps.build_and_sign.outcome || 'skipped' }} | cargo build + optional signing (sign_artifacts=${{ inputs.sign_artifacts }}) |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
           "| Tests | ${{ steps.test.outcome || 'skipped' }} | cargo test --workspace |" |
