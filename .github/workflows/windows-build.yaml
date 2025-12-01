@@ -1,4 +1,4 @@
-name: Windows Build Choco Test
+name: Windows Build Choco + WinGet Test
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         options: [build_sign, reuse]
         default: build_sign
       release_tag:
-        description: "Version to use for Chocolatey package (e.g. 0.0.1-test1). Defaults to MIRRORD_VERSION."
+        description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
         type: string
       sign_artifacts:
@@ -22,21 +22,29 @@ on:
         type: choice
         options: ["false", "true"]
         default: "true"
+      winget_publish:
+        description: "Update WinGet manifest (wingetcreate)?"
+        type: choice
+        options: ["false", "true"]
+        default: "false"
 
 permissions:
   contents: read
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
-  MSI_BUCKET_URI: gs://mirrord-windows-msi
+  # Public bucket for MSI (needed for WinGet HTTP access)
+  MSI_BUCKET_URI: gs://mirrord-windows-builds-public
   ARTIFACT_SUBPATH: windows/mirrord-latest
   RUST_BACKTRACE: "1"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
   LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+  MSI_HTTP_BASE: "https://storage.googleapis.com/mirrord-windows-builds-public"
+  WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
-  windows_choco_test:
+  windows_choco_winget_test:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
@@ -46,6 +54,7 @@ jobs:
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
       PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'true' }}
+      PUBLISH_WINGET: ${{ github.event.inputs.winget_publish || 'false' }}
 
     steps:
       - name: Checkout
@@ -345,7 +354,7 @@ jobs:
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
 
       ###########################################################################
-      # UPLOAD TO GCS (optional, safe)
+      # UPLOAD MSI TO PUBLIC GCS BUCKET
       ###########################################################################
 
       - name: Upload MSI to GCS
@@ -362,6 +371,7 @@ jobs:
             $refName = "unknown"
           }
 
+          # Sanitize ref name for use in path
           $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
 
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
@@ -371,6 +381,9 @@ jobs:
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
 
+          # Export for later (summary, logs, HTTP URL computation)
+          "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MSI_GCS_RUN_ID=$runId" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
@@ -383,10 +396,10 @@ jobs:
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
       ###########################################################################
-      # COMPUTE VERSION FOR CHOCOLATEY (NO GITHUB RELEASE)
+      # COMPUTE VERSION FOR CHOCOLATEY & WINGET
       ###########################################################################
 
-      - name: Compute release tag for Chocolatey
+      - name: Compute release tag
         id: tag
         run: |
           $ErrorActionPreference = "Stop"
@@ -398,7 +411,7 @@ jobs:
           }
 
           if ([string]::IsNullOrWhiteSpace($tag)) {
-            throw "Could not determine version for Chocolatey (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
+            throw "Could not determine version (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
           }
 
           if ($tag.StartsWith("v")) {
@@ -406,10 +419,108 @@ jobs:
           }
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
-          Write-Host "Using RELEASE_TAG (Chocolatey version): $tag"
+          Write-Host "Using RELEASE_TAG (version): $tag"
 
       ###########################################################################
-      # CHOCOLATEY PACKAGE BUILD & PUBLISH (NO GITHUB RELEASE)
+      # COMPUTE MSI DOWNLOAD URL FOR WINGET (FROM GCS)
+      ###########################################################################
+
+      - name: Compute MSI download URL for WinGet
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $httpBase = $env:MSI_HTTP_BASE
+          if (-not $httpBase) {
+            throw "MSI_HTTP_BASE must be set for WinGet."
+          }
+          $httpBase = $httpBase.TrimEnd('/')
+
+          $refSafe = $env:MSI_GCS_REF_SAFE
+          $runId   = $env:MSI_GCS_RUN_ID
+          if (-not $refSafe -or -not $runId) {
+            throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
+          }
+
+          $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
+          Write-Host "Computed MSI download URL for WinGet: $url"
+
+          "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # INSTALL .NET RUNTIME FOR WINGETCREATE
+      ###########################################################################
+
+      - name: Install .NET runtime for wingetcreate
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
+        with:
+          dotnet-version: '8.0.x'
+
+      ###########################################################################
+      # UPDATE WinGet MANIFEST (wingetcreate)
+      ###########################################################################
+
+      - name: Update WinGet manifest (wingetcreate)
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $packageId = $env:WINGET_PACKAGE_ID
+          if (-not $packageId) {
+            throw "WINGET_PACKAGE_ID env var is not set."
+          }
+
+          $version = $env:RELEASE_TAG
+          if (-not $version) {
+            throw "RELEASE_TAG env var is not set."
+          }
+
+          $installerUrl = $env:MSI_DOWNLOAD_URL
+          if (-not $installerUrl) {
+            throw "MSI_DOWNLOAD_URL env var is not set."
+          }
+
+          $gitToken = "${{ secrets.WINGET_TOKEN }}"
+          if (-not $gitToken) {
+            throw "secrets.WINGET_TOKEN is not configured in this repo."
+          }
+
+          Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
+          Write-Host "Installer URL: $installerUrl"
+
+          # Download latest single-file wingetcreate.exe
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+          # Run wingetcreate update and capture output
+          $args = @(
+            "update", $packageId,
+            "--version", $version,
+            "--urls", $installerUrl,
+            "--submit",
+            "--token", $gitToken
+          )
+
+          Write-Host "Running: wingetcreate.exe $($args -join ' ')"
+          $output = & .\wingetcreate.exe @args 2>&1
+          $exitCode = $LASTEXITCODE
+
+          $output | ForEach-Object { Write-Host $_ }
+
+          if ($exitCode -ne 0) {
+            if ($output -match "was not found") {
+              Write-Warning "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Skipping update (non-fatal)."
+              Write-Warning "To create the initial package, run 'wingetcreate new' manually and submit the first PR."
+              exit 0
+            } else {
+              throw "wingetcreate update failed with exit code $exitCode"
+            }
+          }
+
+      ###########################################################################
+      # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
 
       - name: Build Chocolatey package
@@ -422,7 +533,7 @@ jobs:
           }
 
           if (-not $env:RELEASE_TAG) {
-            throw "RELEASE_TAG is not set. Ensure 'Compute release tag for Chocolatey' ran successfully."
+            throw "RELEASE_TAG is not set. Ensure 'Compute release tag' ran successfully."
           }
 
           $pkgRoot  = Join-Path $env:RUNNER_TEMP "choco"
@@ -497,7 +608,7 @@ jobs:
 
           $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
 
-          # IMPORTANT: single-quoted strings so $packageName / $msiPath stay literal in the script
+          # single-quoted strings so $packageName / $msiPath stay literal in the script
           $installLines = @()
           $installLines += '$ErrorActionPreference = ''Stop'''
           $installLines += ''
@@ -553,8 +664,11 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          Write-Host "MSI (local):   $env:MSI_PATH"
-          Write-Host "MSI (GCS):     $env:MSI_GCS_URI"
-          Write-Host "EXE:           $env:MIRRORD_EXE"
-          Write-Host "DLL:           $env:MIRRORD_LAYER_FILE"
-          Write-Host "Choco package: $env:CHOCO_NUPKG_PATH"
+          Write-Host "MSI (local):       $env:MSI_PATH"
+          Write-Host "MSI (GCS URI):     $env:MSI_GCS_URI"
+          Write-Host "EXE:               $env:MIRRORD_EXE"
+          Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
+          Write-Host "Choco package:     $env:CHOCO_NUPKG_PATH"
+          Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
+          Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
+          Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
