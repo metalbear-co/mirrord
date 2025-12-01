@@ -23,12 +23,12 @@ on:
         options: ["false", "true"]
         default: "false"
 
-  pull_request:
-    branches: ["main", "*staging*", "windows-support"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - "*.md"
-      - "**/*.md"
+  # pull_request:
+  #   branches: ["main", "*staging*", "windows-support"]
+  #   types: [opened, synchronize, reopened, ready_for_review]
+  #   paths-ignore:
+  #     - "*.md"
+  #     - "**/*.md"
 
 permissions:
   contents: write
