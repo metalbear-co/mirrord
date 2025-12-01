@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt, net::SocketAddr, path::Path};
 
-use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
+use k8s_openapi::api::core::v1::{PodSecurityContext, ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -495,6 +495,11 @@ pub struct AgentConfig {
     /// bodies do not arrive within this timeout.
     #[config(default = 1000)]
     pub max_body_buffer_timeout: u32,
+
+    /// ### agent.security_context {#agent-security_context}
+    ///
+    /// Agent pod security context. (not with ephemeral agents)
+    pub security_context: Option<PodSecurityContext>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
