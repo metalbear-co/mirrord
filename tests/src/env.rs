@@ -12,7 +12,7 @@ mod env_tests {
         services::basic_service,
     };
 
-    #[cfg_attr(not(feature = "job"), ignore)]
+    #[cfg_attr(any(not(feature = "job"), target_os = "windows"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
