@@ -94,6 +94,9 @@ jobs:
             throw "Expected layer DLL not found at $layerPath"
           }
 
+          # Convert to absolute path for MIRRORD_LAYER_FILE
+          $layerPath = (Resolve-Path $layerPath).Path
+
           Write-Host "=== Building mirrord.exe with MIRRORD_LAYER_FILE ==="
           $env:MIRRORD_LAYER_FILE = $layerPath
           cargo build --locked --release --bin mirrord
