@@ -570,6 +570,15 @@ impl FilesProxy {
             {
                 Err(FileResponse::Rename(Err(ResponseError::NotImplemented)))
             }
+            FileRequest::Ftruncate(..)
+            | FileRequest::Futimens(..)
+            | FileRequest::Fchown(..)
+            | FileRequest::Fchmod(..)
+                if protocol_version
+                    .is_none_or(|version: &Version| COPYFILE_VERSION.matches(version).not()) =>
+            {
+                Err(FileResponse::Rename(Err(ResponseError::NotImplemented)))
+            }
             _ => Ok(()),
         }
     }
