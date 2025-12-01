@@ -87,7 +87,7 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           Write-Host "=== Building mirrord_layer_win.dll ==="
-          cargo build --locked --release -p mirrord_layer_win
+          cargo build --locked --release -p mirrord-layer-win
 
           $layerPath = "target\release\mirrord_layer_win.dll"
           if (-not (Test-Path $layerPath)) {
