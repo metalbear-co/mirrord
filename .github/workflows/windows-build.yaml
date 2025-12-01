@@ -395,3 +395,402 @@ jobs:
 
           "| GitHub Release | ${{ steps.github_release.outcome || 'skipped' }} | create/update + upload assets |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
+
+
+# name: Windows Build
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       github_release:
+#         description: "Create/attach a GitHub Release?"
+#         type: choice
+#         options: [no, draft, prerelease, release]
+#         default: no
+#       release_tag:
+#         description: "Release tag (defaults to pushed tag when running on a tag)"
+#         required: false
+#         type: string
+#       chocolatey_release:
+#         description: "Publish a Chocolatey package?"
+#         type: choice
+#         options: ["false", "true"]
+#         default: "true"
+#       winget_release:
+#         description: "Publish a WinGet package?"
+#         type: choice
+#         options: ["false", "true"]
+#         default: "true"
+#       sign_artifacts:
+#         description: "Code-sign EXE & DLL?"
+#         type: choice
+#         options: ["false", "true"]
+#         default: "true"
+
+#   # If you want PR builds as well, uncomment and adjust:
+#   # pull_request:
+#   #   branches: ["main", "*staging*", "windows-support"]
+#   #   types: [opened, synchronize, reopened, ready_for_review]
+#   #   paths-ignore:
+#   #     - "*.md"
+#   #     - "**/*.md"
+
+# permissions:
+#   contents: write
+
+# env:
+#   DIST_DIR: dist/windows
+#   # Winget package id as registered in microsoft/winget-pkgs
+#   WINGET_PACKAGE_ID: MetalBear.mirrord
+
+# jobs:
+#   windows-build:
+#     name: Build & Package (Windows)
+#     runs-on: windows-latest
+
+#     steps:
+#       # ----------------------------------------------------------
+#       # 1) Checkout
+#       # ----------------------------------------------------------
+#       - name: Checkout
+#         id: checkout
+#         uses: actions/checkout@v4
+
+#       # ----------------------------------------------------------
+#       # 2) (Optional) Show tool versions (debug)
+#       # ----------------------------------------------------------
+#       - name: Show tool versions
+#         id: versions
+#         shell: pwsh
+#         continue-on-error: true
+#         run: |
+#           $ErrorActionPreference = "Continue"
+#           Write-Host "rustc version:"
+#           try { rustc --version } catch { Write-Host "rustc not found" }
+#           Write-Host "cargo version:"
+#           try { cargo --version } catch { Write-Host "cargo not found" }
+#           Write-Host "choco version:"
+#           try { choco --version } catch { Write-Host "choco not found" }
+#           Write-Host "winget version:"
+#           try { winget --version } catch { Write-Host "winget not found" }
+
+#       # ----------------------------------------------------------
+#       # 3) Build & (optionally) sign mirrord (Windows)
+#       # ----------------------------------------------------------
+#       - name: Build & (optionally) sign mirrord (Windows)
+#         id: build_and_sign
+#         shell: pwsh
+#         env:
+#           SIGN_ARTIFACTS: ${{ inputs.sign_artifacts }}
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           Write-Host "=== Building mirrord_layer_win.dll ==="
+#           cargo build --locked --release -p mirrord-layer-win
+
+#           $layerPath = "target\release\mirrord_layer_win.dll"
+#           if (-not (Test-Path $layerPath)) {
+#             throw "Expected layer DLL not found at $layerPath"
+#           }
+
+#           # Convert to absolute path for MIRRORD_LAYER_FILE
+#           $layerPath = (Resolve-Path $layerPath).Path
+#           Write-Host "Layer DLL absolute path: $layerPath"
+
+#           # Also copy to debug location as fallback (build script might look there)
+#           $debugLayerPath = "target\debug\mirrord_layer_win.dll"
+#           $debugDir = Split-Path $debugLayerPath -Parent
+#           if (-not (Test-Path $debugDir)) {
+#             New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+#           }
+#           Copy-Item $layerPath $debugLayerPath -Force
+#           Write-Host "Copied DLL to debug location: $debugLayerPath"
+
+#           Write-Host "=== Building mirrord.exe with MIRRORD_LAYER_FILE ==="
+#           $env:MIRRORD_LAYER_FILE = $layerPath
+#           Write-Host "MIRRORD_LAYER_FILE set to: $env:MIRRORD_LAYER_FILE"
+#           cargo build --locked --release --bin mirrord
+
+#           $exePath = "target\release\mirrord.exe"
+#           if (-not (Test-Path $exePath)) {
+#             throw "Expected mirrord.exe not found at $exePath"
+#           }
+
+#           Write-Host "=== Preparing dist directory ==="
+#           New-Item -ItemType Directory -Force -Path "$env:DIST_DIR" | Out-Null
+
+#           Copy-Item $exePath "$env:DIST_DIR\mirrord.exe"
+#           Copy-Item $layerPath "$env:DIST_DIR\mirrord_layer_win.dll"
+
+#           if ($env:SIGN_ARTIFACTS -eq "true") {
+#             Write-Host "=== Signing artifacts (mirrord.exe + mirrord_layer_win.dll) ==="
+#             # --------------------------------------------------------------------
+#             # TODO: Replace this block with your actual signing commands
+#             # (smctl login, signtool.exe, etc.)
+#             # Example skeleton:
+#             #
+#             # & "C:\path\to\signtool.exe" sign `
+#             #   /fd SHA256 /tr http://timestamp.digicert.com `
+#             #   /td SHA256 /a `
+#             #   "$env:DIST_DIR\mirrord.exe"
+#             #
+#             # & "C:\path\to\signtool.exe" sign `
+#             #   /fd SHA256 /tr http://timestamp.digicert.com `
+#             #   /td SHA256 /a `
+#             #   "$env:DIST_DIR\mirrord_layer_win.dll"
+#             #
+#             # --------------------------------------------------------------------
+#             Write-Host "Signing placeholder complete (replace with real signing logic)."
+#           }
+#           else {
+#             Write-Host "SIGN_ARTIFACTS is 'false' – skipping signing."
+#           }
+
+#       # ----------------------------------------------------------
+#       # 4) Run tests (Windows-compatible packages only)
+#       # ----------------------------------------------------------
+#       - name: Run tests
+#         id: test
+#         shell: pwsh
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           # Test only Windows-compatible packages
+#           # Skip Unix-only crates: iptables (uses nix/caps/iptables), layer test apps (Unix APIs)
+#           Write-Host "Testing Windows-compatible packages..."
+#           cargo test --locked `
+#             -p mirrord `
+#             -p mirrord-layer-win `
+#             -p mirrord-protocol `
+#             -p mirrord-config `
+#             -p mirrord-console `
+#             -p mirrord-intproxy `
+#             -p mirrord-auth `
+#             -p mirrord-kube `
+#             -p mirrord-operator `
+#             -p mirrord-progress `
+#             -p mirrord-analytics `
+#             -p mirrord-vpn `
+#             -p mirrord-tls-util `
+#             -p str-win
+
+#       # ----------------------------------------------------------
+#       # 5) Package ZIP from dist directory
+#       # ----------------------------------------------------------
+#       - name: Package ZIP
+#         id: package_zip
+#         shell: pwsh
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if (-not (Test-Path "$env:DIST_DIR")) {
+#             throw "DIST_DIR '$env:DIST_DIR' does not exist; build may have failed."
+#           }
+
+#           $zipPath = "$env:DIST_DIR\mirrord_windows.zip"
+#           if (Test-Path $zipPath) {
+#             Remove-Item $zipPath -Force
+#           }
+
+#           Compress-Archive -Path "$env:DIST_DIR\*" -DestinationPath $zipPath
+
+#           if (-not (Test-Path $zipPath)) {
+#             throw "Failed to create ZIP at $zipPath"
+#           }
+
+#       # ----------------------------------------------------------
+#       # 6) Upload build artifacts for later inspection
+#       # ----------------------------------------------------------
+#       - name: Upload build artifacts
+#         id: upload_artifact
+#         uses: actions/upload-artifact@v4
+#         continue-on-error: true
+#         with:
+#           name: mirrord-windows
+#           path: ${{ env.DIST_DIR }}
+
+#       # ----------------------------------------------------------
+#       # 7) (Toggle) Publish to Chocolatey
+#       # ----------------------------------------------------------
+#       - name: Publish to Chocolatey
+#         id: chocolatey
+#         if: github.event_name == 'workflow_dispatch' && inputs.chocolatey_release == 'true'
+#         shell: pwsh
+#         env:
+#           CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if (-not $env:CHOCOLATEY_API_KEY) {
+#             throw "CHOCOLATEY_API_KEY secret is not set."
+#           }
+
+#           Write-Host "=== Packing Chocolatey nupkg ==="
+#           choco pack .\packaging\choco\mirrord.nuspec --outputdirectory "$env:DIST_DIR"
+
+#           $nupkg = Get-ChildItem "$env:DIST_DIR" -Filter "*.nupkg" | Select-Object -First 1
+#           if (-not $nupkg) {
+#             throw "No .nupkg found in $env:DIST_DIR after choco pack."
+#           }
+
+#           Write-Host "=== Pushing to Chocolatey ==="
+#           choco apiKey -k $env:CHOCOLATEY_API_KEY -s https://push.chocolatey.org/
+#           choco push $nupkg.FullName -s https://push.chocolatey.org/ --skip-virus-check
+
+#       # ----------------------------------------------------------
+#       # 8) (Toggle) Publish to WinGet (best-effort, never fails job)
+#       # ----------------------------------------------------------
+#       - name: Publish to WinGet
+#         id: winget
+#         if: github.event_name == 'workflow_dispatch' && inputs.winget_release == 'true'
+#         shell: pwsh
+#         env:
+#           WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+#           WINGET_PACKAGE_ID: ${{ env.WINGET_PACKAGE_ID }}
+#         run: |
+#           $ErrorActionPreference = "Stop"
+
+#           if (-not $env:WINGET_GITHUB_TOKEN) {
+#             throw "WINGET_GITHUB_TOKEN secret is not set."
+#           }
+
+#           $packageId = $env:WINGET_PACKAGE_ID
+#           $version   = "${{ inputs.release_tag }}"
+
+#           if (-not $version) {
+#             Write-Warning "No release_tag provided; skipping WinGet publish."
+#             exit 0
+#           }
+
+#           # Adjust to where your MSI is actually published.
+#           # Using run_id so each CI run has its own path (match your current setup).
+#           $runId        = "${{ github.run_id }}"
+#           $installerUrl = "https://storage.googleapis.com/mirrord-windows-builds-public/chocolatey-packaging/run-$runId/mirrord.msi"
+
+#           Write-Host "=== WinGet publish (best-effort) ==="
+#           Write-Host "Package ID: $packageId"
+#           Write-Host "Version:    $version"
+#           Write-Host "Installer:  $installerUrl"
+#           Write-Host "NOTE: This assumes the package '$packageId' already exists in microsoft/winget-pkgs."
+
+#           # IMPORTANT: Do not fail job on errors here
+#           & wingetcreate.exe update $packageId --version $version --urls $installerUrl --submit --token $env:WINGET_GITHUB_TOKEN
+#           $exitCode = $LASTEXITCODE
+
+#           if ($exitCode -ne 0) {
+#             Write-Warning "wingetcreate update failed with exit code $exitCode. This will NOT fail the workflow."
+#             Write-Warning "Common cause: package '$packageId' does not yet exist in microsoft/winget-pkgs."
+#             exit 0
+#           }
+
+#           Write-Host "WinGet publish finished successfully."
+
+#       # ----------------------------------------------------------
+#       # 9) (Toggle) Create / Update GitHub Release and attach assets
+#       # ----------------------------------------------------------
+#       - name: Create / Update GitHub Release
+#         id: github_release
+#         if: github.event_name == 'workflow_dispatch' && inputs.github_release != 'no'
+#         shell: bash
+#         env:
+#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#           DIST_DIR: ${{ env.DIST_DIR }}
+#           RELEASE_KIND: ${{ inputs.github_release }}
+#           INPUT_TAG: ${{ inputs.release_tag }}
+#         run: |
+#           set -euo pipefail
+
+#           if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+#             echo "GITHUB_TOKEN is not available."
+#             exit 1
+#           fi
+
+#           # Determine tag:
+#           if [[ -n "$INPUT_TAG" ]]; then
+#             TAG="$INPUT_TAG"
+#           elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+#             TAG="${GITHUB_REF#refs/tags/}"
+#           else
+#             echo "No release_tag input and not running on a tag ref; cannot create release."
+#             exit 1
+#           fi
+
+#           NAME="mirrord $TAG"
+
+#           FLAGS=()
+#           if [[ "$RELEASE_KIND" == "draft" ]]; then
+#             FLAGS+=(--draft)
+#           elif [[ "$RELEASE_KIND" == "prerelease" ]]; then
+#             FLAGS+=(--prerelease)
+#           fi
+
+#           echo "=== Ensuring GitHub Release '$TAG' exists ==="
+#           if gh release view "$TAG" >/dev/null 2>&1; then
+#             echo "Release $TAG already exists; reusing."
+#           else
+#             gh release create "$TAG" "${FLAGS[@]}" \
+#               --title "$NAME" \
+#               --notes "Automated Windows build for $TAG."
+#           fi
+
+#           echo "=== Uploading assets from $DIST_DIR ==="
+#           if [[ ! -d "$DIST_DIR" ]]; then
+#             echo "DIST_DIR '$DIST_DIR' does not exist."
+#             exit 1
+#           fi
+
+#           if [[ -f "$DIST_DIR/mirrord.exe" ]]; then
+#             gh release upload "$TAG" "$DIST_DIR/mirrord.exe" --clobber
+#           else
+#             echo "Warning: $DIST_DIR/mirrord.exe not found."
+#           fi
+
+#           if [[ -f "$DIST_DIR/mirrord_layer_win.dll" ]]; then
+#             gh release upload "$TAG" "$DIST_DIR/mirrord_layer_win.dll" --clobber
+#           else
+#             echo "Warning: $DIST_DIR/mirrord_layer_win.dll not found."
+#           fi
+
+#           if [[ -f "$DIST_DIR/mirrord_windows.zip" ]]; then
+#             gh release upload "$TAG" "$DIST_DIR/mirrord_windows.zip" --clobber
+#           else
+#             echo "Warning: $DIST_DIR/mirrord_windows.zip not found."
+#           fi
+
+#       # -------------------------------------------------------
+#       # 10) Post-build summary (Summary tab)
+#       # -------------------------------------------------------
+#       - name: Post-build summary
+#         if: always()
+#         shell: pwsh
+#         run: |
+#           $summary = $env:GITHUB_STEP_SUMMARY
+
+#           "## Windows Build Summary"        | Out-File -FilePath $summary -Encoding utf8 -Append
+#           ""                                | Out-File -FilePath $summary -Encoding utf8 -Append
+#           "**Overall job status:** `${{ job.status }}`" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+#           ""                                | Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| Stage | Status | Details |"     | Out-File -FilePath $summary -Encoding utf8 -Append
+#           "|-------|--------|---------|"     | Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| Build & sign binaries | ${{ steps.build_and_sign.outcome || 'skipped' }} | cargo build + optional signing (sign_artifacts=${{ inputs.sign_artifacts }}) |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| Tests | ${{ steps.test.outcome || 'skipped' }} | cargo test --workspace |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| Package ZIP | ${{ steps.package_zip.outcome || 'skipped' }} | mirrord_windows.zip |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| Upload artifact | ${{ steps.upload_artifact.outcome || 'skipped' }} | dist/windows |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| Chocolatey publish | ${{ steps.chocolatey.outcome || 'skipped' }} | toggled via input chocolatey_release |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| WinGet publish | ${{ steps.winget.outcome || 'skipped' }} | toggled via input winget_release (best-effort) |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
+
+#           "| GitHub Release | ${{ steps.github_release.outcome || 'skipped' }} | create/update + upload assets |" |
+#             Out-File -FilePath $summary -Encoding utf8 -Append
