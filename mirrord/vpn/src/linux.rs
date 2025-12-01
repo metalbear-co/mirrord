@@ -109,7 +109,7 @@ async fn agent_fetch_file<const B: u64>(
     let ReadFileResponse { bytes, .. } = response?;
 
     let request = FileRequest::Close(CloseFileRequest { fd });
-    agent.send(ClientMessage::FileRequest(request)).await?;
+    agent.send(ClientMessage::FileRequest(request)).await;
 
     Ok(bytes.into_vec())
 }

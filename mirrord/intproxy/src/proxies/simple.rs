@@ -9,6 +9,7 @@ use mirrord_protocol::{
     ResolveErrorKindInternal, ResponseError,
     dns::{ADDRINFO_V2_VERSION, AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
@@ -29,7 +30,7 @@ pub enum SimpleProxyMessage {
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
-    ConnectionRefresh,
+    ConnectionRefresh(TxHandle<Client>),
 }
 
 #[derive(Error, Debug)]
@@ -120,11 +121,12 @@ impl SimpleProxy {
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
 
-    #[tracing::instrument(level = Level::INFO, skip_all, ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle_connection_refresh(
         &mut self,
         message_bus: &mut MessageBus<Self>,
-    ) -> Result<(), SimpleProxyError> {
+        new_agent_tx: TxHandle<Client>,
+    ) {
         tracing::debug!(
             num_responses = self.addr_info_reqs.len(),
             "Flushing error responses to GetAddrInfoRequests"
@@ -149,7 +151,10 @@ impl SimpleProxy {
                 .await;
         }
 
-        Ok(())
+        message_bus.set_agent_tx(new_agent_tx);
+        // Reset protocol version since we'll need another negotiation
+        // round for the new connection.
+        self.protocol_version = None;
     }
 }
 
@@ -166,7 +171,7 @@ impl BackgroundTask for SimpleProxy {
                     self.addr_info_reqs.push_back(message_id, session_id);
                     if self.addr_info_v2() {
                         message_bus
-                            .send(ClientMessage::GetAddrInfoRequestV2(req))
+                            .send_agent(ClientMessage::GetAddrInfoRequestV2(req))
                             .await;
                     } else {
                         if matches!(req.family, AddressFamily::Ipv6Only) {
@@ -178,7 +183,7 @@ impl BackgroundTask for SimpleProxy {
                             )
                         }
                         message_bus
-                            .send(ClientMessage::GetAddrInfoRequest(req.into()))
+                            .send_agent(ClientMessage::GetAddrInfoRequest(req.into()))
                             .await;
                     }
                 }
@@ -205,7 +210,7 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::GetEnvReq(message_id, layer_id, req) => {
                     self.get_env_reqs.push_back(message_id, layer_id);
                     message_bus
-                        .send(ClientMessage::GetEnvVarsRequest(req))
+                        .send_agent(ClientMessage::GetEnvVarsRequest(req))
                         .await;
                 }
                 SimpleProxyMessage::GetEnvRes(res) => {
@@ -224,8 +229,9 @@ impl BackgroundTask for SimpleProxy {
                         .await
                 }
                 SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
-                SimpleProxyMessage::ConnectionRefresh => {
-                    self.handle_connection_refresh(message_bus).await?
+                SimpleProxyMessage::ConnectionRefresh(new_agent_tx) => {
+                    self.handle_connection_refresh(message_bus, new_agent_tx)
+                        .await
                 }
             }
         }
