@@ -36,6 +36,12 @@ impl CiStopCommandHandler {
             unistd::Pid,
         };
 
+        // If `ci stop` is issued multiple time, we should exit with success status.
+        if self.store.is_empty() {
+            println!("No mirrord ci process found.");
+            return Ok(());
+        }
+
         fn try_kill(pid: u32) -> CiResult<()> {
             kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL))
                 .or_else(|error| {

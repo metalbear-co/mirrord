@@ -19,12 +19,6 @@ pub struct ExperimentalConfig {
     #[config(default = true)]
     pub tcp_ping4_mock: bool,
 
-    /// ### _experimental_ readlink {#experimental-readlink}
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(default = false)]
-    pub readlink: bool,
-
     /// ### _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
     ///
     /// Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
@@ -60,12 +54,6 @@ pub struct ExperimentalConfig {
     /// Uses /dev/null for creating local fake files (should be better than using /tmp)
     #[config(default = true)]
     pub use_dev_null: bool,
-
-    /// ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
-    ///
-    /// DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
-    /// stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
-    pub readonly_file_buffer: Option<u64>,
 
     /// ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
     ///
@@ -106,23 +94,13 @@ pub struct ExperimentalConfig {
     #[config(default = None)]
     pub sip_log_destination: Option<PathBuf>,
 
-    /// ### _experimental_ vfork_emulation {#experimental-vfork_emulation}
-    ///
-    /// Enables vfork emulation within the mirrord-layer.
-    /// Might solve rare stack corruption issues.
-    ///
-    /// Note that for Go applications on ARM64, this feature is not yet supported,
-    /// and this setting is ignored.
-    #[config(default = true)]
-    pub vfork_emulation: bool,
-
     /// ### _experimental_ hook_rename {#experimental-hook_rename}
     ///
     /// Enables hooking the `rename` function.
     ///
     /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
     /// `twig`, to create and rename temporary files.
-    #[config(default = false)]
+    #[config(default = true)]
     pub hook_rename: bool,
 
     /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
@@ -132,10 +110,9 @@ pub struct ExperimentalConfig {
     /// hardened, and the mirrord-agent is not fully functional without `agent.privileged`
     /// enabled.
     ///
-    /// Defaults to `true` in OSS.
-    /// Defaults to `false` in mfT.
-    #[config(default = None)]
-    pub dns_permission_error_fatal: Option<bool>,
+    /// Defaults to `true`
+    #[config(default = true)]
+    pub dns_permission_error_fatal: bool,
 
     /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
     ///
@@ -157,7 +134,6 @@ pub struct ExperimentalConfig {
 impl CollectAnalytics for &ExperimentalConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("tcp_ping4_mock", self.tcp_ping4_mock);
-        analytics.add("readlink", self.readlink);
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
@@ -167,10 +143,10 @@ impl CollectAnalytics for &ExperimentalConfig {
             self.idle_local_http_connection_timeout,
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
-        analytics.add("vfork_emulation", self.vfork_emulation);
-        if let Some(dns_permission_error_fatal) = self.dns_permission_error_fatal {
-            analytics.add("dns_permission_error_fatal", dns_permission_error_fatal);
-        }
+        analytics.add(
+            "dns_permission_error_fatal",
+            self.dns_permission_error_fatal,
+        );
         analytics.add("force_hook_connect", self.force_hook_connect);
         analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
     }

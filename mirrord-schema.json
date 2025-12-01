@@ -488,7 +488,7 @@
         },
         "network_interface": {
           "title": "agent.network_interface {#agent-network_interface}",
-          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.",
+          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
           "type": [
             "string",
             "null"
@@ -515,7 +515,7 @@
         },
         "passthrough_mirroring": {
           "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
-          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.",
+          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
           "type": [
             "boolean",
             "null"
@@ -1229,7 +1229,7 @@
         },
         "dns_permission_error_fatal": {
           "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
-          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
+          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true`",
           "type": [
             "boolean",
             "null"
@@ -1293,24 +1293,6 @@
             "null"
           ]
         },
-        "readlink": {
-          "title": "_experimental_ readlink {#experimental-readlink}",
-          "description": "DEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "readonly_file_buffer": {
-          "title": "_experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}",
-          "description": "DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
           "description": "Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.",
@@ -1338,14 +1320,6 @@
         "use_dev_null": {
           "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
           "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "vfork_emulation": {
-          "title": "_experimental_ vfork_emulation {#experimental-vfork_emulation}",
-          "description": "Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.\n\nNote that for Go applications on ARM64, this feature is not yet supported, and this setting is ignored.",
           "type": [
             "boolean",
             "null"

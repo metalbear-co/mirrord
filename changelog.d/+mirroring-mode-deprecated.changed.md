@@ -1,0 +1,1 @@
+Marked mirrord config settings related to agent's mirroring as deprecated. Mirroring implementation based on raw sockets will be removed in the future.
