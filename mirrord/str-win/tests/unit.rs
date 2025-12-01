@@ -107,30 +107,6 @@ fn try_get_unix_path() {
 }
 
 #[test]
-fn try_get_driver_example_paths_unix_path() {
-    const X64: &str = "\\Device\\example";
-    const X86: &str = "\\DosDevices\\example";
-
-    assert_eq!(path_to_unix_path(X64), None);
-    assert_eq!(path_to_unix_path(X86), None);
-}
-
-#[test]
-fn try_unix_path_from_unix_path() {
-    const UNIX_PATH: &str = "/hmm/this/seems/unixy";
-
-    assert_eq!(path_to_unix_path(UNIX_PATH), None);
-}
-
-#[test]
-fn try_unix_path_from_almost_windows_path() {
-    const ALMOST_WINDOWS_PATH: &str = "c\\waaah\\hiii";
-
-    // not yet, buddy!
-    assert_eq!(path_to_unix_path(ALMOST_WINDOWS_PATH), None);
-}
-
-#[test]
 fn try_all_possible_volume_letters_to_unix_path() {
     for c in 'C'..'Z' {
         let path = format!("\\??\\{c}:\\windows\\system32");

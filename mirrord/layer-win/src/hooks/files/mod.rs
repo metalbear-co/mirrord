@@ -56,7 +56,9 @@ use crate::{
         managed_handle::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
         },
-        util::{WindowsTime, read_object_attributes_name, try_seek, try_xstat},
+        util::{
+            WindowsTime, is_nt_path_disk_path, read_object_attributes_name, try_seek, try_xstat,
+        },
     },
     process::memory::is_memory_valid,
 };
@@ -212,21 +214,23 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 ///     * If not, jump to ["Fallback"](#fallback).
 ///     * This is the only point we have to check for this configuration. Without
 ///       [`managed_handle::MirrordHandle`]s, there is no other logic.
-/// 2. We try to convert the path from `object_attributes` to a Unix path.
+/// 2. We check if the path from `object_attributes` is an NT disk path.
 ///     * If we fail, jump to ["Fallback"](#fallback).
-/// 3. We run the Unix path through
+/// 3. We try to convert the path from `object_attributes` to a Unix path.
+///     * If we fail, jump to ["Fallback"](#fallback).
+/// 4. We run the Unix path through
 ///    [`mirrord_layer_lib::file::mapper::FileRemapper::change_path_str`] to account for file-system
 ///    configuration, This becomes the new "path".
 ///     * If the result of this operation is different from the original path, this is logged.
-/// 4. We account for filter logic after we run the Unix path through
+/// 5. We account for filter logic after we run the Unix path through
 ///    [`mirrord_layer_lib::file::filter::FileFilter::check`] to account for file-system
 ///    configuration.
-/// 5. We check if all input arguments are valid (verify pointer provenance, value, etc.)
+/// 6. We check if all input arguments are valid (verify pointer provenance, value, etc.)
 ///     * If any is not valid, log and jump to ["Fallback"](#fallback).
-/// 6. We make an [`mirrord_protocol::file::OpenFileRequest`] for the Unix path to obtain a file
+/// 7. We make an [`mirrord_protocol::file::OpenFileRequest`] for the Unix path to obtain a file
 ///    descriptor from agent.
 ///     * If this fails, log and jump to ["Fallback"](#fallback).
-/// 7. Use the file descriptor from the [`mirrord_protocol::file::OpenFileResponse`] to create a
+/// 8. Use the file descriptor from the [`mirrord_protocol::file::OpenFileResponse`] to create a
 ///    [`HandleContext`] and insert it into the managed handles map.
 ///     * The [`HandleContext`] may be modified by future operations over the
 ///       [`managed_handle::MirrordHandle`].
@@ -287,7 +291,12 @@ unsafe extern "system" fn nt_create_file_hook(
 
         let name = read_object_attributes_name(object_attributes);
 
-        // Try to create a Linux path from the provided Windows UNC path.
+        // WIN-56: check if path is a FS path.
+        if !is_nt_path_disk_path(&name) {
+            return run_original();
+        }
+
+        // Try to create a Linux path from the provided Windows NT path.
         let Some(parsed_unix_path) = path_to_unix_path(name.clone()) else {
             return run_original();
         };

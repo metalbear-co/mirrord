@@ -1,5 +1,9 @@
 use std::path::{Path, PathBuf};
 
+// This prefix is a way to explicitly indicate that we're looking in
+// the global namespace for a path.
+pub const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
+
 /// Find the length of a null-terminated buffer using an efficient search
 ///
 /// This utility function replaces the common pattern of using `(0..).take_while`
@@ -267,10 +271,6 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
     None // Double null terminator not found within bounds
 }
 
-// This prefix is a way to explicitly indicate that we're looking in
-// the global namespace for a path.
-const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
-
 /// Responsible for turning a Windows absolute path (potentially Device path) into a Unix-compatible
 /// path.
 ///
@@ -293,7 +293,6 @@ const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
 pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
     let mut path = path.as_ref();
 
-    // It's supposed to be the volume letter, will be checked later.
     if !path.has_root() {
         return None;
     }
@@ -303,18 +302,8 @@ pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
         path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
     }
 
-    let mut new_path: PathBuf = path.components().collect();
-
-    let maybe_root_dir = new_path.components().next()?;
-
-    // NOTE(gabriela): WIN-56 make sure path access is to disk
-    let maybe_root_dir = maybe_root_dir.as_os_str().to_string_lossy();
-    if !(maybe_root_dir.len() == 2 && maybe_root_dir.ends_with(":")) {
-        return None;
-    }
-
     // Remove root dir.
-    new_path = new_path.components().skip(1).collect();
+    let mut new_path: PathBuf = path.components().skip(1).collect();
 
     // NOTE(gabriela): WIN-56 agent `strip_prefix``
     // If need be, implement RootDir component so that agent doesn't blow up.
