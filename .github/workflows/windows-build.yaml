@@ -1,4 +1,4 @@
-name: Windows Build Choco + WinGet Test
+name: Windows Build Choco + WinGet
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         options: [build_sign, reuse]
         default: build_sign
       release_tag:
-        description: "Version to use for Chocolatey/WinGet (e.g. 0.0.1-test2). Defaults to MIRRORD_VERSION."
+        description: "Version to use for Chocolatey/WinGet/Release (e.g. 3.174.0 or 0.0.1-test2). Defaults to MIRRORD_VERSION."
         required: false
         type: string
       sign_artifacts:
@@ -22,14 +22,19 @@ on:
         type: choice
         options: ["false", "true"]
         default: "true"
-      winget_publish:
+      winget:
         description: "Update WinGet manifest (wingetcreate)?"
+        type: choice
+        options: ["false", "true"]
+        default: "false"
+      attach_to_release:
+        description: "Attach Windows artifacts to an existing GitHub Release?"
         type: choice
         options: ["false", "true"]
         default: "false"
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -44,7 +49,7 @@ env:
   WINGET_PACKAGE_ID: "MetalBear.mirrord"
 
 jobs:
-  windows_choco_winget_test:
+  windows_choco_winget:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
@@ -54,7 +59,8 @@ jobs:
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag || '' }}
       SIGN_ARTIFACTS: ${{ github.event.inputs.sign_artifacts || 'false' }}
       PUBLISH_CHOCO: ${{ github.event.inputs.choco_publish || 'true' }}
-      PUBLISH_WINGET: ${{ github.event.inputs.winget_publish || 'false' }}
+      PUBLISH_WINGET: ${{ github.event.inputs.winget || 'false' }}
+      ATTACH_TO_RELEASE: ${{ github.event.inputs.attach_to_release || 'false' }}
 
     steps:
       - name: Checkout
@@ -396,7 +402,7 @@ jobs:
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
       ###########################################################################
-      # COMPUTE VERSION FOR CHOCOLATEY & WINGET
+      # COMPUTE VERSION FOR CHOCOLATEY / WINGET / RELEASE
       ###########################################################################
 
       - name: Compute release tag
@@ -420,6 +426,79 @@ jobs:
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Using RELEASE_TAG (version): $tag"
+
+      ###########################################################################
+      # ATTACH WINDOWS ARTIFACTS TO EXISTING GITHUB RELEASE (OPTIONAL)
+      ###########################################################################
+
+      - name: Upload artifacts to GitHub Release (existing)
+        if: ${{ env.ATTACH_TO_RELEASE == 'true' }}
+        uses: actions/github-script@v7
+        env:
+          MSI_PATH: ${{ env.MSI_PATH }}
+          MIRRORD_EXE: ${{ env.MIRRORD_EXE }}
+          MIRRORD_LAYER_FILE: ${{ env.MIRRORD_LAYER_FILE }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const { owner, repo } = context.repo;
+
+            const tag = process.env.RELEASE_TAG;
+            if (!tag) {
+              core.setFailed("RELEASE_TAG is empty; cannot attach to release.");
+              return;
+            }
+
+            let rel;
+            try {
+              const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              rel = r.data;
+              core.info(`Found release '${rel.name || rel.tag_name}' (id=${rel.id}) for tag '${tag}'.`);
+            } catch (e) {
+              core.setFailed(
+                `Release with tag '${tag}' was not found. ` +
+                `Create the GitHub Release (with the same tag) using your main workflow first.`
+              );
+              return;
+            }
+
+            async function upload(filePath) {
+              if (!filePath) return;
+              if (!fs.existsSync(filePath)) {
+                core.warning(`File not found, skipping upload: ${filePath}`);
+                return;
+              }
+
+              const name = path.basename(filePath);
+
+              // If asset already exists, do NOT overwrite
+              const existing = (rel.assets || []).find(a => a.name === name);
+              if (existing) {
+                core.info(`Asset '${name}' already exists on this release (id=${existing.id}), skipping.`);
+                return;
+              }
+
+              const data = fs.readFileSync(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: rel.id,
+                name,
+                data,
+                headers: {
+                  "content-type": "application/octet-stream",
+                  "content-length": data.length
+                }
+              });
+
+              core.info(`Uploaded asset '${name}' (${data.length} bytes)`);
+            }
+
+            await upload(process.env.MIRRORD_EXE);
+            await upload(process.env.MIRRORD_LAYER_FILE);
+            await upload(process.env.MSI_PATH);
 
       ###########################################################################
       # COMPUTE MSI DOWNLOAD URL FOR WINGET (FROM GCS)
@@ -670,5 +749,6 @@ jobs:
           Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
           Write-Host "Choco package:     $env:CHOCO_NUPKG_PATH"
           Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
-          Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
-          Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
+          Write-Host "Attach to release: $env.ATTACH_TO_RELEASE"
+          Write-Host "Publish Choco:     $env.PUBLISH_CHOCO"
+          Write-Host "Publish WinGet:    $env.PUBLISH_WINGET"
