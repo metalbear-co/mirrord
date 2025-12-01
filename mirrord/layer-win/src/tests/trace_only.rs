@@ -3,8 +3,6 @@
 //! This module tests the trace-only mode where mirrord operates without
 //! connecting to an agent, only logging operations locally.
 
-use std::env;
-
 use crate::trace_only::TRACE_ONLY_ENV;
 
 #[cfg(test)]
