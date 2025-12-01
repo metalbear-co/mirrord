@@ -96,9 +96,20 @@ jobs:
 
           # Convert to absolute path for MIRRORD_LAYER_FILE
           $layerPath = (Resolve-Path $layerPath).Path
+          Write-Host "Layer DLL absolute path: $layerPath"
+
+          # Also copy to debug location as fallback (build script might look there)
+          $debugLayerPath = "target\debug\mirrord_layer_win.dll"
+          $debugDir = Split-Path $debugLayerPath -Parent
+          if (-not (Test-Path $debugDir)) {
+            New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+          }
+          Copy-Item $layerPath $debugLayerPath -Force
+          Write-Host "Copied DLL to debug location: $debugLayerPath"
 
           Write-Host "=== Building mirrord.exe with MIRRORD_LAYER_FILE ==="
           $env:MIRRORD_LAYER_FILE = $layerPath
+          Write-Host "MIRRORD_LAYER_FILE set to: $env:MIRRORD_LAYER_FILE"
           cargo build --locked --release --bin mirrord
 
           $exePath = "target\release\mirrord.exe"
