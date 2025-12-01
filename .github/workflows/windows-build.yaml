@@ -16,17 +16,17 @@ on:
         description: "Publish a Chocolatey package?"
         type: choice
         options: ["false", "true"]
-        default: "false"
+        default: "true"
       winget_release:
         description: "Publish a WinGet package?"
         type: choice
         options: ["false", "true"]
-        default: "false"
+        default: "true"
       sign_artifacts:
         description: "Code-sign EXE & DLL?"
         type: choice
         options: ["false", "true"]
-        default: "false"
+        default: "true"
 
   # If you want PR builds as well, uncomment and adjust:
   # pull_request:
