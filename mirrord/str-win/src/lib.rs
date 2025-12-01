@@ -277,8 +277,15 @@ const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
 /// ## Implementation
 ///
 /// 1. If present, remove global namespace path, for device paths (e.g. `"\\??\\"`.)
-/// 2. Remove the volume from the path.
-/// 3. Make all back-slashes be forward-slashes.
+/// 2. Check if there's at least one component left in the path.
+///     * If not, return.
+/// 3. Check if the first component is 2 characters long, AND ends in a `:` (meaning it's a disk
+///    path).
+///     * If not, return.
+/// 4. Remove volume letter from path.
+/// 5. Check if path starts with a RootDir component.
+///     * If not, add a forward slash at the start.
+/// 6. Make all back-slashes be forward-slashes.
 ///
 /// # Arguments
 ///
@@ -286,6 +293,7 @@ const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
 pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
     let mut path = path.as_ref();
 
+    // It's supposed to be the volume letter, will be checked later.
     if !path.has_root() {
         return None;
     }
@@ -295,8 +303,24 @@ pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
         path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
     }
 
-    // Skip root dir
-    let new_path: PathBuf = path.components().skip(1).collect();
+    let mut new_path: PathBuf = path.components().collect();
+
+    let maybe_root_dir = new_path.components().next()?;
+
+    // NOTE(gabriela): WIN-56 make sure path access is to disk
+    let maybe_root_dir = maybe_root_dir.as_os_str().to_string_lossy();
+    if !(maybe_root_dir.len() == 2 && maybe_root_dir.ends_with(":")) {
+        return None;
+    }
+
+    // Remove root dir.
+    new_path = new_path.components().skip(1).collect();
+
+    // NOTE(gabriela): WIN-56 agent `strip_prefix``
+    // If need be, implement RootDir component so that agent doesn't blow up.
+    if !new_path.starts_with("/") {
+        new_path = PathBuf::from(&"/").join(new_path);
+    }
 
     // Turn to string, replace Windows slashes to Linux slashes for ease of use.
     Some(new_path.to_str()?.to_string().replace("\\", "/"))
