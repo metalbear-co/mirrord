@@ -148,14 +148,31 @@ jobs:
           }
 
       # ----------------------------------------------------------
-      # 4) Run tests (workspace)
+      # 4) Run tests (Windows-compatible packages only)
       # ----------------------------------------------------------
       - name: Run tests
         id: test
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test --locked --workspace
+          # Test only Windows-compatible packages
+          # Skip Unix-only crates: iptables (uses nix/caps/iptables), layer test apps (Unix APIs)
+          Write-Host "Testing Windows-compatible packages..."
+          cargo test --locked `
+            -p mirrord `
+            -p mirrord-layer-win `
+            -p mirrord-protocol `
+            -p mirrord-config `
+            -p mirrord-console `
+            -p mirrord-intproxy `
+            -p mirrord-auth `
+            -p mirrord-kube `
+            -p mirrord-operator `
+            -p mirrord-progress `
+            -p mirrord-analytics `
+            -p mirrord-vpn `
+            -p mirrord-tls-util `
+            -p str-win
 
       # ----------------------------------------------------------
       # 5) Package ZIP from dist directory
