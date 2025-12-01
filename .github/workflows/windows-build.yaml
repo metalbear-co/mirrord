@@ -23,6 +23,7 @@ on:
         options: ["false", "true"]
         default: "false"
 
+  # If you want PR builds as well, uncomment and adjust:
   # pull_request:
   #   branches: ["main", "*staging*", "windows-support"]
   #   types: [opened, synchronize, reopened, ready_for_review]
@@ -35,6 +36,8 @@ permissions:
 
 env:
   DIST_DIR: dist/windows
+  # Package ID as it will exist in microsoft/winget-pkgs (once you've run `wingetcreate new` manually)
+  WINGET_PACKAGE_ID: MetalBear.mirrord
 
 jobs:
   windows-build:
@@ -64,8 +67,8 @@ jobs:
           try { cargo --version } catch { Write-Host "cargo not found" }
           Write-Host "choco version:"
           try { choco --version } catch { Write-Host "choco not found" }
-          Write-Host "gh version:"
-          try { gh --version } catch { Write-Host "gh not found" }
+          Write-Host "winget version:"
+          try { winget --version } catch { Write-Host "winget not found" }
 
       # ----------------------------------------------------------
       # 3) Build mirrord_layer_win.dll and mirrord.exe
@@ -74,15 +77,14 @@ jobs:
       - name: Build mirrord (Windows)
         id: build
         shell: pwsh
-        continue-on-error: true
+        continue-on-error: false
         run: |
           $ErrorActionPreference = "Stop"
 
           Write-Host "=== Building mirrord_layer_win.dll ==="
-          # Adjust package name if needed
           cargo build --locked --release -p mirrord_layer_win
 
-          $layerPath = "target\\release\\mirrord_layer_win.dll"
+          $layerPath = "target\release\mirrord_layer_win.dll"
           if (-not (Test-Path $layerPath)) {
             throw "Expected layer DLL not found at $layerPath"
           }
@@ -91,7 +93,7 @@ jobs:
           $env:MIRRORD_LAYER_FILE = $layerPath
           cargo build --locked --release --bin mirrord
 
-          $exePath = "target\\release\\mirrord.exe"
+          $exePath = "target\release\mirrord.exe"
           if (-not (Test-Path $exePath)) {
             throw "Expected mirrord.exe not found at $exePath"
           }
@@ -99,8 +101,8 @@ jobs:
           Write-Host "=== Preparing dist directory ==="
           New-Item -ItemType Directory -Force -Path "$env:DIST_DIR" | Out-Null
 
-          Copy-Item $exePath "$env:DIST_DIR\\mirrord.exe"
-          Copy-Item $layerPath "$env:DIST_DIR\\mirrord_layer_win.dll"
+          Copy-Item $exePath "$env:DIST_DIR\mirrord.exe"
+          Copy-Item $layerPath "$env:DIST_DIR\mirrord_layer_win.dll"
 
       # ----------------------------------------------------------
       # 4) Run tests (workspace)
@@ -108,7 +110,7 @@ jobs:
       - name: Run tests
         id: test
         shell: pwsh
-        continue-on-error: true
+        continue-on-error: false
         run: |
           $ErrorActionPreference = "Stop"
           cargo test --locked --workspace
@@ -119,7 +121,7 @@ jobs:
       - name: Package ZIP
         id: package_zip
         shell: pwsh
-        continue-on-error: true
+        continue-on-error: false
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -127,12 +129,12 @@ jobs:
             throw "DIST_DIR '$env:DIST_DIR' does not exist; build may have failed."
           }
 
-          $zipPath = "$env:DIST_DIR\\mirrord_windows.zip"
+          $zipPath = "$env:DIST_DIR\mirrord_windows.zip"
           if (Test-Path $zipPath) {
             Remove-Item $zipPath -Force
           }
 
-          Compress-Archive -Path "$env:DIST_DIR\\*" -DestinationPath $zipPath
+          Compress-Archive -Path "$env:DIST_DIR\*" -DestinationPath $zipPath
 
           if (-not (Test-Path $zipPath)) {
             throw "Failed to create ZIP at $zipPath"
@@ -151,8 +153,6 @@ jobs:
 
       # ----------------------------------------------------------
       # 7) (Toggle) Publish to Chocolatey
-      #     - expects CHOCOLATEY_API_KEY secret
-      #     - expects .\packaging\choco\mirrord.nuspec (adjust path if needed)
       # ----------------------------------------------------------
       - name: Publish to Chocolatey
         id: chocolatey
@@ -181,17 +181,16 @@ jobs:
           choco push $nupkg.FullName -s https://push.chocolatey.org/ --skip-virus-check
 
       # ----------------------------------------------------------
-      # 8) (Toggle) Publish to WinGet
-      #     - expects WINGET_GITHUB_TOKEN secret
-      #     - adjust commands to your actual WinGet flow
+      # 8) (Toggle) Publish to WinGet (best-effort, never fails job)
       # ----------------------------------------------------------
       - name: Publish to WinGet
         id: winget
         if: github.event_name == 'workflow_dispatch' && inputs.winget_release == 'true'
         shell: pwsh
-        continue-on-error: true
+        continue-on-error: false
         env:
           WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          WINGET_PACKAGE_ID: ${{ env.WINGET_PACKAGE_ID }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -199,16 +198,38 @@ jobs:
             throw "WINGET_GITHUB_TOKEN secret is not set."
           }
 
-          Write-Host "=== WinGet publish (example – adjust to your setup) ==="
-          Write-Host "This step assumes you've configured wingetcreate/manifests elsewhere."
-          Write-Host "Version: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || 'N/A' }}"
+          $packageId = $env:WINGET_PACKAGE_ID
+          $version   = "${{ inputs.release_tag }}"
 
-          # TODO: replace this with your real WinGet automation.
-          Write-Host "WinGet publish placeholder completed."
+          if (-not $version) {
+            Write-Warning "No release_tag provided; skipping WinGet publish."
+            exit 0
+          }
+
+          # NOTE: adjust this URL to wherever your MSI is actually published
+          $installerUrl = "https://storage.googleapis.com/mirrord-windows-builds-public/chocolatey-packaging/run-${{ github.run_id }}/mirrord.msi"
+
+          Write-Host "=== WinGet publish (best-effort) ==="
+          Write-Host "Package ID: $packageId"
+          Write-Host "Version:    $version"
+          Write-Host "Installer:  $installerUrl"
+          Write-Host "NOTE: This assumes the package '$packageId' already exists in microsoft/winget-pkgs."
+
+          # IMPORTANT: Do not fail job on errors here
+          & wingetcreate.exe update $packageId --version $version --urls $installerUrl --submit --token $env:WINGET_GITHUB_TOKEN
+          $exitCode = $LASTEXITCODE
+
+          if ($exitCode -ne 0) {
+            Write-Warning "wingetcreate update failed with exit code $exitCode. This will NOT fail the workflow."
+            Write-Warning "Common cause: package '$packageId' does not yet exist in microsoft/winget-pkgs."
+            # Force success for the step/job
+            exit 0
+          }
+
+          Write-Host "WinGet publish finished successfully."
 
       # ----------------------------------------------------------
       # 9) (Toggle) Create / Update GitHub Release and attach assets
-      #     - uses built-in gh CLI instead of external actions
       # ----------------------------------------------------------
       - name: Create / Update GitHub Release
         id: github_release
@@ -280,9 +301,8 @@ jobs:
             echo "Warning: $DIST_DIR/mirrord_windows.zip not found."
           fi
 
-
       # -------------------------------------------------------
-      # Post-build summary (Summary tab)
+      # 10) Post-build summary (Summary tab)
       # -------------------------------------------------------
       - name: Post-build summary
         if: always()
@@ -299,42 +319,23 @@ jobs:
           "| Stage | Status | Details |"     | Out-File -FilePath $summary -Encoding utf8 -Append
           "|-------|--------|---------|"     | Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # 🔧 Build & sign
-          "| Build & sign binaries | ${{ steps.build_and_sign.outcome || 'skipped' }} | cargo + signing |" |
+          "| Build binaries | ${{ steps.build.outcome || 'skipped' }} | cargo build (exe + DLL) |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # 📦 MSI
-          "| Build MSI | ${{ steps.build_msi.outcome || 'skipped' }} | WiX / .msi packaging |" |
+          "| Tests | ${{ steps.test.outcome || 'skipped' }} | cargo test --workspace |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # ☁️ Uploads to GCS
-          "| Upload MSI to GCS | ${{ steps.upload_msi_gcs.outcome || 'skipped' }} | ${{ env.MSI_BUCKET_URI }} |" |
+          "| Package ZIP | ${{ steps.package_zip.outcome || 'skipped' }} | mirrord_windows.zip |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          "| Upload ZIP/binaries to GCS | ${{ steps.upload_zip_gcs.outcome || 'skipped' }} | ${{ env.BUCKET_URI }} |" |
+          "| Upload artifact | ${{ steps.upload_artifact.outcome || 'skipped' }} | dist/windows |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # 🍫 Chocolatey (toggled)
-          "| Chocolatey package | ${{ steps.choco_pack.outcome || 'skipped' }} | nupkg creation (toggle: ${{ env.INPUT_PUBLISH_CHOCO }}) |" |
+          "| Chocolatey publish | ${{ steps.chocolatey.outcome || 'skipped' }} | toggled via input chocolatey_release |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          "| Push to Chocolatey feed | ${{ steps.choco_push.outcome || 'skipped' }} | internal/external feed |" |
+          "| WinGet publish | ${{ steps.winget.outcome || 'skipped' }} | toggled via input winget_release (best-effort) |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
 
-          # 🪟 WinGet (toggled)
-          "| Generate WinGet manifest | ${{ steps.winget_generate.outcome || 'skipped' }} | yaml manifest (toggle: ${{ env.INPUT_PUBLISH_WINGET }}) |" |
-            Out-File -FilePath $summary -Encoding utf8 -Append
-
-          "| Publish WinGet package | ${{ steps.winget_publish.outcome || 'skipped' }} | submit to repo |" |
-            Out-File -FilePath $summary -Encoding utf8 -Append
-
-          # 🏷️ GitHub Release
-          "| Ensure GitHub Release exists | ${{ steps.ensure_release.outcome || 'skipped' }} | create/find release |" |
-            Out-File -FilePath $summary -Encoding utf8 -Append
-
-          "| Attach artifacts to Release | ${{ steps.attach_release_assets.outcome || 'skipped' }} | upload assets |" |
-            Out-File -FilePath $summary -Encoding utf8 -Append
-
-          # 🧪 Release validation tests
-          "| Release validation tests | ${{ steps.release_tests.outcome || 'skipped' }} | curl/brew checks etc. |" |
+          "| GitHub Release | ${{ steps.github_release.outcome || 'skipped' }} | create/update + upload assets |" |
             Out-File -FilePath $summary -Encoding utf8 -Append
