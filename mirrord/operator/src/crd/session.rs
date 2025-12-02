@@ -153,8 +153,8 @@ pub struct SessionClosed {
 /// `OperatorApi::connect_target`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct MirrordCiInfo {
-    /// CI vendor, e.g. "github", "gitlab", ...
-    pub vendor: Option<String>,
+    /// CI provider, e.g. "github", "gitlab", ...
+    pub provider: Option<String>,
 
     /// Name of the git branch.
     pub branch_name: Option<String>,

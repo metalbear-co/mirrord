@@ -363,7 +363,7 @@ impl MirrordCi {
         } = ci_info::get();
 
         MirrordCiInfo {
-            vendor: name,
+            provider: name,
             branch_name,
         }
     }
