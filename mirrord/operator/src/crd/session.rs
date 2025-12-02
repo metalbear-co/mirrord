@@ -38,7 +38,7 @@ pub struct MirrordClusterSessionSpec {
     ///
     /// Most of the values here will be hashed before being sent to the license-server.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ci_info: Option<MirrordCiInfo>,
+    pub ci_info: Option<SessionCiInfo>,
 
     /// Copy target configuration for this session.
     ///
@@ -152,7 +152,7 @@ pub struct SessionClosed {
 /// Implements this conversion so we can easily send this as a request header in
 /// `OperatorApi::connect_target`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct MirrordCiInfo {
+pub struct SessionCiInfo {
     /// CI provider, e.g. "github", "gitlab", ...
     pub provider: Option<String>,
 
@@ -161,7 +161,7 @@ pub struct MirrordCiInfo {
 }
 
 #[cfg(feature = "client")]
-impl TryFrom<http::HeaderValue> for MirrordCiInfo {
+impl TryFrom<http::HeaderValue> for SessionCiInfo {
     type Error = serde_json::Error;
 
     fn try_from(value: http::HeaderValue) -> Result<Self, Self::Error> {

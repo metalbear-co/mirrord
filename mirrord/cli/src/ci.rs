@@ -12,7 +12,7 @@ use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
-use mirrord_operator::{client::OperatorApi, crd::session::MirrordCiInfo};
+use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};
@@ -353,7 +353,7 @@ impl MirrordCi {
     }
 
     /// Converts a [`CiInfo`] into a [`MirrordCiInfo`] used by the operator.
-    pub(super) fn info(&self) -> MirrordCiInfo {
+    pub(super) fn info(&self) -> SessionCiInfo {
         let CiInfo {
             vendor: _,
             name,
@@ -362,7 +362,7 @@ impl MirrordCi {
             branch_name,
         } = ci_info::get();
 
-        MirrordCiInfo {
+        SessionCiInfo {
             provider: name,
             branch_name,
         }

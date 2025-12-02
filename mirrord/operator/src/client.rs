@@ -43,7 +43,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
-        session::MirrordCiInfo,
+        session::SessionCiInfo,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CI_INFO_HEADER,
@@ -133,7 +133,7 @@ pub struct OperatorSession {
     pub allow_reconnect: bool,
 
     /// [`MirrordCiInfo`] is available when the session was started by `mirrord ci start`.
-    pub mirrord_ci_info: Option<MirrordCiInfo>,
+    pub mirrord_ci_info: Option<SessionCiInfo>,
 }
 
 impl fmt::Debug for OperatorSession {
@@ -693,14 +693,14 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
-        mirrord_ci_info: Option<MirrordCiInfo>,
+        mirrord_ci_info: Option<SessionCiInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
         self.check_feature_support(layer_config)?;
 
-        let mirrord_ci_info = Some(MirrordCiInfo {
+        let mirrord_ci_info = Some(SessionCiInfo {
             provider: Some("Dummy".to_string()),
             branch_name: Some("Dummy-branch".to_string()),
         });
@@ -885,7 +885,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
-        mirrord_ci_info: Option<MirrordCiInfo>,
+        mirrord_ci_info: Option<SessionCiInfo>,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
