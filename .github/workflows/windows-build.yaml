@@ -37,6 +37,20 @@ on:
 
 permissions:
   contents: write   # needed for GitHub Releases
+  permissions:
+  contents: read
+  actions: none
+  checks: none
+  deployments: none
+  id-token: none
+  issues: none
+  discussions: none
+  security-events: none
+  packages: none
+  pages: none
+  statuses: none
+  pull-requests: none
+  repository-projects: none
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
