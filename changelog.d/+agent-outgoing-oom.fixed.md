@@ -1,0 +1,1 @@
+Fixed an issue where mirrord-agent could fail with an OOM error when serving heavy TCP traffic.
