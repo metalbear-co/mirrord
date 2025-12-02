@@ -1,3 +1,9 @@
+use std::path::{Path, PathBuf};
+
+// This prefix is a way to explicitly indicate that we're looking in
+// the global namespace for a path.
+pub const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
+
 /// Find the length of a null-terminated buffer using an efficient search
 ///
 /// This utility function replaces the common pattern of using `(0..).take_while`
@@ -263,4 +269,48 @@ pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
     }
 
     None // Double null terminator not found within bounds
+}
+
+/// Responsible for turning a Windows absolute path (potentially Device path) into a Unix-compatible
+/// path.
+///
+/// ## Implementation
+///
+/// 1. If present, remove global namespace path, for device paths (e.g. `"\\??\\"`.)
+/// 2. Check if there's at least one component left in the path.
+///     * If not, return.
+/// 3. Check if the first component is 2 characters long, AND ends in a `:` (meaning it's a disk
+///    path).
+///     * If not, return.
+/// 4. Remove volume letter from path.
+/// 5. Check if path starts with a RootDir component.
+///     * If not, add a forward slash at the start.
+/// 6. Make all back-slashes be forward-slashes.
+///
+/// # Arguments
+///
+/// * `path` - A Windows absolute path.
+pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
+    let mut path = path.as_ref();
+
+    if !path.has_root() {
+        return None;
+    }
+
+    // Rust doesn't know how to separate the components in this case.
+    if path.starts_with(GLOBAL_NAMESPACE_PATH) {
+        path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
+    }
+
+    // Remove root dir.
+    let mut new_path: PathBuf = path.components().skip(1).collect();
+
+    // NOTE(gabriela): WIN-56 agent `strip_prefix``
+    // If need be, implement RootDir component so that agent doesn't blow up.
+    if !new_path.starts_with("/") {
+        new_path = PathBuf::from(&"/").join(new_path);
+    }
+
+    // Turn to string, replace Windows slashes to Linux slashes for ease of use.
+    Some(new_path.to_str()?.to_string().replace("\\", "/"))
 }

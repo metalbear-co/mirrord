@@ -88,7 +88,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, _mode: c_int) -
 /// Hook for `libc::open`.
 ///
 /// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
-/// [`super::filter`].
+/// [`mirrord_layer_lib::file::filter`].
 #[hook_fn]
 pub(super) unsafe extern "C" fn open_detour(
     raw_path: *const c_char,
@@ -112,7 +112,7 @@ pub(super) unsafe extern "C" fn open_detour(
 /// Hook for `libc::open64`.
 ///
 /// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
-/// [`super::filter`].
+/// [`mirrord_layer_lib::file::filter`].
 #[hook_fn]
 pub(super) unsafe extern "C" fn open64_detour(
     raw_path: *const c_char,

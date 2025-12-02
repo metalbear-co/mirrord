@@ -26,7 +26,10 @@ use winapi::{
     },
 };
 
-use crate::{apply_hook, process::environment::parse_environment_block};
+use crate::{
+    apply_hook,
+    process::{environment::parse_environment_block, get_module_name},
+};
 
 static CREATE_PROCESS_INTERNAL_W_ORIGINAL: OnceLock<&CreateProcessInternalWType> = OnceLock::new();
 
@@ -195,19 +198,45 @@ unsafe extern "system" fn getprocaddress_detour(
     // Always call original first to get the function address
     let original_result = unsafe { original(hModule, lpProcName) };
 
-    // Only process if we have a valid function name pointer
+    // NOTE(gabriela): lpProcName may be either an ordinal, or pointer to string.
+    // NOTE(gabriela): check win-57
     if !lpProcName.is_null() {
-        // Convert the function name to a string for logging
-        let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
+        // NOTE(gabriela): convoluted explication below...
+        //
+        // `#define MAKEINTRESOURCEA(i) ((LPSTR)((ULONG_PTR)((WORD)(i))))``
+        // MAKEINTRESOURCEA only keeps the LOWORD of the input.
+        //
+        // also check out PE spec https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#export-ordinal-table
+        // "A 16-bit ordinal number. This field is used only if the Ordinal/Name Flag bit field is 1
+        // (import by ordinal). Bits 30-15 or 62-15 must be 0."
+        //
 
-        if !function_name.is_empty() {
-            // Trace function resolution for debugging
+        let is_ordinal = !lpProcName.is_null() && (lpProcName as usize) <= u16::MAX as usize;
+
+        let ordinal = is_ordinal.then_some(lpProcName as u16);
+
+        if let Some(number) = ordinal {
             tracing::trace!(
-                "GetProcAddress: module={:?} function='{}' address={:?}",
+                "GetProcAddress: module={:?} ptr={:?} ordinal='{}' address={:?}",
+                get_module_name(hModule as _),
                 hModule,
-                function_name,
+                number,
                 original_result
             );
+        } else {
+            // Convert the function name to a string for logging
+            let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
+
+            if !function_name.is_empty() {
+                // Trace function resolution for debugging
+                tracing::trace!(
+                    "GetProcAddress: module={:?} ptr={:?} function='{}' address={:?}",
+                    get_module_name(hModule as _),
+                    hModule,
+                    function_name,
+                    original_result
+                );
+            }
         }
     }
 

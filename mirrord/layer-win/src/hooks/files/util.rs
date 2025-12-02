@@ -1,45 +1,19 @@
 //! Utility module for files redirection.
 
-use std::{
-    mem::MaybeUninit,
-    path::{Path, PathBuf},
-};
+use std::mem::MaybeUninit;
 
 use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
-use str_win::u16_buffer_to_string;
+use str_win::{GLOBAL_NAMESPACE_PATH, string_to_u16_buffer, u16_buffer_to_string};
 use winapi::{
     shared::{minwindef::FILETIME, ntdef::POBJECT_ATTRIBUTES},
     um::{
+        fileapi::QueryDosDeviceW,
         minwinbase::SYSTEMTIME,
         sysinfoapi::GetSystemTime,
         timezoneapi::{FileTimeToSystemTime, SystemTimeToFileTime},
     },
 };
-
-// This prefix is a way to explicitly indicate that we're looking in
-// the global namespace for a path.
-const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;
-
-/// Responsible for turning global namespace, default volume paths into Linux paths.
-pub fn remove_root_dir_from_path<T: AsRef<Path>>(path: T) -> Option<String> {
-    let mut path = path.as_ref();
-
-    if !path.has_root() {
-        return None;
-    }
-
-    // Rust doesn't know how to separate the components in this case.
-    if path.starts_with(GLOBAL_NAMESPACE_PATH) {
-        path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
-    }
-
-    // Skip root dir
-    let new_path: PathBuf = path.components().skip(1).collect();
-
-    // Turn to string, replace Windows slashes to Linux slashes for ease of use.
-    Some(new_path.to_str()?.to_string().replace("\\", "/"))
-}
 
 /// Attempt to run xstat on pod over file descriptor.
 ///
@@ -56,7 +30,14 @@ pub fn try_xstat(fd: u64) -> Option<MetadataInternal> {
     // If the response contains the `XstatResponse`, return the metadata.
     match req {
         Ok(Ok(res)) => Some(res.metadata),
-        _ => None,
+        Ok(Err(e)) => {
+            tracing::error!(?e, "Protocol: Error trying to xstat into file!");
+            None
+        }
+        Err(e) => {
+            tracing::error!(?e, "Proxy: Error trying to xstat file!");
+            None
+        }
     }
 }
 
@@ -74,7 +55,14 @@ pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
 
     match seek {
         Ok(Ok(res)) => Some(res.result_offset),
-        _ => None,
+        Ok(Err(e)) => {
+            tracing::error!(?e, "Protocol: Error trying to seek into file!");
+            None
+        }
+        Err(e) => {
+            tracing::error!(?e, "Proxy: Error trying to seek into file!");
+            None
+        }
     }
 }
 
@@ -154,5 +142,47 @@ impl PartialEq for WindowsTime {
 impl PartialEq<u64> for WindowsTime {
     fn eq(&self, other: &u64) -> bool {
         self.as_file_time_u64() == *other
+    }
+}
+
+/// Check if NT path points to a harddisk.
+///
+/// # Arguments
+///
+/// * `path` - The path to check.
+pub fn is_nt_path_disk_path<T: AsRef<str>>(path: T) -> bool {
+    let mut path = path.as_ref();
+
+    if !path.starts_with(GLOBAL_NAMESPACE_PATH) {
+        return false;
+    }
+
+    // Remove global namespace path to normalize.
+    path = &path[GLOBAL_NAMESPACE_PATH.len()..];
+
+    // Make sure to support both \\??\\C: and \\??\\C:\abc
+    let volume_path = path.split_once('\\').map(|(a, _)| a).unwrap_or(path);
+
+    let mut path = [0u16; 512];
+    let volume_path = string_to_u16_buffer(volume_path);
+
+    let ret = unsafe {
+        QueryDosDeviceW(
+            volume_path.as_ptr() as _,
+            path.as_mut_ptr() as _,
+            path.len() as _,
+        )
+    };
+
+    if ret == 0 {
+        false
+    } else {
+        let path = u16_buffer_to_string(path).to_lowercase();
+
+        // Multiple possible varaiations of this, but the start is always consistent.
+        const DEVICE_HARDDISK: &str = "\\Device\\Harddisk";
+
+        let prefix = DEVICE_HARDDISK.to_string().to_lowercase();
+        path.starts_with(&prefix)
     }
 }
