@@ -151,7 +151,7 @@ impl fmt::Debug for OperatorSession {
 /// Connection to an operator target.
 pub struct OperatorSessionConnection {
     /// Session of this connection.
-    pub session: OperatorSession,
+    pub session: Box<OperatorSession>,
     /// Used to send [`ClientMessage`]s to the operator.
     pub tx: Sender<ClientMessage>,
     /// Used to receive [`DaemonMessage`]s from the operator.
@@ -862,7 +862,11 @@ impl OperatorApi<PreparedClientCert> {
             Err(error) => return Err(error),
         };
 
-        Ok(OperatorSessionConnection { session, tx, rx })
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            tx,
+            rx,
+        })
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -1196,7 +1200,7 @@ impl OperatorApi<PreparedClientCert> {
     #[tracing::instrument(level = Level::TRACE, skip(layer_config, reporter), ret, err)]
     pub async fn connect_in_existing_session<R>(
         layer_config: &LayerConfig,
-        session: OperatorSession,
+        session: Box<OperatorSession>,
         reporter: &mut R,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
