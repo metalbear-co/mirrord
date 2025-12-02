@@ -96,6 +96,47 @@ impl<'a> HookManager<'a> {
         // This can't fail
         self.process.main_module.find_symbol_by_name(symbol)
     }
+
+    /// Resolve symbol in the given module
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) fn resolve_symbol_in_module(
+        &self,
+        module_name: &str,
+        symbol: &str,
+    ) -> Option<NativePointer> {
+        let Some(module) = self.modules.iter().find(|m| m.name() == module_name) else {
+            trace!(module_name, "Module not found");
+            return None;
+        };
+        module.find_symbol_by_name(symbol)
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) fn hook_symbol_in_module(
+        &mut self,
+        module: &str,
+        symbol: &str,
+        detour: *mut libc::c_void,
+    ) -> Result<NativePointer> {
+        let Some(module) = self.modules.iter().find(|m| m.name() == module) else {
+            return Err(LayerError::NoModuleName(module.to_string()));
+        };
+
+        let function = module
+            .find_symbol_by_name(symbol)
+            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
+
+        // on Go we use `replace_fast` since we don't use the original function.
+        self.interceptor
+            .replace_fast(function, NativePointer(detour))
+            .map_err(Into::into)
+    }
 }
 
 impl<'a> Default for HookManager<'a> {
