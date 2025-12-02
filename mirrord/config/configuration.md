@@ -399,6 +399,10 @@ Which network interface to use for mirroring.
 The default behavior is try to access the internet and use that interface. If that fails
 it uses `eth0`.
 
+DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+and will be removed in the future. This field will be removed, and the agent will always
+use iptables redirects for mirroring traffic.
+
 ### agent.nftables {#agent-nftables}
 
 Determines which iptables backend will be used for traffic redirection.
@@ -430,6 +434,10 @@ with mirroring non HTTP/1 traffic.
 When this is set, `network_interface` setting is ignored.
 
 Defaults to true.
+
+DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+and will be removed in the future. This field will be removed, and the agent will always
+use iptables redirects for mirroring traffic.
 
 ### agent.priority_class {#agent-priority_class}
 
