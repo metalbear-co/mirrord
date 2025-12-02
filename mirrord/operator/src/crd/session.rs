@@ -155,6 +155,7 @@ pub struct SessionClosed {
 /// Implements this conversion so we can easily send this as a request header in
 /// `OperatorApi::connect_target`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCiInfo {
     /// CI provider, e.g. "github", "gitlab", ...
     pub provider: Option<String>,
