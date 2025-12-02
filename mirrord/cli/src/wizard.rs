@@ -240,56 +240,56 @@ async fn list_targets(
         targets.extend(match toi {
             TargetType::Deployment => {
                 seeker
-                    .list_all_namespaced::<Deployment>(None)
+                    .list_all_namespaced::<Deployment>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::Pod => {
                 seeker
-                    .list_all_namespaced::<Pod>(None)
+                    .list_all_namespaced::<Pod>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::Rollout => {
                 seeker
-                    .list_all_namespaced::<Rollout>(None)
+                    .list_all_namespaced::<Rollout>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::Job => {
                 seeker
-                    .list_all_namespaced::<Job>(None)
+                    .list_all_namespaced::<Job>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::CronJob => {
                 seeker
-                    .list_all_namespaced::<CronJob>(None)
+                    .list_all_namespaced::<CronJob>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::StatefulSet => {
                 seeker
-                    .list_all_namespaced::<StatefulSet>(None)
+                    .list_all_namespaced::<StatefulSet>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::Service => {
                 seeker
-                    .list_all_namespaced::<Service>(None)
+                    .list_all_namespaced::<Service>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
             }
             TargetType::ReplicaSet => {
                 seeker
-                    .list_all_namespaced::<ReplicaSet>(None)
+                    .list_all_namespaced::<ReplicaSet>(None, None)
                     .filter_map(|x| into_info(x, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await
@@ -407,7 +407,8 @@ impl IntoTargetInfo for Rollout {
             .map_err(CliError::WizardTargetError)?
             .spec
             .as_ref()
-            .map(|spec| spec.containers.clone()).unwrap_or_default()
+            .map(|spec| spec.containers.clone())
+            .unwrap_or_default()
             .iter()
             .flat_map(|container| container.ports.clone().unwrap_or_default())
             .map(|port| port.container_port.abs() as u16)
@@ -538,11 +539,11 @@ impl IntoTargetInfo for Service {
 
         let mut infos: Vec<TargetInfo> = vec![];
         for (key, value) in selector {
-            let key_value = format!("{key}={value}");
+            let label_selector = format!("{key}={value}");
             infos.extend(
                 seeker
-                    .list_all_namespaced::<Pod>(Some(&key_value))
-                    .filter_map(|x| into_info(x, &seeker, &client))
+                    .list_all_namespaced::<Pod>(None, Some(&label_selector))
+                    .filter_map(|pod_res| into_info(pod_res, &seeker, &client))
                     .collect::<Vec<_>>()
                     .await,
             );
