@@ -354,30 +354,60 @@ impl MirrordCi {
 
     /// Converts a [`CiInfo`] into a [`MirrordCiInfo`] used by the operator.
     pub(super) fn info(&self) -> SessionCiInfo {
-        let CiInfo {
-            vendor: _,
-            name,
-            ci: _,
-            pr: _,
-            branch_name,
-        } = ci_info::get();
+        let CiInfo { name, .. } = ci_info::get();
+
+        let StartArgs {
+            foreground: _,
+            environment,
+            pipeline,
+            triggered_by,
+        } = self.start_args.clone();
 
         SessionCiInfo {
             provider: name,
-            branch_name,
+            environment,
+            pipeline,
+            triggered_by,
         }
     }
 }
 
-#[derive(Debug, Default)]
+/// Similar to [`CiStartArgs`], except here we don't need [`CiStartArgs::exec_args`].
+///
+/// Used instead of `CiStartArgs` so we can `Clone` it around, (we don't need the `ExecArgs` where
+/// this is used).
+#[cfg_attr(windows, allow(dead_code))]
+#[derive(Debug, Default, Clone)]
 struct StartArgs {
-    #[cfg_attr(windows, allow(dead_code))]
+    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
+    /// task).
     foreground: bool,
+
+    /// CI environment, e.g. "staging", "production", "testing", etc.
+    environment: Option<String>,
+
+    /// CI pipeline or job name, e.g. "e2e-tests".
+    pipeline: Option<String>,
+
+    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
+    triggered_by: Option<String>,
 }
 
 impl From<&CiStartArgs> for StartArgs {
-    fn from(args: &CiStartArgs) -> Self {
-        let foreground = args.foreground;
-        Self { foreground }
+    fn from(
+        CiStartArgs {
+            exec_args: _,
+            foreground,
+            environment,
+            pipeline,
+            triggered_by,
+        }: &CiStartArgs,
+    ) -> Self {
+        Self {
+            foreground: *foreground,
+            environment: environment.clone(),
+            pipeline: pipeline.clone(),
+            triggered_by: triggered_by.clone(),
+        }
     }
 }

@@ -156,8 +156,14 @@ pub struct SessionCiInfo {
     /// CI provider, e.g. "github", "gitlab", ...
     pub provider: Option<String>,
 
-    /// Name of the git branch.
-    pub branch_name: Option<String>,
+    /// Staging, production, test, nightly, ...
+    pub environment: Option<String>,
+
+    /// Pipeline/job name, e.g. "e2e-tests".
+    pub pipeline: Option<String>,
+
+    /// PR, manual, push, ...
+    pub triggered_by: Option<String>,
 }
 
 #[cfg(feature = "client")]
