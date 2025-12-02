@@ -1660,7 +1660,7 @@ mod test {
                 },
                 spec: None,
                 status: None,
-            },
+            }.into(),
             container: Some("py-serv".into()),
         }),
         ConcurrentSteal::Abort,
