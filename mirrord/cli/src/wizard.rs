@@ -62,7 +62,7 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
 
     let is_returning_string = user_data.is_returning_wizard().to_string();
 
-    // client
+    // client for fetching targets from the cluster when detecting exposed ports
     let client = create_kube_config(
         args.accept_invalid_certificates,
         args.kubeconfig,
@@ -72,14 +72,14 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
     .and_then(|config| Ok(ClientBuilder::try_from(config.clone())?.build()))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
-    // unpack frontend into dir
-    let tmp_dir = TempDir::new().unwrap(); // FIXME: remove unwraps
+    // unpack the frontend into `TempDir`
+    let tmp_dir = TempDir::new()?;
     let temp_dir_path = tmp_dir.path();
 
     let tar_gz = Cursor::new(COMPRESSED_FRONTEND);
     let tar = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(tar);
-    archive.unpack(temp_dir_path).unwrap(); // FIXME: remove unwraps
+    archive.unpack(temp_dir_path)?;
 
     let serve_client = {
         let index_service = ServiceBuilder::new()
@@ -120,8 +120,8 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
         .route("/api/v1/namespace/{namespace}/targets", get(list_targets))
         .with_state(Arc::new(Mutex::new((user_data, client))));
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap(); // FIXME: remove unwraps
-    tracing::debug!("listening on {}", listener.local_addr().unwrap()); // FIXME: remove unwraps
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::debug!("listening on {}", listener.local_addr()?);
 
     // open browser window
     let url = "http://localhost:3000/";
@@ -138,7 +138,7 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
 
     axum::serve(listener, app.layer(TraceLayer::new_for_http()))
         .await
-        .unwrap(); // TODO: <|:)
+        .expect("Infallible operation should never fail");
     Ok(())
 }
 
@@ -176,6 +176,7 @@ struct Params {
     target_type: Option<TargetType>,
 }
 
+#[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> CliResult<String> {
     let mut user_guard = arc.lock().await;
     // consider the user a returning user in future runs
@@ -209,6 +210,7 @@ async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> C
     Ok(serde_json::to_string(&res)?)
 }
 
+#[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 async fn list_targets(
     State(arc): State<Arc<Mutex<(UserData, Client)>>>,
     Query(query_params): Query<Params>,
