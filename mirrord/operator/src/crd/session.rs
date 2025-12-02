@@ -169,12 +169,3 @@ pub struct SessionCiInfo {
     /// PR, manual, push, ...
     pub triggered_by: Option<String>,
 }
-
-#[cfg(feature = "client")]
-impl TryFrom<http::HeaderValue> for SessionCiInfo {
-    type Error = serde_json::Error;
-
-    fn try_from(value: http::HeaderValue) -> Result<Self, Self::Error> {
-        serde_json::from_slice(value.as_bytes())
-    }
-}

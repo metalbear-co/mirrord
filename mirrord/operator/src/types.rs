@@ -46,9 +46,3 @@ pub const RECONNECT_NOT_POSSIBLE_CODE: u16 = 410;
 /// Reason returned in error responses from the operator, when reconnecting to a session is no
 /// longer possible.
 pub const RECONNECT_NOT_POSSIBLE_REASON: &str = "ReconnectNotPossible";
-
-/// The header we send in `OperatorApi::connect_target` when a mirrord session is started with
-/// `mirrord ci start`.
-///
-/// Contains a json with `MirrordCiInfo`.
-pub const MIRRORD_CI_INFO_HEADER: &str = "x-mirrord-ci-info";

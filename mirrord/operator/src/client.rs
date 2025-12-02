@@ -46,8 +46,8 @@ use crate::{
         session::SessionCiInfo,
     },
     types::{
-        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CI_INFO_HEADER,
-        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
+        SESSION_ID_HEADER,
     },
 };
 
@@ -131,9 +131,6 @@ pub struct OperatorSession {
 
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
-
-    /// [`MirrordCiInfo`] is available when the session was started by `mirrord ci start`.
-    pub mirrord_ci_info: Option<SessionCiInfo>,
 }
 
 impl fmt::Debug for OperatorSession {
@@ -148,7 +145,6 @@ impl fmt::Debug for OperatorSession {
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("allow_reconnect", &self.allow_reconnect)
-            .field("mirrord_ci_info", &self.mirrord_ci_info)
             .finish()
     }
 }
@@ -693,7 +689,7 @@ impl OperatorApi<PreparedClientCert> {
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
-        mirrord_ci_info: Option<SessionCiInfo>,
+        session_ci_info: Option<SessionCiInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -759,14 +755,16 @@ impl OperatorApi<PreparedClientCert> {
                 .status
                 .as_ref()
                 .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+
             let connect_url = Self::copy_target_connect_url(
                 &copied,
                 use_proxy_api,
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
+                session_ci_info.clone(),
             );
-            let session = self.make_operator_session(id, connect_url, mirrord_ci_info.clone())?;
+            let session = self.make_operator_session(id, connect_url)?;
 
             (session, reused)
         } else {
@@ -827,9 +825,10 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config,
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
+                session_ci_info.clone(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
-            let session = self.make_operator_session(None, connect_url, mirrord_ci_info.clone())?;
+            let session = self.make_operator_session(None, connect_url)?;
 
             (session, false)
         };
@@ -853,13 +852,13 @@ impl OperatorApi<PreparedClientCert> {
                     layer_config.profile.as_deref(),
                     branch_name,
                     mysql_branch_names.unwrap_or_default(),
+                    session_ci_info.clone(),
                 );
                 let session_id = copied
                     .status
                     .as_ref()
                     .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
-                let session =
-                    self.make_operator_session(session_id, connect_url, mirrord_ci_info)?;
+                let session = self.make_operator_session(session_id, connect_url)?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
                 let (tx, rx) = Self::connect_target(&self.client, &session).await?;
@@ -880,7 +879,6 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
-        mirrord_ci_info: Option<SessionCiInfo>,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
@@ -905,7 +903,6 @@ impl OperatorApi<PreparedClientCert> {
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
             allow_reconnect,
-            mirrord_ci_info,
         })
     }
 
@@ -949,6 +946,7 @@ impl OperatorApi<PreparedClientCert> {
         profile: Option<&str>,
         branch_name: Option<String>,
         mysql_branch_names: Vec<String>,
+        session_ci_info: Option<SessionCiInfo>,
     ) -> String {
         let name = crd
             .meta()
@@ -973,6 +971,7 @@ impl OperatorApi<PreparedClientCert> {
             sqs_splits: Default::default(),
             branch_name,
             mysql_branch_names,
+            session_ci_info,
         };
 
         if use_proxy {
@@ -1251,16 +1250,6 @@ impl OperatorApi<PreparedClientCert> {
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
 
-        let request_builder = match session
-            .mirrord_ci_info
-            .as_ref()
-            .map(serde_json::to_vec)
-            .transpose()?
-        {
-            Some(ci_info) => request_builder.header(MIRRORD_CI_INFO_HEADER, ci_info),
-            None => request_builder,
-        };
-
         let request = request_builder
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
@@ -1358,7 +1347,7 @@ mod test {
     use rstest::rstest;
 
     use super::OperatorApi;
-    use crate::client::connect_params::ConnectParams;
+    use crate::{client::connect_params::ConnectParams, crd::session::SessionCiInfo};
 
     /// Verifies that [`OperatorApi::target_connect_url`] produces expected URLs.
     ///
@@ -1383,6 +1372,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -1401,6 +1391,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1425,6 +1416,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -1443,6 +1435,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1467,6 +1460,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1485,6 +1479,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1515,6 +1510,7 @@ mod test {
         )]),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1543,6 +1539,7 @@ mod test {
             ]),
         )]),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1565,6 +1562,7 @@ mod test {
         Default::default(),
         Default::default(),
         vec!["branch-1".into(), "branch-2".into()],
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
@@ -1577,6 +1575,7 @@ mod test {
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] mysql_branch_names: Vec<String>,
+        #[case] session_ci_info: Option<SessionCiInfo>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -1597,6 +1596,7 @@ mod test {
             sqs_splits,
             branch_name: None,
             mysql_branch_names,
+            session_ci_info,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
