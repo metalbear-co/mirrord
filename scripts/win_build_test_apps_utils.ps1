@@ -30,6 +30,26 @@ function Invoke-GoBuild {
     }
 }
 
+function Test-WindowsExcludedGoModule {
+    param(
+        [string]$ModulePath
+    )
+
+    $goFiles = Get-ChildItem -Path $ModulePath -Recurse -Filter '*.go'
+    if (-not $goFiles) {
+        return $false
+    }
+
+    $allExcluded = $true
+    foreach ($file in $goFiles) {
+        if (-not (Select-String -Path $file.FullName -Pattern '^\s*//\s*(go:build|\+build).*?(!windows)' -Quiet)) {
+            $allExcluded = $false
+            break
+        }
+    }
+    return $allExcluded
+}
+
 function Build-GoE2EApps {
     param(
         [string]$TestsDir,
@@ -51,6 +71,10 @@ function Build-GoE2EApps {
             Write-Host "Building in $($dir.Name)"
             Push-Location $dir.FullName
             try {
+                if (Test-WindowsExcludedGoModule -ModulePath (Get-Location).ProviderPath) {
+                    Write-Host "Skipping go-e2e module in $($dir.FullName) because it excludes windows"
+                    continue
+                }
                 foreach ($target in $GoTargets) {
                     try {
                         Invoke-GoBuild -OutputName $target.Output -DirectoryName $dir.Name -GoToolchain $target.Toolchain
@@ -88,6 +112,11 @@ function Build-RepoGoApps {
     foreach ($goMod in $goFiles) {
         Push-Location $goMod.Directory.FullName
         try {
+            if (Test-WindowsExcludedGoModule -ModulePath (Get-Location).ProviderPath) {
+                Write-Host "Skipping Go module at $($goMod.Directory.FullName) because it excludes windows"
+                continue
+            }
+
             Write-Host "Building Go test app in $($goMod.Directory.FullName)"
             & go build -o "$OutputPrefix.go_test_app"
             if ($LASTEXITCODE -ne 0) {
