@@ -78,7 +78,10 @@ pub enum DumpSessionError {
     AgentConnClosed(Option<String>),
 
     #[error("received an unexpected message from the agent: {0:?}")]
-    UnexpectedAgentMessage(DaemonMessage),
+    UnexpectedAgentMessage(
+        /// Boxed due to large size difference.
+        Box<DaemonMessage>,
+    ),
 
     #[error("port subscription failed: {0}")]
     PortSubscriptionFailed(ResponseError),
@@ -145,7 +148,7 @@ impl DumpSession {
             DaemonMessage::SwitchProtocolVersionResponse(version) => {
                 debug!("Established mirrord-protocol version {version}");
             }
-            other => return Err(DumpSessionError::UnexpectedAgentMessage(other)),
+            other => return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(other))),
         }
         self.connection
             .sender
@@ -391,9 +394,9 @@ impl DumpSession {
                 );
             }
             message @ DaemonTcp::SubscribeResult(..) => {
-                return Err(DumpSessionError::UnexpectedAgentMessage(
+                return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(
                     DaemonMessage::Tcp(message),
-                ));
+                )));
             }
         }
 
@@ -446,7 +449,7 @@ impl DumpSession {
                 | DaemonMessage::UdpOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)) => {
-                    return Err(DumpSessionError::UnexpectedAgentMessage(message));
+                    return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(message)));
                 }
             }
         }

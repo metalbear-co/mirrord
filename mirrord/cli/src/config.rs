@@ -750,7 +750,7 @@ pub(super) enum OperatorCommand {
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
-    Setup(#[clap(flatten)] OperatorSetupParams),
+    Setup(#[clap(flatten)] Box<OperatorSetupParams>),
     /// Print operator status
     Status {
         /// Specify config file to use

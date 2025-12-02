@@ -102,8 +102,9 @@ impl TcpMirrorApi {
                 }
                 LayerTcp::PortSubscribeFilteredHttp(port, filter) => {
                     // Convert from protocol HttpFilter to agent HttpFilter
-                    let agent_filter =
-                        HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?;
+                    let agent_filter = HttpFilter::try_from(&filter)
+                        .map_err(Box::new)
+                        .map_err(AgentError::InvalidHttpFilter)?;
 
                     mirror_handle.mirror(port).await?;
 
@@ -341,6 +342,7 @@ impl TcpMirrorApi {
                                 transport: http
                                     .info
                                     .tls_connector
+                                    .as_ref()
                                     .map(|tls| IncomingTrafficTransportType::Tls {
                                         alpn_protocol: tls.alpn_protocol().map(From::from),
                                         server_name: tls.server_name().map(|s| s.to_str().into_owned()),

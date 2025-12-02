@@ -231,6 +231,7 @@ impl TcpStealerApi {
                     },
                     transport: info
                         .tls_connector
+                        .as_ref()
                         .map(|tls| IncomingTrafficTransportType::Tls {
                             server_name: tls.server_name().map(|s| s.to_str().into_owned()),
                             alpn_protocol: tls.alpn_protocol().map(Vec::from),
@@ -497,12 +498,17 @@ impl TcpStealerApi {
                             HttpFilter::try_from(&mirrord_protocol::tcp::HttpFilter::Header(
                                 filter,
                             ))
+                            .map_err(Box::new)
                             .map_err(AgentError::InvalidHttpFilter)?,
                         ),
                     ),
                     StealType::FilteredHttpEx(port, filter) => (
                         port,
-                        Some(HttpFilter::try_from(&filter).map_err(AgentError::InvalidHttpFilter)?),
+                        Some(
+                            HttpFilter::try_from(&filter)
+                                .map_err(Box::new)
+                                .map_err(AgentError::InvalidHttpFilter)?,
+                        ),
                     ),
                 };
 

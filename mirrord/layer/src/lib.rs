@@ -8,8 +8,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::result_large_err)]
 
 //! Loaded dynamically with your local process.
 //!
