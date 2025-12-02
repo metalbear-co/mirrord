@@ -47,23 +47,6 @@ pub struct MirrordClusterSessionSpec {
     pub copy_target: Option<SessionCopyTarget>,
 }
 
-impl MirrordClusterSession {
-    /// Deep clones a [`MirrordClusterSession`], so we can get a owned version from an `Arc`.
-    pub fn clone_owned(&self) -> Self {
-        let Self {
-            metadata,
-            spec,
-            status,
-        } = self;
-
-        Self {
-            metadata: metadata.clone(),
-            spec: spec.clone(),
-            status: status.clone(),
-        }
-    }
-}
-
 /// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
