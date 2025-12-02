@@ -235,7 +235,7 @@ fn get_go_runtime_version(hook_manager: &mut HookManager) -> Option<f32> {
     get_version_from_symbol(version_symbol)
 }
 
-/// Extracts version of the Go rutime from all modules.
+/// Extracts version of the Go runtime from the given module.
 fn get_go_runtime_version_in_module(
     hook_manager: &mut HookManager,
     module_name: &str,
