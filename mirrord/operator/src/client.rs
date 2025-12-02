@@ -36,13 +36,15 @@ use tracing::Level;
 
 use crate::{
     client::database_branches::{
-        DatabaseBranchParams, create_mysql_branches, list_reusable_mysql_branches,
+        DatabaseBranchParams, create_mysql_branches, create_pg_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
         mysql_branching::MysqlBranchDatabase,
+        pg_branching::PgBranchDatabase,
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
@@ -727,11 +729,19 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mysql_branch_names = if layer_config.feature.db_branches.is_empty().not() {
-            Some(self.prepare_branch_dbs(layer_config, progress).await?)
+            Some(
+                self.prepare_mysql_branch_dbs(layer_config, progress)
+                    .await?,
+            )
         } else {
             None
         };
 
+        let pg_branch_names = if layer_config.feature.db_branches.is_empty().not() {
+            Some(self.prepare_pg_branch_dbs(layer_config, progress).await?)
+        } else {
+            None
+        };
         let (session, reused_copy) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
@@ -759,6 +769,7 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.profile.as_deref(),
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
+                pg_branch_names.clone().unwrap_or_default(),
             );
             let session = self.make_operator_session(id, connect_url)?;
 
@@ -821,6 +832,7 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config,
                 branch_name.clone(),
                 mysql_branch_names.clone().unwrap_or_default(),
+                pg_branch_names.clone().unwrap_or_default(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
             let session = self.make_operator_session(None, connect_url)?;
@@ -847,6 +859,7 @@ impl OperatorApi<PreparedClientCert> {
                     layer_config.profile.as_deref(),
                     branch_name,
                     mysql_branch_names.unwrap_or_default(),
+                    pg_branch_names.unwrap_or_default(),
                 );
                 let session_id = copied
                     .status
@@ -940,6 +953,7 @@ impl OperatorApi<PreparedClientCert> {
         profile: Option<&str>,
         branch_name: Option<String>,
         mysql_branch_names: Vec<String>,
+        pg_branch_names: Vec<String>,
     ) -> String {
         let name = crd
             .meta()
@@ -964,6 +978,7 @@ impl OperatorApi<PreparedClientCert> {
             sqs_splits: Default::default(),
             branch_name,
             mysql_branch_names,
+            pg_branch_names,
         };
 
         if use_proxy {
@@ -1263,7 +1278,7 @@ impl OperatorApi<PreparedClientCert> {
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
-    async fn prepare_branch_dbs<P: Progress>(
+    async fn prepare_mysql_branch_dbs<P: Progress>(
         &self,
         layer_config: &LayerConfig,
         progress: &P,
@@ -1281,9 +1296,9 @@ impl OperatorApi<PreparedClientCert> {
             .unwrap_or(self.client.default_namespace());
         let mysql_branch_api: Api<MysqlBranchDatabase> =
             Api::namespaced(self.client.clone(), namespace);
-
         let DatabaseBranchParams {
             mysql: mut create_mysql_params,
+            pg: _create_pg_params,
         } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
 
         let reusable_mysql_branches =
@@ -1300,6 +1315,9 @@ impl OperatorApi<PreparedClientCert> {
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => mysql_config.base.creation_timeout_secs,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    pg_config.base.creation_timeout_secs
+                }
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
@@ -1308,6 +1326,7 @@ impl OperatorApi<PreparedClientCert> {
         let created_mysql_branches =
             create_mysql_branches(&mysql_branch_api, create_mysql_params, timeout, &subtask)
                 .await?;
+
         subtask.success(None);
 
         let mysql_branch_names = reusable_mysql_branches
@@ -1322,6 +1341,76 @@ impl OperatorApi<PreparedClientCert> {
             })
             .collect::<Result<Vec<String>, _>>()?;
         Ok(mysql_branch_names)
+    }
+
+    /// Prepare branch databases, and return database resource names.
+    ///
+    /// 1. List reusable branch databases.
+    /// 2. Create new ones if any missing.
+    /// 3. Wait for all new databases to be ready.
+    #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
+    async fn prepare_pg_branch_dbs<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<Vec<String>> {
+        let mut subtask = progress.subtask("preparing branch databases");
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+        let pg_branch_api: Api<PgBranchDatabase> = Api::namespaced(self.client.clone(), namespace);
+        let DatabaseBranchParams {
+            mysql: _create_mysql_params,
+            pg: mut create_pg_params,
+        } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+
+        let reusable_pg_branches =
+            list_reusable_pg_branches(&pg_branch_api, &create_pg_params, &subtask).await?;
+
+        create_pg_params.retain(|id, _| !reusable_pg_branches.contains_key(id));
+
+        // Get the maximum timeout from all DB branch configs
+        let timeout_secs = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
+                    mysql_config,
+                ) => mysql_config.base.creation_timeout_secs,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    pg_config.base.creation_timeout_secs
+                }
+            })
+            .max()
+            .unwrap_or(default_creation_timeout_secs());
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        let created_mysql_branches =
+            create_pg_branches(&pg_branch_api, create_pg_params, timeout, &subtask).await?;
+
+        subtask.success(None);
+
+        let pg_branch_names = reusable_pg_branches
+            .values()
+            .chain(created_mysql_branches.values())
+            .map(|branch| {
+                branch
+                    .meta()
+                    .name
+                    .clone()
+                    .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))
+            })
+            .collect::<Result<Vec<String>, _>>()?;
+
+        Ok(pg_branch_names)
     }
 }
 
@@ -1362,6 +1451,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -1380,6 +1470,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1404,6 +1495,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -1422,6 +1514,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1446,6 +1539,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1464,6 +1558,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1494,6 +1589,7 @@ mod test {
         )]),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1522,6 +1618,7 @@ mod test {
             ]),
         )]),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1544,8 +1641,32 @@ mod test {
         Default::default(),
         Default::default(),
         vec!["branch-1".into(), "branch-2".into()],
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+    )]
+    #[case::deployment_container_proxy_pg_branches(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        vec!["branch-1".into(), "branch-2".into()],
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
     )]
     #[test]
     fn target_connect_url(
@@ -1556,6 +1677,7 @@ mod test {
         #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] sqs_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] mysql_branch_names: Vec<String>,
+        #[case] pg_branch_names: Vec<String>,
         #[case] expected: &str,
     ) {
         let kafka_splits = kafka_splits
@@ -1576,6 +1698,7 @@ mod test {
             sqs_splits,
             branch_name: None,
             mysql_branch_names,
+            pg_branch_names,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
