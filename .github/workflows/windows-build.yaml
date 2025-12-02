@@ -36,7 +36,7 @@ on:
       - "**/*.md"
 
 permissions:
-  contents: write   # needed for GitHub Releases
+  contents: write
   actions: none
   checks: none
   deployments: none
@@ -459,7 +459,7 @@ jobs:
   
   post_release_checks_windows:
     needs: [windows_tests]
-    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || env.PUBLISH_MODE != 'no')
+    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release != 'no'))
     uses: ./.github/workflows/release-tests.yaml
     secrets:
       SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
