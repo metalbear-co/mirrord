@@ -38,7 +38,6 @@ on:
 permissions:
   contents: write   # needed for GitHub Releases
   permissions:
-  contents: read
   actions: none
   checks: none
   deployments: none
