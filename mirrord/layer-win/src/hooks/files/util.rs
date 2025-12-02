@@ -4,10 +4,11 @@ use std::mem::MaybeUninit;
 
 use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
-use str_win::u16_buffer_to_string;
+use str_win::{GLOBAL_NAMESPACE_PATH, string_to_u16_buffer, u16_buffer_to_string};
 use winapi::{
     shared::{minwindef::FILETIME, ntdef::POBJECT_ATTRIBUTES},
     um::{
+        fileapi::QueryDosDeviceW,
         minwinbase::SYSTEMTIME,
         sysinfoapi::GetSystemTime,
         timezoneapi::{FileTimeToSystemTime, SystemTimeToFileTime},
@@ -141,5 +142,47 @@ impl PartialEq for WindowsTime {
 impl PartialEq<u64> for WindowsTime {
     fn eq(&self, other: &u64) -> bool {
         self.as_file_time_u64() == *other
+    }
+}
+
+/// Check if NT path points to a harddisk.
+///
+/// # Arguments
+///
+/// * `path` - The path to check.
+pub fn is_nt_path_disk_path<T: AsRef<str>>(path: T) -> bool {
+    let mut path = path.as_ref();
+
+    if !path.starts_with(GLOBAL_NAMESPACE_PATH) {
+        return false;
+    }
+
+    // Remove global namespace path to normalize.
+    path = &path[GLOBAL_NAMESPACE_PATH.len()..];
+
+    // Make sure to support both \\??\\C: and \\??\\C:\abc
+    let volume_path = path.split_once('\\').map(|(a, _)| a).unwrap_or(path);
+
+    let mut path = [0u16; 512];
+    let volume_path = string_to_u16_buffer(volume_path);
+
+    let ret = unsafe {
+        QueryDosDeviceW(
+            volume_path.as_ptr() as _,
+            path.as_mut_ptr() as _,
+            path.len() as _,
+        )
+    };
+
+    if ret == 0 {
+        false
+    } else {
+        let path = u16_buffer_to_string(path).to_lowercase();
+
+        // Multiple possible varaiations of this, but the start is always consistent.
+        const DEVICE_HARDDISK: &str = "\\Device\\Harddisk";
+
+        let prefix = DEVICE_HARDDISK.to_string().to_lowercase();
+        path.starts_with(&prefix)
     }
 }

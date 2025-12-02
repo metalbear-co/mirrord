@@ -105,3 +105,24 @@ fn try_get_unix_path() {
     assert!(&new_path.is_some());
     assert_eq!(Path::new(&new_path.unwrap()), Path::new(UNIX_PATH));
 }
+
+#[test]
+fn try_all_possible_volume_letters_to_unix_path() {
+    for c in 'C'..'Z' {
+        let path = format!("\\??\\{c}:\\windows\\system32");
+
+        assert_eq!(
+            path_to_unix_path(path),
+            Some("/windows/system32".to_owned())
+        );
+    }
+}
+
+#[test]
+fn try_just_all_possible_volume_letters_to_unix_path() {
+    for c in 'C'..'Z' {
+        let path = format!("\\??\\{c}:\\");
+
+        assert_eq!(path_to_unix_path(path), Some("/".to_owned()));
+    }
+}
