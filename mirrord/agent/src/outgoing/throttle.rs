@@ -48,21 +48,26 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        loop {
-            match &this.ready_data {
-                Some(data) => {
-                    let permits = u32::try_from(data.len()).unwrap_or(u32::MAX);
-                    let permits = std::task::ready!(this.semaphore.poll_acquire_many(cx, permits))
-                        .ok_or_else(|| io::Error::other("throttling semaphore is closed"))?;
-                    break Poll::Ready(Some(Ok((this.ready_data.take().unwrap(), permits))));
-                }
-                None => {
-                    let data = std::task::ready!(this.inner.poll_next_unpin(cx)).transpose()?;
-                    let Some(data) = data else {
-                        break Poll::Ready(None);
-                    };
-                    this.ready_data = Some(data);
-                }
+        let ready_data = match this.ready_data.take() {
+            Some(data) => data,
+            None => {
+                let data = std::task::ready!(this.inner.poll_next_unpin(cx)).transpose()?;
+                let Some(data) = data else {
+                    return Poll::Ready(None);
+                };
+                data
+            }
+        };
+
+        let permits = u32::try_from(ready_data.len()).unwrap_or(u32::MAX);
+        match this.semaphore.poll_acquire_many(cx, permits) {
+            Poll::Ready(Some(permits)) => Poll::Ready(Some(Ok((ready_data, permits)))),
+            Poll::Ready(None) => Poll::Ready(Some(Err(io::Error::other(
+                "throttling semaphore is closed",
+            )))),
+            Poll::Pending => {
+                this.ready_data.replace(ready_data);
+                Poll::Pending
             }
         }
     }
