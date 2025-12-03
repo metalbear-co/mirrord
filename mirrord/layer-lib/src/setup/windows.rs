@@ -68,11 +68,7 @@ pub struct LayerSetup {
 }
 
 impl LayerSetup {
-    pub fn new(
-        mut config: LayerConfig,
-        proxy_address: SocketAddr,
-        local_hostname: bool,
-    ) -> Self {
+    pub fn new(mut config: LayerConfig, proxy_address: SocketAddr, local_hostname: bool) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
