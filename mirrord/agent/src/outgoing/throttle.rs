@@ -10,7 +10,7 @@ use futures::{Stream, StreamExt};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::PollSemaphore;
 
-/// Wrapper over a [`Stream`] of [`Bytes`], that yields items only after only acquiring
+/// Wrapper over a [`Stream`] of [`Bytes`], that yields items only after acquiring
 /// [`Semaphore`] permit for each byte of data.
 ///
 /// E.g. if the inner stream yields 1024 bytes of data, this wrapper will yield a tuple of (data,
