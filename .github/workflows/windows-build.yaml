@@ -399,6 +399,11 @@ jobs:
           # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
+      - name: Run Rust e2e tests 
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests
+
       ###########################################################################
       # RELEASE PUBLISH (upload-only, no creation)
       ###########################################################################
