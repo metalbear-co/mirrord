@@ -279,6 +279,46 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico" "$Root\mirrord.ico" -Force
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
+
+          # COMPUTE VERSION FOR MSI (4-part format required by WiX)
+          $rawVersion = $null
+          if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
+            $rawVersion = "$env:GITHUB_REF".Substring(10)
+          } elseif ($env:RELEASE_TAG_INPUT) {
+            $rawVersion = $env:RELEASE_TAG_INPUT
+          } else {
+            $rawVersion = $env:MIRRORD_VERSION
+          }
+
+          # Remove leading 'v' prefix if present
+          if ($rawVersion -and $rawVersion.StartsWith("v")) {
+            $rawVersion = $rawVersion.Substring(1)
+          }
+
+          # Convert to 4-part version (WiX requires major.minor.patch.build)
+          if ($rawVersion) {
+            $parts = $rawVersion.Split('.')
+            while ($parts.Count -lt 4) {
+              $parts += "0"
+            }
+            $msiVersion = ($parts[0..3] -join '.')
+            Write-Host "Setting MSI Product Version to: $msiVersion (from: $rawVersion)"
+          } else {
+            $msiVersion = "1.0.0.0"
+            Write-Warning "No version found, using default: $msiVersion"
+          }
+
+          # UPDATE VERSION IN main.wxs
+          $wxsPath = "$Root\main.wxs"
+          $wxsContent = Get-Content $wxsPath -Raw
+          # Replace Version="..." with the computed version
+          $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
+          Set-Content -Path $wxsPath -Value $wxsContent -NoNewline
+          Write-Host "Updated Product Version in main.wxs to $msiVersion"
+
+          # Export MSI version for summary
+          "MSI_VERSION=$msiVersion" | Out-File -Append -FilePath $env:GITHUB_ENV
+
           $Obj = "$Root\main.wixobj"
           $Msi = "$Root\mirrord.msi"
           if (Test-Path $Msi) { Remove-Item $Msi -Force }
@@ -561,6 +601,7 @@ jobs:
         if: always()
         run: |
           Write-Host "MSI (local):       $env:MSI_PATH"
+          Write-Host "MSI Version:       $env:MSI_VERSION"
           Write-Host "MSI (GCS URI):     $env:MSI_GCS_URI"
           Write-Host "EXE:               $env:MIRRORD_EXE"
           Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
