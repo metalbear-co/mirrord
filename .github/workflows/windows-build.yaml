@@ -171,7 +171,8 @@ jobs:
       - name: Prepare e2e tests dependencies
         run: |
           $ErrorActionPreference = "Stop"
-          & "$env:GITHUB_WORKSPACE\mirrord\scripts\win_build_test_apps.ps1"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "mirrord\scripts"
+          & "$ScriptsDir\win_build_test_apps.ps1"
 
       - name: Run Rust unit tests (Windows crates)
         run: |
