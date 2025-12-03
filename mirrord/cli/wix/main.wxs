@@ -73,11 +73,18 @@
 
     <!-- UI + License -->
     <UI>
-      <UIRef Id="WixUI_Minimal"/>
+      <UIRef Id="WixUI_InstallDir"/>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" Order="2">1</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
     </UI>
 
     <!-- License shown in installer -->
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf"/>
+    
+    <!-- Set default installation directory -->
+    <Property Id="WIXUI_INSTALLDIR" Value="APPLICATIONFOLDER"/>
 
   </Product>
 
