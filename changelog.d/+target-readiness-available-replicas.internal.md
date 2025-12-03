@@ -1,1 +1,0 @@
-`ResolvedTarget::assert_valid_mirrord_target` no longer asserts that there is at least one available replica.

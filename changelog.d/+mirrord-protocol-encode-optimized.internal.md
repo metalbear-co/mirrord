@@ -1,1 +1,0 @@
-Optimized implementation of mirrord-protocol encoding.

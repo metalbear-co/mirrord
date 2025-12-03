@@ -8,6 +8,59 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.175.0](https://github.com/metalbear-co/mirrord/tree/3.175.0) - 2025-12-03
+
+
+### Added
+
+- Add pg branching.
+- Added dlopen detour to support cgo library being loaded dynamically on Linux.
+  The feature is behind an experimental feature flag.
+- Added support for filtering incoming HTTP requests by running JSONPath
+  queries on the body and matching the results against a regex.
+
+
+### Changed
+
+- Change tracing to not emit ansi format logs in the terminal
+- Made `mirrord ci stop` command idempotent.
+- Marked mirrord config settings related to agent's mirroring as deprecated.
+  Mirroring implementation based on raw sockets will be removed in the future.
+- Updated the `experimental` section of the mirrord config:
+  1. Removed deprecated `readlink` setting.
+  2. Removed deprecated `readonly_file_buffer` setting, which had been moved to
+  `feature.fs`.
+  3. Removed `vfork_emulation` setting. vfork emulation is now always enabled.
+  4. `hook_rename` is now enabled by default.
+  5. `dns_permission_error_fatal` is now enabled by default.
+
+
+### Fixed
+
+- Fixed a rare layer crash in `exec`
+- Fixed an issue where mirrord-agent could fail with an OOM error when serving
+  heavy TCP traffic.
+- Fixed main branch Windows build errors and warnings
+- mirrord-console now compiles again
+
+
+### Internal
+
+- Added `MirrordClusterExternalResource` CRD.
+- Added a unit test verifying that the internal proxy properly handles remote
+  termination of stolen HTTP requests.
+- Added release guide in CONTRIBUTING.md.
+- Fixed some clippy lints.
+- On operator restart migrate copied pods.
+- Optimized implementation of mirrord-protocol encoding.
+- This PR fixes the issue with windows builds that steal the latest release for
+  the main branch
+- This test runs every hour and checks that the latest release exists and all
+  the artifacts are there to be fetched.
+  Also added a small fix later
+- `ResolvedTarget::assert_valid_mirrord_target` no longer asserts that there is
+  at least one available replica.
+
 ## [3.174.0](https://github.com/metalbear-co/mirrord/tree/3.174.0) - 2025-11-20
 
 
