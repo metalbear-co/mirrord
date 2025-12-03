@@ -310,10 +310,12 @@ jobs:
 
           # UPDATE VERSION IN main.wxs
           $wxsPath = "$Root\main.wxs"
-          $wxsContent = Get-Content $wxsPath -Raw
+          $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
           # Replace Version="..." with the computed version
           $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
-          Set-Content -Path $wxsPath -Value $wxsContent -NoNewline
+          # Write with UTF-8 without BOM to avoid XML parsing errors
+          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
           Write-Host "Updated Product Version in main.wxs to $msiVersion"
 
           # Export MSI version for summary
