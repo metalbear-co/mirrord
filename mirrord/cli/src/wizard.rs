@@ -1,3 +1,56 @@
+//! # mirrord Wizard (aka onboarding Wizard)
+//!
+//! The `wizard` module contains everything needed to run the `mirrord wizard` CLI command, with the
+//! exception of the frontend code. This lives in a different top-level directory called
+//! `wizard-frontend`. More documentation specific to the frontend exists in
+//! `wizard-frontend/README.md`.
+//!
+//! **The Wizard operates as follows**:
+//!
+//! 1. Build the TypeScript frontend and compress `wizard-frontend/dist` into a Gzipped file
+//! 2. Use the `include_bytes!` macro to make [`COMPRESSED_FRONTEND`] when compiled with the
+//!    `wizard` feature
+//! 3. When the command is run, the file is unzipped and the frontend served on localhost with axum
+//!    as a Single Page App
+//! 4. The wizard opens in the browser and the user can create and download a config file
+//!
+//! ### Working on the Backend
+//!
+//! Note: To compile the backend, you need to enable the `wizard` feature, for which you need the
+//! compressed frontend file. This file is in the `.gitignore` and should NOT be committed.
+//!
+//! *Example full build and run script*:
+//! ```bash
+//! ## Build the frontend.
+//! cd wizard-frontend/ || exit
+//! npm run build
+//! cd ..
+//!
+//! ## Zip frontend.
+//! tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
+//!
+//! ## If you are not changing the frontend, the above steps do not have to be repeated.
+//! ## Build mirrord w/ wizard feature.
+//! cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+//!
+//! ## Run the wizard command with trace level TRACE.
+//! RUST_LOG=mirrord=trace ./target/debug/mirrord wizard
+//! ```
+//!
+//! ### Backend Overview
+//!
+//! - Endpoints: the frontend communicates with the backend via some REST endpoints defined in
+//!   `app`.
+//! - [`State`]: the app state contains the tuple `(UserData, Client)` for updating the
+//!   `is_returning` bool and making additional resource seeker requests respectively.
+//! - [`Params`]: when listing targets, the target_type is an optional parameter (which may speed up
+//!   fetching on large clusters).
+//! - [`TargetInfo`] trait: all target types (except Targetless) implement
+//!   [`IntoTargetInfo::into_info`] to retrieve target details from the resource definition.
+//! - Errors: the wizard returns `CliError` errors, either when an io operation fails or when there
+//!   is a problem seeking resources in the cluster. For the latter, errors are turned into `None`s
+//!   to avoid the frontend stopping altogether.
+
 use std::{io::Cursor, net::SocketAddr, sync::Arc};
 
 use axum::{
@@ -16,7 +69,7 @@ use k8s_openapi::api::{
 use kube::{Client, client::ClientBuilder};
 use mirrord_config::target::TargetType;
 use mirrord_kube::{
-    api::kubernetes::{create_kube_config, rollout::Rollout, seeker::KubeResourceSeeker},
+    api::kubernetes::{create_kube_config, rollout::Rollout, seeker, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
 use serde::{Deserialize, Serialize};
@@ -36,6 +89,8 @@ use crate::{
     user_data::UserData,
 };
 
+/// The frontend `dist` dir, compressed (as bytes). The CI runs this step automatically, so you only
+/// need to do it manually if making changes to the wizard.
 const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.gz");
 #[cfg(target_os = "linux")]
 fn get_open_command() -> Command {
@@ -56,6 +111,8 @@ fn get_open_command() -> Command {
     Command::new("cmd.exe").arg("/C").arg("start").arg("")
 }
 
+/// The entrypoint for the `wizard` command. Unzips the frontend and serves it using axum, along
+/// with internal API endpoints.
 pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<()> {
     println!("<|:) Greetings, traveler!");
     println!("Opening the Wizard in the browser...");
@@ -142,12 +199,18 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
     Ok(())
 }
 
+/// The response returned from the `/api/v1/cluster-details` endpoint with namespaces and
+/// target_types that mirrord can target in the user's cluster.
 #[derive(Debug, Serialize)]
 struct ClusterDetails {
     namespaces: Vec<String>,
     target_types: Vec<TargetType>,
 }
 
+/// Represents the relevant information for each available target returned by the
+/// `/api/v1/namespace/{namespace}/targets` endpoint. `detected_ports` are used in port
+/// configuration in the wizard's Network tab to offer ports that the user is most likely to be
+/// interested in, according to the ports exposed by that target's Pod or Pods
 #[derive(Debug, Serialize)]
 struct TargetInfo {
     target_path: String,
@@ -176,6 +239,8 @@ struct Params {
     target_type: Option<TargetType>,
 }
 
+/// Called by the `/api/v1/cluster-details` endpoint, returning cluster details that are shown while
+/// the user selects a target.
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> CliResult<String> {
     let mut user_guard = arc.lock().await;
@@ -210,13 +275,15 @@ async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> C
     Ok(serde_json::to_string(&res)?)
 }
 
+/// Called by the `/api/v1/namespace/{namespace}/targets` endpoint, returning details for individual
+/// targets. Targets can only be listed in a single namespace, and may optionally only be listed for
+/// a single [`TargetType`].
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 async fn list_targets(
     State(arc): State<Arc<Mutex<(UserData, Client)>>>,
     Query(query_params): Query<Params>,
     Path(namespace): Path<String>,
 ) -> CliResult<String> {
-    // return target info using mirrord ls
     let user_guard = arc.lock().await;
     let client = user_guard.1.clone();
     let seeker = KubeResourceSeeker {
@@ -225,7 +292,7 @@ async fn list_targets(
         copy_target: true,
     };
 
-    // return target according to target type param, otherwise fetch all types (sans Targetless)
+    // Return targets according to target type param, otherwise fetch all types (sans Targetless)
     let types_of_interest = query_params
         .target_type
         .map(|t| vec![t])
@@ -301,6 +368,9 @@ async fn list_targets(
     Ok(serde_json::to_string(&targets)?)
 }
 
+/// A helper function that bridges the gap between the types in
+/// [`list_all_namespaced`][seeker::KubeResourceSeeker::list_all_namespaced] and
+/// [`into_info`][IntoTargetInfo::into_info]. Emits `warn!`s when `into_info` produces an error.
 async fn into_info<T: IntoTargetInfo>(
     target_type: kube::Result<T>,
     seeker: &KubeResourceSeeker<'_>,
@@ -316,10 +386,13 @@ async fn into_info<T: IntoTargetInfo>(
         })
 }
 
+/// Implementable by resources that can be targeted by mirrord and can produce a [`TargetInfo`].
 trait IntoTargetInfo {
-    /// Construct an instance of [`TargetInfo`] from a valid target Resource. If fetching further
-    /// resources fails, return a `CliError`. If there are any empty fields in the Resource spec,
-    /// return `None`.
+    /// Construct an instance of [`TargetInfo`] from a valid target Resource. Fetches further
+    /// resources in some cases, to detect ports on the resource's pods.
+    ///
+    /// If fetching further resources fails, return a `CliError`. If there are any empty fields in
+    /// the Resource spec, return `None`.
     fn into_info(
         self,
         seeker: &KubeResourceSeeker,
