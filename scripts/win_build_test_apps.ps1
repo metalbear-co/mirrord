@@ -13,8 +13,8 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Write-Host 'Chocolatey already installed.'
 }
 
-Write-Host 'Installing dependencies: nodejs, go, python3, curl, llvm'
-choco install -y nodejs go python3 curl llvm
+Write-Host 'Installing dependencies: nodejs, go, python3, curl, llvm, mingw'
+choco install -y nodejs go python3 curl llvm mingw
 
 Write-Host 'Installing Python packages required by tests'
 python -m pip install --upgrade pip
