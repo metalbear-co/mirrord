@@ -135,7 +135,7 @@ impl ContainerVariant for PodVariant<'_> {
                     resources: Some(resources),
                     ..Default::default()
                 }],
-                security_context: agent.security_context.clone(),
+                security_context: agent.security_context.clone().map(Into::into),
                 priority_class_name: agent.priority_class.clone(),
                 ..Default::default()
             }),
