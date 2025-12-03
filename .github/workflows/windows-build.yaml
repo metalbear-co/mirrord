@@ -165,6 +165,26 @@ jobs:
           Set-Env "MIRRORD_VERSION" $pkg.version
 
       ###########################################################################
+      # UNIT TESTS (Windows-only crates)
+      ###########################################################################
+
+      - name: Prepare e2e tests dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "$env:GITHUB_WORKSPACE\mirrord\scripts\win_build_test_apps.ps1"
+
+      - name: Run Rust unit tests (Windows crates)
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+
+      - name: Run Rust e2e tests 
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests
+
+      ###########################################################################
       # ENSURE WIX TOOLSET IS INSTALLED
       ###########################################################################
 
@@ -388,21 +408,6 @@ jobs:
 
           # Export for later (summary, logs)
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
-
-      ###########################################################################
-      # UNIT TESTS (Windows-only crates)
-      ###########################################################################
-
-      - name: Run Rust unit tests (Windows crates)
-        run: |
-          $ErrorActionPreference = "Stop"
-          # Only test the Windows-related crates on Windows to avoid Linux-only deps/tests
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
-
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests
 
       ###########################################################################
       # RELEASE PUBLISH (upload-only, no creation)
