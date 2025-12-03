@@ -989,6 +989,8 @@ pub enum Application {
     GoIssue2988(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
+    /// C++ app that dlopen c-shared go library.
+    DlopenCgo,
 }
 
 impl Application {
@@ -1168,6 +1170,7 @@ impl Application {
             Application::GoIssue2988(version) => {
                 format!("tests/apps/issue2988/{version}.go_test_app")
             }
+            Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
         }
     }
 
@@ -1282,7 +1285,8 @@ impl Application {
             | Application::RustRebind0
             | Application::RustIssue2438
             | Application::RustIssue3248
-            | Application::GoIssue2988(..) => vec![],
+            | Application::GoIssue2988(..)
+            | Application::DlopenCgo => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1377,6 +1381,7 @@ impl Application {
             | Application::NodeMakeConnections => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
+            Application::DlopenCgo => 23333,
         }
     }
 

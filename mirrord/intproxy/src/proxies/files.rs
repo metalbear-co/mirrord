@@ -870,9 +870,9 @@ impl FilesProxy {
             FileResponse::Open(Ok(open)) => {
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::Open(Ok(
-                            open.clone()
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::Open(Ok(open.clone()))).into(),
+                        )
                     })?;
 
                 self.remote_files.add(layer_id, open.fd);
@@ -893,9 +893,9 @@ impl FilesProxy {
             // Update dir maps.
             FileResponse::OpenDir(Ok(open)) => {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
-                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::OpenDir(Ok(
-                        open.clone()
-                    ))))
+                    UnexpectedAgentMessage(
+                        DaemonMessage::File(FileResponse::OpenDir(Ok(open.clone()))).into(),
+                    )
                 })?;
 
                 self.remote_dirs.add(layer_id, open.fd);
@@ -917,9 +917,9 @@ impl FilesProxy {
             FileResponse::ReadLimited(Ok(read)) => {
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Ok(
-                            read.clone(),
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::ReadLimited(Ok(read.clone()))).into(),
+                        )
                     })?;
 
                 let AdditionalRequestData::ReadBuffered {
@@ -989,9 +989,10 @@ impl FilesProxy {
                 // returned containing the error rather than a ReadLimited
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Err(
-                            error.clone(),
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::ReadLimited(Err(error.clone())))
+                                .into(),
+                        )
                     })?;
 
                 let message = match additional_data {
@@ -1014,9 +1015,9 @@ impl FilesProxy {
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::Seek(Ok(
-                            seek.clone()
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::Seek(Ok(seek.clone()))).into(),
+                        )
                     })?;
 
                 if let AdditionalRequestData::SeekBuffered { fd } = additional_data {
@@ -1049,9 +1050,9 @@ impl FilesProxy {
             // Store extra entries in `dirs_data`.
             FileResponse::ReadDirBatch(Ok(batch)) => {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
-                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
-                        batch.clone(),
-                    ))))
+                    UnexpectedAgentMessage(
+                        DaemonMessage::File(FileResponse::ReadDirBatch(Ok(batch.clone()))).into(),
+                    )
                 })?;
 
                 let Some(data) = self.buffered_dirs.get_mut(&batch.fd) else {
@@ -1085,7 +1086,9 @@ impl FilesProxy {
             // Convert to XstatFsV2 so that the layer doesn't ever need to deal with the old type.
             FileResponse::XstatFs(res) => {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
-                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::XstatFs(res.clone())))
+                    UnexpectedAgentMessage(
+                        DaemonMessage::File(FileResponse::XstatFs(res.clone())).into(),
+                    )
                 })?;
                 message_bus
                     .send(ToLayer {
@@ -1100,10 +1103,9 @@ impl FilesProxy {
 
             // Doesn't require any special logic.
             other => {
-                let (message_id, layer_id) = self
-                    .request_queue
-                    .pop_front()
-                    .ok_or_else(|| UnexpectedAgentMessage(DaemonMessage::File(other.clone())))?;
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
+                    UnexpectedAgentMessage(DaemonMessage::File(other.clone()).into())
+                })?;
                 message_bus
                     .send(ToLayer {
                         message_id,
