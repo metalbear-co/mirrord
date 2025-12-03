@@ -319,14 +319,14 @@ impl ResolvedTarget<false> {
     ///
     /// Performs only basic checks:
     /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`],
-    ///    [`ResolvedTarget::StatefulSet`] - has available replicas and the target container, if
-    ///    specified, is found in the spec
+    ///    [`ResolvedTarget::StatefulSet`] - the target container, if specified, is found in the
+    ///    spec
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`RuntimeData::from_pod`].
     /// 3. [`ResolvedTarget::Job`] and [`ResolvedTarget::CronJob`] - error, as this is `copy_target`
     ///    exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check (not applicable)
-    /// 5. [`ResolvedTarget::Service`] - has available replicas and the target container, if
-    ///    specified, is found in at least one of them
+    /// 5. [`ResolvedTarget::Service`] - the target container, if specified, is found in at least
+    ///    one of the pods
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn assert_valid_mirrord_target(
         self,
@@ -337,20 +337,6 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        resource.as_ref(),
-                        "no available replicas",
-                    ));
-                }
-
                 if let Some(container) = &container {
                     // verify that the container exists
                     resource
@@ -388,20 +374,6 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        resource.as_ref(),
-                        "no available replicas",
-                    ));
-                }
-
                 let pod_template = resource.get_pod_template(client).await?;
 
                 if let Some(container) = &container {
@@ -431,20 +403,6 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        resource.as_ref(),
-                        "no available replicas",
-                    ));
-                }
-
                 if let Some(container) = &container {
                     // verify that the container exists
                     resource
@@ -506,20 +464,6 @@ impl ResolvedTarget<false> {
                 resource,
                 container,
             }) => {
-                let available = resource
-                    .status
-                    .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".status"))?
-                    .available_replicas
-                    .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                if available <= 0 {
-                    return Err(KubeApiError::invalid_state(
-                        resource.as_ref(),
-                        "no available replicas",
-                    ));
-                }
-
                 if let Some(container) = &container {
                     // verify that the container exists
                     resource
