@@ -30,7 +30,25 @@ function Invoke-GoBuild {
     }
 }
 
-function Test-WindowsExcludedGoModule {
+function Test-RequiresUnavailableDeps {
+    param(
+        [string]$ModulePath
+    )
+
+    $goModPath = Join-Path $ModulePath 'go.mod'
+    if (-not (Test-Path $goModPath)) {
+        return $false
+    }
+
+    $goModContent = Get-Content $goModPath -ErrorAction SilentlyContinue
+    if ($goModContent -match 'v8go') {
+        return $true
+    }
+
+    return $false
+}
+
+function Should-SkipGoModule {
     param(
         [string]$ModulePath
     )
@@ -40,14 +58,24 @@ function Test-WindowsExcludedGoModule {
         return $false
     }
 
-    $allExcluded = $true
+    $allExcluded = $true;
     foreach ($file in $goFiles) {
-        if (-not (Select-String -Path $file.FullName -Pattern '^\s*//\s*(go:build|\+build).*?(!windows)' -Quiet)) {
+        if (-not (Select-String -Path $file.FullName -Pattern '^\s*//\s*(go:build|\+build).*?(!windows|linux)' -Quiet)) {
             $allExcluded = $false
             break
         }
     }
-    return $allExcluded
+    if ($allExcluded) {
+        Write-Host "Skipping Go module at $ModulePath because it excludes windows"
+        return $true
+    }
+
+    if (Test-RequiresUnavailableDeps -ModulePath $ModulePath) {
+        Write-Host "Skipping Go module at $ModulePath because it requires unavailable dependencies"
+        return $true
+    }
+
+    return $false
 }
 
 function Build-GoE2EApps {
@@ -71,8 +99,8 @@ function Build-GoE2EApps {
             Write-Host "Building in $($dir.Name)"
             Push-Location $dir.FullName
             try {
-                if (Test-WindowsExcludedGoModule -ModulePath (Get-Location).ProviderPath) {
-                    Write-Host "Skipping go-e2e module in $($dir.FullName) because it excludes windows"
+                $modulePath = (Get-Location).ProviderPath
+                if (Should-SkipGoModule -ModulePath $modulePath) {
                     continue
                 }
                 foreach ($target in $GoTargets) {
@@ -112,8 +140,8 @@ function Build-RepoGoApps {
     foreach ($goMod in $goFiles) {
         Push-Location $goMod.Directory.FullName
         try {
-            if (Test-WindowsExcludedGoModule -ModulePath (Get-Location).ProviderPath) {
-                Write-Host "Skipping Go module at $($goMod.Directory.FullName) because it excludes windows"
+            $modulePath = (Get-Location).ProviderPath
+            if (Should-SkipGoModule -ModulePath $modulePath) {
                 continue
             }
 
@@ -125,5 +153,32 @@ function Build-RepoGoApps {
         } finally {
             Pop-Location
         }
+    }
+}
+
+function Build-RustApps {
+    param(
+        [string]$RepoRoot,
+        [string]$Target = 'x86_64-pc-windows-msvc',
+        [string[]]$Crates = @('rust-websockets', 'rust-sqs-printer')
+    )
+
+    Push-Location $RepoRoot
+    try {
+        $args = @('build')
+        if ($Target) {
+            $args += @('--target', $Target)
+        }
+        foreach ($crate in $Crates) {
+            $args += @('-p', $crate)
+        }
+
+        Write-Host "Building Rust test applications: $($Crates -join ', ')"
+        & cargo @args
+        if ($LASTEXITCODE -ne 0) {
+            throw "cargo build failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
     }
 }

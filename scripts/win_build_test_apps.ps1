@@ -27,6 +27,9 @@ if (-not (Test-Path $testsDir)) {
     throw "Tests directory not found at path $testsDir"
 }
 
+# build Rust test binaries used by mirrord-tests targetless fixtures
+Build-RustApps -RepoRoot $repoRoot -Target 'x86_64-pc-windows-msvc'
+
 # builds Windows go-e2e test binaries with specific toolchains
 Build-GoE2EApps -TestsDir $testsDir
 
