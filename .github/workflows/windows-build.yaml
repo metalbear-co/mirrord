@@ -36,7 +36,19 @@ on:
       - "**/*.md"
 
 permissions:
-  contents: write   # needed for GitHub Releases
+  contents: write
+  actions: none
+  checks: none
+  deployments: none
+  id-token: none
+  issues: none
+  discussions: none
+  security-events: none
+  packages: none
+  pages: none
+  statuses: none
+  pull-requests: none
+  repository-projects: none
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
@@ -444,3 +456,10 @@ jobs:
           $md += ''
           $md += '<sub>DLL load runs in a child process to avoid crashing the job. See step logs for full outputs.</sub>'
           $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8 -Append
+  
+  post_release_checks_windows:
+    needs: [windows_tests]
+    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release != 'no'))
+    uses: ./.github/workflows/release-tests.yaml
+    secrets:
+      SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
