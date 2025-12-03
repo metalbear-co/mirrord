@@ -159,7 +159,7 @@ function Build-RepoGoApps {
 function Build-RustApps {
     param(
         [string]$RepoRoot,
-        [string]$Target = 'x86_64-pc-windows-msvc',
+        [string]$Target = $null,
         [string[]]$Crates = @('rust-websockets', 'rust-sqs-printer')
     )
 
