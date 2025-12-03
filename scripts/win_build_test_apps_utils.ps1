@@ -13,7 +13,7 @@ function Invoke-GoBuild {
     }
 
     try {
-        & go build -o $OutputName | Out-Null
+        & go build -buildvcs=false -o $OutputName | Out-Null
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
             throw "go build exited with code $exitCode in directory $DirectoryName for output $OutputName using toolchain $GoToolchain"
@@ -146,7 +146,7 @@ function Build-RepoGoApps {
             }
 
             Write-Host "Building Go test app in $($goMod.Directory.FullName)"
-            & go build -o "$OutputPrefix.go_test_app"
+            & go build -buildvcs=false -o "$OutputPrefix.go_test_app"
             if ($LASTEXITCODE -ne 0) {
                 throw "go build failed in $($goMod.Directory.FullName) with exit code $LASTEXITCODE"
             }
