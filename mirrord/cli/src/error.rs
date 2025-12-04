@@ -1,5 +1,6 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+use dll_syringe::error::InjectError;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -273,6 +274,14 @@ pub(crate) enum CliError {
     #[error("Failed to extract mirrord-layer to `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),
+
+    #[error("Failed to obtain handle to process while attaching: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    FailedProcessHandle(#[from] std::io::Error),
+
+    #[error("Failed attaching to process {0}: {1}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    FailedAttachingLayer(u32, InjectError),
 
     #[error("Failed to serialize JSON: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]

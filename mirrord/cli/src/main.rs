@@ -254,6 +254,7 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
+use attach::attach_command;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
@@ -290,6 +291,7 @@ use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
 
+mod attach;
 mod browser;
 mod ci;
 mod config;
@@ -980,6 +982,11 @@ fn main() -> miette::Result<()> {
                 let mut progress = ProgressTracker::from_env("mirrord exec");
                 exec(&args, watch, &mut user_data, &mut progress, None).await?
             }
+            #[cfg(windows)]
+            Commands::Attach { pid } => {
+                let progress = ProgressTracker::from_env("mirrord attach");
+                attach_command(pid, &progress)?;
+            }
             Commands::Dump(args) => windows_unsupported!(args, "dump", {
                 dump_command(&args, watch, &user_data).await?
             }),
@@ -1001,9 +1008,9 @@ fn main() -> miette::Result<()> {
             Commands::Operator(args) => {
                 windows_unsupported!(args, "operator", { operator_command(*args).await? })
             }
-            Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
+            Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
-            }),
+            }
             Commands::InternalProxy {
                 port,
                 mirrord_for_ci,

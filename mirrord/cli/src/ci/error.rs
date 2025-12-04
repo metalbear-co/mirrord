@@ -25,6 +25,7 @@ pub(crate) enum CiError {
     #[error("mirrord user process may be running already!")]
     UserPidAlreadyPresent,
 
+    #[cfg_attr(windows, allow(unused))]
     #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
     #[diagnostic(help(
         "`mirrord ci stop` reads the file `/tmp/mirrord/mirrord-for-ci-intproxy-pid` to stop \
@@ -34,6 +35,7 @@ pub(crate) enum CiError {
     #[cfg(not(target_os = "windows"))]
     IntproxyPidMissing,
 
+    #[cfg_attr(windows, allow(unused))]
     #[error("`mirrord ci stop` could not retrieve the mirrord-intproxy pid!")]
     #[diagnostic(help(
         "`mirrord ci stop` reads the file `/tmp/mirrord/mirrord-for-ci-intproxy-pid` to stop \
