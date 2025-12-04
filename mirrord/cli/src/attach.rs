@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 use std::{env, ffi::OsString, path::PathBuf};
 
 use dll_syringe::{Syringe, process::OwnedProcess};
