@@ -353,7 +353,7 @@ impl MirrordCi {
         })
     }
 
-    /// Converts a [`CiInfo`] into a [`MirrordCiInfo`] used by the operator.
+    /// Converts a [`CiInfo`] into a [`SessionCiInfo`] used by the operator.
     pub(super) fn info(&self) -> SessionCiInfo {
         let CiInfo { name, .. } = ci_info::get();
 
