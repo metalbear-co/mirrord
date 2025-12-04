@@ -42,5 +42,15 @@ pub enum SipError {
     BinaryMoveFailed(std::io::Error),
 
     #[error("Code sign error: `{0}`")]
-    CodeSignError(#[from] apple_codesign::AppleCodesignError),
+    CodeSignError(
+        /// Boxed due to large size.
+        #[from]
+        Box<apple_codesign::AppleCodesignError>,
+    ),
+}
+
+impl From<apple_codesign::AppleCodesignError> for SipError {
+    fn from(value: apple_codesign::AppleCodesignError) -> Self {
+        Self::CodeSignError(value.into())
+    }
 }

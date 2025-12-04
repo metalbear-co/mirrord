@@ -36,6 +36,10 @@ pub struct ConnectParams<'a> {
     #[serde(with = "mysql_branches_serde")]
     pub mysql_branch_names: Vec<String>,
 
+    /// Resource names of the PostgreSQL branch databases to use for the connection.
+    #[serde(with = "pg_branches_serde")]
+    pub pg_branch_names: Vec<String>,
+
     #[serde(with = "session_ci_info_serde")]
     pub session_ci_info: Option<SessionCiInfo>,
 }
@@ -45,6 +49,7 @@ impl<'a> ConnectParams<'a> {
         config: &'a LayerConfig,
         branch_name: Option<String>,
         mysql_branch_names: Vec<String>,
+        pg_branch_names: Vec<String>,
         session_ci_info: Option<SessionCiInfo>,
     ) -> Self {
         Self {
@@ -55,6 +60,7 @@ impl<'a> ConnectParams<'a> {
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
             mysql_branch_names,
+            pg_branch_names,
             session_ci_info,
         }
     }
@@ -93,6 +99,23 @@ mod mysql_branches_serde {
             serializer.serialize_none()
         } else {
             let as_json = serde_json::to_string(mysql_branches)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
+        }
+    }
+}
+
+mod pg_branches_serde {
+    use serde::Serializer;
+
+    pub fn serialize<S>(pg_branches: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if pg_branches.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(pg_branches)
                 .expect("serialization to memory should not fail");
             serializer.serialize_str(&as_json)
         }

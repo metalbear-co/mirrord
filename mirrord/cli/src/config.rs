@@ -765,7 +765,7 @@ pub(super) enum OperatorCommand {
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
-    Setup(#[clap(flatten)] OperatorSetupParams),
+    Setup(#[clap(flatten)] Box<OperatorSetupParams>),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -845,6 +845,12 @@ pub(super) struct OperatorSetupParams {
     /// a mysql branching component.
     #[arg(long, visible_alias = "mysql", default_value_t = false)]
     pub(super) mysql_branching: bool,
+
+    /// Enable PostgreSQL database branching.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a PostgreSQL branching component.
+    #[arg(long, visible_alias = "pg", default_value_t = false)]
+    pub(super) pg_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.

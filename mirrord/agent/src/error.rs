@@ -49,7 +49,11 @@ pub(crate) enum AgentError {
     ExhaustedConnectionId,
 
     #[error("Failed to parse the given HTTP filter: {0}")]
-    InvalidHttpFilter(#[from] FilterCreationError),
+    InvalidHttpFilter(
+        /// Boxed due to large size difference.
+        #[from]
+        Box<FilterCreationError>,
+    ),
 
     #[error("Timeout on accepting first client connection")]
     FirstConnectionTimeout,

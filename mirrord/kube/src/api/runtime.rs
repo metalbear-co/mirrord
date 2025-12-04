@@ -5,7 +5,7 @@ use std::{
     fmt::{self, Display, Formatter},
     future::Future,
     net::IpAddr,
-    ops::FromResidual,
+    ops::{FromResidual, Not},
     str::FromStr,
 };
 
@@ -268,20 +268,23 @@ impl RuntimeData {
         };
 
         loop {
-            let pods_on_node = pod_api.list(&list_params).await?;
+            let pods_on_node = pod_api.list_metadata(&list_params).await?;
 
             pod_count += pods_on_node.items.len();
 
             match pods_on_node.metadata.continue_ {
-                Some(next) => {
+                Some(next) if next.is_empty().not() => {
                     list_params = list_params.continue_token(&next);
                 }
-                None => break,
+                None | Some(..) => break,
             }
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed(node, pod_count)
+            NodeCheck::Failed {
+                node: Box::new(node),
+                pod_count,
+            }
         } else {
             NodeCheck::Success
         }
@@ -347,7 +350,14 @@ impl RuntimeData {
 #[derive(Debug)]
 pub enum NodeCheck {
     Success,
-    Failed(Node, usize),
+    Failed {
+        /// [`Node`] fetched from the API.
+        ///
+        /// Boxed due to large size (>1kb).
+        node: Box<Node>,
+        /// Count of pods found on the node.
+        pod_count: usize,
+    },
     Error(KubeApiError),
 }
 

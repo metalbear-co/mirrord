@@ -42,7 +42,7 @@ use crate::{
 /// is started with either [`Self::steal`] or [`Self::pass_through`].
 pub struct RedirectedHttp {
     request: ExtractedRequest,
-    info: ConnectionInfo,
+    info: Arc<ConnectionInfo>,
     mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
     ///
@@ -70,7 +70,7 @@ impl RedirectedHttp {
     /// as [`Handle::current()`] is stored in this struct.
     /// We might need to connect to the original destination in the future.
     pub fn new(
-        info: ConnectionInfo,
+        info: Arc<ConnectionInfo>,
         request: ExtractedRequest,
         redirector_config: RedirectorTaskConfig,
     ) -> Self {
@@ -307,7 +307,7 @@ static MAX_BODY_BUFFER_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
 });
 /// Steal handle to a redirected HTTP request.
 pub struct StolenHttp {
-    pub info: ConnectionInfo,
+    pub info: Arc<ConnectionInfo>,
     pub request_head: RequestHead,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
@@ -412,7 +412,7 @@ impl ResponseBodyProvider {
 
 /// Mirror handle to a redirected HTTP request.
 pub struct MirroredHttp {
-    pub info: ConnectionInfo,
+    pub info: Arc<ConnectionInfo>,
     pub request_head: RequestHead,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
