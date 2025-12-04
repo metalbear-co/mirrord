@@ -16,6 +16,13 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 Write-Host 'Installing dependencies: nodejs, go, python3, curl, llvm, mingw'
 choco install -y nodejs go python3 curl llvm mingw
 
+Write-Host 'Refreshing environment variables after Chocolatey installations'
+if (Get-Command refreshenv -ErrorAction SilentlyContinue) {
+    refreshenv | Out-Null
+} else {
+    Write-Warning 'refreshenv command not found; PATH changes may require reopening the shell.'
+}
+
 Write-Host 'Installing Python packages required by tests'
 python -m pip install --upgrade pip
 python -m pip install uvicorn fastapi flask
