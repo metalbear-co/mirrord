@@ -841,8 +841,6 @@ impl OperatorApi<PreparedClientCert> {
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
 
-            tracing::info!(?connect_url, "URL IS");
-
             let session = self.make_operator_session(None, connect_url)?;
 
             (session, false)
