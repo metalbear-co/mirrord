@@ -78,6 +78,12 @@ jobs:
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
 
+      - name: Prepare e2e tests dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\win_build_test_apps.ps1"
+
       - name: Prepare artifacts
         id: prep
         run: |
@@ -167,12 +173,6 @@ jobs:
       ###########################################################################
       # UNIT TESTS (Windows-only crates)
       ###########################################################################
-
-      - name: Prepare e2e tests dependencies
-        run: |
-          $ErrorActionPreference = "Stop"
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\win_build_test_apps.ps1"
 
       - name: Run Rust unit tests (Windows crates)
         run: |
