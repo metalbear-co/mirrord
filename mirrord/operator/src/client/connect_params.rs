@@ -40,7 +40,10 @@ pub struct ConnectParams<'a> {
     #[serde(with = "pg_branches_serde")]
     pub pg_branch_names: Vec<String>,
 
-    #[serde(with = "session_ci_info_serde")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "session_ci_info_serde"
+    )]
     pub session_ci_info: Option<SessionCiInfo>,
 }
 
@@ -128,13 +131,13 @@ mod session_ci_info_serde {
     use crate::crd::session::SessionCiInfo;
 
     pub fn serialize<S>(
-        session_ci_ifno: &Option<SessionCiInfo>,
+        session_ci_info: &Option<SessionCiInfo>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let as_json = serde_json::to_string(session_ci_ifno)
+        let as_json = serde_json::to_string(session_ci_info)
             .expect("serialization to memory should not fail");
         serializer.serialize_str(&as_json)
     }

@@ -158,14 +158,18 @@ pub struct SessionClosed {
 #[serde(rename_all = "camelCase")]
 pub struct SessionCiInfo {
     /// CI provider, e.g. "github", "gitlab", ...
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
 
     /// Staging, production, test, nightly, ...
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
 
     /// Pipeline/job name, e.g. "e2e-tests".
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<String>,
 
     /// PR, manual, push, ...
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub triggered_by: Option<String>,
 }

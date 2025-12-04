@@ -840,6 +840,9 @@ impl OperatorApi<PreparedClientCert> {
                 session_ci_info.clone(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
+
+            tracing::info!(?connect_url, "URL IS");
+
             let session = self.make_operator_session(None, connect_url)?;
 
             (session, false)
@@ -1466,6 +1469,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -1484,6 +1488,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1510,6 +1515,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -1528,6 +1534,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1554,6 +1561,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1572,6 +1580,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -1604,6 +1613,7 @@ mod test {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1633,6 +1643,7 @@ mod test {
         )]),
         Default::default(),
         Default::default(),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&sqs_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
@@ -1655,6 +1666,7 @@ mod test {
         Default::default(),
         Default::default(),
         vec!["branch-1".into(), "branch-2".into()],
+        Default::default(),
         Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&mysql_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
@@ -1679,8 +1691,37 @@ mod test {
         Default::default(),
         Default::default(),
         vec!["branch-1".into(), "branch-2".into()],
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
         ?connect=true&on_concurrent_steal=abort&pg_branch_names=%5B%22branch-1%22%2C%22branch-2%22%5D",
+    )]
+    #[case::deployment_no_container_no_proxy_with_session_ci_info(
+        false,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            }.into(),
+            container: None,
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Some(SessionCiInfo {
+            provider: Some("Krzysztof".into()),
+            environment: Some("Kresy".into()),
+            pipeline: Some("Wschodnie".into()),
+            triggered_by: Some("Kononowicz".into())
+        }),
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort&session_ci_info=%7B%22provider%22%3A%22Krzysztof%22%2C%22environment%22%3A%22Kresy%22%2C%22pipeline%22%3A%22Wschodnie%22%2C%22triggeredBy%22%3A%22Kononowicz%22%7D"
     )]
     #[test]
     fn target_connect_url(
