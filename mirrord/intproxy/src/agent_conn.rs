@@ -15,13 +15,21 @@ use mirrord_operator::{
     },
     types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
+#[cfg(test)]
+use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use mirrord_protocol_io::{ConnectionOutput, TxHandle};
+#[cfg(not(test))]
+use serde::Deserialize;
+use serde::Serialize;
 use strum::IntoDiscriminant;
 use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 pub use tls::ConnectionTlsError;
 use tokio::net::{TcpSocket, TcpStream};
+#[cfg(test)]
+use tokio::sync::mpsc;
 use tokio_retry::{RetryIf, strategy::ExponentialBackoff};
 use tracing::Level;
 
@@ -54,7 +62,8 @@ pub enum AgentConnectionError {
 }
 
 /// Directive for the proxy on how to connect to the agent.
-#[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants)]
+#[derive(Debug, Clone, Serialize, EnumDiscriminants)]
+#[cfg_attr(not(test), derive(Deserialize))]
 pub enum AgentConnectInfo {
     /// Connect to agent through `mirrord extproxy`.
     ExternalProxy {
@@ -65,6 +74,10 @@ pub enum AgentConnectInfo {
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
+    /// Use a dummy connection. For tests only. The sender is used for
+    /// sending the new dummy connection to the driver code.
+    #[cfg(test)]
+    Dummy(#[serde(skip)] mpsc::Sender<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>),
 }
 
 impl fmt::Display for AgentConnectInfoDiscriminants {
@@ -73,6 +86,8 @@ impl fmt::Display for AgentConnectInfoDiscriminants {
             Self::ExternalProxy => "external proxy",
             Self::Operator => "operator",
             Self::DirectKubernetes => "agent",
+            #[cfg(test)]
+            Self::Dummy => "dummy",
         };
 
         f.write_str(as_str)
@@ -184,6 +199,19 @@ impl AgentConnection {
             AgentConnectInfo::DirectKubernetes(connect_info) => {
                 let conn = portforward::create_connection(config, connect_info.clone()).await?;
                 (conn, ReconnectFlow::Break(kind))
+            }
+
+            #[cfg(test)]
+            AgentConnectInfo::Dummy(sender) => {
+                let (conn, tx, rx) = Connection::dummy();
+                sender.send((tx, rx)).await.unwrap();
+
+                let reconnect = ReconnectFlow::ConnectInfo {
+                    config: config.clone(),
+                    connect_info: AgentConnectInfo::Dummy(sender),
+                };
+
+                (conn, reconnect)
             }
         };
 

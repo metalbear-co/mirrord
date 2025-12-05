@@ -722,17 +722,31 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
-    use mirrord_intproxy_protocol::{
-        LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
+    use mirrord_analytics::NullReporter;
+    use mirrord_config::{
+        LayerConfig, LayerFileConfig,
+        config::{ConfigContext, MirrordConfig, context},
+        experimental::ExperimentalFileConfig,
     };
-    use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, file::StatFsRequestV2};
+    use mirrord_intproxy_protocol::{
+        IncomingRequest, LayerToProxyMessage, LocalMessage, NewSessionRequest, PortSubscribe,
+        PortSubscription, ProcessInfo, ProxyToLayerMessage,
+    };
+    use mirrord_protocol::{
+        ClientMessage, DaemonMessage, FileRequest, RemoteResult, VERSION, file::StatFsRequestV2,
+        tcp::StealType,
+    };
     use mirrord_protocol_io::Connection;
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+    };
 
     use crate::{
         IntProxy,
-        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
+        agent_conn::{
+            AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
+        },
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -983,5 +997,115 @@ mod test {
         .await
         .unwrap()
         .unwrap_err();
+    }
+
+    /// Verifies that [`IntProxy`] reconnects and restores state (port subscriptions) correctly
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect() {
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+
+        let config = LayerFileConfig::default()
+            .generate_config(&mut Default::default())
+            .unwrap();
+
+        let (conn_tx, mut conn_rx) = mpsc::channel(1);
+
+        let agent_conn = AgentConnection::new(
+            &config,
+            AgentConnectInfo::Dummy(conn_tx),
+            &mut NullReporter::default(),
+        )
+        .await
+        .unwrap();
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        let from_proxy = async || {
+
+		};
+
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+        );
+        tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+
+        encoder
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: 1337,
+                        parent_pid: 1336,
+                        name: "hello there".into(),
+                        cmdline: vec!["hello there".into()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        encoder.flush().await.unwrap();
+        match decoder.receive().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(..),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        assert_eq!(
+            from_proxy.next().await,
+            Some(ClientMessage::SwitchProtocolVersion(VERSION.clone())),
+        );
+
+        to_proxy
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+
+        // Subscribe to a port and open a file. These are the only
+        // subsystems that need to restore state after a reconnect.
+        encoder
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
+                    PortSubscribe {
+                        listening_on: "0.0.0.0:42069".parse().unwrap(),
+                        subscription: PortSubscription::Steal(StealType::All(42069)),
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decoder.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Incoming(
+                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                )
+            }))
+        ))
     }
 }
