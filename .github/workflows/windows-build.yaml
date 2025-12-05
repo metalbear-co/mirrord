@@ -602,7 +602,7 @@ jobs:
           $verificationLines += "   Expected checksum (mirrord-$version.msi):"
           $verificationLines += "   $($hash.Hash)"
           $verificationLines += ''
-          $verificationLines += '3. Optionally, verify the MSI’s digital signature:'
+          $verificationLines += '3. Optionally, verify the MSIs digital signature:'
           $verificationLines += '   - Publisher: MetalBear'
           $verificationLines += '   - Signature algorithm: SHA256'
           $verificationLines += '   - Timestamped by DigiCert'
