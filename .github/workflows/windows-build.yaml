@@ -70,32 +70,40 @@ jobs:
           rustc -V
           cargo -V
           rustup show
+
       ###########################################################################
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
-
       - name: Prepare artifacts
         id: prep
         run: |
           $ErrorActionPreference = "Stop"
           function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
+
           $Target = "x86_64-pc-windows-msvc"
           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
           $Tmp = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+
           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
+
           if ($env:MODE -eq "reuse") {
             # DOWNLOAD FROM GCS
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
               throw "gcloud not found"
             }
+
             $dest = Join-Path $Tmp "picked"
             New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
             gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
+
             $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
             $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
+
             if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
+
             # SIGN IF NEEDED
             if ($shouldSign) {
               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
@@ -103,15 +111,18 @@ jobs:
               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                   /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
             }
+
             Set-Env "MIRRORD_EXE" $exe
             Set-Env "MIRRORD_LAYER_FILE" $dll
             Set-Env "MIRRORD_VERSION" "unknown"
             exit 0
           }
+
           ####################################################################
           # BUILD + SIGN ARTIFACTS
           ####################################################################
           rustup target add $Target
+
           # BUILD DLL
           cargo build -p mirrord-layer-win --target $Target
           $dll = Join-Path $DbgDir "mirrord_layer_win.dll"
@@ -119,10 +130,12 @@ jobs:
             $dll = Join-Path $RelDir "mirrord_layer_win.dll"
           }
           if (-not (Test-Path $dll)) { throw "DLL not found" }
+
           if ($shouldSign) {
             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           }
+
           # BUILD CLI
           $env:MIRRORD_LAYER_FILE = $dll
           cargo build -p mirrord --bin mirrord --target $Target
@@ -131,32 +144,39 @@ jobs:
             $exe = Join-Path $RelDir "mirrord.exe"
           }
           if (-not (Test-Path $exe)) { throw "EXE not found" }
+
           if ($shouldSign) {
             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           }
+
           # EXPORT ENV
           Set-Env "MIRRORD_EXE" $exe
           Set-Env "MIRRORD_LAYER_FILE" $dll
+
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
           Set-Env "MIRRORD_VERSION" $pkg.version
+
       ###########################################################################
       # ENSURE WIX TOOLSET IS INSTALLED
       ###########################################################################
-
       - name: Ensure WiX Toolset
         run: |
           $ErrorActionPreference = "Stop"
+
           function Write-Env([string]$k,[string]$v) {
             "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
           }
+
           function Find-Candle {
             param(
               [switch]$DeepSearch
             )
+
             Write-Host "Searching for WiX candle.exe in known locations..."
             $candidateDirs = @()
+
             if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
               $candidateDirs += @(
                 (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
@@ -164,6 +184,7 @@ jobs:
                 (Join-Path $Env:ChocolateyInstall "bin")
               )
             }
+
             $candidateDirs += @(
               "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
               "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
@@ -176,7 +197,9 @@ jobs:
               "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
               "$Env:ProgramData\chocolatey\bin"
             )
+
             $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
+
             foreach ($dir in $candidateDirs) {
               $candlePath = Join-Path $dir "candle.exe"
               if (Test-Path $candlePath) {
@@ -184,6 +207,7 @@ jobs:
                 return $candlePath
               }
             }
+
             if ($DeepSearch) {
               Write-Host "No candle.exe in known dirs. Deep searching C:\ for candle.exe (may take time)..."
               try {
@@ -198,8 +222,10 @@ jobs:
                 Write-Warning "Deep search failed: $($_.Exception.Message)"
               }
             }
+
             return $null
           }
+
           # 1. Try PATH directly
           $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
           $candlePath = $null
@@ -210,6 +236,7 @@ jobs:
             # 2. Try common locations
             $candlePath = Find-Candle
           }
+
           # 3. If still not found, try installing via Chocolatey (best effort)
           if (-not $candlePath) {
             Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
@@ -224,6 +251,7 @@ jobs:
             } catch {
               Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
             }
+
             # 4. After choco, re-check (including deep search)
             $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
             if ($candleCmd) {
@@ -233,9 +261,11 @@ jobs:
               $candlePath = Find-Candle -DeepSearch
             }
           }
+
           if (-not $candlePath -or -not (Test-Path $candlePath)) {
             throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists (e.g., via Chocolatey or MSI)."
           }
+
           # Resolve light.exe in same directory (or via PATH as fallback)
           $wixDir = Split-Path $candlePath -Parent
           $lightPath = Join-Path $wixDir "light.exe"
@@ -245,34 +275,42 @@ jobs:
               $lightPath = $lightCmd.Source
             }
           }
+
           if (-not (Test-Path $lightPath)) {
             throw "Found candle.exe at '$candlePath' but could not find light.exe in the same directory or on PATH. Please ensure a full WiX Toolset 3.x install (candle.exe and light.exe)."
           }
+
           Write-Host "Resolved WiX tools:"
           Write-Host "  candle.exe = $candlePath"
           Write-Host "  light.exe  = $lightPath"
+
           # Export for subsequent steps
           Write-Env "CANDLE_EXE" $candlePath
           Write-Env "LIGHT_EXE"  $lightPath
+
       ###########################################################################
       # BUILD MSI USING main.wxs
       ###########################################################################
-
       - name: Build MSI
         run: |
           $ErrorActionPreference = "Stop"
+
           if (-not $env:CANDLE_EXE -or -not (Test-Path $env:CANDLE_EXE)) {
             throw "CANDLE_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
           }
           if (-not $env:LIGHT_EXE -or -not (Test-Path $env:LIGHT_EXE)) {
             throw "LIGHT_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
           }
+
           $candle = $env:CANDLE_EXE
           $light  = $env:LIGHT_EXE
+
           Write-Host "Using candle.exe at: $candle"
           Write-Host "Using light.exe  at: $light"
+
           $Root = "C:\wix\mirrord"
           New-Item -ItemType Directory -Force -Path $Root | Out-Null
+
           # COPY ARTIFACTS + ASSETS
           Copy-Item $env:MIRRORD_EXE "$Root\mirrord.exe" -Force
           Copy-Item $env:MIRRORD_LAYER_FILE "$Root\mirrord_layer_win.dll" -Force
@@ -323,106 +361,127 @@ jobs:
 
           $Obj = "$Root\main.wixobj"
           $Msi = "$Root\mirrord.msi"
+
           if (Test-Path $Msi) { Remove-Item $Msi -Force }
+
           & $candle -nologo -v "$Root\main.wxs" -out $Obj
           & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
+
           if (-not (Test-Path $Msi)) { throw "MSI not produced" }
+
           "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
+
       ###########################################################################
       # SIGN MSI (optional, same cert as EXE/DLL)
       ###########################################################################
-
       - name: Sign MSI
         if: env.SIGN_ARTIFACTS == 'true'
         run: |
           $ErrorActionPreference = "Stop"
+
           $msi = $env:MSI_PATH
           if (-not (Test-Path $msi)) {
             throw "MSI_PATH '$msi' does not exist."
           }
+
           & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
+
       ###########################################################################
       # UPLOAD MSI TO PUBLIC GCS BUCKET
       ###########################################################################
-
       - name: Upload MSI to GCS
         run: |
           $ErrorActionPreference = "Stop"
+
           $msi = $env:MSI_PATH
           if (-not (Test-Path $msi)) {
             throw "MSI_PATH '$msi' does not exist."
           }
+
           $runId = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
             $refName = "unknown"
           }
+
           # Sanitize ref name for use in path
           $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
+
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
           $destFolder = "$bucketBase/$refSafe/run-$runId"
           $destUri = "$destFolder/mirrord.msi"
+
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
+
           # Export for later (summary, logs, HTTP URL computation)
           "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MSI_GCS_RUN_ID=$runId" | Out-File -Append -FilePath $env:GITHUB_ENV
           "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
+
       ###########################################################################
       # UNIT TESTS (Windows-only crates)
       ###########################################################################
-
       - name: Run Rust unit tests (Windows crates)
         run: |
           $ErrorActionPreference = "Stop"
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
+
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
       ###########################################################################
-
       - name: Compute release tag
         id: tag
         run: |
           $ErrorActionPreference = "Stop"
+
           if ($env:RELEASE_TAG_INPUT) {
             $tag = $env:RELEASE_TAG_INPUT
           } else {
             $tag = $env:MIRRORD_VERSION
           }
+
           if ([string]::IsNullOrWhiteSpace($tag)) {
             throw "Could not determine version (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
           }
+
           if ($tag.StartsWith("v")) {
             $tag = $tag.Substring(1)
           }
+
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Using RELEASE_TAG (version): $tag"
+
       ###########################################################################
       # COMPUTE MSI DOWNLOAD URL FOR WINGET (FROM GCS)
       ###########################################################################
-
       - name: Compute MSI download URL for WinGet
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
+
           $httpBase = $env:MSI_HTTP_BASE
           if (-not $httpBase) {
             throw "MSI_HTTP_BASE must be set for WinGet."
           }
           $httpBase = $httpBase.TrimEnd('/')
+
           $refSafe = $env:MSI_GCS_REF_SAFE
           $runId   = $env:MSI_GCS_RUN_ID
+
           if (-not $refSafe -or -not $runId) {
             throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
           }
+
           $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
           Write-Host "Computed MSI download URL for WinGet: $url"
+
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+
       ###########################################################################
       # INSTALL .NET RUNTIME FOR WINGETCREATE
       ###########################################################################
-
       - name: Install .NET runtime for wingetcreate
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         uses: actions/setup-dotnet@v4
@@ -434,31 +493,37 @@ jobs:
       ###########################################################################
       # UPDATE WinGet MANIFEST (wingetcreate)
       ###########################################################################
-
       - name: Update WinGet manifest (wingetcreate)
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
+
           $packageId = $env:WINGET_PACKAGE_ID
           if (-not $packageId) {
             throw "WINGET_PACKAGE_ID env var is not set."
           }
+
           $version = $env:RELEASE_TAG
           if (-not $version) {
             throw "RELEASE_TAG env var is not set."
           }
+
           $installerUrl = $env:MSI_DOWNLOAD_URL
           if (-not $installerUrl) {
             throw "MSI_DOWNLOAD_URL env var is not set."
           }
+
           $gitToken = "${{ secrets.WINGET_TOKEN }}"
           if (-not $gitToken) {
             throw "secrets.WINGET_TOKEN is not configured in this repo."
           }
+
           Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
           Write-Host "Installer URL: $installerUrl"
+
           # Download latest single-file wingetcreate.exe
           Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
           # Run wingetcreate update and capture output
           $args = @(
             "update", $packageId,
@@ -467,10 +532,14 @@ jobs:
             "--submit",
             "--token", $gitToken
           )
+
           Write-Host "Running: wingetcreate.exe $($args -join ' ')"
+
           $output = & .\wingetcreate.exe @args 2>&1
           $exitCode = $LASTEXITCODE
+
           $output | ForEach-Object { Write-Host $_ }
+
           if ($exitCode -ne 0) {
             if ($output -match "was not found") {
               Write-Warning "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Skipping update (non-fatal)."
@@ -480,29 +549,34 @@ jobs:
               throw "wingetcreate update failed with exit code $exitCode"
             }
           }
+
       ###########################################################################
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
-
       - name: Build Chocolatey package
         if: ${{ env.PUBLISH_CHOCO == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
+
           if (-not $env:MSI_PATH -or -not (Test-Path $env:MSI_PATH)) {
             throw "MSI_PATH is not set or file does not exist. Cannot build Chocolatey package."
           }
           if (-not $env:RELEASE_TAG) {
             throw "RELEASE_TAG is not set. Ensure 'Compute release tag' ran successfully."
           }
+
           $pkgRoot  = Join-Path $env:RUNNER_TEMP "choco"
           $toolsDir = Join-Path $pkgRoot "tools"
+
           if (Test-Path $pkgRoot) {
             Remove-Item $pkgRoot -Recurse -Force
           }
           New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
           # Copy MSI into tools directory
           Copy-Item $env:MSI_PATH (Join-Path $toolsDir "mirrord.msi") -Force
-          # LICENSE.txt (required when shipping binaries)
+
+          # LICENSE.txt (from repo LICENSE)
           $licenseSource = Join-Path $env:GITHUB_WORKSPACE 'LICENSE'
           $licenseDest   = Join-Path $toolsDir 'LICENSE.txt'
           if (Test-Path $licenseSource) {
@@ -510,68 +584,142 @@ jobs:
           } else {
             Write-Warning "LICENSE file not found at $licenseSource; Chocolatey expects LICENSE.txt alongside binaries."
           }
-          # VERIFICATION.txt (required when shipping binaries)
+
+          # VERIFICATION.txt with real version + SHA256
           $verificationPath = Join-Path $toolsDir 'VERIFICATION.txt'
           $hash = Get-FileHash $env:MSI_PATH -Algorithm SHA256
+          $version = $env:RELEASE_TAG
+
           $verificationLines = @()
           $verificationLines += 'VERIFICATION'
           $verificationLines += '------------'
           $verificationLines += ''
           $verificationLines += '1. Download the mirrord MSI from the official source:'
-          $verificationLines += '   https://github.com/metalbear-co/mirrord/releases'
+          $verificationLines += "   https://github.com/metalbear-co/mirrord/releases/tag/$version"
           $verificationLines += ''
-          $verificationLines += '2. Verify the SHA256 checksum of the downloaded file matches:'
+          $verificationLines += '2. Compute the SHA256 checksum of the downloaded file.'
+          $verificationLines += ''
+          $verificationLines += "   Expected checksum (mirrord-$version.msi):"
           $verificationLines += "   $($hash.Hash)"
+          $verificationLines += ''
+          $verificationLines += '3. Optionally, verify the MSI’s digital signature:'
+          $verificationLines += '   - Publisher: MetalBear'
+          $verificationLines += '   - Signature algorithm: SHA256'
+          $verificationLines += '   - Timestamped by DigiCert'
           $verificationLines += ''
           $verificationLines += 'This installer is built from the source at:'
           $verificationLines += '   https://github.com/metalbear-co/mirrord'
           $verificationLines | Set-Content -Encoding UTF8 -Path $verificationPath
+
+          # mirrord.nuspec
           $nuspecPath = Join-Path $pkgRoot "mirrord.nuspec"
-          $version    = $env:RELEASE_TAG
           $releaseNotesUrl = "https://github.com/metalbear-co/mirrord/releases/tag/$version"
+
           $nuspecLines = @()
-          $nuspecLines += '<?xml version="1.0"?>'
+          $nuspecLines += '<?xml version="1.0" encoding="utf-8"?>'
           $nuspecLines += '<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">'
           $nuspecLines += '  <metadata>'
+          $nuspecLines += '    <!-- Package identity -->'
           $nuspecLines += '    <id>mirrord</id>'
           $nuspecLines += "    <version>$version</version>"
+          $nuspecLines += ''
+          $nuspecLines += '    <!-- Display info -->'
           $nuspecLines += '    <title>mirrord (Kubernetes dev tool)</title>'
-          $nuspecLines += '    <summary>Run local code in the context of your Kubernetes environment.</summary>'
           $nuspecLines += '    <authors>MetalBear</authors>'
           $nuspecLines += '    <owners>MetalBear</owners>'
-          $nuspecLines += '    <licenseUrl>https://github.com/metalbear-co/mirrord/blob/main/LICENSE</licenseUrl>'
+          $nuspecLines += ''
+          $nuspecLines += '    <!-- URLs -->'
           $nuspecLines += '    <projectUrl>https://github.com/metalbear-co/mirrord</projectUrl>'
-          $nuspecLines += '    <packageSourceUrl>https://github.com/metalbear-co/mirrord</packageSourceUrl>'
-          $nuspecLines += '    <projectSourceUrl>https://github.com/metalbear-co/mirrord</projectSourceUrl>'
-          $nuspecLines += '    <docsUrl>https://mirrord.dev</docsUrl>'
-          $nuspecLines += '    <bugTrackerUrl>https://github.com/metalbear-co/mirrord/issues</bugTrackerUrl>'
-          $nuspecLines += '    <iconUrl>https://raw.githubusercontent.com/metalbear-co/mirrord/main/assets/icon.png</iconUrl>'
+          $nuspecLines += '    <licenseUrl>https://github.com/metalbear-co/mirrord/blob/main/LICENSE</licenseUrl>'
           $nuspecLines += '    <requireLicenseAcceptance>false</requireLicenseAcceptance>'
-          $nuspecLines += '    <description>mirrord lets you run local code in the context of your cloud environment (Kubernetes).</description>'
+          $nuspecLines += '    <projectSourceUrl>https://github.com/metalbear-co/mirrord</projectSourceUrl>'
+          $nuspecLines += '    <packageSourceUrl>https://github.com/metalbear-co/mirrord</packageSourceUrl>'
+          $nuspecLines += '    <docsUrl>https://metalbear.com/mirrord/docs</docsUrl>'
+          $nuspecLines += '    <bugTrackerUrl>https://github.com/metalbear-co/mirrord/issues</bugTrackerUrl>'
+          $nuspecLines += '    <iconUrl>https://raw.githubusercontent.com/metalbear-co/mirrord/refs/heads/chocolatey-packaging/mirrord/cli/wix/mirrord.ico</iconUrl>'
+          $nuspecLines += ''
+          $nuspecLines += '    <!-- Metadata -->'
+          $nuspecLines += '    <tags>mirrord kubernetes cloud debugging devtools cli vscode intellij</tags>'
+          $nuspecLines += '    <summary>Run local code in your Kubernetes environment, without complex local setups.</summary>'
+          $nuspecLines += '    <description>'
+          $nuspecLines += '      mirrord is an open-source tool by MetalBear that lets you run local code as if it were part of your remote Kubernetes environment.'
+          $nuspecLines += '      Instead of standing up full local stacks or deploying to staging on every change, mirrord proxies traffic, environment variables, and file access'
+          $nuspecLines += '      between your local process and a target pod or deployment in the cluster. This shortens the inner dev loop while keeping the shared environment stable.'
+          $nuspecLines += '    </description>'
           $nuspecLines += "    <releaseNotes>$releaseNotesUrl</releaseNotes>"
-          $nuspecLines += '    <tags>mirrord kubernetes debugging cloud</tags>'
           $nuspecLines += '  </metadata>'
           $nuspecLines += '  <files>'
+          $nuspecLines += '    <!-- Your build step places mirrord.msi, LICENSE.txt, VERIFICATION.txt under tools\ -->'
           $nuspecLines += '    <file src="tools\**" target="tools" />'
           $nuspecLines += '  </files>'
           $nuspecLines += '</package>'
           $nuspecLines | Set-Content -Encoding UTF8 -Path $nuspecPath
+
+          # chocolateyinstall.ps1
           $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
-          # single-quoted strings so $packageName / $msiPath stay literal in the script
           $installLines = @()
           $installLines += '$ErrorActionPreference = ''Stop'''
           $installLines += ''
-          $installLines += '$packageName = ''mirrord'''
-          $installLines += '$toolsDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition'
-          $installLines += '$msiPath     = Join-Path $toolsDir ''mirrord.msi'''
+          $installLines += '$toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition'
+          $installLines += '$msiPath  = Join-Path $toolsDir ''mirrord.msi'''
           $installLines += ''
-          $installLines += 'Install-ChocolateyInstallPackage -PackageName $packageName -FileType ''msi'' -SilentArgs ''/qn /norestart'' -ValidExitCodes @(0, 3010) -File $msiPath'
+          $installLines += 'if (-not (Test-Path $msiPath)) {'
+          $installLines += '    throw "mirrord.msi not found in tools directory: $msiPath"'
+          $installLines += '}'
+          $installLines += ''
+          $installLines += '$packageArgs = @{'
+          $installLines += '    packageName    = $env:ChocolateyPackageName'
+          $installLines += '    fileType       = ''MSI'''
+          $installLines += '    file           = $msiPath'
+          $installLines += '    silentArgs     = ''/qn /norestart'''
+          $installLines += '    validExitCodes = @(0, 3010)'
+          $installLines += '}'
+          $installLines += ''
+          $installLines += 'Install-ChocolateyInstallPackage @packageArgs'
           $installLines | Set-Content -Encoding UTF8 -Path $installScript
-          # Ensure choco is available
+
+          # chocolateyuninstall.ps1
+          $uninstallScript = Join-Path $toolsDir "chocolateyuninstall.ps1"
+          $uninstallLines = @()
+          $uninstallLines += '$ErrorActionPreference = ''Stop'''
+          $uninstallLines += ''
+          $uninstallLines += '$packageName  = $env:ChocolateyPackageName'
+          $uninstallLines += '$softwareName = ''mirrord*''  # must match MSI DisplayName'
+          $uninstallLines += ''
+          $uninstallLines += 'Write-Host "Searching for MSI products matching ''$softwareName''..." -ForegroundColor Cyan'
+          $uninstallLines += ''
+          $uninstallLines += '# Chocolatey helper – returns uninstall-registry entries'
+          $uninstallLines += '$keys = Get-UninstallRegistryKey -SoftwareName $softwareName'
+          $uninstallLines += ''
+          $uninstallLines += 'if (-not $keys -or $keys.Count -eq 0) {'
+          $uninstallLines += '    Write-Warning "No uninstall registry keys found for ''$softwareName''."'
+          $uninstallLines += '    Write-Warning "Nothing to uninstall via MSI. This can happen if mirrord was manually removed."'
+          $uninstallLines += '    return'
+          $uninstallLines += '}'
+          $uninstallLines += ''
+          $uninstallLines += 'foreach ($key in $keys) {'
+          $uninstallLines += '    $productCode = $key.PSChildName  # MSI ProductCode'
+          $uninstallLines += '    Write-Host "Uninstalling mirrord MSI with ProductCode: $productCode" -ForegroundColor Yellow'
+          $uninstallLines += ''
+          $uninstallLines += '    $packageArgs = @{'
+          $uninstallLines += '        packageName    = $packageName'
+          $uninstallLines += '        fileType       = ''MSI'''
+          $uninstallLines += '        silentArgs     = ''/qn /norestart'''
+          $uninstallLines += '        file           = $productCode'
+          $uninstallLines += '        validExitCodes = @(0, 3010, 1605, 1614, 1641)'
+          $uninstallLines += '    }'
+          $uninstallLines += ''
+          $uninstallLines += '    Uninstall-ChocolateyPackage @packageArgs'
+          $uninstallLines += '}'
+          $uninstallLines | Set-Content -Encoding UTF8 -Path $uninstallScript
+
+          # Pack with choco
           if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
             throw "choco.exe not found on PATH. Ensure Chocolatey is installed on this runner."
           }
+
           choco pack $nuspecPath --outputdirectory $pkgRoot
+
           $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord.$version.nupkg" -File -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $nupkg) {
             $nupkg = Get-ChildItem $pkgRoot -Filter "mirrord*.nupkg" -File | Select-Object -First 1
@@ -579,26 +727,30 @@ jobs:
           if (-not $nupkg) {
             throw "Failed to find generated mirrord nupkg in $pkgRoot"
           }
+
           "CHOCO_NUPKG_PATH=$($nupkg.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
+
       - name: Push Chocolatey package
         if: ${{ env.PUBLISH_CHOCO == 'true' }}
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
+
           if (-not $env:CHOCO_NUPKG_PATH -or -not (Test-Path $env:CHOCO_NUPKG_PATH)) {
             throw "CHOCO_NUPKG_PATH is not set or file does not exist. Cannot push package."
           }
           if (-not $env:CHOCO_API_KEY) {
             throw "CHOCO_API_KEY is not set. Configure the repository secret 'CHOCO_API_KEY' with your Chocolatey API key."
           }
+
           Write-Host "Pushing Chocolatey package $env:CHOCO_NUPKG_PATH to Chocolatey.org..."
           choco push $env:CHOCO_NUPKG_PATH --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+
       ###########################################################################
       # SUMMARY
       ###########################################################################
-
       - name: Summary
         if: always()
         run: |
