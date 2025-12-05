@@ -65,6 +65,11 @@ pub(super) enum Commands {
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
+    /// Attach to a running application (usually for the case of attaching to IDE debug
+    /// targets).
+    #[cfg(windows)]
+    Attach { pid: u32 },
+
     /// Print incoming tcp traffic of specific ports from remote target.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Dump(Box<DumpArgs>),

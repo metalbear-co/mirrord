@@ -16,7 +16,7 @@ pub mod process;
 mod subprocess;
 mod trace_only;
 
-use std::{io::Write, thread};
+use std::{env, io::Write, thread};
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
@@ -62,6 +62,12 @@ fn release_detour_guard() -> LayerResult<()> {
     Ok(())
 }
 
+/// Checks if layer was loaded as a result of attaching to an IDE's debugger
+/// functionality.
+fn was_attached_to_ide_debugger() -> bool {
+    env::var("__MIRRORD_EXT_INJECTED").is_ok()
+}
+
 fn initialize_windows_proxy_connection() -> LayerResult<()> {
     // init_tracing();
 
@@ -99,7 +105,11 @@ fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
 
 fn mirrord_start() -> LayerResult<()> {
     // Create layer initialization event first
-    let init_event = LayerInitEvent::for_child()?;
+    let init_event = if was_attached_to_ide_debugger() {
+        None
+    } else {
+        Some(LayerInitEvent::for_child()?)
+    };
 
     // Check for trace-only mode and initialize accordingly
     if is_trace_only_mode() {
@@ -125,7 +135,9 @@ fn mirrord_start() -> LayerResult<()> {
     tracing::info!("Hooks initialized");
 
     // Signal that initialization is complete
-    init_event.signal_complete()?;
+    if let Some(event) = init_event {
+        event.signal_complete()?;
+    }
 
     if is_trace_only_mode() {
         tracing::info!("mirrord-layer-win fully initialized in trace-only mode");

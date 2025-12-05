@@ -4385,6 +4385,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "const-random",
+ "dll-syringe",
  "dotenvy",
  "drain",
  "fs4 0.13.1",
@@ -4871,7 +4872,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.23.1"
+version = "1.23.2"
 dependencies = [
  "actix-codec",
  "bincode",

@@ -1,12 +1,10 @@
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
     env::{self, temp_dir},
     path::{Path, PathBuf},
 };
 #[cfg(unix)]
-use std::{fs::File, process::Stdio, time::SystemTime};
+use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
@@ -163,6 +161,12 @@ impl MirrordCiStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Check if the store is empty. Return `true` if no process is found.
+    #[cfg_attr(windows, allow(dead_code))]
+    fn is_empty(&self) -> bool {
+        self.intproxy_pid.is_none() && self.user_pid.is_none()
     }
 }
 
@@ -351,7 +355,7 @@ impl MirrordCi {
 
 #[derive(Debug, Default)]
 struct StartArgs {
-    #[cfg_attr(windows, allow(unused))]
+    #[cfg_attr(windows, allow(dead_code))]
     foreground: bool,
 }
 
