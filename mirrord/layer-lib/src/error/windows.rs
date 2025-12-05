@@ -89,25 +89,38 @@ impl WindowsError {
         };
         Self::format_error_code(err)
     }
+
+    /// Returns the underlying error code formatted as a hexadecimal string.
+    pub fn hex_code(&self) -> String {
+        let value = match self {
+            Self::Windows(code) => *code,
+            Self::WinSock(code) => *code as u32,
+        };
+
+        format!("0x{value:08X}")
+    }
+
+    fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.get_formatted_error() {
+            Some(message) => f.write_str(&message),
+            None => write!(
+                f,
+                "WindowsError: Not a valid error code ({})",
+                self.hex_code()
+            ),
+        }
+    }
 }
 
 impl Display for WindowsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "{}",
-            self.get_formatted_error()
-                .unwrap_or("Not a valid Windows error code".into())
-        ))
+        self.fmt_message(f)
     }
 }
 
 impl Debug for WindowsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "{}",
-            self.get_formatted_error()
-                .unwrap_or("Not a valid Windows error code".into())
-        ))
+        self.fmt_message(f)
     }
 }
 

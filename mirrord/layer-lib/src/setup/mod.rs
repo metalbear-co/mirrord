@@ -24,8 +24,12 @@ pub fn layer_setup() -> &'static LayerSetup {
 }
 
 #[cfg(target_os = "windows")]
-pub fn init_setup(config: LayerConfig, proxy_address: SocketAddr) -> LayerResult<()> {
-    let state = LayerSetup::new(config, proxy_address);
+pub fn init_setup(
+    config: LayerConfig,
+    proxy_address: SocketAddr,
+    local_hostname: bool,
+) -> LayerResult<()> {
+    let state = LayerSetup::new(config, proxy_address, local_hostname);
     SETUP
         .set(state)
         .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer setup already initialized"))?;
@@ -40,6 +44,6 @@ pub fn layer_setup() -> ! {
 #[cfg(not(target_os = "windows"))]
 pub fn init_setup(_config: LayerConfig, _proxy_address: SocketAddr) -> LayerResult<()> {
     Err(LayerError::GlobalAlreadyInitialized(
-        "LayerSetup is only supported on Windows",
+        "LayerSetup by layer-lib is only supported on Windows",
     ))
 }

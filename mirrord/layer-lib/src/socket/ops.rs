@@ -196,6 +196,8 @@ where
     P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
+    debug!("connect_outgoing -> preparing {protocol:?} connection to {remote_address:?}");
+
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
@@ -277,8 +279,7 @@ where
     ) {
         (Some(layer_address), Some(in_cluster_address)) => {
             debug!(
-                "call_connect_fn -> connecting to remote_address={:?}, in_cluster_address={:?}, layer_address={:?}",
-                remote_address, in_cluster_address, layer_address
+                "call_connect_fn -> connecting to remote_address={remote_address:?}, in_cluster_address={in_cluster_address:?}, layer_address={layer_address:?}"
             );
 
             let layer_addr = SockAddr::try_from(layer_address.clone())?;
@@ -311,8 +312,7 @@ where
             }
 
             debug!(
-                "call_connect_fn -> connecting to remote_address={:?} (no mirrord interception)",
-                remote_address
+                "call_connect_fn -> bypassing interception, connecting locally to {remote_address:?}"
             );
 
             let connect_result: ConnectResult = connect_fn(sockfd, remote_addr);

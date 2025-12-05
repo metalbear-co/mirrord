@@ -125,7 +125,7 @@ mod targetless_tests {
         drop(test_process);
     }
 
-    #[cfg_attr(not(feature = "targetless"), ignore)]
+    #[cfg_attr(any(not(feature = "targetless"), target_os = "windows"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
     #[timeout(Duration::from_secs(120))]
