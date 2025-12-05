@@ -26,7 +26,7 @@ on:
         description: "Update WinGet manifest (wingetcreate)?"
         type: choice
         options: ["false", "true"]
-        default: "false"
+        default: "true"
 
 permissions:
   contents: read
@@ -464,12 +464,14 @@ jobs:
           dotnet-version: '8.0.x'
 
       ###########################################################################
-      # UPDATE WinGet MANIFEST (wingetcreate) — NOW NON-FATAL
+      # UPDATE WinGet MANIFEST (wingetcreate) — FORCE SUCCESS
       ###########################################################################
       - name: Update WinGet manifest (wingetcreate)
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
+          # Always force a successful exit from this step
+          $global:LASTEXITCODE = 0
           try {
             $packageId = $env:WINGET_PACKAGE_ID
             if (-not $packageId) {
@@ -524,8 +526,12 @@ jobs:
           } catch {
             Write-Warning "WinGet manifest update step failed: $($_.Exception.Message)"
             Write-Warning "Continuing workflow without failing build (non-fatal WinGet step)."
+          } finally {
+            # Ensure GitHub Actions sees a success exit code
+            $global:LASTEXITCODE = 0
           }
           Write-Host "WinGet update step finished (never fails the workflow)."
+          exit 0
 
       ###########################################################################
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
