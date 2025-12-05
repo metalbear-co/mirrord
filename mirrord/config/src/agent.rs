@@ -496,6 +496,12 @@ pub struct AgentConfig {
     #[config(default = 1000)]
     pub max_body_buffer_timeout: u32,
 
+    /// ### agent.security_context {#agent-security_context}
+    ///
+    /// Agent pod security context (not with ephemeral agents).
+    /// Support seccomp profile and app armor profile.
+    pub security_context: Option<SecurityContext>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
@@ -619,6 +625,51 @@ impl AgentFileConfig {
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct SecurityContext {
+    pub app_armor_profile: Option<AppArmorProfile>,
+    pub seccomp_profile: Option<SeccompProfile>,
+}
+
+impl From<SecurityContext> for k8s_openapi::api::core::v1::PodSecurityContext {
+    fn from(ctx: SecurityContext) -> Self {
+        Self {
+            app_armor_profile: ctx.app_armor_profile.map(Into::into),
+            seccomp_profile: ctx.seccomp_profile.map(Into::into),
+            ..Default::default()
+        }
+    }
+}
+
+pub type AppArmorProfile = SecurityProfile;
+pub type SeccompProfile = SecurityProfile;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct SecurityProfile {
+    pub localhost_profile: Option<String>,
+
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+impl From<AppArmorProfile> for k8s_openapi::api::core::v1::AppArmorProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
+        }
+    }
+}
+
+impl From<SeccompProfile> for k8s_openapi::api::core::v1::SeccompProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
         }
     }
 }
