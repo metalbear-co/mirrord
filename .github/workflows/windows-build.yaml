@@ -77,15 +77,19 @@ jobs:
         id: prep
         run: |
           $ErrorActionPreference = "Stop"
-          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
+
+          function Set-Env([string]$k,[string]$v) {
+            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
+          }
 
           $Target = "x86_64-pc-windows-msvc"
           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
-          $Tmp = Join-Path $env:RUNNER_TEMP "prep"
+          $Tmp    = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase)
+          # FIXED: added missing closing ")
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
 
           if ($env:MODE -eq "reuse") {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
@@ -100,7 +104,9 @@ jobs:
             $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
             $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
 
-            if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
+            if (-not $exe -or -not $dll) {
+              throw "Failed to find EXE or DLL"
+            }
 
             if ($shouldSign) {
               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
@@ -122,7 +128,9 @@ jobs:
           if (-not (Test-Path $dll)) {
             $dll = Join-Path $RelDir "mirrord_layer_win.dll"
           }
-          if (-not (Test-Path $dll)) { throw "DLL not found" }
+          if (-not (Test-Path $dll)) {
+            throw "DLL not found"
+          }
 
           if ($shouldSign) {
             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
@@ -130,12 +138,15 @@ jobs:
           }
 
           $env:MIRRORD_LAYER_FILE = $dll
+
           cargo build -p mirrord --bin mirrord --target $Target
           $exe = Join-Path $DbgDir "mirrord.exe"
           if (-not (Test-Path $exe)) {
             $exe = Join-Path $RelDir "mirrord.exe"
           }
-          if (-not (Test-Path $exe)) { throw "EXE not found" }
+          if (-not (Test-Path $exe)) {
+            throw "EXE not found"
+          }
 
           if ($shouldSign) {
             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
@@ -146,7 +157,7 @@ jobs:
           Set-Env "MIRRORD_LAYER_FILE" $dll
 
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
+          $pkg  = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
           Set-Env "MIRRORD_VERSION" $pkg.version
 
       ###########################################################################
@@ -215,8 +226,9 @@ jobs:
             return $null
           }
 
-          $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $candleCmd  = Get-Command candle.exe -ErrorAction SilentlyContinue
           $candlePath = $null
+
           if ($candleCmd) {
             $candlePath = $candleCmd.Source
             Write-Host "candle.exe found on PATH at $candlePath"
@@ -226,12 +238,14 @@ jobs:
 
           if (-not $candlePath) {
             Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
+
             if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
               Write-Host "Chocolatey not found, installing Chocolatey..."
               Set-ExecutionPolicy Bypass -Scope Process -Force
               [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
               Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
             }
+
             try {
               choco install wixtoolset -y --no-progress
             } catch {
@@ -251,7 +265,7 @@ jobs:
             throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists."
           }
 
-          $wixDir = Split-Path $candlePath -Parent
+          $wixDir    = Split-Path $candlePath -Parent
           $lightPath = Join-Path $wixDir "light.exe"
           if (-not (Test-Path $lightPath)) {
             $lightCmd = Get-Command light.exe -ErrorAction SilentlyContinue
@@ -294,11 +308,11 @@ jobs:
           $Root = "C:\wix\mirrord"
           New-Item -ItemType Directory -Force -Path $Root | Out-Null
 
-          Copy-Item $env:MIRRORD_EXE "$Root\mirrord.exe" -Force
-          Copy-Item $env:MIRRORD_LAYER_FILE "$Root\mirrord_layer_win.dll" -Force
-          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico" "$Root\mirrord.ico" -Force
-          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
-          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
+          Copy-Item $env:MIRRORD_EXE          "$Root\mirrord.exe"          -Force
+          Copy-Item $env:MIRRORD_LAYER_FILE   "$Root\mirrord_layer_win.dll" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico"    "$Root\mirrord.ico"     -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf"    "$Root\License.rtf"     -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs"       "$Root\main.wxs"        -Force
 
           $rawVersion = $null
           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
@@ -325,9 +339,10 @@ jobs:
             Write-Warning "No version found, using default: $msiVersion"
           }
 
-          $wxsPath = "$Root\main.wxs"
+          $wxsPath    = "$Root\main.wxs"
           $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
           $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
+
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
           Write-Host "Updated Product Version in main.wxs to $msiVersion"
@@ -337,12 +352,16 @@ jobs:
           $Obj = "$Root\main.wixobj"
           $Msi = "$Root\mirrord.msi"
 
-          if (Test-Path $Msi) { Remove-Item $Msi -Force }
+          if (Test-Path $Msi) {
+            Remove-Item $Msi -Force
+          }
 
           & $candle -nologo -v "$Root\main.wxs" -out $Obj
           & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
 
-          if (-not (Test-Path $Msi)) { throw "MSI not produced" }
+          if (-not (Test-Path $Msi)) {
+            throw "MSI not produced"
+          }
 
           "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
 
@@ -374,24 +393,23 @@ jobs:
             throw "MSI_PATH '$msi' does not exist."
           }
 
-          $runId = $env:GITHUB_RUN_ID
+          $runId   = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
             $refName = "unknown"
           }
 
-          $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
-
+          $refSafe    = $refName -replace '[^A-Za-z0-9\.\-]', '_'
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
           $destFolder = "$bucketBase/$refSafe/run-$runId"
-          $destUri = "$destFolder/mirrord.msi"
+          $destUri    = "$destFolder/mirrord.msi"
 
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
 
           "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_RUN_ID=$runId" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MSI_GCS_RUN_ID=$runId"     | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MSI_GCS_URI=$destUri"      | Out-File -Append -FilePath $env:GITHUB_ENV
 
       ###########################################################################
       # UNIT TESTS
@@ -464,13 +482,13 @@ jobs:
           dotnet-version: '8.0.x'
 
       ###########################################################################
-      # UPDATE WinGet MANIFEST (wingetcreate) — FORCE SUCCESS
+      # UPDATE WinGet MANIFEST (wingetcreate) — NON-FATAL
       ###########################################################################
       - name: Update WinGet manifest (wingetcreate)
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $global:LASTEXITCODE = 0
+          # Make this step completely non-fatal
+          $ErrorActionPreference = "Continue"
           try {
             $packageId = $env:WINGET_PACKAGE_ID
             if (-not $packageId) {
@@ -507,7 +525,7 @@ jobs:
 
             Write-Host "Running: wingetcreate.exe $($args -join ' ')"
 
-            $output = & .\wingetcreate.exe @args 2>&1
+            $output   = & .\wingetcreate.exe @args 2>&1
             $exitCode = $LASTEXITCODE
 
             $output | ForEach-Object { Write-Host $_ }
@@ -554,8 +572,10 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
 
+          # MSI
           Copy-Item $env:MSI_PATH (Join-Path $toolsDir "mirrord.msi") -Force
 
+          # LICENSE.txt
           $licenseSource = Join-Path $env:GITHUB_WORKSPACE 'LICENSE'
           $licenseDest   = Join-Path $toolsDir 'LICENSE.txt'
           if (Test-Path $licenseSource) {
@@ -564,9 +584,10 @@ jobs:
             Write-Warning "LICENSE file not found at $licenseSource; Chocolatey expects LICENSE.txt alongside binaries."
           }
 
+          # VERIFICATION.txt (with real version + SHA256)
           $verificationPath = Join-Path $toolsDir 'VERIFICATION.txt'
-          $hash = Get-FileHash $env:MSI_PATH -Algorithm SHA256
-          $version = $env:RELEASE_TAG
+          $hash             = Get-FileHash $env:MSI_PATH -Algorithm SHA256
+          $version          = $env:RELEASE_TAG
 
           $verificationLines = @()
           $verificationLines += 'VERIFICATION'
@@ -589,7 +610,8 @@ jobs:
           $verificationLines += '   https://github.com/metalbear-co/mirrord'
           $verificationLines | Set-Content -Encoding UTF8 -Path $verificationPath
 
-          $nuspecPath = Join-Path $pkgRoot "mirrord.nuspec"
+          # mirrord.nuspec
+          $nuspecPath      = Join-Path $pkgRoot "mirrord.nuspec"
           $releaseNotesUrl = "https://github.com/metalbear-co/mirrord/releases/tag/$version"
 
           $nuspecLines = @()
@@ -632,8 +654,9 @@ jobs:
           $nuspecLines += '</package>'
           $nuspecLines | Set-Content -Encoding UTF8 -Path $nuspecPath
 
+          # chocolateyinstall.ps1
           $installScript = Join-Path $toolsDir "chocolateyinstall.ps1"
-          $installLines = @()
+          $installLines  = @()
           $installLines += '$ErrorActionPreference = ''Stop'''
           $installLines += ''
           $installLines += '$toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition'
@@ -654,8 +677,9 @@ jobs:
           $installLines += 'Install-ChocolateyInstallPackage @packageArgs'
           $installLines | Set-Content -Encoding UTF8 -Path $installScript
 
+          # chocolateyuninstall.ps1
           $uninstallScript = Join-Path $toolsDir "chocolateyuninstall.ps1"
-          $uninstallLines = @()
+          $uninstallLines  = @()
           $uninstallLines += '$ErrorActionPreference = ''Stop'''
           $uninstallLines += ''
           $uninstallLines += '$packageName  = $env:ChocolateyPackageName'
@@ -663,7 +687,7 @@ jobs:
           $uninstallLines += ''
           $uninstallLines += 'Write-Host "Searching for MSI products matching ''$softwareName''..." -ForegroundColor Cyan'
           $uninstallLines += ''
-          $uninstallLines += '# Chocolatey helper – returns uninstall-registry entries'
+          $uninstallLines += '# Chocolatey helper returns uninstall-registry entries'
           $uninstallLines += '$keys = Get-UninstallRegistryKey -SoftwareName $softwareName'
           $uninstallLines += ''
           $uninstallLines += 'if (-not $keys -or $keys.Count -eq 0) {'
@@ -719,7 +743,9 @@ jobs:
 
           $runId   = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
-          if (-not $refName) { $refName = "unknown" }
+          if (-not $refName) {
+            $refName = "unknown"
+          }
           $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
 
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
@@ -758,7 +784,7 @@ jobs:
             '--source', 'https://push.chocolatey.org/'
           )
 
-          $output = choco push @args 2>&1
+          $output   = choco push @args 2>&1
           $exitCode = $LASTEXITCODE
 
           $output | ForEach-Object { Write-Host $_ }
