@@ -1,6 +1,8 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
+#[cfg(windows)]
 use dll_syringe::error::InjectError;
+
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -275,10 +277,12 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),
 
+    #[cfg(windows)]
     #[error("Failed to obtain handle to process while attaching: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     FailedProcessHandle(#[from] std::io::Error),
 
+    #[cfg(windows)]
     #[error("Failed attaching to process {0}: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     FailedAttachingLayer(u32, InjectError),

@@ -254,7 +254,6 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
-use attach::attach_command;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
@@ -984,6 +983,7 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Attach { pid } => {
+                use attach::*;
                 let progress = ProgressTracker::from_env("mirrord attach");
                 attach_command(pid, &progress)?;
             }
