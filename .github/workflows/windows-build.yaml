@@ -183,7 +183,7 @@ jobs:
       - name: Run Rust e2e tests 
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
 
       ###########################################################################
       # ENSURE WIX TOOLSET IS INSTALLED

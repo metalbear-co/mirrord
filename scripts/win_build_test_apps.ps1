@@ -13,11 +13,8 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Write-Host 'Chocolatey already installed.'
 }
 
-Write-Host 'Installing dependencies: nodejs, go, python3, curl, llvm, mingw'
-choco install -y --force nodejs go python3 curl llvm mingw
-
-Write-Host 'Refreshing environment variables after Chocolatey installations'
-Update-Environment
+Write-Host 'Installing dependencies: nodejs, go, python3, curl, mingw, cmake, nasm, llvm'
+choco install -y nodejs go python3 curl mingw cmake nasm llvm
 
 Write-Host 'Installing Python packages required by tests'
 python -m pip install --upgrade pip

@@ -459,6 +459,9 @@ mod traffic_tests {
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
         let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .expect("failed to configure UDP socket read timeout");
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = [
