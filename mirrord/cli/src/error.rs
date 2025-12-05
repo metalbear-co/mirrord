@@ -2,7 +2,6 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 #[cfg(windows)]
 use dll_syringe::error::InjectError;
-
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
