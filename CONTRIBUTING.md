@@ -13,7 +13,7 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Getting Started](#getting-started)
 - [Debugging mirrord](#debugging-mirrord)
 - [New Hook Guidelines](#new-hook-guidelines)
-- [Compiling on MacOs](#compiling-on-macos)
+- [Compiling on MacOS](#compiling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
 - [Architecture](#architecture)
@@ -95,7 +95,7 @@ with the mirrord CLI. The mirrord CLI spawns an agent for the target on the clus
 layer injected into it. Some test apps need to be compiled before they can be used in the tests
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
-> **Note:** `//go:build linux` prevents certain Go test apps from being built on macOS. When using 
+> **Note:** `//go:build linux` prevents certain Go test apps from being built on macOS. When using
 > `scripts/build_go_apps.sh`, make the change below so the script continues building all other apps.
 > ```bash
 > go build -o "$1.go_test_app" || echo "Failed to build $directory/$1.go_test_app"
@@ -556,62 +556,38 @@ In order to have a more structured approach, here's the flow you should follow w
 
 # Compiling on MacOS
 
-The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on MacOS when you run `cargo build`.
+`mirrord` is cross-platform and natively supports compiling from a MacOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the kubernetes cluster.
 
-To enable `mirrord-agent` code analysis with rust-analyzer:
-1. Install additional targets
+`mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on MacOS, but produces a binary that does nothing.
+To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to linux, which requires the following steps:
+
+1. Install the x86 linux target
 ```sh
 rustup target add x86_64-unknown-linux-gnu
-rustup target add aarch64-apple-darwin
-rustup target add x86_64-apple-darwin
-rustup target add aarch64-unknown-linux-gnu
-```
-2. Add additional targets to your local `.cargo/config.toml` block:
-```toml
-[build]
-target = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-]
 ```
 
-If you're using rust-analyzer VSCode extension, put this block in `.vscode/settings.json` as well:
+2. Get a C compiler capable of targeting the `x86_64-unknown-linux-gnu` triplet
+
+Usually the builtin clang compiler can handle this, if you use GCC you'll need a custom build that targets this triplet
+(see [homebrew-macos-cross-toolchains](https://github.com/messense/homebrew-macos-cross-toolchains) if you use brew)
+
+3. Tell `bindgen` which C compiler to use when building `frida-gum`, the C library we use for detour hooking:
+```sh
+export CC_x86_64_unknown_linux_gnu=(C compiler from step 2)
+```
+
+Now you can pass the linux target to `cargo` commands:
+```sh
+cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu
+```
+
+And tell rust-analyzer to use it:
 ```json
-{
-    "rust-analyzer.check.targets": [
-        "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu"
-    ]
-}
+"rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu"
 ```
 
-You can use `cargo-zigbuild` to run `cargo check` or `clippy` on the agent's code on macOS.
-
-`cargo check`
-
-```shell
-cargo-zigbuild check -p mirrord-agent --target x86_64-unknown-linux-gnu
-```
-
-`clippy` only for the agent
-
-```shell
-cargo-zigbuild clippy --target x86_64-unknown-linux-gnu -p mirrord-agent -- -Wclippy::indexing_slicing -D warnings
-```
-
-`clippy` for all code:
-
-```shell
-cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
-```
-
-If it doesn't work, try updating `cargo-zigbuild`
-(`cargo install cargo-zigbuild` or maybe `cargo install cargo-zigbuild --force`)
-or via `homebrew` if it was installed via homebrew.
+This is editor specific, please check [rust-analyzer's documentation](https://rust-analyzer.github.io/book/other_editors.html)
+to find where to put it in your editor's configuration.
 
 # Adding new target types
 
@@ -772,8 +748,8 @@ Before running the script, ensure there are no uncommitted changes in your repos
 
 ## Create a new GitHub release
 
-1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both 
-   the tag name and the release title. Use the changelog from the release PR as the release description, 
+1. After the release PR is merged, create a new GitHub release with a new tag. Use the new version for both
+   the tag name and the release title. Use the changelog from the release PR as the release description,
    excluding the `Internal` section if present.
 
    **Note**: Ensure the tag is attached to the release commit.

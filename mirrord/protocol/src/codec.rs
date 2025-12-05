@@ -109,6 +109,10 @@ pub enum FileRequest {
     /// Same as StatFs, but results in the V2 response.
     StatFsV2(StatFsRequestV2),
     Rename(RenameRequest),
+    Ftruncate(FtruncateRequest),
+    Futimens(FutimensRequest),
+    Fchown(FchownRequest),
+    Fchmod(FchmodRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -181,6 +185,10 @@ pub enum FileResponse {
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
     Rename(RemoteResult<()>),
+    Ftruncate(RemoteResult<()>),
+    Futimens(RemoteResult<()>),
+    Fchown(RemoteResult<()>),
+    Fchmod(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.

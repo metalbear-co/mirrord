@@ -549,6 +549,18 @@
             }
           ]
         },
+        "security_context": {
+          "title": "agent.security_context {#agent-security_context}",
+          "description": "Agent pod security context (not with ephemeral agents). Support seccomp profile and app armor profile.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityContext"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "service_account": {
           "title": "agent.service_account {#agent-service_account}",
           "description": "Allows setting up custom Service Account for the agent Job and Pod.\n\n```json { \"agent\": { \"service_account\": \"my-service-account\" } } ```",
@@ -2440,6 +2452,48 @@
         }
       },
       "additionalProperties": false
+    },
+    "SecurityContext": {
+      "type": "object",
+      "properties": {
+        "app_armor_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seccomp_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SecurityProfile": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "localhost_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      }
     },
     "ServiceTarget": {
       "type": "object",
