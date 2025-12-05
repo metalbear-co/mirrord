@@ -26,7 +26,7 @@ on:
         description: "Update WinGet manifest (wingetcreate)?"
         type: choice
         options: ["false", "true"]
-        default: "true"
+        default: "false"
 
 permissions:
   contents: read
@@ -85,7 +85,7 @@ jobs:
           $Tmp = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase)
 
           if ($env:MODE -eq "reuse") {
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
@@ -470,7 +470,6 @@ jobs:
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
-          # Always force a successful exit from this step
           $global:LASTEXITCODE = 0
           try {
             $packageId = $env:WINGET_PACKAGE_ID
@@ -527,14 +526,13 @@ jobs:
             Write-Warning "WinGet manifest update step failed: $($_.Exception.Message)"
             Write-Warning "Continuing workflow without failing build (non-fatal WinGet step)."
           } finally {
-            # Ensure GitHub Actions sees a success exit code
             $global:LASTEXITCODE = 0
           }
           Write-Host "WinGet update step finished (never fails the workflow)."
           exit 0
 
       ###########################################################################
-      # CHOCOLATEY PACKAGE BUILD & PUBLISH
+      # CHOCOLATEY PACKAGE BUILD
       ###########################################################################
       - name: Build Chocolatey package
         if: ${{ env.PUBLISH_CHOCO == 'true' }}
@@ -707,6 +705,35 @@ jobs:
           "CHOCO_NUPKG_PATH=$($nupkg.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
 
+      ###########################################################################
+      # UPLOAD CHOCO NUPKG TO GCS
+      ###########################################################################
+      - name: Upload Choco nupkg to GCS
+        if: ${{ env.PUBLISH_CHOCO == 'true' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:CHOCO_NUPKG_PATH -or -not (Test-Path $env:CHOCO_NUPKG_PATH)) {
+            throw "CHOCO_NUPKG_PATH is not set or file does not exist."
+          }
+
+          $runId   = $env:GITHUB_RUN_ID
+          $refName = $env:GITHUB_REF_NAME
+          if (-not $refName) { $refName = "unknown" }
+          $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
+
+          $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
+          $destFolder = "$bucketBase/$refSafe/run-$runId"
+          $destUri    = "$destFolder/mirrord.$env:RELEASE_TAG.nupkg"
+
+          Write-Host "Uploading Choco nupkg to $destUri"
+          gcloud --quiet storage cp $env:CHOCO_NUPKG_PATH $destUri
+
+          "CHOCO_NUPKG_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # PUSH CHOCOLATEY PACKAGE (NON-FATAL ON SUBMITTED STATE)
+      ###########################################################################
       - name: Push Chocolatey package
         if: ${{ env.PUBLISH_CHOCO == 'true' }}
         env:
@@ -746,17 +773,61 @@ jobs:
           }
 
       ###########################################################################
-      # SUMMARY
+      # UPLOAD CHOCO NUPKG AS GITHUB ARTIFACT
+      ###########################################################################
+      - name: Upload Chocolatey nupkg artifact
+        if: ${{ env.PUBLISH_CHOCO == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirrord-choco-${{ env.RELEASE_TAG }}
+          path: ${{ env.CHOCO_NUPKG_PATH }}
+          if-no-files-found: error
+
+      ###########################################################################
+      # SUMMARY (CONSOLE + GITHUB STEP SUMMARY)
       ###########################################################################
       - name: Summary
         if: always()
         run: |
+          $ErrorActionPreference = "Continue"
+
           Write-Host "MSI (local):       $env:MSI_PATH"
           Write-Host "MSI Version:       $env:MSI_VERSION"
           Write-Host "MSI (GCS URI):     $env:MSI_GCS_URI"
           Write-Host "EXE:               $env:MIRRORD_EXE"
           Write-Host "DLL:               $env:MIRRORD_LAYER_FILE"
           Write-Host "Choco package:     $env:CHOCO_NUPKG_PATH"
+          Write-Host "Choco package GCS: $env:CHOCO_NUPKG_GCS_URI"
           Write-Host "MSI HTTP URL:      $env:MSI_DOWNLOAD_URL"
           Write-Host "Publish Choco:     $env:PUBLISH_CHOCO"
           Write-Host "Publish WinGet:    $env:PUBLISH_WINGET"
+
+          $summary = @()
+          $summary += "# Windows Build / Choco + WinGet"
+          $summary += ""
+          $summary += "## Versions"
+          $summary += ""
+          $summary += "- Release tag: $env:RELEASE_TAG"
+          $summary += "- MSI version: $env:MSI_VERSION"
+          $summary += ""
+          $summary += "## Paths"
+          $summary += ""
+          $summary += "- MSI (local): $env:MSI_PATH"
+          $summary += "- MSI (GCS): $env:MSI_GCS_URI"
+          if ($env:CHOCO_NUPKG_PATH) {
+            $summary += "- Choco nupkg (local): $env:CHOCO_NUPKG_PATH"
+          }
+          if ($env:CHOCO_NUPKG_GCS_URI) {
+            $summary += "- Choco nupkg (GCS): $env:CHOCO_NUPKG_GCS_URI"
+          }
+          if ($env:MSI_DOWNLOAD_URL) {
+            $summary += "- MSI HTTP URL (for WinGet): $env:MSI_DOWNLOAD_URL"
+          }
+          $summary += ""
+          $summary += "## Flags"
+          $summary += ""
+          $summary += "- Publish Choco: $env:PUBLISH_CHOCO"
+          $summary += "- Publish WinGet: $env:PUBLISH_WINGET"
+
+          $summaryText = $summary -join "`n"
+          $summaryText | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
