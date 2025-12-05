@@ -186,3 +186,34 @@ pub fn is_nt_path_disk_path<T: AsRef<str>>(path: T) -> bool {
         path.starts_with(&prefix)
     }
 }
+
+/// Check if NT path refers exactly to a disk root (e.g. `\\??\\C:\`).
+pub fn is_nt_path_disk_root<T: AsRef<str>>(path: T) -> bool {
+    let mut path = path.as_ref();
+
+    if !path.starts_with(GLOBAL_NAMESPACE_PATH) {
+        return false;
+    }
+
+    path = &path[GLOBAL_NAMESPACE_PATH.len()..];
+
+    // normalize to backslashes
+    let normalized = path.replace('/', "\\");
+    let trimmed = normalized.trim_end_matches('\\');
+    let mut components = trimmed.split('\\');
+
+    // make sure we have a non-empty drive component
+    match components.next() {
+        Some(drive_component) if !drive_component.is_empty() => {}
+        _ => return false,
+    }
+
+    match components.next() {
+        // no components left means it's a root path
+        None => true,
+        // a single dot component means it's also a root path
+        Some(segment) if segment == "." && components.next().is_none() => true,
+        // anything else means it's not a root path
+        _ => false,
+    }
+}

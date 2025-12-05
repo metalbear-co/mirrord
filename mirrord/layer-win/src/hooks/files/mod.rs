@@ -57,7 +57,8 @@ use crate::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
         },
         util::{
-            WindowsTime, is_nt_path_disk_path, read_object_attributes_name, try_seek, try_xstat,
+            WindowsTime, is_nt_path_disk_path, is_nt_path_disk_root, read_object_attributes_name,
+            try_seek, try_xstat,
         },
     },
     process::memory::is_memory_valid,
@@ -293,6 +294,16 @@ unsafe extern "system" fn nt_create_file_hook(
 
         // WIN-56: check if path is a FS path.
         if !is_nt_path_disk_path(&name) {
+            return run_original();
+        }
+
+        // Some Windows APIs try to open the drive root (e.g. `C:\`) to inspect metadata. We don't
+        // support mirroring root directory handles, so let Windows handle these locally.
+        if is_nt_path_disk_root(&name) {
+            tracing::debug!(
+                "nt_create_file_hook: bypassing remote open for root directory \"{}\"",
+                name
+            );
             return run_original();
         }
 
