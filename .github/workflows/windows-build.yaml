@@ -21,12 +21,19 @@ on:
         description: "Publish a Chocolatey package?"
         type: choice
         options: ["false", "true"]
-        default: "true"
+        default: "false"
       winget_publish:
         description: "Update WinGet manifest (wingetcreate)?"
         type: choice
         options: ["false", "true"]
         default: "false"
+
+  pull_request:
+    branches: ["main", "*staging*", "windows-support"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "*.md"
+      - "**/*.md"
 
 permissions:
   contents: read
@@ -384,7 +391,6 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
-
 
       - name: Run Rust e2e tests 
         run: |
