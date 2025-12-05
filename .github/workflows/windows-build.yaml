@@ -464,62 +464,68 @@ jobs:
           dotnet-version: '8.0.x'
 
       ###########################################################################
-      # UPDATE WinGet MANIFEST (wingetcreate)
+      # UPDATE WinGet MANIFEST (wingetcreate) — NOW NON-FATAL
       ###########################################################################
       - name: Update WinGet manifest (wingetcreate)
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
-
-          $packageId = $env:WINGET_PACKAGE_ID
-          if (-not $packageId) {
-            throw "WINGET_PACKAGE_ID env var is not set."
-          }
-
-          $version = $env:RELEASE_TAG
-          if (-not $version) {
-            throw "RELEASE_TAG env var is not set."
-          }
-
-          $installerUrl = $env:MSI_DOWNLOAD_URL
-          if (-not $installerUrl) {
-            throw "MSI_DOWNLOAD_URL env var is not set."
-          }
-
-          $gitToken = "${{ secrets.WINGET_TOKEN }}"
-          if (-not $gitToken) {
-            throw "secrets.WINGET_TOKEN is not configured in this repo."
-          }
-
-          Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
-          Write-Host "Installer URL: $installerUrl"
-
-          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-
-          $args = @(
-            "update", $packageId,
-            "--version", $version,
-            "--urls", $installerUrl,
-            "--submit",
-            "--token", $gitToken
-          )
-
-          Write-Host "Running: wingetcreate.exe $($args -join ' ')"
-
-          $output = & .\wingetcreate.exe @args 2>&1
-          $exitCode = $LASTEXITCODE
-
-          $output | ForEach-Object { Write-Host $_ }
-
-          if ($exitCode -ne 0) {
-            if ($output -match "was not found") {
-              Write-Warning "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Skipping update (non-fatal)."
-              Write-Warning "To create the initial package, run 'wingetcreate new' manually and submit the first PR."
-              exit 0
-            } else {
-              throw "wingetcreate update failed with exit code $exitCode"
+          try {
+            $packageId = $env:WINGET_PACKAGE_ID
+            if (-not $packageId) {
+              throw "WINGET_PACKAGE_ID env var is not set."
             }
+
+            $version = $env:RELEASE_TAG
+            if (-not $version) {
+              throw "RELEASE_TAG env var is not set."
+            }
+
+            $installerUrl = $env:MSI_DOWNLOAD_URL
+            if (-not $installerUrl) {
+              throw "MSI_DOWNLOAD_URL env var is not set."
+            }
+
+            $gitToken = "${{ secrets.WINGET_TOKEN }}"
+            if (-not $gitToken) {
+              throw "secrets.WINGET_TOKEN is not configured in this repo."
+            }
+
+            Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
+            Write-Host "Installer URL: $installerUrl"
+
+            Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+            $args = @(
+              "update", $packageId,
+              "--version", $version,
+              "--urls", $installerUrl,
+              "--submit",
+              "--token", $gitToken
+            )
+
+            Write-Host "Running: wingetcreate.exe $($args -join ' ')"
+
+            $output = & .\wingetcreate.exe @args 2>&1
+            $exitCode = $LASTEXITCODE
+
+            $output | ForEach-Object { Write-Host $_ }
+
+            if ($exitCode -ne 0) {
+              if ($output -match "was not found") {
+                Write-Warning "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Skipping update (non-fatal)."
+                Write-Warning "To create the initial package, run 'wingetcreate new' manually and submit the first PR."
+              } else {
+                Write-Warning "wingetcreate update failed with exit code $exitCode. Treating as non-fatal."
+              }
+            } else {
+              Write-Host "wingetcreate update completed successfully."
+            }
+          } catch {
+            Write-Warning "WinGet manifest update step failed: $($_.Exception.Message)"
+            Write-Warning "Continuing workflow without failing build (non-fatal WinGet step)."
           }
+          Write-Host "WinGet update step finished (never fails the workflow)."
 
       ###########################################################################
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
@@ -705,12 +711,33 @@ jobs:
           if (-not $env:CHOCO_NUPKG_PATH -or -not (Test-Path $env:CHOCO_NUPKG_PATH)) {
             throw "CHOCO_NUPKG_PATH is not set or file does not exist. Cannot push package."
           }
+
           if (-not $env:CHOCO_API_KEY) {
-            throw "CHOCO_API_KEY is not set. Configure the repository secret 'CHOCO_API_KEY' with your Chocolatey API key."
+            Write-Warning "CHOCO_API_KEY is not set. Skipping push (non-fatal)."
+            exit 0
           }
 
           Write-Host "Pushing Chocolatey package $env:CHOCO_NUPKG_PATH to Chocolatey.org..."
-          choco push $env:CHOCO_NUPKG_PATH --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+
+          $args = @(
+            $env:CHOCO_NUPKG_PATH,
+            '--api-key', $env:CHOCO_API_KEY,
+            '--source', 'https://push.chocolatey.org/'
+          )
+
+          $output = choco push @args 2>&1
+          $exitCode = $LASTEXITCODE
+
+          $output | ForEach-Object { Write-Host $_ }
+
+          if ($exitCode -ne 0) {
+            if ($output -match 'has a previous version in a submitted state') {
+              Write-Warning "Chocolatey push blocked because there is a previous version in submitted state. Treating as non-fatal and continuing."
+              exit 0
+            }
+
+            throw "choco push failed with exit code $exitCode"
+          }
 
       ###########################################################################
       # SUMMARY
