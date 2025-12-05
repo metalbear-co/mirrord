@@ -197,6 +197,8 @@ pub struct IncomingProxy {
 
     /// [`mirrord_protocol`] version negotiated with the agent.
     protocol_version: Option<Version>,
+
+    restore_subscriptions_on_protocol_version_switch: bool,
 }
 
 impl IncomingProxy {
@@ -221,6 +223,7 @@ impl IncomingProxy {
             http_gateways: Default::default(),
             tasks: None,
             protocol_version: None,
+            restore_subscriptions_on_protocol_version_switch: false,
         }
     }
 
@@ -698,6 +701,19 @@ impl IncomingProxy {
             IncomingProxyMessage::AgentProtocolVersion(protocol_version) => {
                 self.response_mode = ResponseMode::from(&protocol_version);
                 self.protocol_version.replace(protocol_version);
+
+                if self.restore_subscriptions_on_protocol_version_switch {
+                    for subscription in self.subscriptions.iter_mut() {
+                        tracing::info!(?subscription, "Resubscribing after connection refresh");
+
+                        message_bus
+                            .send_agent(
+                                subscription.resubscribe_message(self.protocol_version.as_ref()),
+                            )
+                            .await
+                    }
+                    self.restore_subscriptions_on_protocol_version_switch = false;
+                }
             }
 
             IncomingProxyMessage::ConnectionRefresh(new_agent_tx) => {
@@ -715,15 +731,7 @@ impl IncomingProxy {
                 message_bus.set_agent_tx(new_agent_tx);
                 tasks.set_agent_tx(message_bus.clone_agent_tx());
 
-                for subscription in self.subscriptions.iter_mut() {
-                    tracing::info!(?subscription, "Resubscribing after connection refresh");
-
-                    message_bus
-                        .send_agent(
-                            subscription.resubscribe_message(self.protocol_version.as_ref()),
-                        )
-                        .await
-                }
+                self.restore_subscriptions_on_protocol_version_switch = true;
             }
         }
 
