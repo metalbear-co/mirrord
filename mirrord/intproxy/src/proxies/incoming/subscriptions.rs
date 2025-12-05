@@ -284,19 +284,28 @@ impl SubscriptionsManager {
                 tracing::warn!(%response_error, "Port subscribe blocked by policy");
 
                 let port = match blocked_action {
-                    BlockedAction::Steal(steal_type) => steal_type.get_port(),
-                    BlockedAction::Mirror(port) => *port,
-                };
-                let Some(subscription) = self.subscriptions.remove(&port) else {
-                    return Ok(vec![]);
+                    BlockedAction::Steal(steal_type) => Some(steal_type.get_port()),
+                    BlockedAction::Mirror(port) => Some(*port),
+                    BlockedAction::OutgoingTcp(addr) | BlockedAction::OutgoingUdp(addr) => {
+                        addr.get_port()
+                    }
                 };
 
-                subscription
-                    .reject(response_error.clone())
-                    .map_err(|subscription|{
-                        tracing::error!(?subscription, "Subscription was confirmed before, then requested again and blocked by a policy.");
-                        IncomingProxyError::SubscriptionFailed(response_error.clone())
-                    })
+                match port {
+                    Some(port) => {
+                        let Some(subscription) = self.subscriptions.remove(&port) else {
+                            return Ok(vec![]);
+                        };
+
+                        subscription
+                        .reject(response_error.clone())
+                        .map_err(|subscription|{
+                            tracing::error!(?subscription, "Subscription was confirmed before, then requested again and blocked by a policy.");
+                            IncomingProxyError::SubscriptionFailed(response_error.clone())
+                        })
+                    }
+                    None => Ok(vec![]),
+                }
             }
 
             Err(err) => Err(IncomingProxyError::SubscriptionFailed(err)),
