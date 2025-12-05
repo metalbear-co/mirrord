@@ -125,6 +125,7 @@ impl ContainerVariant for PodVariant<'_> {
                 image_pull_secrets,
                 tolerations: agent.tolerations.clone(),
                 node_selector: Some(node_selector),
+                service_account_name: agent.service_account.clone(),
                 containers: vec![Container {
                     name: "mirrord-agent".to_string(),
                     image: Some(agent.image().to_string()),
