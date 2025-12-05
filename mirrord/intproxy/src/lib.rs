@@ -724,8 +724,8 @@ mod test {
 
     use mirrord_analytics::NullReporter;
     use mirrord_config::{
-        LayerConfig, LayerFileConfig,
-        config::{ConfigContext, MirrordConfig, context},
+        LayerFileConfig,
+        config::MirrordConfig,
         experimental::ExperimentalFileConfig,
     };
     use mirrord_intproxy_protocol::{
@@ -733,10 +733,11 @@ mod test {
         PortSubscription, ProcessInfo, ProxyToLayerMessage,
     };
     use mirrord_protocol::{
-        ClientMessage, DaemonMessage, FileRequest, RemoteResult, VERSION, file::StatFsRequestV2,
-        tcp::StealType,
+        ClientMessage, DaemonMessage, FileRequest, VERSION,
+        file::StatFsRequestV2,
+        tcp::{DaemonTcp, LayerTcpSteal, StealType},
     };
-    use mirrord_protocol_io::Connection;
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
@@ -1024,9 +1025,21 @@ mod test {
         .unwrap();
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
-        let from_proxy = async || {
 
-		};
+        async fn pull_next_proxy_msg(
+            from_proxy: &ConnectionOutput<Client>,
+            to_proxy: &mpsc::Sender<DaemonMessage>,
+        ) -> ClientMessage {
+            loop {
+                match from_proxy.next().await.unwrap() {
+                    ClientMessage::Ping => to_proxy.send(DaemonMessage::Pong).await.unwrap(),
+                    ClientMessage::ReadyForLogs => (),
+                    otherwise => return otherwise,
+                }
+            }
+        }
+
+        let next_proxy_msg = async || pull_next_proxy_msg(&from_proxy, &to_proxy).await;
 
         let proxy = IntProxy::new_with_connection(
             agent_conn,
@@ -1072,8 +1085,8 @@ mod test {
         }
 
         assert_eq!(
-            from_proxy.next().await,
-            Some(ClientMessage::SwitchProtocolVersion(VERSION.clone())),
+            next_proxy_msg().await,
+            ClientMessage::SwitchProtocolVersion(VERSION.clone()),
         );
 
         to_proxy
@@ -1083,8 +1096,8 @@ mod test {
             .await
             .unwrap();
 
-        // Subscribe to a port and open a file. These are the only
-        // subsystems that need to restore state after a reconnect.
+        // Subscribe to a port so we can later confirm that it
+        // restores the subscription after the reconnect.
         encoder
             .send(&LocalMessage {
                 message_id: 0,
@@ -1098,6 +1111,18 @@ mod test {
             .await
             .unwrap();
 
+        assert_eq!(
+            next_proxy_msg().await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+                42069,
+            ))))
+            .await
+            .unwrap();
+
         assert!(matches!(
             decoder.receive().await,
             Ok(Some(LocalMessage {
@@ -1106,6 +1131,49 @@ mod test {
                     mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
                 )
             }))
-        ))
+        ));
+
+        // Simulate dropping the connection
+        drop(to_proxy);
+
+        // The intproxy (AgentConnection) to be exact should now try to reconnect.
+        // We'll receive the new dummy connection from conn_rx.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        let next_proxy_msg = async || pull_next_proxy_msg(&from_proxy, &to_proxy).await;
+
+        assert_eq!(
+            next_proxy_msg().await,
+            ClientMessage::SwitchProtocolVersion(VERSION.clone()),
+        );
+
+        to_proxy
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg().await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+                42069,
+            ))))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decoder.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Incoming(
+                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                )
+            }))
+        ));
     }
 }

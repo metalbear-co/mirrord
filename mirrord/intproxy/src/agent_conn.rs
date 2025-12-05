@@ -17,9 +17,9 @@ use mirrord_operator::{
 };
 #[cfg(test)]
 use mirrord_protocol::DaemonMessage;
-use mirrord_protocol_io::{Client, Connection, ProtocolError};
 #[cfg(test)]
-use mirrord_protocol_io::{ConnectionOutput, TxHandle};
+use mirrord_protocol_io::ConnectionOutput;
+use mirrord_protocol_io::{Client, Connection, ProtocolError};
 #[cfg(not(test))]
 use serde::Deserialize;
 use serde::Serialize;
