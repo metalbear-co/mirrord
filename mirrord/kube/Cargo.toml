@@ -47,6 +47,7 @@ tracing.workspace = true
 tokio-retry = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"] }
 http.workspace = true
+itertools = "0.14.0"
 
 [dev-dependencies]
 rstest.workspace = true
