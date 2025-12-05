@@ -244,32 +244,6 @@ async fn node_close(
         .await;
 
     let contents = "hello";
-    // on macOS it will send xstat before reading.
-    #[cfg(target_os = "macos")]
-    {
-        let read_amount = contents.len();
-        assert_eq!(
-            intproxy.recv().await,
-            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: None,
-                fd: Some(1),
-                follow_symlink: true
-            }))
-        );
-
-        let metadata = MetadataInternal {
-            device_id: 0,
-            size: read_amount as u64,
-            user_id: 2,
-            blocks: 3,
-            ..Default::default()
-        };
-        intproxy
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata },
-            ))))
-            .await;
-    }
 
     intproxy.expect_file_read(contents, fd).await;
 
