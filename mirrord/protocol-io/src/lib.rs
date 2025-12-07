@@ -239,6 +239,12 @@ impl<Type: ProtocolEndpoint> Drop for Connection<Type> {
 /// sent through it. Used only for testing.
 pub struct ConnectionOutput<Type: ProtocolEndpoint>(Arc<SharedState<Type>>);
 
+impl<Type: ProtocolEndpoint> fmt::Debug for ConnectionOutput<Type> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ConnectionOutput").field(&self.0).finish()
+    }
+}
+
 impl<Type: ProtocolEndpoint> ConnectionOutput<Type>
 where
     Type::OutMsg: bincode::Decode<()>,

@@ -110,7 +110,10 @@ impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
     /// How long can the agent connection remain silent.
+    #[cfg(not(test))]
     const PING_INTERVAL: Duration = Duration::from_secs(30);
+    #[cfg(test)]
+    const PING_INTERVAL: Duration = Duration::from_secs(1);
     /// How many sequential reconnects should PingPong task attepmt to perform before giving up.
     const PING_PONG_MAX_RECONNECTS: usize = 5;
 
@@ -722,6 +725,7 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+    use futures::{StreamExt, stream::FuturesUnordered};
     use mirrord_analytics::NullReporter;
     use mirrord_config::{
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
@@ -743,6 +747,7 @@ mod test {
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
         sync::mpsc,
+        task::JoinSet,
     };
 
     use crate::{
@@ -1036,18 +1041,6 @@ mod test {
             LocalMessage<ProxyToLayerMessage>,
         >(conn);
 
-        let proxy = IntProxy::new_with_connection(
-            agent_conn,
-            listener,
-            4096,
-            Default::default(),
-            Duration::from_secs(60),
-            &ExperimentalFileConfig::default()
-                .generate_config(&mut Default::default())
-                .unwrap(),
-        );
-        tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
-
         from_layer
             .send(&LocalMessage {
                 message_id: 0,
@@ -1065,6 +1058,19 @@ mod test {
             .await
             .unwrap();
         from_layer.flush().await.unwrap();
+
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            Duration::from_secs(60),
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+        );
+        tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
+
         match to_layer.receive().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 0,
@@ -1186,5 +1192,39 @@ mod test {
                 }))
             ));
         }
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly when a pong is no received.
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_on_lost_ping(#[values(true, false)] drop_explicitly: bool) {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            from_layer: _from_layer,
+            to_layer: _,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::ReadyForLogs));
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::Ping));
+
+        // Don't respond to pings.
+        if drop_explicitly {
+            drop(to_proxy);
+        }
+
+        // We should get a reconnect.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::ReadyForLogs));
+        assert_eq!(from_proxy.next().await, Some(ClientMessage::Ping));
     }
 }
