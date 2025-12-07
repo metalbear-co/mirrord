@@ -724,13 +724,12 @@ mod test {
 
     use mirrord_analytics::NullReporter;
     use mirrord_config::{
-        LayerFileConfig,
-        config::MirrordConfig,
-        experimental::ExperimentalFileConfig,
+        LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
     };
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NewSessionRequest, PortSubscribe,
         PortSubscription, ProcessInfo, ProxyToLayerMessage,
+        codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
         ClientMessage, DaemonMessage, FileRequest, VERSION,
@@ -739,7 +738,10 @@ mod test {
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
     use tokio::{
-        net::{TcpListener, TcpStream},
+        net::{
+            TcpListener, TcpStream,
+            tcp::{OwnedReadHalf, OwnedWriteHalf},
+        },
         sync::mpsc,
     };
 
@@ -1000,21 +1002,22 @@ mod test {
         .unwrap_err();
     }
 
-    /// Verifies that [`IntProxy`] reconnects and restores state (port subscriptions) correctly
-    #[tokio::test]
-    #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
-    async fn reconnect() {
+    struct ReconnectTestSetup {
+        conn_rx: mpsc::Receiver<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>,
+        from_layer: AsyncEncoder<LocalMessage<LayerToProxyMessage>, OwnedWriteHalf>,
+        to_layer: AsyncDecoder<LocalMessage<ProxyToLayerMessage>, OwnedReadHalf>,
+    }
+
+    async fn setup_reconnect_test() -> ReconnectTestSetup {
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
-        let proxy_addr = listener.local_addr().unwrap();
+
+        let (conn_tx, conn_rx) = mpsc::channel(1);
 
         let config = LayerFileConfig::default()
             .generate_config(&mut Default::default())
             .unwrap();
-
-        let (conn_tx, mut conn_rx) = mpsc::channel(1);
 
         let agent_conn = AgentConnection::new(
             &config,
@@ -1024,22 +1027,14 @@ mod test {
         .await
         .unwrap();
 
-        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        let conn = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
 
-        async fn pull_next_proxy_msg(
-            from_proxy: &ConnectionOutput<Client>,
-            to_proxy: &mpsc::Sender<DaemonMessage>,
-        ) -> ClientMessage {
-            loop {
-                match from_proxy.next().await.unwrap() {
-                    ClientMessage::Ping => to_proxy.send(DaemonMessage::Pong).await.unwrap(),
-                    ClientMessage::ReadyForLogs => (),
-                    otherwise => return otherwise,
-                }
-            }
-        }
-
-        let next_proxy_msg = async || pull_next_proxy_msg(&from_proxy, &to_proxy).await;
+        let (mut from_layer, mut to_layer) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
 
         let proxy = IntProxy::new_with_connection(
             agent_conn,
@@ -1053,13 +1048,7 @@ mod test {
         );
         tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
 
-        let conn = TcpStream::connect(proxy_addr).await.unwrap();
-        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
-            LocalMessage<LayerToProxyMessage>,
-            LocalMessage<ProxyToLayerMessage>,
-        >(conn);
-
-        encoder
+        from_layer
             .send(&LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::NewSession(NewSessionRequest {
@@ -1075,8 +1064,8 @@ mod test {
             })
             .await
             .unwrap();
-        encoder.flush().await.unwrap();
-        match decoder.receive().await.unwrap().unwrap() {
+        from_layer.flush().await.unwrap();
+        match to_layer.receive().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::NewSession(..),
@@ -1084,8 +1073,32 @@ mod test {
             other => panic!("unexpected local message from the proxy: {other:?}"),
         }
 
+        ReconnectTestSetup {
+            from_layer,
+            to_layer,
+            conn_rx,
+        }
+    }
+
+    async fn next_proxy_msg(
+        to_proxy: &mpsc::Sender<DaemonMessage>,
+        from_proxy: &ConnectionOutput<Client>,
+    ) -> ClientMessage {
+        loop {
+            match from_proxy.next().await.unwrap() {
+                ClientMessage::Ping => to_proxy.send(DaemonMessage::Pong).await.unwrap(),
+                ClientMessage::ReadyForLogs => (),
+                other => return other,
+            }
+        }
+    }
+
+    async fn switch_protocol_version(
+        to_proxy: &mpsc::Sender<DaemonMessage>,
+        from_proxy: &ConnectionOutput<Client>,
+    ) {
         assert_eq!(
-            next_proxy_msg().await,
+            next_proxy_msg(to_proxy, from_proxy).await,
             ClientMessage::SwitchProtocolVersion(VERSION.clone()),
         );
 
@@ -1095,10 +1108,24 @@ mod test {
             ))
             .await
             .unwrap();
+    }
+
+    /// Verifies that [`IntProxy`] reconnects and restores state (port subscriptions) correctly
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_restore_subscriptions() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (mut to_proxy, mut from_proxy) = conn_rx.recv().await.unwrap();
 
         // Subscribe to a port so we can later confirm that it
         // restores the subscription after the reconnect.
-        encoder
+        from_layer
             .send(&LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
@@ -1111,8 +1138,10 @@ mod test {
             .await
             .unwrap();
 
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
         assert_eq!(
-            next_proxy_msg().await,
+            next_proxy_msg(&to_proxy, &from_proxy).await,
             ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
         );
 
@@ -1123,57 +1152,39 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            decoder.receive().await,
-            Ok(Some(LocalMessage {
-                message_id: 0,
-                inner: ProxyToLayerMessage::Incoming(
-                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
-                )
-            }))
-        ));
+        // Run multiple times for good measure
+        for _ in 0..3 {
+            // Simulate dropping the connection
+            drop(to_proxy);
 
-        // Simulate dropping the connection
-        drop(to_proxy);
+            // The intproxy (AgentConnection to be exact) should now try to reconnect.
+            // We'll receive the new dummy connection from conn_rx.
 
-        // The intproxy (AgentConnection) to be exact should now try to reconnect.
-        // We'll receive the new dummy connection from conn_rx.
+            (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
 
-        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
-        let next_proxy_msg = async || pull_next_proxy_msg(&from_proxy, &to_proxy).await;
+            switch_protocol_version(&to_proxy, &from_proxy).await;
 
-        assert_eq!(
-            next_proxy_msg().await,
-            ClientMessage::SwitchProtocolVersion(VERSION.clone()),
-        );
+            assert_eq!(
+                next_proxy_msg(&to_proxy, &from_proxy).await,
+                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
+            );
 
-        to_proxy
-            .send(DaemonMessage::SwitchProtocolVersionResponse(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await
-            .unwrap();
+            to_proxy
+                .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+                    42069,
+                ))))
+                .await
+                .unwrap();
 
-        assert_eq!(
-            next_proxy_msg().await,
-            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(42069)))
-        );
-
-        to_proxy
-            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
-                42069,
-            ))))
-            .await
-            .unwrap();
-
-        assert!(matches!(
-            decoder.receive().await,
-            Ok(Some(LocalMessage {
-                message_id: 0,
-                inner: ProxyToLayerMessage::Incoming(
-                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
-                )
-            }))
-        ));
+            assert!(matches!(
+                to_layer.receive().await,
+                Ok(Some(LocalMessage {
+                    message_id: 0,
+                    inner: ProxyToLayerMessage::Incoming(
+                        mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                    )
+                }))
+            ));
+        }
     }
 }
