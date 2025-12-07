@@ -1,1 +1,1 @@
-Added clang in build tools list, so mirrord no longer SIP patches or hooks into it.
+Added clang in build tools list, so mirrord only patches it and hooks exec and spawn.
