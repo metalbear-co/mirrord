@@ -74,8 +74,10 @@ pub enum AgentConnectInfo {
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
-    /// Use a dummy connection. For tests only. The sender is used for
+    /// Use a dummy connection. The sender is used for
     /// sending the new dummy connection to the driver code.
+    ///
+    /// For tests only.
     #[cfg(test)]
     Dummy(#[serde(skip)] mpsc::Sender<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>),
 }
