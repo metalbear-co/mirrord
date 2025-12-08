@@ -731,14 +731,16 @@ mod test {
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
     };
     use mirrord_intproxy_protocol::{
-        IncomingRequest, LayerToProxyMessage, LocalMessage, NewSessionRequest, PortSubscribe,
-        PortSubscription, ProcessInfo, ProxyToLayerMessage,
+        IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
+        OutgoingConnectRequest, OutgoingRequest, OutgoingResponse, PortSubscribe, PortSubscription,
+        ProcessInfo, ProxyToLayerMessage,
         codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
-        ClientMessage, DaemonMessage, FileRequest, FileResponse, RemoteIOError, ResponseError,
-        VERSION,
+        ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
+        ResponseError, VERSION,
         file::{OpenFileRequest, StatFsRequestV2},
+        outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing},
         tcp::{DaemonTcp, LayerTcpSteal, StealType},
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
@@ -1277,9 +1279,70 @@ mod test {
                 inner: ProxyToLayerMessage::File(FileResponse::Open(Err(ResponseError::RemoteIO(
                     RemoteIOError {
                         raw_os_error: None,
-                        kind: mirrord_protocol::ErrorKindInternal::Unknown(error_msg)
+                        kind: ErrorKindInternal::Unknown(error_msg)
                     }
                 ))))
+            })) if error_msg == "connection with mirrord-agent was lost"
+        ));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while waiting for a response to a
+    /// [`ClientMessage::TcpOutgoing`].
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_outgoing() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let socket_addr = SocketAddress::Ip("8.0.0.85:69".parse().unwrap());
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::Outgoing(OutgoingRequest::Connect(
+                    OutgoingConnectRequest {
+                        remote_address: socket_addr.clone(),
+                        protocol: NetProtocol::Stream,
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+                remote_address,
+                ..
+            })) if remote_address == socket_addr
+        ));
+
+        drop(to_proxy);
+
+        // We should get a reconnect.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
+                    ResponseError::RemoteIO(RemoteIOError {
+                        raw_os_error: None,
+                        kind: ErrorKindInternal::Unknown(error_msg)
+                    })
+                )))
             })) if error_msg == "connection with mirrord-agent was lost"
         ));
     }
