@@ -190,8 +190,10 @@ if (-not $wslInstalled) {
         Write-Warning "Could not check WSL feature status: $($_.Exception.Message)"
     }
     
-    # Try to enable required features if not enabled
-    if (-not $vmPlatformEnabled -or -not $wslFeatureEnabled) {
+    # Try to enable required features if not enabled (only if we could check their status)
+    # Note: In CI environments, features may already be enabled but we can't check without admin rights
+    if (($vmPlatformEnabled -eq $false -or $wslFeatureEnabled -eq $false) -and 
+        -not ($vmPlatformEnabled -eq $null -and $wslFeatureEnabled -eq $null)) {
         Write-Host 'Attempting to enable required Windows features for WSL...'
         Write-Host 'This requires administrator privileges and may require a reboot.'
         
@@ -211,15 +213,28 @@ if (-not $wslInstalled) {
             Write-Warning "Windows features have been enabled. A reboot may be required."
             Write-Warning "After reboot, run this script again to install the WSL distribution."
         } catch {
-            Write-Error "Failed to enable Windows features. Error: $($_.Exception.Message)"
-            Write-Error "You may need to run this script as Administrator."
-            Write-Error "Or enable features manually:"
-            Write-Error "  Run as Administrator:"
-            Write-Error "    Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux"
-            Write-Error "    Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform"
-            Write-Error "  Then reboot and run this script again."
-            throw "Required Windows features are not enabled. Enable them and try again."
+            $errorMsg = $_.Exception.Message
+            if ($errorMsg -match 'elevation' -or $errorMsg -match 'requires elevation') {
+                Write-Warning "Cannot enable Windows features: Administrator privileges required."
+                Write-Warning "The features may already be enabled. Attempting to proceed with WSL installation..."
+                Write-Warning "If WSL installation fails, enable features manually as Administrator:"
+                Write-Warning "  Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux"
+                Write-Warning "  Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform"
+            } else {
+                Write-Error "Failed to enable Windows features. Error: $errorMsg"
+                Write-Error "You may need to run this script as Administrator."
+                Write-Error "Or enable features manually:"
+                Write-Error "  Run as Administrator:"
+                Write-Error "    Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux"
+                Write-Error "    Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform"
+                Write-Error "  Then reboot and run this script again."
+                throw "Required Windows features are not enabled. Enable them and try again."
+            }
         }
+    } elseif ($vmPlatformEnabled -eq $null -and $wslFeatureEnabled -eq $null) {
+        # Couldn't check feature status (likely no admin rights), but features may already be enabled
+        Write-Warning "Cannot verify Windows feature status (requires elevation)."
+        Write-Warning "Assuming features may already be enabled. Attempting to proceed with WSL installation..."
     }
     
     Write-Host 'Attempting to install Ubuntu...'
@@ -270,13 +285,25 @@ if (-not $wslInstalled) {
             throw "Failed to install WSL distribution. You may need to run as administrator or install manually."
         }
     } catch {
+        $errorMsg = $_.Exception.Message
         Write-Error "WSL distribution is required but not installed."
-        Write-Error "Please install a WSL distribution manually using one of these methods:"
-        Write-Error "  1. Run as Administrator: wsl --install -d Ubuntu"
-        Write-Error "  2. Or: wsl --install (to install the default distribution)"
-        Write-Error "  3. Or use: wsl --list --online to see available distributions"
-        Write-Error "  After installation, you may need to reboot your system."
-        throw "No WSL distribution available. Install one and try again. Error: $($_.Exception.Message)"
+        Write-Error ""
+        Write-Error "For CI/CD environments (GitHub Actions, etc.):"
+        Write-Error "  Ensure your Windows runner has WSL pre-configured with:"
+        Write-Error "    1. WSL feature enabled"
+        Write-Error "    2. Virtual Machine Platform enabled"
+        Write-Error "    3. At least one WSL distribution installed (e.g., Ubuntu)"
+        Write-Error ""
+        Write-Error "For manual setup, run as Administrator:"
+        Write-Error "  1. Enable features:"
+        Write-Error "     Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux"
+        Write-Error "     Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform"
+        Write-Error "  2. Reboot if prompted"
+        Write-Error "  3. Install distribution: wsl --install -d Ubuntu"
+        Write-Error "  4. Or use: wsl --list --online to see available distributions"
+        Write-Error ""
+        Write-Error "Original error: $errorMsg"
+        throw "No WSL distribution available. Install one and try again. Error: $errorMsg"
     }
 }
 
