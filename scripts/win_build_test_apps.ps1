@@ -135,6 +135,75 @@ if (-not $wslCommand) {
     throw "WSL is required to build native test applications. Follow the setup guide at https://learn.microsoft.com/windows/wsl/install"
 }
 
+# Check if WSL has any distributions installed
+Write-Host 'Checking for WSL distributions...'
+$wslInstalled = $false
+try {
+    $wslListOutput = & wsl --list --quiet 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        # Parse the output to see if any distributions are installed
+        # Filter out header lines and empty lines
+        $distributions = $wslListOutput | Where-Object { 
+            $_ -and 
+            $_ -notmatch '^\s*$' -and 
+            $_ -notmatch '^\s*NAME' -and 
+            $_ -notmatch '^\s*--' -and
+            $_ -notmatch '^\s*Windows Subsystem for Linux'
+        }
+        if ($distributions) {
+            $wslInstalled = $true
+            Write-Host "Found WSL distribution(s): $($distributions -join ', ')"
+        }
+    }
+} catch {
+    Write-Warning "Error checking WSL distributions: $($_.Exception.Message)"
+}
+
+if (-not $wslInstalled) {
+    Write-Host 'No WSL distribution found. Attempting to install Ubuntu...'
+    try {
+        # Try to install Ubuntu (default distribution)
+        # Note: This may require admin rights and might prompt for reboot
+        $installOutput = & wsl --install -d Ubuntu 2>&1
+        $installExitCode = $LASTEXITCODE
+        Write-Host $installOutput
+        
+        if ($installExitCode -eq 0) {
+            Write-Host 'Ubuntu installation command completed successfully.'
+            # Wait a moment and check again
+            Start-Sleep -Seconds 3
+            $wslListOutput = & wsl --list --quiet 2>&1
+            $distributions = $wslListOutput | Where-Object { 
+                $_ -and 
+                $_ -notmatch '^\s*$' -and 
+                $_ -notmatch '^\s*NAME' -and 
+                $_ -notmatch '^\s*--' -and
+                $_ -notmatch '^\s*Windows Subsystem for Linux'
+            }
+            if (-not $distributions) {
+                Write-Warning "WSL distribution installation may require a reboot or additional setup."
+                Write-Warning "Please check if Ubuntu is being installed, and if prompted, reboot your system."
+                Write-Warning "After reboot, run this script again to continue."
+                throw "WSL distribution not yet available. Installation may be in progress or a reboot may be required."
+            } else {
+                Write-Host "WSL distribution is now available: $($distributions -join ', ')"
+            }
+        } else {
+            Write-Warning "WSL install command returned exit code: $installExitCode"
+            Write-Warning "This may indicate that installation requires admin rights or a reboot."
+            throw "Failed to install WSL distribution. You may need to run as administrator or install manually."
+        }
+    } catch {
+        Write-Error "WSL distribution is required but not installed."
+        Write-Error "Please install a WSL distribution manually using one of these methods:"
+        Write-Error "  1. Run as Administrator: wsl --install -d Ubuntu"
+        Write-Error "  2. Or: wsl --install (to install the default distribution)"
+        Write-Error "  3. Or use: wsl --list --online to see available distributions"
+        Write-Error "  After installation, you may need to reboot your system."
+        throw "No WSL distribution available. Install one and try again. Error: $($_.Exception.Message)"
+    }
+}
+
 Write-Host 'Ensuring Go is available inside WSL...'
 $ensureGoScript = @'
 set -euo pipefail
@@ -172,9 +241,19 @@ try {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($tempGoScript, $ensureGoScript, $utf8NoBom)
     $tempGoScriptWsl = Convert-ToWslPath -WindowsPath $tempGoScript
-    & wsl --exec /bin/bash $tempGoScriptWsl
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to provision Go inside WSL'
+    Write-Host "Running Go provisioning script in WSL..."
+    $wslOutput = & wsl --exec /bin/bash $tempGoScriptWsl 2>&1
+    $wslExitCode = $LASTEXITCODE
+    if ($wslOutput) {
+        Write-Host $wslOutput
+    }
+    if ($wslExitCode -ne 0) {
+        Write-Error "WSL command failed with exit code: $wslExitCode"
+        Write-Error "This may indicate that:"
+        Write-Error "  1. No WSL distribution is installed or available"
+        Write-Error "  2. The WSL distribution is not properly initialized"
+        Write-Error "  3. There was an error running the Go provisioning script"
+        throw "Failed to provision Go inside WSL (exit code: $wslExitCode)"
     }
 } finally {
     Remove-Item $tempGoScript -ErrorAction SilentlyContinue
