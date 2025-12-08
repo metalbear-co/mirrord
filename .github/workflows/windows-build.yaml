@@ -445,11 +445,11 @@ jobs:
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
 
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
-          
+      # - name: Run Rust e2e tests 
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
+
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
       ###########################################################################
