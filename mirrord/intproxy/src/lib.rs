@@ -736,7 +736,8 @@ mod test {
         codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
-        ClientMessage, DaemonMessage, FileRequest, VERSION,
+        ClientMessage, DaemonMessage, FileRequest, FileResponse, RemoteIOError, ResponseError,
+        VERSION,
         file::{OpenFileRequest, StatFsRequestV2},
         tcp::{DaemonTcp, LayerTcpSteal, StealType},
     };
@@ -1226,5 +1227,60 @@ mod test {
 
         assert_eq!(from_proxy.next().await, Some(ClientMessage::ReadyForLogs));
         assert_eq!(from_proxy.next().await, Some(ClientMessage::Ping));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while waiting for a fileops response.
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_fileop() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let file_request = FileRequest::Open(OpenFileRequest {
+            path: "/some/file".into(),
+            open_options: Default::default(),
+        });
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::File(file_request.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::FileRequest(file_request)
+        );
+
+        drop(to_proxy);
+
+        // We should get a reconnect.
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::File(FileResponse::Open(Err(ResponseError::RemoteIO(
+                    RemoteIOError {
+                        raw_os_error: None,
+                        kind: mirrord_protocol::ErrorKindInternal::Unknown(error_msg)
+                    }
+                ))))
+            })) if error_msg == "connection with mirrord-agent was lost"
+        ));
     }
 }
