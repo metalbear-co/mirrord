@@ -240,6 +240,17 @@
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
+use std::{
+    collections::{HashMap, HashSet},
+    env::vars,
+    net::SocketAddr,
+    time::Duration,
+};
+#[cfg(not(target_os = "windows"))]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
+#[cfg(target_os = "macos")]
+use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
@@ -273,16 +284,6 @@ use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::Version;
-use std::{
-    collections::{HashMap, HashSet},
-    env::vars,
-    net::SocketAddr,
-    time::Duration,
-};
-#[cfg(not(target_os = "windows"))]
-use std::{ffi::CString, os::unix::ffi::OsStrExt};
-#[cfg(target_os = "macos")]
-use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use tracing::{error, info, trace, warn};
 use which::which;
 
