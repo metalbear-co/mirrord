@@ -81,6 +81,75 @@ jobs:
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
 
+
+      - name: Prepare artifacts
+        id: prep
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
+          $Target = "x86_64-pc-windows-msvc"
+          $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
+          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
+          $Tmp = Join-Path $env:RUNNER_TEMP "prep"
+          New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
+          if ($env:MODE -eq "reuse") {
+            # DOWNLOAD FROM GCS
+            if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+              throw "gcloud not found"
+            }
+            $dest = Join-Path $Tmp "picked"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
+            $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
+            $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
+            if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
+            # SIGN IF NEEDED
+            if ($shouldSign) {
+              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+            }
+            Set-Env "MIRRORD_EXE" $exe
+            Set-Env "MIRRORD_LAYER_FILE" $dll
+            Set-Env "MIRRORD_VERSION" "unknown"
+            exit 0
+          }
+          ####################################################################
+          # BUILD + SIGN ARTIFACTS
+          ####################################################################
+          rustup target add $Target
+          # BUILD DLL
+          cargo build -p mirrord-layer-win --target $Target
+          $dll = Join-Path $DbgDir "mirrord_layer_win.dll"
+          if (-not (Test-Path $dll)) {
+            $dll = Join-Path $RelDir "mirrord_layer_win.dll"
+          }
+          if (-not (Test-Path $dll)) { throw "DLL not found" }
+          if ($shouldSign) {
+            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
+          }
+          # BUILD CLI
+          $env:MIRRORD_LAYER_FILE = $dll
+          cargo build -p mirrord --bin mirrord --target $Target
+          $exe = Join-Path $DbgDir "mirrord.exe"
+          if (-not (Test-Path $exe)) {
+            $exe = Join-Path $RelDir "mirrord.exe"
+          }
+          if (-not (Test-Path $exe)) { throw "EXE not found" }
+          if ($shouldSign) {
+            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
+                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
+          }
+          # EXPORT ENV
+          Set-Env "MIRRORD_EXE" $exe
+          Set-Env "MIRRORD_LAYER_FILE" $dll
+          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
+          Set-Env "MIRRORD_VERSION" $pkg.version
+
       - name: Prepare e2e tests dependencies
         id: prep_e2e
         run: |
@@ -273,73 +342,6 @@ jobs:
             Add-PathEntry -PathEntry $path
           }
 
-      - name: Prepare artifacts
-        id: prep
-        run: |
-          $ErrorActionPreference = "Stop"
-          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
-          $Target = "x86_64-pc-windows-msvc"
-          $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
-          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
-          $Tmp = Join-Path $env:RUNNER_TEMP "prep"
-          New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
-          $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
-          if ($env:MODE -eq "reuse") {
-            # DOWNLOAD FROM GCS
-            if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
-              throw "gcloud not found"
-            }
-            $dest = Join-Path $Tmp "picked"
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-            gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
-            $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
-            $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
-            if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
-            # SIGN IF NEEDED
-            if ($shouldSign) {
-              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-              & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                  /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-            }
-            Set-Env "MIRRORD_EXE" $exe
-            Set-Env "MIRRORD_LAYER_FILE" $dll
-            Set-Env "MIRRORD_VERSION" "unknown"
-            exit 0
-          }
-          ####################################################################
-          # BUILD + SIGN ARTIFACTS
-          ####################################################################
-          rustup target add $Target
-          # BUILD DLL
-          cargo build -p mirrord-layer-win --target $Target
-          $dll = Join-Path $DbgDir "mirrord_layer_win.dll"
-          if (-not (Test-Path $dll)) {
-            $dll = Join-Path $RelDir "mirrord_layer_win.dll"
-          }
-          if (-not (Test-Path $dll)) { throw "DLL not found" }
-          if ($shouldSign) {
-            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
-          }
-          # BUILD CLI
-          $env:MIRRORD_LAYER_FILE = $dll
-          cargo build -p mirrord --bin mirrord --target $Target
-          $exe = Join-Path $DbgDir "mirrord.exe"
-          if (-not (Test-Path $exe)) {
-            $exe = Join-Path $RelDir "mirrord.exe"
-          }
-          if (-not (Test-Path $exe)) { throw "EXE not found" }
-          if ($shouldSign) {
-            & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
-                /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
-          }
-          # EXPORT ENV
-          Set-Env "MIRRORD_EXE" $exe
-          Set-Env "MIRRORD_LAYER_FILE" $dll
-          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
-          Set-Env "MIRRORD_VERSION" $pkg.version
 
       - name: Run Rust e2e tests 
         run: |
