@@ -39,7 +39,7 @@ Install-NasmPortable
 
 Write-Host 'Installing Python packages required by tests'
 python -m pip install --upgrade pip
-python -m pip install uvicorn fastapi flask
+python -m pip install uvicorn fastapi flask --ignore-installed 
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $testsDir = Join-Path $repoRoot 'tests'
