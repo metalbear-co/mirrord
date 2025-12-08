@@ -77,6 +77,16 @@ jobs:
           cargo -V
           rustup show
 
+      # Early sanity check that the runner account can write to C:.
+      - name: Validate C write access
+        run: |
+          $ErrorActionPreference = "Stop"
+          whoami
+          $testDir = "C:\actions\workspace-test"
+          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
+          New-Item -ItemType File -Force -Path (Join-Path $testDir "write-test.txt") -Value "ok" | Out-Null
+          Remove-Item $testDir -Recurse -Force
+
       ###########################################################################
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
