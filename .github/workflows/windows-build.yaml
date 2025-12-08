@@ -40,7 +40,6 @@ permissions:
 
 env:
   BUCKET_URI: gs://mirrord-windows-builds
-  # Public bucket for MSI (needed for WinGet HTTP access)
   MSI_BUCKET_URI: gs://mirrord-windows-builds-public
   ARTIFACT_SUBPATH: windows/mirrord-latest
   RUST_BACKTRACE: "1"
@@ -77,196 +76,131 @@ jobs:
           rustc -V
           cargo -V
           rustup show
+
+      # Early sanity check that the runner account can write to C:.
+      - name: Validate C write access
+        run: |
+          $ErrorActionPreference = "Stop"
+          whoami
+          $testDir = "C:\actions\workspace-test"
+          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
+          New-Item -ItemType File -Force -Path (Join-Path $testDir "write-test.txt") -Value "ok" | Out-Null
+          Remove-Item $testDir -Recurse -Force
+
       ###########################################################################
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
-
+      
+      - name: Prepare e2e tests dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\win_build_test_apps.ps1"
 
       - name: Prepare artifacts
         id: prep
         run: |
           $ErrorActionPreference = "Stop"
-          function Set-Env([string]$k,[string]$v){ "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV }
+
+          function Set-Env([string]$k,[string]$v) {
+            "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
+          }
+
           $Target = "x86_64-pc-windows-msvc"
           $DbgDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
           $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\release"
-          $Tmp = Join-Path $env:RUNNER_TEMP "prep"
+          $Tmp    = Join-Path $env:RUNNER_TEMP "prep"
           New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+
+          # FIXED: added missing closing ")
           $shouldSign = [System.String]::Equals($env:SIGN_ARTIFACTS, "true", "InvariantCultureIgnoreCase")
+
           if ($env:MODE -eq "reuse") {
-            # DOWNLOAD FROM GCS
             if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
               throw "gcloud not found"
             }
+
             $dest = Join-Path $Tmp "picked"
             New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
             gcloud --quiet storage cp "$($env:BUCKET_URI)/$($env:ARTIFACT_SUBPATH)/*" "$dest/"
+
             $exe = (Get-ChildItem $dest -Filter "mirrord.exe" -Recurse -File | Select-Object -First 1).FullName
             $dll = (Get-ChildItem $dest -Filter "mirrord_layer_win.dll" -Recurse -File | Select-Object -First 1).FullName
-            if (-not $exe -or -not $dll) { throw "Failed to find EXE or DLL" }
-            # SIGN IF NEEDED
+
+            if (-not $exe -or -not $dll) {
+              throw "Failed to find EXE or DLL"
+            }
+
             if ($shouldSign) {
               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                   /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
               & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                   /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
             }
+
             Set-Env "MIRRORD_EXE" $exe
             Set-Env "MIRRORD_LAYER_FILE" $dll
             Set-Env "MIRRORD_VERSION" "unknown"
             exit 0
           }
-          ####################################################################
-          # BUILD + SIGN ARTIFACTS
-          ####################################################################
+
           rustup target add $Target
-          # BUILD DLL
+
           cargo build -p mirrord-layer-win --target $Target
           $dll = Join-Path $DbgDir "mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) {
             $dll = Join-Path $RelDir "mirrord_layer_win.dll"
           }
-          if (-not (Test-Path $dll)) { throw "DLL not found" }
+          if (-not (Test-Path $dll)) {
+            throw "DLL not found"
+          }
+
           if ($shouldSign) {
             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$dll"
           }
-          # BUILD CLI
+
           $env:MIRRORD_LAYER_FILE = $dll
+
           cargo build -p mirrord --bin mirrord --target $Target
           $exe = Join-Path $DbgDir "mirrord.exe"
           if (-not (Test-Path $exe)) {
             $exe = Join-Path $RelDir "mirrord.exe"
           }
-          if (-not (Test-Path $exe)) { throw "EXE not found" }
+          if (-not (Test-Path $exe)) {
+            throw "EXE not found"
+          }
+
           if ($shouldSign) {
             & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
                 /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$exe"
           }
-          # EXPORT ENV
+
           Set-Env "MIRRORD_EXE" $exe
           Set-Env "MIRRORD_LAYER_FILE" $dll
+
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
+          $pkg  = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
           Set-Env "MIRRORD_VERSION" $pkg.version
-
-      - name: Prepare e2e tests dependencies
-        id: prep_e2e
-        run: |
-          $ErrorActionPreference = "Stop"
-          $script:AddedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-
-          function Set-StepEnv {
-            param([string]$Key, [string]$Value)
-
-            if ([string]::IsNullOrWhiteSpace($Key) -or [string]::IsNullOrWhiteSpace($Value)) {
-              return
-            }
-
-            "$Key=$Value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Host "Set environment variable: $Key=$Value"
-          }
-
-          function Add-PathEntry {
-            param([string]$PathEntry)
-
-            if ([string]::IsNullOrWhiteSpace($PathEntry)) {
-              return
-            }
-
-            $expanded = [Environment]::ExpandEnvironmentVariables($PathEntry)
-            if (-not (Test-Path $expanded)) {
-              Write-Host "Skipping missing path: $expanded"
-              return
-            }
-
-            $resolved = (Resolve-Path $expanded).ProviderPath
-            if ($script:AddedPaths.Add($resolved)) {
-              $resolved | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              Write-Host "Added to PATH: $resolved"
-              $currentEntries = $env:PATH -split ';'
-              if ($currentEntries -notcontains $resolved) {
-                $env:PATH = "$resolved;$env:PATH"
-              }
-            } else {
-              Write-Host "Path already present: $resolved"
-            }
-          }
-
-          $userProfile = [Environment]::GetFolderPath("UserProfile")
-          $desiredPathOrder = @(
-            "C:\Program Files\PowerShell\7",
-            "C:\Python314\Scripts",
-            "C:\Python314",
-            "C:\Program Files\Eclipse Adoptium\jdk-17.0.16.8-hotspot\bin",
-            "C:\Rust\.cargo\bin",
-            "C:\Windows\System32\OpenSSH",
-            "C:\Program Files\PowerShell\7",
-            "C:\ProgramData\chocolatey\bin",
-            "C:\Program Files\Git\cmd",
-            "C:\Program Files\CMake\bin",
-            "C:\Program Files\NASM",
-            "C:\Program Files\GitHub CLI",
-            "C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit",
-            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64",
-            (Join-Path $userProfile "AppData\Local\nvm"),
-            "C:\nvm4w\nodejs",
-            "C:\Program Files\Rust stable MSVC 1.90\bin",
-            "C:\Program Files (x86)\WiX Toolset v3.14\bin",
-            "C:\Program Files\nodejs",
-            "C:\Program Files\Go\bin",
-            "C:\Program Files\LLVM\bin",
-            "C:\Program Files (x86)\LLVM\bin",
-            "C:\Program Files (x86)\mirrord\bin",
-            "C:\ProgramData\mingw64\mingw64\bin",
-            (Join-Path $userProfile "bin"),
-            (Join-Path $userProfile "go\bin"),
-            (Join-Path $userProfile "scoop\shims"),
-            (Join-Path $userProfile "AppData\Local\Programs\Python\Python312\Scripts"),
-            (Join-Path $userProfile "AppData\Local\Programs\Python\Python312"),
-            (Join-Path $userProfile "AppData\Local\Programs\Python\Launcher"),
-            (Join-Path $userProfile ".cargo\bin"),
-            (Join-Path $userProfile "AppData\Local\Microsoft\WindowsApps"),
-            (Join-Path $userProfile "AppData\Roaming\npm")
-          )
-
-          foreach ($path in $desiredPathOrder) {
-            Add-PathEntry -PathEntry $path
-          }
-
-          try {
-            $goRoot = (& go env GOROOT | Select-Object -First 1).Trim()
-            Set-StepEnv -Key "GOROOT" -Value $goRoot
-            if ($goRoot) { Add-PathEntry -PathEntry (Join-Path $goRoot "bin") }
-
-            $goPath = (& go env GOPATH | Select-Object -First 1).Trim()
-            Set-StepEnv -Key "GOPATH" -Value $goPath
-            if ($goPath) { Add-PathEntry -PathEntry (Join-Path $goPath "bin") }
-          } catch {
-            Write-Warning "Unable to query Go environment with 'go env': $($_.Exception.Message)"
-          }
-
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
 
       ###########################################################################
       # ENSURE WIX TOOLSET IS INSTALLED
       ###########################################################################
-
       - name: Ensure WiX Toolset
         run: |
           $ErrorActionPreference = "Stop"
+
           function Write-Env([string]$k,[string]$v) {
             "$k=$v" | Out-File -Append -FilePath $env:GITHUB_ENV
           }
+
           function Find-Candle {
-            param(
-              [switch]$DeepSearch
-            )
+            param([switch]$DeepSearch)
+
             Write-Host "Searching for WiX candle.exe in known locations..."
             $candidateDirs = @()
+
             if ($Env:ChocolateyInstall -and (Test-Path $Env:ChocolateyInstall)) {
               $candidateDirs += @(
                 (Join-Path $Env:ChocolateyInstall "lib\wixtoolset\tools\bin"),
@@ -274,6 +208,7 @@ jobs:
                 (Join-Path $Env:ChocolateyInstall "bin")
               )
             }
+
             $candidateDirs += @(
               "$Env:ProgramFiles(x86)\WiX Toolset v3.14\bin",
               "$Env:ProgramFiles(x86)\WiX Toolset v3.13\bin",
@@ -286,7 +221,9 @@ jobs:
               "$Env:ProgramData\chocolatey\lib\wixtoolset\tools\bin",
               "$Env:ProgramData\chocolatey\bin"
             )
+
             $candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path $_) }
+
             foreach ($dir in $candidateDirs) {
               $candlePath = Join-Path $dir "candle.exe"
               if (Test-Path $candlePath) {
@@ -294,6 +231,7 @@ jobs:
                 return $candlePath
               }
             }
+
             if ($DeepSearch) {
               Write-Host "No candle.exe in known dirs. Deep searching C:\ for candle.exe (may take time)..."
               try {
@@ -308,33 +246,36 @@ jobs:
                 Write-Warning "Deep search failed: $($_.Exception.Message)"
               }
             }
+
             return $null
           }
-          # 1. Try PATH directly
-          $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+
+          $candleCmd  = Get-Command candle.exe -ErrorAction SilentlyContinue
           $candlePath = $null
+
           if ($candleCmd) {
             $candlePath = $candleCmd.Source
             Write-Host "candle.exe found on PATH at $candlePath"
           } else {
-            # 2. Try common locations
             $candlePath = Find-Candle
           }
-          # 3. If still not found, try installing via Chocolatey (best effort)
+
           if (-not $candlePath) {
             Write-Host "candle.exe still not found. Trying to install WiX Toolset via Chocolatey (latest 3.x)..."
+
             if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
               Write-Host "Chocolatey not found, installing Chocolatey..."
               Set-ExecutionPolicy Bypass -Scope Process -Force
               [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
               Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
             }
+
             try {
               choco install wixtoolset -y --no-progress
             } catch {
               Write-Warning "Chocolatey install failed: $($_.Exception.Message)"
             }
-            # 4. After choco, re-check (including deep search)
+
             $candleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
             if ($candleCmd) {
               $candlePath = $candleCmd.Source
@@ -343,11 +284,12 @@ jobs:
               $candlePath = Find-Candle -DeepSearch
             }
           }
+
           if (-not $candlePath -or -not (Test-Path $candlePath)) {
-            throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists (e.g., via Chocolatey or MSI)."
+            throw "candle.exe still not found after all attempts. Please install WiX Toolset 3.x on this runner and ensure candle.exe exists."
           }
-          # Resolve light.exe in same directory (or via PATH as fallback)
-          $wixDir = Split-Path $candlePath -Parent
+
+          $wixDir    = Split-Path $candlePath -Parent
           $lightPath = Join-Path $wixDir "light.exe"
           if (-not (Test-Path $lightPath)) {
             $lightCmd = Get-Command light.exe -ErrorAction SilentlyContinue
@@ -355,42 +297,48 @@ jobs:
               $lightPath = $lightCmd.Source
             }
           }
+
           if (-not (Test-Path $lightPath)) {
-            throw "Found candle.exe at '$candlePath' but could not find light.exe in the same directory or on PATH. Please ensure a full WiX Toolset 3.x install (candle.exe and light.exe)."
+            throw "Found candle.exe at '$candlePath' but could not find light.exe. Ensure full WiX installation."
           }
+
           Write-Host "Resolved WiX tools:"
           Write-Host "  candle.exe = $candlePath"
           Write-Host "  light.exe  = $lightPath"
-          # Export for subsequent steps
+
           Write-Env "CANDLE_EXE" $candlePath
           Write-Env "LIGHT_EXE"  $lightPath
+
       ###########################################################################
       # BUILD MSI USING main.wxs
       ###########################################################################
-
       - name: Build MSI
         run: |
           $ErrorActionPreference = "Stop"
+
           if (-not $env:CANDLE_EXE -or -not (Test-Path $env:CANDLE_EXE)) {
-            throw "CANDLE_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+            throw "CANDLE_EXE env var is not set or invalid."
           }
           if (-not $env:LIGHT_EXE -or -not (Test-Path $env:LIGHT_EXE)) {
-            throw "LIGHT_EXE env var is not set or does not point to a valid file. Ensure 'Ensure WiX Toolset' step ran successfully."
+            throw "LIGHT_EXE env var is not set or invalid."
           }
+
           $candle = $env:CANDLE_EXE
           $light  = $env:LIGHT_EXE
+
           Write-Host "Using candle.exe at: $candle"
           Write-Host "Using light.exe  at: $light"
+
           $Root = "C:\wix\mirrord"
           New-Item -ItemType Directory -Force -Path $Root | Out-Null
-          # COPY ARTIFACTS + ASSETS
-          Copy-Item $env:MIRRORD_EXE "$Root\mirrord.exe" -Force
-          Copy-Item $env:MIRRORD_LAYER_FILE "$Root\mirrord_layer_win.dll" -Force
-          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico" "$Root\mirrord.ico" -Force
-          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf" "$Root\License.rtf" -Force
-          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs" "$Root\main.wxs" -Force
 
-          # COMPUTE VERSION FOR MSI (4-part format required by WiX)
+          Copy-Item $env:MIRRORD_EXE          "$Root\mirrord.exe"          -Force
+          Copy-Item $env:MIRRORD_LAYER_FILE   "$Root\mirrord_layer_win.dll" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\mirrord.ico"    "$Root\mirrord.ico"     -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf"    "$Root\License.rtf"     -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs"       "$Root\main.wxs"        -Force
+
+          # Compute raw version from tag, input, or MIRRORD_VERSION
           $rawVersion = $null
           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
             $rawVersion = "$env:GITHUB_REF".Substring(10)
@@ -400,145 +348,178 @@ jobs:
             $rawVersion = $env:MIRRORD_VERSION
           }
 
-          # Remove leading 'v' prefix if present
           if ($rawVersion -and $rawVersion.StartsWith("v")) {
             $rawVersion = $rawVersion.Substring(1)
           }
 
-          # Convert to 4-part version (WiX requires major.minor.patch.build)
           if ($rawVersion) {
-            $parts = $rawVersion.Split('.')
-            while ($parts.Count -lt 4) {
-              $parts += "0"
+            # Strip any non-numeric suffix (e.g. "3.174.0-run895-53f857b" -> "3.174.0")
+            $match = [Regex]::Match($rawVersion, '^[0-9]+(\.[0-9]+){0,3}')
+            if ($match.Success) {
+              $clean = $match.Value
+            } else {
+              Write-Warning "Could not parse numeric version from '$rawVersion', falling back to 1.0.0.0"
+              $clean = '1.0.0'
             }
+
+            $parts = $clean.Split('.')
+            while ($parts.Count -lt 4) {
+              $parts += '0'
+            }
+
             $msiVersion = ($parts[0..3] -join '.')
-            Write-Host "Setting MSI Product Version to: $msiVersion (from: $rawVersion)"
+            Write-Host "Setting MSI Product Version to: $msiVersion (from raw '$rawVersion', clean '$clean')"
           } else {
             $msiVersion = "1.0.0.0"
-            Write-Warning "No version found, using default: $msiVersion"
+            Write-Warning "No version found at all, using default: $msiVersion"
           }
 
-          # UPDATE VERSION IN main.wxs
-          $wxsPath = "$Root\main.wxs"
+          $wxsPath    = "$Root\main.wxs"
           $wxsContent = Get-Content $wxsPath -Raw -Encoding UTF8
-          # Replace Version="..." with the computed version
           $wxsContent = $wxsContent -replace 'Version="[^"]*"', "Version=`"$msiVersion`""
-          # Write with UTF-8 without BOM to avoid XML parsing errors
+
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($wxsPath, $wxsContent, $utf8NoBom)
           Write-Host "Updated Product Version in main.wxs to $msiVersion"
 
-          # Export MSI version for summary
           "MSI_VERSION=$msiVersion" | Out-File -Append -FilePath $env:GITHUB_ENV
 
           $Obj = "$Root\main.wixobj"
           $Msi = "$Root\mirrord.msi"
-          if (Test-Path $Msi) { Remove-Item $Msi -Force }
+
+          if (Test-Path $Msi) {
+            Remove-Item $Msi -Force
+          }
+
           & $candle -nologo -v "$Root\main.wxs" -out $Obj
           & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
-          if (-not (Test-Path $Msi)) { throw "MSI not produced" }
-          "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
-      ###########################################################################
-      # SIGN MSI (optional, same cert as EXE/DLL)
-      ###########################################################################
 
+          if (-not (Test-Path $Msi)) {
+            throw "MSI not produced"
+          }
+
+          "MSI_PATH=$Msi" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # SIGN MSI (optional)
+      ###########################################################################
       - name: Sign MSI
         if: env.SIGN_ARTIFACTS == 'true'
         run: |
           $ErrorActionPreference = "Stop"
+
           $msi = $env:MSI_PATH
           if (-not (Test-Path $msi)) {
             throw "MSI_PATH '$msi' does not exist."
           }
+
           & signtool.exe sign /sha1 BFA0BEA8D22265CB382D2D5DEC55A6FFCFF70BCB `
               /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "$msi"
+
       ###########################################################################
       # UPLOAD MSI TO PUBLIC GCS BUCKET
       ###########################################################################
-
       - name: Upload MSI to GCS
         run: |
           $ErrorActionPreference = "Stop"
+
           $msi = $env:MSI_PATH
           if (-not (Test-Path $msi)) {
             throw "MSI_PATH '$msi' does not exist."
           }
-          $runId = $env:GITHUB_RUN_ID
+
+          $runId   = $env:GITHUB_RUN_ID
           $refName = $env:GITHUB_REF_NAME
           if (-not $refName) {
             $refName = "unknown"
           }
-          # Sanitize ref name for use in path
-          $refSafe = $refName -replace '[^A-Za-z0-9\.\-]', '_'
+
+          $refSafe    = $refName -replace '[^A-Za-z0-9\.\-]', '_'
           $bucketBase = $env:MSI_BUCKET_URI.TrimEnd('/')
           $destFolder = "$bucketBase/$refSafe/run-$runId"
-          $destUri = "$destFolder/mirrord.msi"
+          $destUri    = "$destFolder/mirrord.msi"
+
           Write-Host "Uploading MSI to $destUri"
           gcloud --quiet storage cp $msi $destUri
-          # Export for later (summary, logs, HTTP URL computation)
-          "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_RUN_ID=$runId" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MSI_GCS_URI=$destUri" | Out-File -Append -FilePath $env:GITHUB_ENV
-      ###########################################################################
-      # UNIT TESTS (Windows-only crates)
-      ###########################################################################
 
+          "MSI_GCS_REF_SAFE=$refSafe" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MSI_GCS_RUN_ID=$runId"     | Out-File -Append -FilePath $env:GITHUB_ENV
+          "MSI_GCS_URI=$destUri"      | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      ###########################################################################
+      # UNIT TESTS
+      ###########################################################################
       - name: Run Rust unit tests (Windows crates)
         run: |
           $ErrorActionPreference = "Stop"
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
-      # - name: Run Rust e2e tests 
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
+
+      - name: Run Rust e2e tests 
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
       ###########################################################################
-
       - name: Compute release tag
         id: tag
         run: |
           $ErrorActionPreference = "Stop"
+
           if ($env:RELEASE_TAG_INPUT) {
             $tag = $env:RELEASE_TAG_INPUT
           } else {
             $tag = $env:MIRRORD_VERSION
           }
+
           if ([string]::IsNullOrWhiteSpace($tag)) {
             throw "Could not determine version (RELEASE_TAG_INPUT and MIRRORD_VERSION are empty)."
           }
+
           if ($tag.StartsWith("v")) {
             $tag = $tag.Substring(1)
           }
+
+          # Optional: re-use numeric part for Choco/WinGet (consistent with MSI)
+          $match = [Regex]::Match($tag, '^[0-9]+(\.[0-9]+){0,3}')
+          if ($match.Success) {
+            $tag = $match.Value
+          }
+
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Using RELEASE_TAG (version): $tag"
-      ###########################################################################
-      # COMPUTE MSI DOWNLOAD URL FOR WINGET (FROM GCS)
-      ###########################################################################
 
+      ###########################################################################
+      # COMPUTE MSI DOWNLOAD URL FOR WINGET
+      ###########################################################################
       - name: Compute MSI download URL for WinGet
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
+
           $httpBase = $env:MSI_HTTP_BASE
           if (-not $httpBase) {
             throw "MSI_HTTP_BASE must be set for WinGet."
           }
           $httpBase = $httpBase.TrimEnd('/')
+
           $refSafe = $env:MSI_GCS_REF_SAFE
           $runId   = $env:MSI_GCS_RUN_ID
+
           if (-not $refSafe -or -not $runId) {
             throw "MSI_GCS_REF_SAFE/MSI_GCS_RUN_ID not set; ensure 'Upload MSI to GCS' ran."
           }
+
           $url = "$httpBase/$refSafe/run-$runId/mirrord.msi"
           Write-Host "Computed MSI download URL for WinGet: $url"
+
           "MSI_DOWNLOAD_URL=$url" | Out-File -Append -FilePath $env:GITHUB_ENV
+
       ###########################################################################
       # INSTALL .NET RUNTIME FOR WINGETCREATE
       ###########################################################################
-
       - name: Install .NET runtime for wingetcreate
         if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
         uses: actions/setup-dotnet@v4
