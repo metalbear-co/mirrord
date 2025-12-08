@@ -81,11 +81,11 @@ jobs:
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
       
-      - name: Prepare e2e tests dependencies
-        run: |
-          $ErrorActionPreference = "Stop"
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\win_build_test_apps.ps1"
+      # - name: Prepare e2e tests dependencies
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+      #     & "$ScriptsDir\win_build_test_apps.ps1"
 
       - name: Prepare artifacts
         id: prep
