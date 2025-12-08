@@ -160,13 +160,89 @@ try {
 }
 
 if (-not $wslInstalled) {
-    Write-Host 'No WSL distribution found. Attempting to install Ubuntu...'
+    Write-Host 'No WSL distribution found. Checking WSL prerequisites...'
+    
+    # Check if Virtual Machine Platform is enabled (required for WSL2)
+    $vmPlatformEnabled = $false
+    try {
+        $vmPlatform = Get-WindowsOptionalFeature -Online -FeatureName "VirtualMachinePlatform" -ErrorAction SilentlyContinue
+        if ($vmPlatform -and $vmPlatform.State -eq "Enabled") {
+            $vmPlatformEnabled = $true
+            Write-Host "Virtual Machine Platform is enabled."
+        } else {
+            Write-Host "Virtual Machine Platform is not enabled."
+        }
+    } catch {
+        Write-Warning "Could not check Virtual Machine Platform status: $($_.Exception.Message)"
+    }
+    
+    # Check if WSL feature is enabled
+    $wslFeatureEnabled = $false
+    try {
+        $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName "Microsoft-Windows-Subsystem-Linux" -ErrorAction SilentlyContinue
+        if ($wslFeature -and $wslFeature.State -eq "Enabled") {
+            $wslFeatureEnabled = $true
+            Write-Host "WSL feature is enabled."
+        } else {
+            Write-Host "WSL feature is not enabled."
+        }
+    } catch {
+        Write-Warning "Could not check WSL feature status: $($_.Exception.Message)"
+    }
+    
+    # Try to enable required features if not enabled
+    if (-not $vmPlatformEnabled -or -not $wslFeatureEnabled) {
+        Write-Host 'Attempting to enable required Windows features for WSL...'
+        Write-Host 'This requires administrator privileges and may require a reboot.'
+        
+        try {
+            if (-not $wslFeatureEnabled) {
+                Write-Host 'Enabling WSL feature...'
+                Enable-WindowsOptionalFeature -Online -FeatureName "Microsoft-Windows-Subsystem-Linux" -NoRestart -ErrorAction Stop
+                Write-Host 'WSL feature enabled.'
+            }
+            
+            if (-not $vmPlatformEnabled) {
+                Write-Host 'Enabling Virtual Machine Platform feature...'
+                Enable-WindowsOptionalFeature -Online -FeatureName "VirtualMachinePlatform" -NoRestart -ErrorAction Stop
+                Write-Host 'Virtual Machine Platform feature enabled.'
+            }
+            
+            Write-Warning "Windows features have been enabled. A reboot may be required."
+            Write-Warning "After reboot, run this script again to install the WSL distribution."
+        } catch {
+            Write-Error "Failed to enable Windows features. Error: $($_.Exception.Message)"
+            Write-Error "You may need to run this script as Administrator."
+            Write-Error "Or enable features manually:"
+            Write-Error "  Run as Administrator:"
+            Write-Error "    Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux"
+            Write-Error "    Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform"
+            Write-Error "  Then reboot and run this script again."
+            throw "Required Windows features are not enabled. Enable them and try again."
+        }
+    }
+    
+    Write-Host 'Attempting to install Ubuntu...'
     try {
         # Try to install Ubuntu (default distribution)
         # Note: This may require admin rights and might prompt for reboot
         $installOutput = & wsl --install -d Ubuntu 2>&1
         $installExitCode = $LASTEXITCODE
-        Write-Host $installOutput
+        $installOutputString = $installOutput | Out-String
+        Write-Host $installOutputString
+        
+        # Check for specific error messages
+        if ($installOutputString -match 'HCS_E_HYPERV_NOT_INSTALLED' -or 
+            $installOutputString -match 'Virtual Machine Platform' -or
+            $installOutputString -match 'virtualization is enabled in the BIOS') {
+            Write-Error "WSL2 requires Virtual Machine Platform to be enabled."
+            Write-Error "The feature may have been enabled but a reboot is required."
+            Write-Error "Please reboot your system and run this script again."
+            Write-Error "If the issue persists after reboot, ensure:"
+            Write-Error "  1. Virtualization is enabled in BIOS"
+            Write-Error "  2. Hyper-V or Virtual Machine Platform is enabled in Windows Features"
+            throw "WSL2 installation failed: Virtual Machine Platform not available. Reboot may be required."
+        }
         
         if ($installExitCode -eq 0) {
             Write-Host 'Ubuntu installation command completed successfully.'
