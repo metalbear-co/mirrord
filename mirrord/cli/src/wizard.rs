@@ -182,7 +182,7 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
 
     // open browser window
     let url = "http://localhost:3000/";
-    match crate::wizard::get_open_command().arg(&url).output().await {
+    match crate::wizard::get_open_command().arg(url).output().await {
         Ok(output) if output.status.success() => {}
         other => {
             tracing::trace!(?other, "failed to open browser");
@@ -414,7 +414,7 @@ impl IntoTargetInfo for Pod {
                 .containers
                 .iter()
                 .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.abs() as u16)
+                .map(|port| port.container_port.unsigned_abs() as u16)
                 .collect();
             Some(TargetInfo::new(
                 TargetType::Pod,
@@ -443,7 +443,7 @@ impl IntoTargetInfo for Deployment {
                 .containers
                 .iter()
                 .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.abs() as u16)
+                .map(|port| port.container_port.unsigned_abs() as u16)
                 .collect();
             Some(TargetInfo::new(
                 TargetType::Deployment,
@@ -484,7 +484,7 @@ impl IntoTargetInfo for Rollout {
             .unwrap_or_default()
             .iter()
             .flat_map(|container| container.ports.clone().unwrap_or_default())
-            .map(|port| port.container_port.abs() as u16)
+            .map(|port| port.container_port.unsigned_abs() as u16)
             .collect();
 
         if let Some(info) = result {
@@ -514,7 +514,7 @@ impl IntoTargetInfo for Job {
                 .containers
                 .iter()
                 .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.abs() as u16)
+                .map(|port| port.container_port.unsigned_abs() as u16)
                 .collect();
             Some(TargetInfo::new(
                 TargetType::Job,
@@ -545,7 +545,7 @@ impl IntoTargetInfo for CronJob {
                 .containers
                 .iter()
                 .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.abs() as u16)
+                .map(|port| port.container_port.unsigned_abs() as u16)
                 .collect();
             Some(TargetInfo::new(
                 TargetType::CronJob,
@@ -574,7 +574,7 @@ impl IntoTargetInfo for StatefulSet {
                 .containers
                 .iter()
                 .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.abs() as u16)
+                .map(|port| port.container_port.unsigned_abs() as u16)
                 .collect();
             Some(TargetInfo::new(
                 TargetType::StatefulSet,
@@ -607,7 +607,7 @@ impl IntoTargetInfo for Service {
         let selector: Vec<_> = self
             .spec
             .and_then(|spec| spec.selector)
-            .and_then(|tree| Some(tree.into_iter().collect()))
+            .map(|tree| tree.into_iter().collect())
             .unwrap_or_default();
 
         let mut infos: Vec<TargetInfo> = vec![];
@@ -616,7 +616,7 @@ impl IntoTargetInfo for Service {
             infos.extend(
                 seeker
                     .list_all_namespaced::<Pod>(None, Some(&label_selector))
-                    .filter_map(|pod_res| into_info(pod_res, &seeker, &client))
+                    .filter_map(|pod_res| into_info(pod_res, seeker, client))
                     .collect::<Vec<_>>()
                     .await,
             );
@@ -654,7 +654,7 @@ impl IntoTargetInfo for ReplicaSet {
                 .containers
                 .iter()
                 .flat_map(|container| container.ports.clone().unwrap_or_default())
-                .map(|port| port.container_port.abs() as u16)
+                .map(|port| port.container_port.unsigned_abs() as u16)
                 .collect();
             Some(TargetInfo::new(
                 TargetType::ReplicaSet,

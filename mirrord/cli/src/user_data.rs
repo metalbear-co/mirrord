@@ -130,6 +130,7 @@ impl UserData {
         Ok(self.session_count)
     }
 
+    #[cfg(feature = "wizard")]
     /// Updates user data file to indicate that user has used the Wizard
     pub(crate) async fn update_is_returning_wizard(&mut self) -> io::Result<()> {
         self.is_returning_wizard = true;
@@ -138,6 +139,7 @@ impl UserData {
         Ok(())
     }
 
+    #[cfg(feature = "wizard")]
     pub(crate) fn is_returning_wizard(&self) -> bool {
         self.is_returning_wizard
     }
