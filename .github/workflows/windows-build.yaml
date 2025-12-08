@@ -21,12 +21,19 @@ on:
         description: "Publish a Chocolatey package?"
         type: choice
         options: ["false", "true"]
-        default: "true"
+        default: "false"
       winget_publish:
         description: "Update WinGet manifest (wingetcreate)?"
         type: choice
         options: ["false", "true"]
         default: "false"
+
+  pull_request:
+    branches: ["main", "*staging*", "windows-support"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "*.md"
+      - "**/*.md"
 
 permissions:
   contents: read
@@ -73,6 +80,13 @@ jobs:
       ###########################################################################
       # PREPARE ARTIFACTS (either reuse from GCS OR build+sign)
       ###########################################################################
+      
+      - name: Prepare e2e tests dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          & "$ScriptsDir\win_build_test_apps.ps1"
+
       - name: Prepare artifacts
         id: prep
         run: |
@@ -430,6 +444,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
+
+      - name: Run Rust e2e tests 
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
+          
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
       ###########################################################################
