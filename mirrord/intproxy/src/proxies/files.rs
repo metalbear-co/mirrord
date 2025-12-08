@@ -1151,7 +1151,7 @@ impl FilesProxy {
             num_responses = responses.len(),
             "Flushing error responses to file requests"
         );
-        for response in responses {
+        for response in self.reconnect_tracker.agent_lost() {
             message_bus.send(ToLayer::from(response)).await;
         }
         // Reset protocol version since we'll need another negotiation
