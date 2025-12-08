@@ -232,20 +232,44 @@ jobs:
             Write-Warning "Unable to query Go environment with 'go env': $($_.Exception.Message)"
           }
 
-          $logPaths = @(
-            "C:\nvm4w\nodejs",
-            "$env:USERPROFILE\AppData\Roaming\npm",
-            "C:\ProgramData\chocolatey\lib\nodejs",
-            "C:\ProgramData\chocolatey\lib\python3",
-            "$env:APPDATA\Python\Python314\Scripts",
-            "C:\ProgramData\chocolatey\lib\curl\tools",
-            "C:\ProgramData\chocolatey\lib\mingw\tools\install",
-            "C:\ProgramData\chocolatey\lib\cmake",
+          $userProfile = [Environment]::GetFolderPath("UserProfile")
+          $desiredPathOrder = @(
+            "C:\Program Files\PowerShell\7",
             "C:\Python314\Scripts",
-            "$env:USERPROFILE\go\bin"
+            "C:\Python314",
+            "C:\Program Files\Eclipse Adoptium\jdk-17.0.16.8-hotspot\bin",
+            "C:\Rust\.cargo\bin",
+            "C:\Windows\System32\OpenSSH",
+            "C:\Program Files\PowerShell\7",
+            "C:\ProgramData\chocolatey\bin",
+            "C:\Program Files\Git\cmd",
+            "C:\Program Files\CMake\bin",
+            "C:\Program Files\NASM",
+            "C:\Program Files\GitHub CLI",
+            "C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64",
+            (Join-Path $userProfile "AppData\Local\nvm"),
+            "C:\nvm4w\nodejs",
+            "C:\Program Files\Rust stable MSVC 1.90\bin",
+            "C:\Program Files (x86)\WiX Toolset v3.14\bin",
+            "C:\Program Files\nodejs",
+            "C:\Program Files\Go\bin",
+            "C:\Program Files\LLVM\bin",
+            "C:\Program Files (x86)\LLVM\bin",
+            "C:\Program Files (x86)\mirrord\bin",
+            "C:\ProgramData\mingw64\mingw64\bin",
+            (Join-Path $userProfile "bin"),
+            (Join-Path $userProfile "go\bin"),
+            (Join-Path $userProfile "scoop\shims"),
+            (Join-Path $userProfile "AppData\Local\Programs\Python\Python312\Scripts"),
+            (Join-Path $userProfile "AppData\Local\Programs\Python\Python312"),
+            (Join-Path $userProfile "AppData\Local\Programs\Python\Launcher"),
+            (Join-Path $userProfile ".cargo\bin"),
+            (Join-Path $userProfile "AppData\Local\Microsoft\WindowsApps"),
+            (Join-Path $userProfile "AppData\Roaming\npm")
           )
 
-          foreach ($path in $logPaths) {
+          foreach ($path in $desiredPathOrder) {
             Add-PathEntry -PathEntry $path
           }
 
@@ -316,6 +340,11 @@ jobs:
           $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
           $pkg = $meta.packages | Where-Object { $_.name -eq "mirrord" } | Select-Object -First 1
           Set-Env "MIRRORD_VERSION" $pkg.version
+
+      - name: Run Rust e2e tests 
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
 
       ###########################################################################
       # ENSURE WIX TOOLSET IS INSTALLED
@@ -554,10 +583,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
-      - name: Run Rust e2e tests 
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
+      # - name: Run Rust e2e tests 
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     cargo test --target=x86_64-pc-windows-msvc -p mirrord-tests -- --test-threads=1
 
       ###########################################################################
       # COMPUTE VERSION FOR CHOCOLATEY & WINGET
