@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.176.0](https://github.com/metalbear-co/mirrord/tree/3.176.0) - 2025-12-07
+
+
+### Added
+
+- Added support for node.js'
+  [`fs.copyFile`](https://nodejs.org/api/fs.html#fspromisescopyfilesrc-dest-mode)
+  function. [#3741](https://github.com/metalbear-co/mirrord/issues/3741)
+- Added clang in build tools list, so mirrord only patches it and hooks exec
+  and spawn.
+- Added security context configuration option for agent pod.
+
 ## [3.175.0](https://github.com/metalbear-co/mirrord/tree/3.175.0) - 2025-12-03
 
 
