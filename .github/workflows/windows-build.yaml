@@ -314,6 +314,7 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\License.rtf"    "$Root\License.rtf"     -Force
           Copy-Item "$env:GITHUB_WORKSPACE\mirrord\cli\wix\main.wxs"       "$Root\main.wxs"        -Force
 
+          # Compute raw version from tag, input, or MIRRORD_VERSION
           $rawVersion = $null
           if ("$env:GITHUB_REF".StartsWith("refs/tags/")) {
             $rawVersion = "$env:GITHUB_REF".Substring(10)
@@ -328,15 +329,25 @@ jobs:
           }
 
           if ($rawVersion) {
-            $parts = $rawVersion.Split('.')
-            while ($parts.Count -lt 4) {
-              $parts += "0"
+            # Strip any non-numeric suffix (e.g. "3.174.0-run895-53f857b" -> "3.174.0")
+            $match = [Regex]::Match($rawVersion, '^[0-9]+(\.[0-9]+){0,3}')
+            if ($match.Success) {
+              $clean = $match.Value
+            } else {
+              Write-Warning "Could not parse numeric version from '$rawVersion', falling back to 1.0.0.0"
+              $clean = '1.0.0'
             }
+
+            $parts = $clean.Split('.')
+            while ($parts.Count -lt 4) {
+              $parts += '0'
+            }
+
             $msiVersion = ($parts[0..3] -join '.')
-            Write-Host "Setting MSI Product Version to: $msiVersion (from: $rawVersion)"
+            Write-Host "Setting MSI Product Version to: $msiVersion (from raw '$rawVersion', clean '$clean')"
           } else {
             $msiVersion = "1.0.0.0"
-            Write-Warning "No version found, using default: $msiVersion"
+            Write-Warning "No version found at all, using default: $msiVersion"
           }
 
           $wxsPath    = "$Root\main.wxs"
@@ -439,6 +450,12 @@ jobs:
 
           if ($tag.StartsWith("v")) {
             $tag = $tag.Substring(1)
+          }
+
+          # Optional: re-use numeric part for Choco/WinGet (consistent with MSI)
+          $match = [Regex]::Match($tag, '^[0-9]+(\.[0-9]+){0,3}')
+          if ($match.Success) {
+            $tag = $match.Value
           }
 
           "RELEASE_TAG=$tag" | Out-File -Append -FilePath $env:GITHUB_ENV
@@ -688,16 +705,8 @@ jobs:
           $uninstallLines += 'Write-Host "Searching for MSI products matching ''$softwareName''..." -ForegroundColor Cyan'
           $uninstallLines += ''
           $uninstallLines += '# Chocolatey helper returns uninstall-registry entries'
-          $uninstallLines += '$keys = Get-UninstallRegistryKey -SoftwareName $softwareName'
-          $uninstallLines += ''
-          $uninstallLines += 'if (-not $keys -or $keys.Count -eq 0) {'
-          $uninstallLines += '    Write-Warning "No uninstall registry keys found for ''$softwareName''."'
-          $uninstallLines += '    Write-Warning "Nothing to uninstall via MSI. This can happen if mirrord was manually removed."'
-          $uninstallLines += '    return'
-          $uninstallLines += '}'
-          $uninstallLines += ''
-          $uninstallLines += 'foreach ($key in $keys) {'
-          $uninstallLines += '    $productCode = $key.PSChildName  # MSI ProductCode'
+          $uninstallLines += 'Get-UninstallRegistryKey -SoftwareName $softwareName | ForEach-Object {'
+          $uninstallLines += '    $productCode = $_.PSChildName  # MSI ProductCode'
           $uninstallLines += '    Write-Host "Uninstalling mirrord MSI with ProductCode: $productCode" -ForegroundColor Yellow'
           $uninstallLines += ''
           $uninstallLines += '    $packageArgs = @{'
