@@ -59,9 +59,31 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 Write-Host 'Installing dependencies: nodejs, go, python3, curl'
 choco install -y nodejs go python3 curl
 
+# Refresh environment variables to pick up newly installed packages
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
 Write-Host 'Installing Python packages required by tests'
-python -m pip install --upgrade pip
-python -m pip install uvicorn fastapi flask
+# Try different Python command names (Chocolatey may install as python, python3, or py)
+$pythonCmd = $null
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $pythonCmd = "python"
+} elseif (Get-Command python3 -ErrorAction SilentlyContinue) {
+    $pythonCmd = "python3"
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    $pythonCmd = "py"
+} else {
+    # Try to find Python in common Chocolatey installation locations
+    $chocoPythonPath = "C:\ProgramData\chocolatey\lib\python3\tools\python.exe"
+    if (Test-Path $chocoPythonPath) {
+        $pythonCmd = $chocoPythonPath
+    } else {
+        throw "Python not found. Please ensure python3 was installed via Chocolatey."
+    }
+}
+
+Write-Host "Using Python: $pythonCmd"
+& $pythonCmd -m pip install --upgrade pip
+& $pythonCmd -m pip install uvicorn fastapi flask
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $testsDir = Join-Path $repoRoot 'tests'
