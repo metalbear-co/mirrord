@@ -739,6 +739,7 @@ mod test {
     use mirrord_protocol::{
         ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
         ResponseError, VERSION,
+        dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, SockType},
         file::{OpenFileRequest, StatFsRequestV2},
         outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing},
         tcp::{DaemonTcp, LayerTcpSteal, StealType},
@@ -1338,6 +1339,63 @@ mod test {
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
+                    ResponseError::RemoteIO(RemoteIOError {
+                        raw_os_error: None,
+                        kind: ErrorKindInternal::Unknown(error_msg)
+                    })
+                )))
+            })) if error_msg == "connection with mirrord-agent was lost"
+        ));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while waiting for dns response
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_dns() {
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let request = GetAddrInfoRequestV2 {
+            node: "hello".into(),
+            service_port: 4000,
+            family: AddressFamily::Ipv4Only,
+            socktype: SockType::Stream,
+            flags: 0,
+            protocol: 0,
+        };
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::GetAddrInfo(request.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::GetAddrInfoRequestV2(request)
+        );
+
+        drop(to_proxy);
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::GetAddrInfo(GetAddrInfoResponse(Err(
                     ResponseError::RemoteIO(RemoteIOError {
                         raw_os_error: None,
                         kind: ErrorKindInternal::Unknown(error_msg)
