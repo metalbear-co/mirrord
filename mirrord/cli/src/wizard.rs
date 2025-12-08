@@ -114,9 +114,6 @@ fn get_open_command() -> Command {
 /// The entrypoint for the `wizard` command. Unzips the frontend and serves it using axum, along
 /// with internal API endpoints.
 pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<()> {
-    println!("<|:) Greetings, traveler!");
-    println!("Opening the Wizard in the browser...");
-
     let is_returning_string = user_data.is_returning_wizard().to_string();
 
     // client for fetching targets from the cluster when detecting exposed ports
@@ -179,6 +176,9 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::debug!("listening on {}", listener.local_addr()?);
+
+    println!("<|:) Greetings, traveler!");
+    println!("Opening the Wizard in the browser...");
 
     // open browser window
     let url = "http://localhost:3000/";

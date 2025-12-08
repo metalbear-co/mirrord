@@ -207,34 +207,6 @@ jobs:
         working-directory: ./wizard-frontend
       - run: npm run lint
         working-directory: ./wizard-frontend
-
-  run-wizard-frontend:
-    runs-on: ubuntu-24.04
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.wizard_frontend_changed == 'true' || needs.changed_files.outputs.rs_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 22
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - name: "Update config types from current schema"
-        run: |
-          rm -f ./src/mirrord-schema.d.ts
-          npx json2ts ../mirrord-schema.json -o ./src/mirrord-schema.d.ts
-        working-directory: ./wizard-frontend
-      - run: npm run build
-        working-directory: ./wizard-frontend
-      - run: tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
-      - run: |
-          ./target/debug/mirrord wizard &
-          curl localhost:3000
   
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
@@ -639,6 +611,24 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+      # the wizard eagerly creates a Client from a kubeconfig, hence its inclusion here after we set up minikube
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - name: "Wizard: Update config types from current schema"
+        run: |
+          rm -f ./src/mirrord-schema.d.ts
+          npx json2ts ../mirrord-schema.json -o ./src/mirrord-schema.d.ts
+        working-directory: ./wizard-frontend
+      - run: npm run build
+        working-directory: ./wizard-frontend
+      - run: tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      - run: |
+          ./target/debug/mirrord wizard &
+          sleep 2 && curl localhost:3000
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
