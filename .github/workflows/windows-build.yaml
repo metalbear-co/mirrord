@@ -82,10 +82,140 @@ jobs:
       ###########################################################################
 
       - name: Prepare e2e tests dependencies
+        id: prep_e2e
         run: |
           $ErrorActionPreference = "Stop"
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\win_build_test_apps.ps1"
+          $script:AddedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+          function Add-PathEntry {
+            param([string]$PathEntry)
+
+            if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+              return
+            }
+
+            $expanded = [Environment]::ExpandEnvironmentVariables($PathEntry)
+            if (-not (Test-Path $expanded)) {
+              Write-Host "Skipping missing path: $expanded"
+              return
+            }
+
+            $resolved = (Resolve-Path $expanded).ProviderPath
+            if ($script:AddedPaths.Add($resolved)) {
+              $resolved | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              Write-Host "Added to PATH: $resolved"
+            } else {
+              Write-Host "Path already present: $resolved"
+            }
+          }
+
+          function Resolve-CommandDirectory {
+            param([string[]]$Commands)
+
+            foreach ($command in $Commands) {
+              $cmd = Get-Command $command -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($cmd -and $cmd.Source) {
+                return Split-Path -Parent $cmd.Source
+              }
+            }
+
+            return $null
+          }
+
+          function Resolve-ExistingPath {
+            param([string[]]$Candidates)
+
+            foreach ($candidate in $Candidates) {
+              if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+              $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
+              if (Test-Path $expanded) {
+                return (Resolve-Path $expanded).ProviderPath
+              }
+            }
+
+            return $null
+          }
+
+          function Configure-ToolPath {
+            param(
+              [string]$Tool,
+              [string[]]$Commands,
+              [string[]]$Fallbacks = @(),
+              [switch]$IncludeScripts,
+              [string[]]$Extra = @()
+            )
+
+            $candidates = @()
+
+            $cmdDir = Resolve-CommandDirectory -Commands $Commands
+            if ($cmdDir) {
+              $candidates += $cmdDir
+            }
+
+            $candidates += $Fallbacks
+
+            $primary = Resolve-ExistingPath -Candidates $candidates
+            if ($primary) {
+              Write-Host "$Tool resolved to $primary"
+              Add-PathEntry -PathEntry $primary
+
+              if ($IncludeScripts) {
+                Add-PathEntry -PathEntry (Join-Path $primary "Scripts")
+              }
+            } else {
+              Write-Warning "Unable to resolve $Tool location from commands [$($Commands -join ', ')] or expected paths."
+            }
+
+            foreach ($extraPath in $Extra) {
+              Add-PathEntry -PathEntry $extraPath
+            }
+          }
+
+          Configure-ToolPath -Tool "Node.js" -Commands @("node.exe", "npm.cmd") -Fallbacks @(
+            "C:\Program Files\nodejs",
+            "C:\ProgramData\chocolatey\lib\nodejs",
+            "C:\ProgramData\chocolatey\lib\nodejs\tools"
+          )
+          Configure-ToolPath -Tool "Go" -Commands @("go.exe") -Fallbacks @(
+            "C:\Program Files\Go\bin",
+            "C:\Go\bin"
+          )
+          Configure-ToolPath -Tool "Python" -Commands @("python.exe", "python3.exe") -Fallbacks @(
+            "C:\Python314",
+            "C:\ProgramData\chocolatey\lib\python3",
+            "C:\Users\runneradmin\AppData\Local\Programs\Python\Python314"
+          ) -IncludeScripts
+          Configure-ToolPath -Tool "curl" -Commands @("curl.exe") -Fallbacks @(
+            "C:\ProgramData\chocolatey\lib\curl\tools"
+          )
+          Configure-ToolPath -Tool "MinGW" -Commands @("gcc.exe") -Fallbacks @(
+            "C:\ProgramData\mingw64\mingw64\bin",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          ) -Extra @(
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install"
+          )
+          Configure-ToolPath -Tool "CMake" -Commands @("cmake.exe") -Fallbacks @(
+            "C:\Program Files\CMake\bin"
+          )
+          Configure-ToolPath -Tool "NASM" -Commands @("nasm.exe") -Fallbacks @(
+            "C:\Program Files\NASM"
+          )
+          Configure-ToolPath -Tool "LLVM" -Commands @("clang.exe", "llvm-ar.exe") -Fallbacks @(
+            "C:\Program Files\LLVM\bin"
+          )
+
+          $logPaths = @(
+            "C:\ProgramData\chocolatey\lib\nodejs",
+            "C:\ProgramData\chocolatey\lib\python3",
+            "C:\ProgramData\chocolatey\lib\curl\tools",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install",
+            "C:\ProgramData\chocolatey\lib\cmake",
+            "C:\Python314\Scripts"
+          )
+
+          foreach ($path in $logPaths) {
+            Add-PathEntry -PathEntry $path
+          }
 
       - name: Prepare artifacts
         id: prep
