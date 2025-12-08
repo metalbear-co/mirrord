@@ -69,7 +69,7 @@ use k8s_openapi::api::{
 use kube::{Client, client::ClientBuilder};
 use mirrord_config::target::TargetType;
 use mirrord_kube::{
-    api::kubernetes::{create_kube_config, rollout::Rollout, seeker, seeker::KubeResourceSeeker},
+    api::kubernetes::{create_kube_config, rollout::Rollout, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
 use serde::{Deserialize, Serialize};
@@ -397,7 +397,7 @@ trait IntoTargetInfo {
         self,
         seeker: &KubeResourceSeeker,
         client: &Client,
-    ) -> impl Future<Output=Result<Option<TargetInfo>, CliError>>;
+    ) -> impl Future<Output = Result<Option<TargetInfo>, CliError>>;
 }
 
 impl IntoTargetInfo for Pod {

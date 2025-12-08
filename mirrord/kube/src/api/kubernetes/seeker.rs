@@ -244,8 +244,8 @@ impl KubeResourceSeeker<'_> {
                     Some("app!=mirrord,!operator.metalbear.co/owner"),
                     label_selector,
                 ]
-                    .into_iter()
-                    .flatten(),
+                .into_iter()
+                .flatten(),
                 ",",
             )),
             field_selector: field_selector.map(ToString::to_string),
