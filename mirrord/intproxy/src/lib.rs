@@ -648,6 +648,34 @@ impl IntProxy {
             ))
             .await;
 
+        self.task_txs
+            .files
+            .send(FilesProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .incoming
+            .send(IncomingProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .outgoing
+            .send(OutgoingProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
+        self.task_txs
+            .simple
+            .send(SimpleProxyMessage::ConnectionRefresh(
+                kind.clone_with_another_handle(),
+            ))
+            .await;
+
         match kind {
             ConnectionRefresh::Start => {
                 // Initialise default reconnect message queue
@@ -667,34 +695,6 @@ impl IntProxy {
                             .as_ref()
                             .unwrap_or(&mirrord_protocol::VERSION)
                             .clone(),
-                    ))
-                    .await;
-
-                self.task_txs
-                    .files
-                    .send(FilesProxyMessage::ConnectionRefresh(
-                        self.agent_tx.another(),
-                    ))
-                    .await;
-
-                self.task_txs
-                    .incoming
-                    .send(IncomingProxyMessage::ConnectionRefresh(
-                        self.agent_tx.another(),
-                    ))
-                    .await;
-
-                self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::ConnectionRefresh(
-                        self.agent_tx.another(),
-                    ))
-                    .await;
-
-                self.task_txs
-                    .outgoing
-                    .send(OutgoingProxyMessage::ConnectionRefresh(
-                        self.agent_tx.another(),
                     ))
                     .await;
 
@@ -737,7 +737,7 @@ mod test {
     };
     use mirrord_protocol::{
         ClientMessage, DaemonMessage, FileRequest, VERSION,
-        file::StatFsRequestV2,
+        file::{OpenFileRequest, StatFsRequestV2},
         tcp::{DaemonTcp, LayerTcpSteal, StealType},
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};

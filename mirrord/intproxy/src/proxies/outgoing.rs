@@ -27,7 +27,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     error::{UnexpectedAgentMessage, agent_lost_io_error},
-    main_tasks::{LayerClosed, LayerForked, ToLayer},
+    main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
     proxies::outgoing::{
         busy_tcp_listener::{BusyListenerMethod, BusyTcpListener},
         net_protocol_ext::{NetProtocolExt, PreparedSocket},
@@ -485,54 +485,61 @@ impl OutgoingProxy {
     async fn handle_connection_refresh(
         &mut self,
         message_bus: &mut MessageBus<Self>,
-        new_agent_tx: TxHandle<Client>,
+        refresh: ConnectionRefresh,
     ) {
-        tracing::debug!("Closing all local connections");
-        self.txs.clear();
-        self.background_tasks.as_mut().unwrap().clear();
-        self.protocol_version = None;
+        match refresh {
+            ConnectionRefresh::Start => {
+                tracing::debug!("Closing all local connections");
+                self.txs.clear();
+                self.background_tasks.as_mut().unwrap().clear();
+                self.protocol_version = None;
 
-        tracing::debug!(
-            responses = self.datagrams_reqs.len(),
-            "Flushing error responses to UDP connect requests"
-        );
-        while let Some((message_id, layer_id)) = self.datagrams_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostOutgoingResponse(
-                    layer_id, message_id,
-                )))
-                .await;
+                tracing::debug!(
+                    responses = self.datagrams_reqs.len(),
+                    "Flushing error responses to UDP connect requests"
+                );
+                while let Some((message_id, layer_id)) = self.datagrams_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostOutgoingResponse(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
+
+                tracing::debug!(
+                    responses = self.stream_reqs.len(),
+                    "Flushing error responses to TCP connect requests"
+                );
+                while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostOutgoingResponse(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
+
+                tracing::debug!(
+                    responses = self.v2_reqs.len(),
+                    "Flushing error responses to V2 connect requests"
+                );
+                for in_progress in std::mem::take(&mut self.v2_reqs).into_values() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostOutgoingResponse(
+                            in_progress.layer_id,
+                            in_progress.message_id,
+                        )))
+                        .await;
+                }
+
+                // Reset protocol version since we'll need another negotiation
+                // round for the new connection.
+                self.protocol_version = None;
+            }
+            ConnectionRefresh::End(tx_handle) => {
+                message_bus.set_agent_tx(tx_handle);
+            }
+            ConnectionRefresh::Request => {}
         }
-
-        tracing::debug!(
-            responses = self.stream_reqs.len(),
-            "Flushing error responses to TCP connect requests"
-        );
-        while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostOutgoingResponse(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
-
-        tracing::debug!(
-            responses = self.v2_reqs.len(),
-            "Flushing error responses to V2 connect requests"
-        );
-        for in_progress in std::mem::take(&mut self.v2_reqs).into_values() {
-            message_bus
-                .send(ToLayer::from(AgentLostOutgoingResponse(
-                    in_progress.layer_id,
-                    in_progress.message_id,
-                )))
-                .await;
-        }
-
-        // Reset protocol version since we'll need another negotiation
-        // round for the new connection.
-        self.protocol_version = None;
-        message_bus.set_agent_tx(new_agent_tx);
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err(level = Level::DEBUG))]
@@ -579,7 +586,7 @@ pub enum OutgoingProxyMessage {
     AgentDatagrams(DaemonUdpOutgoing),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
-    ConnectionRefresh(TxHandle<Client>),
+    ConnectionRefresh(ConnectionRefresh),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
 }
@@ -644,7 +651,7 @@ impl BackgroundTask for OutgoingProxy {
                             self.agent_local_addresses.remove(&id);
                         }
                     }
-                    Some(OutgoingProxyMessage::ConnectionRefresh(new_agent_tx)) => self.handle_connection_refresh(message_bus, new_agent_tx).await,
+                    Some(OutgoingProxyMessage::ConnectionRefresh(refresh)) => self.handle_connection_refresh(message_bus, refresh).await,
                     Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
                         self.protocol_version.replace(version);
                     }
@@ -698,7 +705,7 @@ mod test {
 
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
-        main_tasks::{ProxyMessage, ToLayer},
+        main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
     };
 
@@ -758,7 +765,13 @@ mod test {
             // Connection with the operator was reset.
             outgoing
                 .send(OutgoingProxyMessage::ConnectionRefresh(
-                    connection.tx_handle(),
+                    ConnectionRefresh::Start,
+                ))
+                .await;
+
+            outgoing
+                .send(OutgoingProxyMessage::ConnectionRefresh(
+                    ConnectionRefresh::End(connection.tx_handle()),
                 ))
                 .await;
         }

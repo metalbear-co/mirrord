@@ -42,7 +42,7 @@ use crate::{
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
-    main_tasks::{LayerClosed, LayerForked, ToLayer},
+    main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
 };
 
 mod bound_socket;
@@ -110,7 +110,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
-    ConnectionRefresh(TxHandle<Client>),
+    ConnectionRefresh(ConnectionRefresh),
 }
 
 /// Handle to a running [`HttpGatewayTask`].
@@ -716,22 +716,29 @@ impl IncomingProxy {
                 }
             }
 
-            IncomingProxyMessage::ConnectionRefresh(new_agent_tx) => {
-                self.tcp_proxies.mirror.clear();
-                self.tcp_proxies.steal.clear();
-                self.http_gateways.mirror.clear();
-                self.http_gateways.steal.clear();
+            IncomingProxyMessage::ConnectionRefresh(refresh) => {
+                match refresh {
+                    ConnectionRefresh::Start => {
+                        self.tcp_proxies.mirror.clear();
+                        self.tcp_proxies.steal.clear();
+                        self.http_gateways.mirror.clear();
+                        self.http_gateways.steal.clear();
+                        self.tasks.as_mut().unwrap().clear();
 
-                let tasks = self.tasks.as_mut().unwrap();
-                tasks.clear();
-
-                // Reset protocol version since we'll need another negotiation
-                // round for the new connection.
-                self.protocol_version = None;
-                message_bus.set_agent_tx(new_agent_tx);
-                tasks.set_agent_tx(message_bus.clone_agent_tx());
-
-                self.restore_subscriptions_on_protocol_version_switch = true;
+                        // Reset protocol version since we'll need another negotiation
+                        // round for the new connection.
+                        self.protocol_version = None;
+                        self.restore_subscriptions_on_protocol_version_switch = true;
+                    }
+                    ConnectionRefresh::End(tx_handle) => {
+                        message_bus.set_agent_tx(tx_handle);
+                        self.tasks
+                            .as_mut()
+                            .unwrap()
+                            .set_agent_tx(message_bus.clone_agent_tx());
+                    }
+                    ConnectionRefresh::Request => {}
+                }
             }
         }
 

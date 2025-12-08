@@ -19,7 +19,7 @@ use tracing::Level;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
-    main_tasks::{LayerClosed, LayerForked, ProxyMessage, ToLayer},
+    main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ProxyMessage, ToLayer},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
 };
@@ -137,7 +137,7 @@ pub enum FilesProxyMessage {
     /// Layer instance closed.
     LayerClosed(LayerClosed),
     /// Agent connection was refreshed
-    ConnectionRefresh(TxHandle<Client>),
+    ConnectionRefresh(ConnectionRefresh),
 }
 
 /// Error that can occur in [`FilesProxy`].
@@ -1124,40 +1124,47 @@ impl FilesProxy {
     async fn handle_reconnect(
         &mut self,
         message_bus: &mut MessageBus<Self>,
-        new_agent_tx: TxHandle<Client>,
+        refresh: ConnectionRefresh,
     ) {
-        let files_to_drop = self
-            .remote_files
-            .drain()
-            .flat_map(|(_, fds)| fds)
-            .collect::<HashSet<_>>();
-        tracing::debug!(?files_to_drop, "Dropping remote files");
-        for fd in files_to_drop {
-            self.buffered_files.remove(&fd);
-        }
+        match refresh {
+            ConnectionRefresh::Start => {
+                let files_to_drop = self
+                    .remote_files
+                    .drain()
+                    .flat_map(|(_, fds)| fds)
+                    .collect::<HashSet<_>>();
+                tracing::debug!(?files_to_drop, "Dropping remote files");
+                for fd in files_to_drop {
+                    self.buffered_files.remove(&fd);
+                }
 
-        let directories_to_drop = self
-            .remote_dirs
-            .drain()
-            .flat_map(|(_, fds)| fds)
-            .collect::<HashSet<_>>();
-        tracing::debug!(?directories_to_drop, "Dropping remote directories");
-        for fd in directories_to_drop {
-            self.buffered_dirs.remove(&fd);
-        }
+                let directories_to_drop = self
+                    .remote_dirs
+                    .drain()
+                    .flat_map(|(_, fds)| fds)
+                    .collect::<HashSet<_>>();
+                tracing::debug!(?directories_to_drop, "Dropping remote directories");
+                for fd in directories_to_drop {
+                    self.buffered_dirs.remove(&fd);
+                }
 
-        let responses = self.reconnect_tracker.agent_lost();
-        tracing::debug!(
-            num_responses = responses.len(),
-            "Flushing error responses to file requests"
-        );
-        for response in self.reconnect_tracker.agent_lost() {
-            message_bus.send(ToLayer::from(response)).await;
+                let responses = self.reconnect_tracker.agent_lost();
+                tracing::debug!(
+                    num_responses = responses.len(),
+                    "Flushing error responses to file requests"
+                );
+                for response in self.reconnect_tracker.agent_lost() {
+                    message_bus.send(ToLayer::from(response)).await;
+                }
+                // Reset protocol version since we'll need another negotiation
+                // round for the new connection.
+                self.protocol_version = None;
+            }
+            ConnectionRefresh::End(tx_handle) => {
+                message_bus.set_agent_tx(tx_handle);
+            }
+            ConnectionRefresh::Request => {}
         }
-        // Reset protocol version since we'll need another negotiation
-        // round for the new connection.
-        self.protocol_version = None;
-        message_bus.set_agent_tx(new_agent_tx);
     }
 }
 
@@ -1194,8 +1201,8 @@ impl BackgroundTask for FilesProxy {
                 }
                 FilesProxyMessage::LayerForked(forked) => self.layer_forked(forked),
                 FilesProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
-                FilesProxyMessage::ConnectionRefresh(new_agent_tx) => {
-                    self.handle_reconnect(message_bus, new_agent_tx).await
+                FilesProxyMessage::ConnectionRefresh(refresh) => {
+                    self.handle_reconnect(message_bus, refresh).await
                 }
             }
         }

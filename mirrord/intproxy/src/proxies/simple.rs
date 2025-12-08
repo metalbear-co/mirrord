@@ -18,7 +18,7 @@ use crate::{
     ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
-    main_tasks::ToLayer,
+    main_tasks::{ConnectionRefresh, ToLayer},
     request_queue::RequestQueue,
 };
 
@@ -30,7 +30,7 @@ pub enum SimpleProxyMessage {
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
-    ConnectionRefresh(TxHandle<Client>),
+    ConnectionRefresh(ConnectionRefresh),
 }
 
 #[derive(Error, Debug)]
@@ -125,36 +125,41 @@ impl SimpleProxy {
     async fn handle_connection_refresh(
         &mut self,
         message_bus: &mut MessageBus<Self>,
-        new_agent_tx: TxHandle<Client>,
+        refresh: ConnectionRefresh,
     ) {
-        tracing::debug!(
-            num_responses = self.addr_info_reqs.len(),
-            "Flushing error responses to GetAddrInfoRequests"
-        );
-        while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
+        match refresh {
+            ConnectionRefresh::Start => {
+                tracing::debug!(
+                    num_responses = self.addr_info_reqs.len(),
+                    "Flushing error responses to GetAddrInfoRequests"
+                );
+                while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
 
-        tracing::debug!(
-            num_responses = self.get_env_reqs.len(),
-            "Flushing error responses to GetEnvVarsRequests"
-        );
-        while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
-            message_bus
-                .send(ToLayer::from(AgentLostSimpleResponse::get_env(
-                    layer_id, message_id,
-                )))
-                .await;
-        }
+                tracing::debug!(
+                    num_responses = self.get_env_reqs.len(),
+                    "Flushing error responses to GetEnvVarsRequests"
+                );
+                while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
+                    message_bus
+                        .send(ToLayer::from(AgentLostSimpleResponse::get_env(
+                            layer_id, message_id,
+                        )))
+                        .await;
+                }
 
-        message_bus.set_agent_tx(new_agent_tx);
-        // Reset protocol version since we'll need another negotiation
-        // round for the new connection.
-        self.protocol_version = None;
+                // Reset protocol version since we'll need another negotiation
+                // round for the new connection.
+                self.protocol_version = None;
+            }
+            ConnectionRefresh::End(tx_handle) => message_bus.set_agent_tx(tx_handle),
+            ConnectionRefresh::Request => {}
+        }
     }
 }
 
