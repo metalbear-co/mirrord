@@ -2,6 +2,7 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 #[cfg(target_os = "windows")]
 use ::windows::core as windows_core;
+#[cfg(feature = "wizard")]
 use axum::response::{IntoResponse, Response};
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -597,6 +598,7 @@ impl From<OperatorApiError> for CliError {
     }
 }
 
+#[cfg(feature = "wizard")]
 impl IntoResponse for CliError {
     fn into_response(self) -> Response {
         (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
