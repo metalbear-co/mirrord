@@ -184,6 +184,8 @@ jobs:
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
       # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
       - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
+      - name: create dummy file to compile wizard feature
+        run: touch wizard-frontend.tar.gz
       - run: cargo fmt --all -- --check
       # x64
       - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
@@ -445,6 +447,8 @@ jobs:
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - name: create dummy file to compile wizard feature
+        run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
@@ -458,7 +462,7 @@ jobs:
       - name: mirrord operator UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
