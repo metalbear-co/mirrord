@@ -473,6 +473,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           cargo test --target=x86_64-pc-windows-msvc -p mirrord -p mirrord-layer-win
 
+      - name: Debug Python environment before Rust e2e tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          py -3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__); print('sys.path:'); [print(' ', p) for p in sys.path]"
 
       - name: Run Rust e2e tests 
         run: |
