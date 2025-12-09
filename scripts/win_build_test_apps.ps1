@@ -37,9 +37,31 @@ function Install-NasmPortable {
 choco install -y --force nodejs go python3 curl mingw cmake llvm
 Install-NasmPortable
 
-Write-Host 'Installing Python packages required by tests'
-python -m pip install --upgrade pip
-python -m pip install uvicorn fastapi flask --ignore-installed 
+Write-Host 'Preparing Python virtual environment for test dependencies'
+$venvRoot = Join-Path $env:TEMP "mirrord-test-venv"
+if (Test-Path $venvRoot) {
+    Remove-Item -Recurse -Force $venvRoot
+}
+python -m pip install --upgrade pip virtualenv
+python -m venv $venvRoot
+$venvActivate = Join-Path $venvRoot "Scripts\Activate.ps1"
+
+try {
+    Write-Host "Activating virtual environment at $venvRoot"
+    . $venvActivate
+
+    Write-Host 'Installing Python packages required by tests'
+    python -m pip install --upgrade pip
+    python -m pip install uvicorn fastapi flask --ignore-installed
+} finally {
+    Write-Host "Deactivating and removing virtual environment"
+    if (Get-Command deactivate -ErrorAction SilentlyContinue) {
+        deactivate
+    }
+    if (Test-Path $venvRoot) {
+        Remove-Item -Recurse -Force $venvRoot
+    }
+}
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $testsDir = Join-Path $repoRoot 'tests'
