@@ -75,7 +75,7 @@ use mirrord_kube::{
 use serde::{Deserialize, Serialize};
 use tar::Archive;
 use tempfile::TempDir;
-use tokio::{process::Command, sync::Mutex};
+use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -92,24 +92,6 @@ use crate::{
 /// The frontend `dist` dir, compressed (as bytes). The CI runs this step automatically, so you only
 /// need to do it manually if making changes to the wizard.
 const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.gz");
-#[cfg(target_os = "linux")]
-fn get_open_command() -> Command {
-    let mut command = Command::new("gio");
-    command.arg("open");
-    command
-}
-
-#[cfg(target_os = "macos")]
-fn get_open_command() -> Command {
-    Command::new("open")
-}
-
-/// WARNING: untested on `target_os = "windows"`, but if this fails the URL will get printed to the
-/// terminal as a fallback.
-#[cfg(target_os = "windows")]
-fn get_open_command() -> Command {
-    Command::new("cmd.exe").arg("/C").arg("start").arg("")
-}
 
 /// The entrypoint for the `wizard` command. Unzips the frontend and serves it using axum, along
 /// with internal API endpoints.
@@ -182,16 +164,16 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
 
     // open browser window
     let url = "http://localhost:3000/";
-    match crate::wizard::get_open_command().arg(url).output().await {
-        Ok(output) if output.status.success() => {}
-        other => {
-            tracing::trace!(?other, "failed to open browser");
-            println!(
-                "To open the mirrord wizard, visit:\n\n\
-             {url}"
-            );
+    match opener::open(url) {
+        Ok(()) => {}
+        Err(error) => {
+            tracing::trace!(?error, "failed to open browser");
         }
     }
+    println!(
+        "The wizard is available at:\n\n\
+             {url}"
+    );
 
     axum::serve(listener, app.layer(TraceLayer::new_for_http()))
         .await
