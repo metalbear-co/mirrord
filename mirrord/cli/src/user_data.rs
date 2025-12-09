@@ -42,8 +42,9 @@ pub(crate) struct UserData {
     #[serde(default = "Uuid::new_v4")]
     machine_id: Uuid,
 
-    /// True if the user has used the `mirrord wizard` command  for at least 10 seconds in the
-    /// past.
+    /// True if the user has used the `mirrord wizard` command enough to be considered a returning
+    /// user. This update is triggered when the wizard gets a request on the cluster-details
+    /// endpoint, which happens when the user starts the flow to create a config file.
     #[serde(default)]
     is_returning_wizard: bool,
 }
