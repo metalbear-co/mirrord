@@ -478,6 +478,19 @@ jobs:
           $ErrorActionPreference = "Stop"
           py -3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__); print('sys.path:'); [print(' ', p) for p in sys.path]"
 
+      - name: Force python3 to use C:\Python314
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not (Test-Path "C:\Python314\python3.exe")) {
+            Copy-Item "C:\Python314\python.exe" "C:\Python314\python3.exe" -Force
+          }
+          $env:PATH = "C:\Python314;C:\Python314\Scripts;$env:PATH"
+          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH)
+          python3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__)"
+          # Extra debug for next run: show PATH and pip list for the exact python3
+          python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
+          python3 -m pip list
+
       - name: Run Rust e2e tests 
         run: |
           $ErrorActionPreference = "Stop"
