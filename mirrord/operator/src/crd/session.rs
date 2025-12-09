@@ -142,7 +142,7 @@ pub struct SessionClosed {
 
 /// Information about the CI session started from `mirrord ci start`.
 ///
-/// We try to get some of these fields automatically, but for some that we cannot, the user mays
+/// We try to get some of these fields automatically, but for some that we cannot, the user may
 /// pass them as cli args to `mirrord ci start`, see `cli::ci::StartArgs`.
 ///
 /// These values are passed to the operator, and handled by the `ci_controller`.
