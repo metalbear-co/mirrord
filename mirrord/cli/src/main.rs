@@ -1056,7 +1056,10 @@ fn main() -> miette::Result<()> {
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
-            Commands::Wizard(args) => wizard::wizard_command(user_data, *args).await?,
+            Commands::Wizard(args) => {
+                wizard::wizard_command(user_data, *args, &mut ProgressTracker::from_env("wizard"))
+                    .await?
+            }
         };
 
         Ok(())
