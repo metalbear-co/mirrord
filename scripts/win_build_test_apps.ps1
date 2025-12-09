@@ -53,6 +53,8 @@ try {
     Write-Host 'Installing Python packages required by tests'
     python -m pip install --upgrade pip
     python -m pip install uvicorn fastapi flask --ignore-installed
+    Write-Host 'Installed Python packages:'
+    python -c "import pkgutil, sys; [print(module.module_finder.path) for module in pkgutil.iter_modules()]"
 } finally {
     Write-Host "Deactivating and removing virtual environment"
     if (Get-Command deactivate -ErrorAction SilentlyContinue) {
