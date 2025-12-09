@@ -181,12 +181,16 @@ pub struct SessionOwner {
 
 #[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct AgentPodTarget {
-    pub uid: String,
-
+    /// Target namespace
     pub namespace: String,
 
+    /// Target name
     pub name: String,
 
+    /// Target's container id
+    pub container_id: String,
+
+    /// Target's container name
     pub container_name: String,
 }
 
@@ -200,6 +204,7 @@ impl fmt::Display for AgentPodTarget {
 }
 
 #[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "snakeCase")]
 pub enum AgentTarget {
     Targetless(String),
     Pod(AgentPodTarget),
