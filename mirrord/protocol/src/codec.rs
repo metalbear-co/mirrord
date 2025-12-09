@@ -6,8 +6,15 @@ use std::{
 };
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{Decode, Encode, error::DecodeError};
-use bytes::{Buf, BufMut, BytesMut};
+use bincode::{
+    Decode, Encode,
+    enc::{
+        EncoderImpl,
+        write::{SizeWriter, Writer},
+    },
+    error::{DecodeError, EncodeError},
+};
+use bytes::{Buf, BytesMut};
 use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -102,6 +109,10 @@ pub enum FileRequest {
     /// Same as StatFs, but results in the V2 response.
     StatFsV2(StatFsRequestV2),
     Rename(RenameRequest),
+    Ftruncate(FtruncateRequest),
+    Futimens(FutimensRequest),
+    Fchown(FchownRequest),
+    Fchmod(FchmodRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -174,6 +185,10 @@ pub enum FileResponse {
     Unlink(RemoteResult<()>),
     XstatFsV2(RemoteResult<XstatFsResponseV2>),
     Rename(RemoteResult<()>),
+    Ftruncate(RemoteResult<()>),
+    Futimens(RemoteResult<()>),
+    Fchown(RemoteResult<()>),
+    Fchmod(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
@@ -261,22 +276,32 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
     fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match bincode::encode_to_vec(msg, self.config) {
-            Ok(encoded) => encoded,
-            Err(err) => {
-                return Err(io::Error::other(err.to_string()));
-            }
+        // First, calculate the size of encoded message, and eagerly reserve enough space in the
+        // buffer. This guarantees at most one allocation.
+        let size = {
+            let mut size_writer = EncoderImpl::new(SizeWriter::default(), self.config);
+            msg.encode(&mut size_writer).map_err(io::Error::other)?;
+            size_writer.into_writer().bytes_written
         };
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
+        dst.reserve(size);
 
-        Ok(())
+        /// Allows using [`BytesMut`] as bincode's [`Writer`].
+        struct WriterAdapter<'a>(&'a mut BytesMut);
+
+        impl Writer for WriterAdapter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
+                self.0.extend_from_slice(bytes);
+                Ok(())
+            }
+        }
+
+        bincode::encode_into_writer(msg, WriterAdapter(dst), self.config).map_err(io::Error::other)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
+    use bytes::{BufMut, BytesMut};
 
     use super::*;
     use crate::{Payload, tcp::TcpData};

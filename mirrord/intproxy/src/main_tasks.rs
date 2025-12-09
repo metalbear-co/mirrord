@@ -10,6 +10,7 @@ use tokio::net::TcpStream;
 /// [`MainTaskId`].
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+#[allow(clippy::large_enum_variant)] // the difference is not that big
 pub enum ProxyMessage {
     /// Message to be sent to the agent.
     ToAgent(ClientMessage),

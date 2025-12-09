@@ -7,10 +7,11 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::RawFd,
+        fd::{AsRawFd, RawFd},
         unix::{fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf},
+    ptr,
 };
 
 use faccess::{AccessMode, PathExt};
@@ -228,6 +229,18 @@ impl FileManager {
                 pathname,
                 flags,
             }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
+            FileRequest::Ftruncate(FtruncateRequest { fd, length }) => {
+                Some(FileResponse::Ftruncate(self.ftruncate(fd, length)))
+            }
+            FileRequest::Futimens(FutimensRequest { fd, times }) => {
+                Some(FileResponse::Futimens(self.futimens(fd, times)))
+            }
+            FileRequest::Fchown(FchownRequest { fd, owner, group }) => {
+                Some(FileResponse::Fchown(self.fchown(fd, owner, group)))
+            }
+            FileRequest::Fchmod(FchmodRequest { fd, mode }) => {
+                Some(FileResponse::Fchmod(self.fchmod(fd, mode)))
+            }
         })
     }
 
@@ -517,6 +530,95 @@ impl FileManager {
 
         nix::unistd::unlinkat(fd, path.as_ref(), flags)
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
+    }
+
+    pub(crate) fn ftruncate(&mut self, fd: u64, length: i64) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::ftruncate(file.as_raw_fd(), length) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn futimens(&mut self, fd: u64, times: Option<[Timespec; 2]>) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let times = times.map(|times| {
+                    [
+                        libc::timespec {
+                            tv_sec: times[0].tv_sec,
+                            tv_nsec: times[0].tv_nsec,
+                        },
+                        libc::timespec {
+                            tv_sec: times[1].tv_sec,
+                            tv_nsec: times[1].tv_nsec,
+                        },
+                    ]
+                });
+                let result = unsafe {
+                    libc::futimens(
+                        file.as_raw_fd(),
+                        times.map(|times| times.as_ptr()).unwrap_or(ptr::null()),
+                    )
+                };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn fchown(&mut self, fd: u64, owner: u32, group: u32) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::fchown(file.as_raw_fd(), owner, group) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
+    }
+
+    pub(crate) fn fchmod(&mut self, fd: u64, mode: u32) -> RemoteResult<()> {
+        let file = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        match file {
+            RemoteFile::File(file) => {
+                let result = unsafe { libc::fchmod(file.as_raw_fd(), mode) };
+                match result {
+                    -1 => Err(ResponseError::from(io::Error::last_os_error())),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(ResponseError::NotFile(fd)),
+        }
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {

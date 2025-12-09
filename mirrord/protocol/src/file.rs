@@ -46,6 +46,9 @@ pub static STATFS_V2_VERSION: LazyLock<VersionReq> =
 pub static RENAME_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.21.0".parse().expect("Bad Identifier"));
 
+pub static COPYFILE_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.24.0".parse().expect("Bad Identifier"));
+
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
@@ -652,4 +655,35 @@ pub struct GetDEnts64Response {
 pub struct RenameRequest {
     pub old_path: PathBuf,
     pub new_path: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FtruncateRequest {
+    pub fd: u64,
+    pub length: i64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Timespec {
+    pub tv_sec: i64,
+    pub tv_nsec: i64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FutimensRequest {
+    pub fd: u64,
+    pub times: Option<[Timespec; 2]>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FchownRequest {
+    pub fd: u64,
+    pub owner: u32,
+    pub group: u32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FchmodRequest {
+    pub fd: u64,
+    pub mode: u32,
 }

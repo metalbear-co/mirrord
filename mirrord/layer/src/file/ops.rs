@@ -21,9 +21,10 @@ use mirrord_layer_lib::file::filter::FileFilter;
 use mirrord_protocol::{
     Payload, ResponseError,
     file::{
-        MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        RenameRequest, SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest,
+        FchmodRequest, FchownRequest, FtruncateRequest, FutimensRequest, MakeDirAtRequest,
+        MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+        ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest, RenameRequest,
+        SeekFileResponse, StatFsRequestV2, Timespec, UnlinkAtRequest, UnlinkRequest,
         WriteFileResponse, XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
     },
 };
@@ -877,6 +878,37 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
     Detour::Success(common::make_proxy_request_with_response(RenameRequest {
         old_path,
         new_path,
+    })??)
+}
+
+pub(crate) fn ftruncate(fd: RawFd, length: i64) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        FtruncateRequest { fd, length },
+    )??)
+}
+
+pub(crate) fn futimens(fd: RawFd, times: Option<[Timespec; 2]>) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(
+        FutimensRequest { fd, times },
+    )??)
+}
+
+pub(crate) fn fchown(fd: RawFd, owner: u32, group: u32) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(FchownRequest {
+        fd,
+        owner,
+        group,
+    })??)
+}
+
+pub(crate) fn fchmod(fd: RawFd, mode: u32) -> Detour<()> {
+    let fd = get_remote_fd(fd)?;
+    Detour::Success(common::make_proxy_request_with_response(FchmodRequest {
+        fd,
+        mode,
     })??)
 }
 

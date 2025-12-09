@@ -236,10 +236,6 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::large_enum_variant)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::result_large_err)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
