@@ -481,11 +481,29 @@ jobs:
       - name: Force python3 to use C:\Python314
         run: |
           $ErrorActionPreference = "Stop"
+          
+          # Try to create python3.exe, but handle permission errors gracefully
           if (-not (Test-Path "C:\Python314\python3.exe")) {
-            Copy-Item "C:\Python314\python.exe" "C:\Python314\python3.exe" -Force
+            try {
+              Copy-Item "C:\Python314\python.exe" "C:\Python314\python3.exe" -Force -ErrorAction Stop
+              Write-Host "Created python3.exe in C:\Python314"
+            } catch {
+              Write-Warning "Could not create python3.exe in C:\Python314 (permission denied). Creating wrapper script instead."
+              # Create a wrapper script in a writable location
+              $wrapperDir = "$env:RUNNER_TEMP\python3_wrapper"
+              New-Item -ItemType Directory -Force -Path $wrapperDir | Out-Null
+              $wrapperScript = Join-Path $wrapperDir "python3.bat"
+              "@echo off`n`"C:\Python314\python.exe`" %*" | Out-File -FilePath $wrapperScript -Encoding ASCII
+              Write-Host "Created python3.bat wrapper at $wrapperScript"
+              $env:PATH = "$wrapperDir;$env:PATH"
+            }
           }
+          
+          # Ensure C:\Python314 is first in PATH
           $env:PATH = "C:\Python314;C:\Python314\Scripts;$env:PATH"
-          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH)
+          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
+          
+          # Verify python3 works
           python3 -c "import sys, flask; print('exe:', sys.executable); print('flask:', flask.__version__)"
           # Extra debug for next run: show PATH and pip list for the exact python3
           python3 -c "import os; print('PATH=', os.environ.get('PATH',''))"
