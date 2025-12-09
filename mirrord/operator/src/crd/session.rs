@@ -35,8 +35,6 @@ pub struct MirrordClusterSessionSpec {
     pub target: Option<SessionTarget>,
 
     /// CI info when a session is started with `mirrord ci start`.
-    ///
-    /// Most of the values here will be hashed before being sent to the license-server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ci_info: Option<SessionCiInfo>,
 
@@ -147,13 +145,7 @@ pub struct SessionClosed {
 /// We try to get some of these fields automatically, but for some that we cannot, the user mays
 /// pass them as cli args to `mirrord ci start`, see `cli::ci::StartArgs`.
 ///
-/// These values are passed to the operator, and handled by the `ci_controller`, at some point
-/// they're sent to the license-server, but as hashed `u64`s (most are hashed).
-///
-/// ## `TryFrom<http::HeaderValue>`
-///
-/// Implements this conversion so we can easily send this as a request header in
-/// `OperatorApi::connect_target`.
+/// These values are passed to the operator, and handled by the `ci_controller`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionCiInfo {
