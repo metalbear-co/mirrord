@@ -109,6 +109,13 @@ jobs:
           py -3 -m pip install --upgrade flask uvicorn fastapi
           py -3 -c "import flask, uvicorn, fastapi; print('flask:', flask.__version__); print('uvicorn:', uvicorn.__version__); print('fastapi:', fastapi.__version__)"
 
+      - name: Debug Python environment
+        run: |
+          $ErrorActionPreference = "Stop"
+          py -3 -c "import sys, site; print('exe:', sys.executable); print('version:', sys.version); print('sys.path:'); [print(' ', p) for p in sys.path]; print('USER_SITE:', site.getusersitepackages()); print('USER_BASE:', site.getuserbase())"
+          py -3 -m pip show flask uvicorn fastapi
+          py -3 -m pip list
+
       - name: Prepare artifacts
         id: prep
         run: |
