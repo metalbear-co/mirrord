@@ -21,7 +21,7 @@ on:
         description: "Publish a Chocolatey package?"
         type: choice
         options: ["false", "true"]
-        default: "true"
+        default: "false"
       winget_publish:
         description: "Update WinGet manifest (wingetcreate)?"
         type: choice

@@ -399,6 +399,10 @@ Which network interface to use for mirroring.
 The default behavior is try to access the internet and use that interface. If that fails
 it uses `eth0`.
 
+DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+and will be removed in the future. This field will be removed, and the agent will always
+use iptables redirects for mirroring traffic.
+
 ### agent.nftables {#agent-nftables}
 
 Determines which iptables backend will be used for traffic redirection.
@@ -430,6 +434,10 @@ with mirroring non HTTP/1 traffic.
 When this is set, `network_interface` setting is ignored.
 
 Defaults to true.
+
+DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+and will be removed in the future. This field will be removed, and the agent will always
+use iptables redirects for mirroring traffic.
 
 ### agent.priority_class {#agent-priority_class}
 
@@ -482,6 +490,11 @@ Default is
   }
 }
 ```
+
+### agent.security_context {#agent-security_context}
+
+Agent pod security context (not with ephemeral agents).
+Support seccomp profile and app armor profile.
 
 ### agent.service_account {#agent-service_account}
 
@@ -646,6 +659,12 @@ correctly. This probably should be on by default but we want to gradually roll i
 <https://github.com/metalbear-co/mirrord/issues/2819>
 This option applies only on macOS.
 
+### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
+
+Useful when the user's application loads a c-shared golang library dynamically.
+
+Defaults to `false`.
+
 ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
 
 Whether to terminate the session when a permission denied error
@@ -653,8 +672,7 @@ occurs during DNS resolution. This error often means that the Kubernetes cluster
 hardened, and the mirrord-agent is not fully functional without `agent.privileged`
 enabled.
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
+Defaults to `true`
 
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
@@ -703,17 +721,7 @@ Disables any system wide proxy configuration for affecting the running applicati
 
 Enables better support for outgoing connections using non-blocking TCP sockets.
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
-
-### _experimental_ readlink {#experimental-readlink}
-
-DEPRECATED, WILL BE REMOVED
-
-### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
-
-DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
-stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
+Defaults to `false`.
 
 ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
 
@@ -731,14 +739,6 @@ Enables trusting any certificate on macOS, useful for <https://github.com/golang
 ### _experimental_ use_dev_null {#experimental-use_dev_null}
 
 Uses /dev/null for creating local fake files (should be better than using /tmp)
-
-### _experimental_ vfork_emulation {#experimental-vfork_emulation}
-
-Enables vfork emulation within the mirrord-layer.
-Might solve rare stack corruption issues.
-
-Note that for Go applications on ARM64, this feature is not yet supported,
-and this setting is ignored.
 
 ## external_proxy {#root-external_proxy}
 
@@ -925,7 +925,6 @@ A list of configurations for database branches.
       {
         "name": "my-database-name",
         "ttl_secs": 120,
-        "creation_timeout_secs": 60,
         "type": "mysql",
         "version": "8.0",
         "connection": {
@@ -949,7 +948,6 @@ Example:
   "id": "my-branch-db",
   "name": "my-database-name",
   "ttl_secs": 120,
-  "creation_timeout_secs": 60,
   "type": "mysql",
   "version": "8.0",
   "connection": {
@@ -989,6 +987,12 @@ the target pod template.
 
 Different ways to source the connection options.
 
+### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
 ### feature.db_branches.base.id {#feature-db_branches-base-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
@@ -1007,12 +1011,6 @@ The time-to-live (TTL) for the branch database is set to 300 seconds by default.
 Users can set `ttl_secs` to customize this value according to their need. Please note
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
-
-### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.
-If branch creation takes longer than expected, increase this value to prevent timeout errors.
 
 ### feature.db_branches.base.version {#feature-db_branches-base-version}
 
@@ -1048,6 +1046,138 @@ Example:
   },
   "orders": {
     "filter": "my_db.orders.created_at > 1759948761"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` table and orders
+created after the given timestamp will be copied.
+
+In addition to copying an empty database or all tables' schema, mirrord operator
+will copy data from the source DB when an array of table configs are specified.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "my_db.users.name = 'alice' OR my_db.users.name = 'bob'"
+  },
+  "orders": {
+    "filter": "my_db.orders.created_at > 1759948761"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` table and orders
+created after the given timestamp will be copied.
+
+When configuring a branch for PostgreSQL, set `type` to `pg`.
+
+Despite the database type, all database branch config objects share the following fields.
+
+### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Example:
+
+A single complete connection URL stored in an environment variable accessible from
+the target pod template.
+
+```json
+{
+  "url": {
+    "type": "env",
+    "variable": "DB_CONNECTION_URL"
+  }
+}
+```
+
+Different ways to source the connection options.
+
+### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
+### feature.db_branches.base.id {#feature-db_branches-base-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+### feature.db_branches.base.name {#feature-db_branches-base-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+### feature.db_branches.base.version {#feature-db_branches-base-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
+Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- Schema
+
+  Creates an empty database and copies schema of all tables.
+
+- All
+
+  Copies both schema and data of all tables. This option shall only be used
+  when the data volume of the source database is minimal.
+
+In addition to copying an empty database or all tables' schema, mirrord operator
+will copy data from the source DB when an array of table configs are specified.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "name = 'alice' OR name = 'bob'"
+  },
+  "orders": {
+    "filter": "created_at > '2025-01-01'"
+  }
+}
+```
+
+With the config above, only alice and bob from the `users` table and orders
+created after the given timestamp will be copied.
+
+In addition to copying an empty database or all tables' schema, mirrord operator
+will copy data from the source DB when an array of table configs are specified.
+
+Example:
+
+```json
+{
+  "users": {
+    "filter": "name = 'alice' OR name = 'bob'"
+  },
+  "orders": {
+    "filter": "created_at > '2025-01-01'"
   }
 }
 ```

@@ -36,7 +36,7 @@ resolver = "2"
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.174.0"
+version = "3.176.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -82,7 +82,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 thiserror = "2"
-k8s-openapi = { version = "0.24", features = ["earliest"] }
+k8s-openapi = { version = "0.24", features = ["v1_30"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls-native-roots",
@@ -101,10 +101,7 @@ kube = { git = "https://github.com/metalbear-co/kube.git", rev = "842a9e2ef0fe8b
     "socks5",
     "http-proxy",
 ] }
-hickory-resolver = { version = "0.24.3", features = [
-    "serde",
-    "tokio-runtime",
-] }
+hickory-resolver = { version = "0.24.3", features = ["serde", "tokio-runtime"] }
 hickory-proto = "0.24.3"
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 
@@ -122,7 +119,7 @@ serde_json_path_macros = "0.1.6"
 
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
 # There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
-hyper = { version = "1", features = ["full"] }
+hyper = { version = "1.7", features = ["full"] }
 hyper-util = { version = "0.1" }
 http-body = "1"
 http-body-util = "0.1"
@@ -233,12 +230,30 @@ windows = { version = "0.61", features = [
 
 # Used by `layer-win`
 winapi = { version = "0.3.9", features = [
-    "winbase", "minwindef", "winnt", "consoleapi", "libloaderapi", "fileapi",
-    "winsock2", "mswsock", "ws2tcpip", "ws2def", "ws2ipdef", "debugapi",
-    "processthreadsapi", "errhandlingapi", "sysinfoapi", "synchapi", "handleapi", "processenv",
-    "winioctl", "memoryapi", "timezoneapi", "securitybaseapi", "namedpipeapi"
+    "winbase",
+    "minwindef",
+    "winnt",
+    "consoleapi",
+    "libloaderapi",
+    "fileapi",
+    "winsock2",
+    "mswsock",
+    "ws2tcpip",
+    "ws2def",
+    "ws2ipdef",
+    "debugapi",
+    "processthreadsapi",
+    "errhandlingapi",
+    "sysinfoapi",
+    "synchapi",
+    "handleapi",
+    "processenv",
+    "winioctl",
+    "memoryapi",
+    "timezoneapi",
+    "securitybaseapi",
+    "namedpipeapi",
 ] }
-
 
 
 [workspace.lints.rustdoc]

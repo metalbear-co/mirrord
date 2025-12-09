@@ -15,7 +15,10 @@ use crate::{
 
 #[derive(Error, Debug)]
 #[error("agent sent an unexpected message: {0:?}")]
-pub struct UnexpectedAgentMessage(pub DaemonMessage);
+pub struct UnexpectedAgentMessage(
+    /// Boxed due to large size.
+    pub Box<DaemonMessage>,
+);
 
 /// This kind of error causes a partial failure of the proxy, meaning that for these errors does
 /// exist a failover strategy, so in case of incurring of this error, the proxy change behavior,

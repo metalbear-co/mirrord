@@ -12,7 +12,6 @@ use mirrord_config::{
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 #[cfg(target_os = "macos")]
@@ -219,10 +218,7 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let agent_protocol_version = match &connect_info {
-            AgentConnectInfo::Operator(OperatorSession {
-                operator_protocol_version: Some(version),
-                ..
-            }) => Some(version.clone()),
+            AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
             AgentConnectInfo::DirectKubernetes(_) => {
                 Some(MirrordExecution::get_agent_version(&mut connection).await?)
             }

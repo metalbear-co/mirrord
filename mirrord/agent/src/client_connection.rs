@@ -104,7 +104,7 @@ impl ClientConnection {
                     .connect(connector.server_name.clone(), stream)
                     .await?;
 
-                ConnectionFramed::Tls(Framed::new(tls_stream, DaemonCodec::default()))
+                ConnectionFramed::Tls(Box::new(Framed::new(tls_stream, DaemonCodec::default())))
             }
             None => ConnectionFramed::Tcp(Framed::new(stream, DaemonCodec::default())),
         };
@@ -149,7 +149,7 @@ impl fmt::Debug for ClientConnection {
 /// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
 enum ConnectionFramed {
     Tcp(Framed<TcpStream, DaemonCodec>),
-    Tls(Framed<TlsStream<TcpStream>, DaemonCodec>),
+    Tls(Box<Framed<TlsStream<TcpStream>, DaemonCodec>>),
 }
 
 #[cfg(test)]

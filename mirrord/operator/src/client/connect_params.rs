@@ -33,6 +33,10 @@ pub struct ConnectParams<'a> {
     /// Resource names of the database branches to use for the connection.
     #[serde(with = "mysql_branches_serde")]
     pub mysql_branch_names: Vec<String>,
+
+    /// Resource names of the PostgreSQL branch databases to use for the connection.
+    #[serde(with = "pg_branches_serde")]
+    pub pg_branch_names: Vec<String>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -40,6 +44,7 @@ impl<'a> ConnectParams<'a> {
         config: &'a LayerConfig,
         branch_name: Option<String>,
         mysql_branch_names: Vec<String>,
+        pg_branch_names: Vec<String>,
     ) -> Self {
         Self {
             connect: true,
@@ -49,6 +54,7 @@ impl<'a> ConnectParams<'a> {
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
             mysql_branch_names,
+            pg_branch_names,
         }
     }
 }
@@ -92,6 +98,22 @@ mod mysql_branches_serde {
     }
 }
 
+mod pg_branches_serde {
+    use serde::Serializer;
+
+    pub fn serialize<S>(pg_branches: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if pg_branches.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(pg_branches)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
+        }
+    }
+}
 impl fmt::Display for ConnectParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_string =

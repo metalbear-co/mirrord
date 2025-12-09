@@ -442,11 +442,21 @@ impl ClientConnectionHandler {
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => self.respond(message).await?,
+                    Ok(message) => {
+                        // Being explicit here.
+                        // Throttle permits should be dropped only when the message has been sent and flushed.
+                        let _throttle = message.throttle;
+                        self.respond(message.message).await?
+                    },
                     Err(e) => break e,
                 },
                 message = self.udp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
+                    Ok(message) => {
+                        // Being explicit here.
+                        // Throttle permits should be dropped only when the message has been sent and flushed.
+                        let _throttle = message.throttle;
+                        self.respond(DaemonMessage::UdpOutgoing(message.message)).await?
+                    },
                     Err(e) => break e,
                 },
                 message = self.dns_api.recv() => match message {
