@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::fmt;
 
 use k8s_openapi::{
     Resource as _,
@@ -13,15 +13,14 @@ use kube::CustomResource;
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
     target::{
-        Target, cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget,
-        pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget,
+        Target, TargetConfig, cron_job::CronJobTarget, deployment::DeploymentTarget,
+        job::JobTarget, pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget,
         service::ServiceTarget, stateful_set::StatefulSetTarget,
     },
 };
 use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -180,6 +179,77 @@ pub struct SessionOwner {
     pub k8s_username: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct AgentPodTarget {
+    pub uid: String,
+
+    pub namespace: String,
+
+    pub name: String,
+
+    pub container_name: String,
+}
+
+impl fmt::Display for AgentPodTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "{}/{}/{}",
+            self.namespace, self.name, self.container_name
+        ))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum AgentTarget {
+    Targetless(String),
+    Pod(AgentPodTarget),
+}
+
+impl AgentTarget {
+    pub fn targetless<S>(namespace: S) -> Self
+    where
+        String: From<S>,
+    {
+        AgentTarget::Targetless(namespace.into())
+    }
+
+    /// Target's namespace
+    pub fn namespace(&self) -> &str {
+        match self {
+            AgentTarget::Targetless(namespace) => namespace,
+            AgentTarget::Pod(AgentPodTarget { namespace, .. }) => namespace,
+        }
+    }
+
+    pub fn as_target_config(&self) -> TargetConfig {
+        TargetConfig {
+            path: match self {
+                AgentTarget::Targetless(_) => None,
+                AgentTarget::Pod(target) => Some(Target::Pod(PodTarget {
+                    pod: target.name.clone(),
+                    container: Some(target.container_name.clone()),
+                })),
+            },
+            namespace: Some(self.namespace().to_string()),
+        }
+    }
+}
+
+impl From<AgentPodTarget> for AgentTarget {
+    fn from(pod_target: AgentPodTarget) -> Self {
+        AgentTarget::Pod(pod_target)
+    }
+}
+
+impl fmt::Display for AgentTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AgentTarget::Targetless(namespace) => write!(f, "targetless/{namespace}"),
+            AgentTarget::Pod(pod) => write!(f, "pod/{pod}"),
+        }
+    }
+}
+
 /// Describes a target of a mirrord session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -220,7 +290,7 @@ pub struct MirrordClusterSessionAgent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
     /// Resolved agent target.
-    pub target: SessionTarget,
+    pub target: AgentTarget,
 }
 
 /// Describes an owner of a mirrord session.
