@@ -586,6 +586,7 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
+            OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
         }
     }
 }

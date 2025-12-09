@@ -6,12 +6,13 @@ use std::{
 #[cfg(unix)]
 use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
+use ci_info::types::CiInfo;
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{LayerConfig, ci::CiConfig, config::ConfigContext};
-use mirrord_operator::client::OperatorApi;
+use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};
@@ -351,17 +352,63 @@ impl MirrordCi {
             store,
         })
     }
+
+    /// Converts a [`CiInfo`] into a [`SessionCiInfo`] used by the operator.
+    pub(super) fn info(&self) -> SessionCiInfo {
+        let CiInfo { name, .. } = ci_info::get();
+
+        let StartArgs {
+            foreground: _,
+            environment,
+            pipeline,
+            triggered_by,
+        } = self.start_args.clone();
+
+        SessionCiInfo {
+            provider: name,
+            environment,
+            pipeline,
+            triggered_by,
+        }
+    }
 }
 
-#[derive(Debug, Default)]
+/// Similar to [`CiStartArgs`], except here we don't need [`CiStartArgs::exec_args`].
+///
+/// Used instead of `CiStartArgs` so we can `Clone` it around, (we don't need the `ExecArgs` where
+/// this is used).
+#[cfg_attr(windows, allow(dead_code))]
+#[derive(Debug, Default, Clone)]
 struct StartArgs {
-    #[cfg_attr(windows, allow(dead_code))]
+    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
+    /// task).
     foreground: bool,
+
+    /// CI environment, e.g. "staging", "production", "testing", etc.
+    environment: Option<String>,
+
+    /// CI pipeline or job name, e.g. "e2e-tests".
+    pipeline: Option<String>,
+
+    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
+    triggered_by: Option<String>,
 }
 
 impl From<&CiStartArgs> for StartArgs {
-    fn from(args: &CiStartArgs) -> Self {
-        let foreground = args.foreground;
-        Self { foreground }
+    fn from(
+        CiStartArgs {
+            exec_args: _,
+            foreground,
+            environment,
+            pipeline,
+            triggered_by,
+        }: &CiStartArgs,
+    ) -> Self {
+        Self {
+            foreground: *foreground,
+            environment: environment.clone(),
+            pipeline: pipeline.clone(),
+            triggered_by: triggered_by.clone(),
+        }
     }
 }
