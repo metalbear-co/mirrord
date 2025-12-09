@@ -21,6 +21,7 @@ use mirrord_config::{
 use mirrord_kube::api::kubernetes::{AgentKubernetesConnectInfo, rollout::Rollout};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[kube(
@@ -192,6 +193,10 @@ pub struct AgentPodTarget {
 
     /// Target's container name
     pub container_name: String,
+
+    /// Target's pod uid
+    #[schemars(with = "String")]
+    pub uid: Uuid,
 }
 
 impl fmt::Display for AgentPodTarget {
@@ -204,7 +209,7 @@ impl fmt::Display for AgentPodTarget {
 }
 
 #[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", tag = "kind")]
 pub enum AgentTarget {
     Targetless(String),
     Pod(AgentPodTarget),
@@ -285,9 +290,6 @@ pub struct MirrordClusterSessionAgent {
     pub connection_info: Option<AgentKubernetesConnectInfo>,
     /// If the agent is of the ephemeral variaty
     pub ephemeral: bool,
-    /// Agent's container id
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub container_id: Option<String>,
     /// Agent spawn error if there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ErrorMessage>,
