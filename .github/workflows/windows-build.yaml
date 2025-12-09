@@ -97,6 +97,18 @@ jobs:
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
           & "$ScriptsDir\win_build_test_apps.ps1"
 
+      # Ensure Python deps are present for the Flask test apps.
+      - name: Ensure Python test deps (flask/uvicorn/fastapi)
+        run: |
+          $ErrorActionPreference = "Stop"
+          $py = Get-Command py -ErrorAction SilentlyContinue
+          if (-not $py) {
+            throw "py launcher not found; ensure Python is installed."
+          }
+          py -3 -m pip install --upgrade pip
+          py -3 -m pip install --upgrade flask uvicorn fastapi
+          py -3 -c "import flask, uvicorn, fastapi; print('flask:', flask.__version__); print('uvicorn:', uvicorn.__version__); print('fastapi:', fastapi.__version__)"
+
       - name: Prepare artifacts
         id: prep
         run: |
