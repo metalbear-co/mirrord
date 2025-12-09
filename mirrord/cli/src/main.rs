@@ -234,6 +234,7 @@
 //! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
 //! prints a nice little message to stdout.
 #![feature(try_blocks)]
+#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
@@ -316,6 +317,9 @@ mod util;
 mod verify_config;
 mod vpn;
 mod wsl;
+
+#[cfg(feature = "wizard")]
+mod wizard;
 
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
@@ -1067,6 +1071,11 @@ fn main() -> miette::Result<()> {
             Commands::Newsletter => newsletter::newsletter_command().await,
             Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            #[cfg(feature = "wizard")]
+            Commands::Wizard(args) => {
+                wizard::wizard_command(user_data, *args, &mut ProgressTracker::from_env("wizard"))
+                    .await?
+            }
         };
 
         Ok(())

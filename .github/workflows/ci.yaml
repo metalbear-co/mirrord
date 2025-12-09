@@ -73,6 +73,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}   # <-- ADDED
+      wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,6 +138,12 @@ jobs:
             scripts/**/*.ps1
             **/*.ps1
             .github/workflows/windows-build.yaml
+      - name: get wizard frontend changes
+        id: changed-wizard-frontend
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
+        with:
+          files: |
+            wizard-frontend/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -156,7 +163,8 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-windows.outputs.any_changed }};           # <-- ADDED
           echo ${{ steps.changed-windows.outputs.all_changed_files }};     # <-- ADDED
-
+          echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          
   lint:
     runs-on: ubuntu-24.04
     needs: changed_files
@@ -176,6 +184,8 @@ jobs:
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
       # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
       - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
+      - name: create dummy file to compile wizard feature
+        run: touch wizard-frontend.tar.gz
       - run: cargo fmt --all -- --check
       # x64
       - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
@@ -183,6 +193,21 @@ jobs:
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
       - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+
+  wizard-frontend-lint:
+    runs-on: ubuntu-24.04
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.wizard_frontend_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - run: npm run lint
+        working-directory: ./wizard-frontend
+  
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
@@ -394,6 +419,8 @@ jobs:
       - run: ./mirrord/layer/tests/apps/dlopen_cgo/build_test_app.sh
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - name: create dummy file to compile wizard feature
+        run: touch wizard-frontend.tar.gz
       - name: mirrord protocol UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
@@ -407,7 +434,7 @@ jobs:
       - name: mirrord operator UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord --features "wizard"
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -584,6 +611,24 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
+      # the wizard eagerly creates a Client from a kubeconfig, hence its inclusion here after we set up minikube
+      - run: npm install
+        working-directory: ./wizard-frontend
+      - name: "Wizard: Update config types from current schema"
+        run: |
+          rm -f ./src/mirrord-schema.d.ts
+          npx json2ts ../mirrord-schema.json -o ./src/mirrord-schema.d.ts
+        working-directory: ./wizard-frontend
+      - run: npm run build
+        working-directory: ./wizard-frontend
+      - run: tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
+      - run: |
+          ./target/debug/mirrord wizard &
+          sleep 2 && curl localhost:3000
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |

@@ -70,9 +70,15 @@ fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 is_ci = "1.2.0"
+opener = "0.8.3"
 
 [target.'cfg(unix)'.dependencies]
 rand.workspace = true
+axum = { version = "0.8.4", optional = true }
+tower-http = { version = "0.6.6", features = ["fs", "set-header"], optional = true }
+tar = { version = "0.4.44", optional = true }
+flate2 = { version = "1.1.2", optional = true }
+tempfile = { version = "3.23.0", optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }
@@ -106,3 +112,4 @@ rcgen.workspace = true
 
 [features]
 windows_build = []
+wizard = ["dep:axum", "dep:tower-http", "dep:tar", "dep:flate2", "dep:tempfile"]
