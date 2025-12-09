@@ -82,7 +82,7 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
     trace::TraceLayer,
 };
-
+use mirrord_progress::Progress;
 use crate::{
     config::WizardArgs,
     error::{CliError, CliResult},
@@ -95,7 +95,15 @@ const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.
 
 /// The entrypoint for the `wizard` command. Unzips the frontend and serves it using axum, along
 /// with internal API endpoints.
-pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<()> {
+pub async fn wizard_command<P>(
+    user_data: UserData,
+    args: WizardArgs,
+    parent_progress: &mut P,
+) -> CliResult<()>
+where
+    P: Progress,
+{
+    let mut progress = parent_progress.subtask("launching wizard");
     let is_returning_string = user_data.is_returning_wizard().to_string();
 
     // client for fetching targets from the cluster when detecting exposed ports
@@ -158,9 +166,9 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::debug!("listening on {}", listener.local_addr()?);
+    progress.success(None);
 
-    println!("<|:) Greetings, traveler!");
-    println!("Opening the Wizard in the browser...");
+    parent_progress.subtask("<|:) Greetings, traveler!").success(None);
 
     // open browser window
     let url = "http://localhost:3000/";
@@ -168,16 +176,16 @@ pub async fn wizard_command(user_data: UserData, args: WizardArgs) -> CliResult<
         Ok(()) => {}
         Err(error) => {
             tracing::trace!(?error, "failed to open browser");
+            parent_progress.subtask("Couldn't open the browser automatically").failure(None);
         }
     }
-    println!(
-        "The wizard is available at:\n\n\
-             {url}"
-    );
+    parent_progress.subtask(format!("The wizard is available at: {url}").as_str()).success(None);
 
+    parent_progress.success(None);
     axum::serve(listener, app.layer(TraceLayer::new_for_http()))
         .await
         .expect("Infallible operation should never fail");
+
     Ok(())
 }
 
