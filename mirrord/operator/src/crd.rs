@@ -22,11 +22,13 @@ use crate::{
 };
 
 pub mod copy_target;
+pub mod external;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod mysql_branching;
 pub mod patch;
+pub mod pg_branching;
 pub mod policy;
 pub mod profile;
 pub mod session;
@@ -387,6 +389,7 @@ pub enum NewOperatorFeature {
     SqsQueueSplittingDirect,
     MySqlBranching,
     ExtendableUserCredentials,
+    PgBranching,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -411,6 +414,7 @@ impl Display for NewOperatorFeature {
                 "SQS queue splitting without copy target"
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
+            NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::Unknown => "unknown feature",
         };

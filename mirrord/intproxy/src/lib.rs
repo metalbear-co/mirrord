@@ -1,8 +1,6 @@
 #![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::large_enum_variant)]
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -155,7 +153,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::new(experimental.dns_permission_error_fatal.unwrap_or_default()),
+            SimpleProxy::new(experimental.dns_permission_error_fatal),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
@@ -574,7 +572,7 @@ impl IntProxy {
             }
             message @ DaemonMessage::PauseTarget(_) | message @ DaemonMessage::Vpn(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(
-                    UnexpectedAgentMessage(message),
+                    UnexpectedAgentMessage(message.into()),
                 ))?;
             }
         }

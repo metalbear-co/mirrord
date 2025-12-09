@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future};
+use std::{error::Report, future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -106,7 +106,7 @@ where
 
 impl HttpTask<PassthroughConnection> {
     pub fn new(
-        info: ConnectionInfo,
+        info: Arc<ConnectionInfo>,
         mirror_data_tx: OptionalBroadcast,
         request: ExtractedRequest,
         redirector_config: RedirectorTaskConfig,

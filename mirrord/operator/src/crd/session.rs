@@ -57,6 +57,11 @@ pub struct MirrordClusterSessionSpec {
     /// None for targetless sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<SessionTarget>,
+    /// Copy target configuration for this session.
+    ///
+    /// Set when the session uses a copied pod.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_target: Option<SessionCopyTarget>,
 }
 
 impl MirrordClusterSessionSpec {
@@ -69,99 +74,42 @@ impl MirrordClusterSessionSpec {
             (Deployment::API_VERSION, Deployment::KIND) => {
                 Ok(Target::Deployment(DeploymentTarget {
                     deployment: target.name.clone(),
-                    container: target.container.clone(),
+                    container: Some(target.container.clone()),
                 }))
             }
             (Pod::API_VERSION, Pod::KIND) => Ok(Target::Pod(PodTarget {
                 pod: target.name.clone(),
-                container: target.container.clone(),
+                container: Some(target.container.clone()),
             })),
             (Rollout::API_VERSION, Rollout::KIND) => Ok(Target::Rollout(RolloutTarget {
                 rollout: target.name.clone(),
-                container: target.container.clone(),
+                container: Some(target.container.clone()),
             })),
             (Job::API_VERSION, Job::KIND) => Ok(Target::Job(JobTarget {
                 job: target.name.clone(),
-                container: target.container.clone(),
+                container: Some(target.container.clone()),
             })),
             (CronJob::API_VERSION, CronJob::KIND) => Ok(Target::CronJob(CronJobTarget {
                 cron_job: target.name.clone(),
-                container: target.container.clone(),
+                container: Some(target.container.clone()),
             })),
             (StatefulSet::API_VERSION, StatefulSet::KIND) => {
                 Ok(Target::StatefulSet(StatefulSetTarget {
                     stateful_set: target.name.clone(),
-                    container: target.container.clone(),
+                    container: Some(target.container.clone()),
                 }))
             }
             (Service::API_VERSION, Service::KIND) => Ok(Target::Service(ServiceTarget {
                 service: target.name.clone(),
-                container: target.container.clone(),
+                container: Some(target.container.clone()),
             })),
             (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
                 Ok(Target::ReplicaSet(ReplicaSetTarget {
                     replica_set: target.name.clone(),
-                    container: target.container.clone(),
+                    container: Some(target.container.clone()),
                 }))
             }
             _ => Err(target.clone()),
-        }
-    }
-
-    pub fn with_target(self, target: Target) -> Self {
-        MirrordClusterSessionSpec {
-            target: match target {
-                Target::Deployment(target) => Some(SessionTarget {
-                    api_version: Deployment::API_VERSION.to_owned(),
-                    kind: Deployment::KIND.to_owned(),
-                    name: target.deployment,
-                    container: target.container,
-                }),
-                Target::Pod(target) => Some(SessionTarget {
-                    api_version: Pod::API_VERSION.to_owned(),
-                    kind: Pod::KIND.to_owned(),
-                    name: target.pod,
-                    container: target.container,
-                }),
-                Target::Rollout(target) => Some(SessionTarget {
-                    api_version: Rollout::API_VERSION.to_owned(),
-                    kind: Rollout::KIND.to_owned(),
-                    name: target.rollout,
-                    container: target.container,
-                }),
-                Target::Job(target) => Some(SessionTarget {
-                    api_version: Job::API_VERSION.to_owned(),
-                    kind: Job::KIND.to_owned(),
-                    name: target.job,
-                    container: target.container,
-                }),
-                Target::CronJob(target) => Some(SessionTarget {
-                    api_version: CronJob::API_VERSION.to_owned(),
-                    kind: CronJob::KIND.to_owned(),
-                    name: target.cron_job,
-                    container: target.container,
-                }),
-                Target::StatefulSet(target) => Some(SessionTarget {
-                    api_version: StatefulSet::API_VERSION.to_owned(),
-                    kind: StatefulSet::KIND.to_owned(),
-                    name: target.stateful_set,
-                    container: target.container,
-                }),
-                Target::Service(target) => Some(SessionTarget {
-                    api_version: Service::API_VERSION.to_owned(),
-                    kind: Service::KIND.to_owned(),
-                    name: target.service,
-                    container: target.container,
-                }),
-                Target::ReplicaSet(target) => Some(SessionTarget {
-                    api_version: ReplicaSet::API_VERSION.to_owned(),
-                    kind: ReplicaSet::KIND.to_owned(),
-                    name: target.replica_set,
-                    container: target.container,
-                }),
-                Target::Targetless => None,
-            },
-            ..self
         }
     }
 }
@@ -211,30 +159,37 @@ impl fmt::Display for AgentPodTarget {
 #[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum AgentTarget {
-    Targetless(String),
+    Targetless {
+        /// Target namespace
+        namespace: String,
+
+        /// Target namespace uid
+        #[schemars(with = "String")]
+        uid: Uuid,
+    },
     Pod(AgentPodTarget),
 }
 
 impl AgentTarget {
-    pub fn targetless<S>(namespace: S) -> Self
-    where
-        String: From<S>,
-    {
-        AgentTarget::Targetless(namespace.into())
-    }
-
     /// Target's namespace
     pub fn namespace(&self) -> &str {
         match self {
-            AgentTarget::Targetless(namespace) => namespace,
+            AgentTarget::Targetless { namespace, .. } => namespace,
             AgentTarget::Pod(AgentPodTarget { namespace, .. }) => namespace,
+        }
+    }
+
+    pub fn uid(&self) -> Uuid {
+        match self {
+            AgentTarget::Targetless { uid, .. } => *uid,
+            AgentTarget::Pod(AgentPodTarget { uid, .. }) => *uid,
         }
     }
 
     pub fn as_target_config(&self) -> TargetConfig {
         TargetConfig {
             path: match self {
-                AgentTarget::Targetless(_) => None,
+                AgentTarget::Targetless { .. } => None,
                 AgentTarget::Pod(target) => Some(Target::Pod(PodTarget {
                     pod: target.name.clone(),
                     container: Some(target.container_name.clone()),
@@ -254,7 +209,7 @@ impl From<AgentPodTarget> for AgentTarget {
 impl fmt::Display for AgentTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AgentTarget::Targetless(namespace) => write!(f, "targetless/{namespace}"),
+            AgentTarget::Targetless { namespace, .. } => write!(f, "targetless/{namespace}"),
             AgentTarget::Pod(pod) => write!(f, "pod/{pod}"),
         }
     }
@@ -271,7 +226,7 @@ pub struct SessionTarget {
     /// Kubernetes resource name.
     pub name: String,
     /// Name of the container defined in the Pod spec.
-    pub container: Option<String>,
+    pub container: String,
 }
 
 /// Resources needed to report session metrics to the mirrord Jira app.
@@ -282,6 +237,15 @@ pub struct SessionJiraMetrics {
     pub branch_name: String,
 }
 
+/// Describes copy target configuration for a session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCopyTarget {
+    /// Whether the original target should be scaled down.
+    pub scaledown: bool,
+}
+
+/// Status of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionAgent {
@@ -313,6 +277,34 @@ pub struct MirrordClusterSessionStatus {
     /// If the session has been closed, describes the reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<ErrorMessage>,
+    /// Copy target status for sessions using a copied pod.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_target: Option<SessionCopyTargetStatus>,
+}
+
+/// Status of the copy target for a session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCopyTargetStatus {
+    /// Name of the CopyTargetCrd, used by CLI when making connections.
+    pub name: String,
+    /// Status of the produced copied pod.
+    ///
+    /// `None` if there is no valid pod at the moment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copied_pod_status: Option<CopiedPodStatus>,
+}
+
+/// Status of a copied pod.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CopiedPodStatus {
+    /// Name of the copied pod.
+    pub name: String,
+    /// Namespace of the copied pod.
+    pub namespace: String,
+    /// Name of the target container in the copied pod.
+    pub target_container: String,
 }
 
 /// Describes the reason for with a mirrord session was closed.

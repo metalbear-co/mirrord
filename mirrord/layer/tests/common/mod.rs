@@ -25,8 +25,9 @@ use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
-        AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
-        ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
+        AccessFileRequest, AccessFileResponse, MetadataInternal, OpenFileRequest,
+        OpenOptionsInternal, ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest,
+        XstatResponse,
     },
     outgoing::{
         DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
@@ -846,8 +847,14 @@ impl TestIntProxy {
             .unwrap();
     }
 
-    /// Assert that the layer sends an xstat request with the given fd, answer the request.
-    pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
+    /// Assert that the layer sends an xstat request with the given fd, answer the request with the
+    /// given metadata.
+    pub async fn expect_xstat_with_metadata(
+        &mut self,
+        path: Option<PathBuf>,
+        fd: Option<u64>,
+        metadata: MetadataInternal,
+    ) {
         assert_eq!(
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
@@ -859,12 +866,16 @@ impl TestIntProxy {
 
         self.codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse {
-                    metadata: Default::default(),
-                },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
+    }
+
+    /// Assert that the layer sends an xstat request with the given fd, answer the request.
+    pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
+        self.expect_xstat_with_metadata(path, fd, Default::default())
+            .await
     }
 
     /// Consume messages from the codec and return the first non-xstat message.
@@ -933,6 +944,7 @@ pub enum Application {
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
+    NodeCopyFile,
     NodeIssue2903,
     GoDir(GoVersion),
     GoDirBypass(GoVersion),
@@ -989,6 +1001,8 @@ pub enum Application {
     GoIssue2988(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
+    /// C++ app that dlopen c-shared go library.
+    DlopenCgo,
 }
 
 impl Application {
@@ -1046,6 +1060,7 @@ impl Application {
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::NodeCopyFile
             | Application::NodeIssue2903
             | Application::NodeMakeConnections => String::from("node"),
             Application::GoDir(version) => format!("tests/apps/dir_go/{version}.go_test_app"),
@@ -1168,6 +1183,7 @@ impl Application {
             Application::GoIssue2988(version) => {
                 format!("tests/apps/issue2988/{version}.go_test_app")
             }
+            Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
         }
     }
 
@@ -1223,6 +1239,10 @@ impl Application {
             }
             Application::NodeSpawn => {
                 app_path.push("node_spawn.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
+            Application::NodeCopyFile => {
+                app_path.push("node_copyfile.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeIssue2903 => {
@@ -1282,7 +1302,8 @@ impl Application {
             | Application::RustRebind0
             | Application::RustIssue2438
             | Application::RustIssue3248
-            | Application::GoIssue2988(..) => vec![],
+            | Application::GoIssue2988(..)
+            | Application::DlopenCgo => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1336,6 +1357,7 @@ impl Application {
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::NodeCopyFile
             | Application::NodeIssue2903
             | Application::NodeIssue3456
             | Application::BashShebang
@@ -1377,6 +1399,7 @@ impl Application {
             | Application::NodeMakeConnections => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
+            Application::DlopenCgo => 23333,
         }
     }
 
