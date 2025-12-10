@@ -105,7 +105,13 @@ where
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
-        .connect_in_new_session(target, layer_config, &session_subtask, branch_name)
+        .connect_in_new_session(
+            target.clone(),
+            layer_config,
+            &session_subtask,
+            branch_name,
+            mirrord_for_ci.map(MirrordCi::info),
+        )
         .await?;
     session_subtask.success(Some("session started"));
 

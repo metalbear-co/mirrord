@@ -426,11 +426,26 @@ pub(super) struct DumpArgs {
 // `mirrord ci start` command
 #[derive(Args, Debug)]
 pub(super) struct CiStartArgs {
+    /// Args passed down to mirrord itself (similar to `mirrord exec`).
     #[clap(flatten)]
     pub exec_args: Box<ExecArgs>,
 
+    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
+    /// task).
     #[arg(long)]
     pub foreground: bool,
+
+    /// CI environment, e.g. "staging", "production", "testing", etc.
+    #[arg(long)]
+    pub environment: Option<String>,
+
+    /// CI pipeline or job name, e.g. "e2e-tests".
+    #[arg(long)]
+    pub pipeline: Option<String>,
+
+    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
+    #[arg(long)]
+    pub triggered_by: Option<String>,
 }
 
 /// Target-related parameters, present in more than one command.
@@ -750,7 +765,7 @@ pub(super) enum OperatorCommand {
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
-    Setup(#[clap(flatten)] OperatorSetupParams),
+    Setup(#[clap(flatten)] Box<OperatorSetupParams>),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -830,6 +845,12 @@ pub(super) struct OperatorSetupParams {
     /// a mysql branching component.
     #[arg(long, visible_alias = "mysql", default_value_t = false)]
     pub(super) mysql_branching: bool,
+
+    /// Enable PostgreSQL database branching.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a PostgreSQL branching component.
+    #[arg(long, visible_alias = "pg", default_value_t = false)]
+    pub(super) pg_branching: bool,
 }
 
 /// `mirrord operator session` family of commands.

@@ -8,8 +8,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::result_large_err)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -66,6 +64,11 @@
 extern crate alloc;
 extern crate core;
 
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use std::ffi::c_void;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -82,6 +85,11 @@ use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use libc::c_char;
 use libc::{c_int, pid_t};
 use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
@@ -669,6 +677,24 @@ fn enable_hooks(state: &LayerSetup) {
     {
         go_hooks::enable_hooks(&mut hook_manager);
     }
+
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
+    {
+        if state.experimental().dlopen_cgo {
+            unsafe {
+                replace!(
+                    &mut hook_manager,
+                    "dlopen",
+                    dlopen_detour,
+                    FnDlopen,
+                    FN_DLOPEN
+                );
+            }
+        }
+    }
 }
 
 /// Shared code for closing `fd` in our data structures.
@@ -930,4 +956,35 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
         close_layer_fd(fd);
         FN_UV_FS_CLOSE(a, b, fd, c)
     }
+}
+
+/// ## Hook
+///
+/// Detect if `dlopen()` loaded go dynamic library. If so, enable go specific hooks.
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+#[hook_fn]
+pub(crate) unsafe extern "C" fn dlopen_detour(
+    raw_path: *const c_char,
+    mode: c_int,
+) -> *const c_void {
+    let handle = unsafe { FN_DLOPEN(raw_path, mode) };
+    let _guard = DetourGuard::new();
+
+    let mut hook_manager = HookManager::default();
+    let path_str = unsafe {
+        std::ffi::CStr::from_ptr(raw_path)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let filename = std::path::Path::new(&path_str)
+        .file_name()
+        .expect("cannot get the filename of the dynamic library")
+        .to_string_lossy()
+        .into_owned();
+    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename);
+
+    handle
 }

@@ -58,6 +58,10 @@ impl From<AgentLostFileResponse> for ToLayer {
             FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
             FileResponse::Unlink(..) => FileResponse::Unlink(Err(error)),
             FileResponse::Rename(..) => FileResponse::Rename(Err(error)),
+            FileResponse::Ftruncate(..) => FileResponse::Ftruncate(Err(error)),
+            FileResponse::Futimens(..) => FileResponse::Futimens(Err(error)),
+            FileResponse::Fchown(..) => FileResponse::Fchown(Err(error)),
+            FileResponse::Fchmod(..) => FileResponse::Fchmod(Err(error)),
         };
 
         debug_assert_eq!(
@@ -116,6 +120,10 @@ impl FileRequestExt for FileRequest {
             Self::StatFs(..) => dummy_file_response!(XstatFs),
             Self::StatFsV2(..) => dummy_file_response!(XstatFsV2),
             Self::Rename(..) => dummy_file_response!(Rename),
+            Self::Ftruncate(..) => dummy_file_response!(Ftruncate),
+            Self::Futimens(..) => dummy_file_response!(Futimens),
+            Self::Fchown(..) => dummy_file_response!(Fchown),
+            Self::Fchmod(..) => dummy_file_response!(Fchmod),
         };
 
         Some(AgentLostFileResponse(layer_id, message_id, response))
@@ -315,7 +323,11 @@ impl RouterFileOps {
             | FileRequest::UnlinkAt(UnlinkAtRequest {
                 dirfd: Some(remote_fd),
                 ..
-            }) => {
+            })
+            | FileRequest::Ftruncate(FtruncateRequest { fd: remote_fd, .. })
+            | FileRequest::Futimens(FutimensRequest { fd: remote_fd, .. })
+            | FileRequest::Fchown(FchownRequest { fd: remote_fd, .. })
+            | FileRequest::Fchmod(FchmodRequest { fd: remote_fd, .. }) => {
                 if *remote_fd < self.current_fd_offset {
                     let error_response = request
                         .agent_lost_response(layer_id, message_id)
@@ -358,7 +370,11 @@ impl RouterFileOps {
             | FileResponse::MakeDir(..)
             | FileResponse::Unlink(..)
             | FileResponse::Rename(..)
-            | FileResponse::RemoveDir(..) => {}
+            | FileResponse::RemoveDir(..)
+            | FileResponse::Ftruncate(..)
+            | FileResponse::Futimens(..)
+            | FileResponse::Fchown(..)
+            | FileResponse::Fchmod(..) => {}
 
             FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd: remote_fd, .. }))
             | FileResponse::Open(Ok(OpenFileResponse { fd: remote_fd }))
@@ -551,6 +567,15 @@ impl FilesProxy {
             FileRequest::Rename(..)
                 if protocol_version
                     .is_none_or(|version: &Version| RENAME_VERSION.matches(version).not()) =>
+            {
+                Err(FileResponse::Rename(Err(ResponseError::NotImplemented)))
+            }
+            FileRequest::Ftruncate(..)
+            | FileRequest::Futimens(..)
+            | FileRequest::Fchown(..)
+            | FileRequest::Fchmod(..)
+                if protocol_version
+                    .is_none_or(|version: &Version| COPYFILE_VERSION.matches(version).not()) =>
             {
                 Err(FileResponse::Rename(Err(ResponseError::NotImplemented)))
             }
@@ -872,9 +897,9 @@ impl FilesProxy {
             FileResponse::Open(Ok(open)) => {
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::Open(Ok(
-                            open.clone()
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::Open(Ok(open.clone()))).into(),
+                        )
                     })?;
 
                 self.remote_files.add(layer_id, open.fd);
@@ -895,9 +920,9 @@ impl FilesProxy {
             // Update dir maps.
             FileResponse::OpenDir(Ok(open)) => {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
-                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::OpenDir(Ok(
-                        open.clone()
-                    ))))
+                    UnexpectedAgentMessage(
+                        DaemonMessage::File(FileResponse::OpenDir(Ok(open.clone()))).into(),
+                    )
                 })?;
 
                 self.remote_dirs.add(layer_id, open.fd);
@@ -919,9 +944,9 @@ impl FilesProxy {
             FileResponse::ReadLimited(Ok(read)) => {
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Ok(
-                            read.clone(),
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::ReadLimited(Ok(read.clone()))).into(),
+                        )
                     })?;
 
                 let AdditionalRequestData::ReadBuffered {
@@ -991,9 +1016,10 @@ impl FilesProxy {
                 // returned containing the error rather than a ReadLimited
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Err(
-                            error.clone(),
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::ReadLimited(Err(error.clone())))
+                                .into(),
+                        )
                     })?;
 
                 let message = match additional_data {
@@ -1016,9 +1042,9 @@ impl FilesProxy {
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::Seek(Ok(
-                            seek.clone()
-                        ))))
+                        UnexpectedAgentMessage(
+                            DaemonMessage::File(FileResponse::Seek(Ok(seek.clone()))).into(),
+                        )
                     })?;
 
                 if let AdditionalRequestData::SeekBuffered { fd } = additional_data {
@@ -1051,9 +1077,9 @@ impl FilesProxy {
             // Store extra entries in `dirs_data`.
             FileResponse::ReadDirBatch(Ok(batch)) => {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
-                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
-                        batch.clone(),
-                    ))))
+                    UnexpectedAgentMessage(
+                        DaemonMessage::File(FileResponse::ReadDirBatch(Ok(batch.clone()))).into(),
+                    )
                 })?;
 
                 let Some(data) = self.buffered_dirs.get_mut(&batch.fd) else {
@@ -1087,7 +1113,9 @@ impl FilesProxy {
             // Convert to XstatFsV2 so that the layer doesn't ever need to deal with the old type.
             FileResponse::XstatFs(res) => {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
-                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::XstatFs(res.clone())))
+                    UnexpectedAgentMessage(
+                        DaemonMessage::File(FileResponse::XstatFs(res.clone())).into(),
+                    )
                 })?;
                 message_bus
                     .send(ToLayer {
@@ -1102,10 +1130,9 @@ impl FilesProxy {
 
             // Doesn't require any special logic.
             other => {
-                let (message_id, layer_id) = self
-                    .request_queue
-                    .pop_front()
-                    .ok_or_else(|| UnexpectedAgentMessage(DaemonMessage::File(other.clone())))?;
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
+                    UnexpectedAgentMessage(DaemonMessage::File(other.clone()).into())
+                })?;
                 message_bus
                     .send(ToLayer {
                         message_id,

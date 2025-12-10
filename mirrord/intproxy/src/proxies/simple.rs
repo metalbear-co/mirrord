@@ -201,7 +201,9 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::AddrInfoRes(res) => {
                     let (message_id, layer_id) =
                         self.addr_info_reqs.pop_front().ok_or_else(|| {
-                            UnexpectedAgentMessage(DaemonMessage::GetAddrInfoResponse(res.clone()))
+                            UnexpectedAgentMessage(
+                                DaemonMessage::GetAddrInfoResponse(res.clone()).into(),
+                            )
                         })?;
                     message_bus
                         .send(ToLayer {
@@ -220,9 +222,10 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::GetEnvRes(res) => {
                     let (message_id, layer_id) =
                         self.get_env_reqs.pop_front().ok_or_else(|| {
-                            UnexpectedAgentMessage(DaemonMessage::GetEnvVarsResponse(
-                                res.clone().map(Into::into),
-                            ))
+                            UnexpectedAgentMessage(
+                                DaemonMessage::GetEnvVarsResponse(res.clone().map(Into::into))
+                                    .into(),
+                            )
                         })?;
                     message_bus
                         .send(ToLayer {

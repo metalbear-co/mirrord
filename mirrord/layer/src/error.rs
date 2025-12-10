@@ -139,6 +139,10 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to find symbol for name `{0}`!")]
     NoSymbolName(String),
 
+    #[cfg(target_os = "linux")]
+    #[error("mirrord-layer: Failed to find module for name `{0}`!")]
+    NoModuleName(String),
+
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
 

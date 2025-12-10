@@ -304,7 +304,7 @@ impl OutgoingProxy {
                     DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect))
                 }
             };
-            return Err(UnexpectedAgentMessage(message).into());
+            return Err(UnexpectedAgentMessage(message.into()).into());
         };
 
         let DaemonConnect {

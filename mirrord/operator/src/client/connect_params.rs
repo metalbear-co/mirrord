@@ -6,6 +6,8 @@ use std::{
 use mirrord_config::{LayerConfig, feature::network::incoming::ConcurrentSteal};
 use serde::Serialize;
 
+use crate::crd::session::SessionCiInfo;
+
 /// Query params for the operator connect request.
 ///
 /// You can use the [`fmt::Display`] to get a properly encoded query string.
@@ -33,6 +35,16 @@ pub struct ConnectParams<'a> {
     /// Resource names of the database branches to use for the connection.
     #[serde(with = "mysql_branches_serde")]
     pub mysql_branch_names: Vec<String>,
+
+    /// Resource names of the PostgreSQL branch databases to use for the connection.
+    #[serde(with = "pg_branches_serde")]
+    pub pg_branch_names: Vec<String>,
+
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "session_ci_info_serde"
+    )]
+    pub session_ci_info: Option<SessionCiInfo>,
 }
 
 impl<'a> ConnectParams<'a> {
@@ -40,6 +52,8 @@ impl<'a> ConnectParams<'a> {
         config: &'a LayerConfig,
         branch_name: Option<String>,
         mysql_branch_names: Vec<String>,
+        pg_branch_names: Vec<String>,
+        session_ci_info: Option<SessionCiInfo>,
     ) -> Self {
         Self {
             connect: true,
@@ -49,6 +63,8 @@ impl<'a> ConnectParams<'a> {
             sqs_splits: config.feature.split_queues.sqs().collect(),
             branch_name,
             mysql_branch_names,
+            pg_branch_names,
+            session_ci_info,
         }
     }
 }
@@ -89,6 +105,41 @@ mod mysql_branches_serde {
                 .expect("serialization to memory should not fail");
             serializer.serialize_str(&as_json)
         }
+    }
+}
+
+mod pg_branches_serde {
+    use serde::Serializer;
+
+    pub fn serialize<S>(pg_branches: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if pg_branches.is_empty() {
+            serializer.serialize_none()
+        } else {
+            let as_json = serde_json::to_string(pg_branches)
+                .expect("serialization to memory should not fail");
+            serializer.serialize_str(&as_json)
+        }
+    }
+}
+
+mod session_ci_info_serde {
+    use serde::Serializer;
+
+    use crate::crd::session::SessionCiInfo;
+
+    pub fn serialize<S>(
+        session_ci_info: &Option<SessionCiInfo>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let as_json = serde_json::to_string(session_ci_info)
+            .expect("serialization to memory should not fail");
+        serializer.serialize_str(&as_json)
     }
 }
 

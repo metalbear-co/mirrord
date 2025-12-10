@@ -24,7 +24,10 @@ pub enum ProxyError {
     #[error("connection closed")]
     ConnectionClosed,
     #[error("unexpected response: {0:?}")]
-    UnexpectedResponse(ProxyToLayerMessage),
+    UnexpectedResponse(
+        /// Boxed due to large size difference.
+        Box<ProxyToLayerMessage>,
+    ),
     #[error("critical error: {0}")]
     ProxyFailure(String),
     #[error("connection lock poisoned")]
@@ -73,7 +76,7 @@ impl ProxyConnection {
         let mut responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
         let ProxyToLayerMessage::NewSession(layer_id) = &response else {
-            return Err(ProxyError::UnexpectedResponse(response));
+            return Err(ProxyError::UnexpectedResponse(Box::new(response)));
         };
 
         Ok(Self {
@@ -119,7 +122,9 @@ impl ProxyConnection {
     {
         let response_id = self.send(request.wrap())?;
         let response = self.receive(response_id)?;
-        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
+        T::try_unwrap_response(response)
+            .map_err(Box::new)
+            .map_err(ProxyError::UnexpectedResponse)
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]

@@ -71,7 +71,10 @@ pub enum AgentConnectInfo {
         tls_pem: Option<PathBuf>,
     },
     /// Connect to the agent through the operator.
-    Operator(OperatorSession),
+    Operator(
+        /// Boxed due to large size.
+        Box<OperatorSession>,
+    ),
     /// Connect directly to the agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
     /// Use a dummy connection. The sender is used for
@@ -98,7 +101,8 @@ impl fmt::Display for AgentConnectInfoDiscriminants {
 
 pub enum ReconnectFlow {
     ConnectInfo {
-        config: LayerConfig,
+        /// Boxed due to large size.
+        config: Box<LayerConfig>,
         connect_info: AgentConnectInfo,
     },
 
@@ -171,7 +175,7 @@ impl AgentConnection {
                     connection.conn,
                     if session.allow_reconnect {
                         ReconnectFlow::ConnectInfo {
-                            config: config.clone(),
+                            config: Box::new(config.clone()),
                             connect_info: AgentConnectInfo::Operator(session),
                         }
                     } else {
@@ -209,7 +213,7 @@ impl AgentConnection {
                 sender.send((tx, rx)).await.unwrap();
 
                 let reconnect = ReconnectFlow::ConnectInfo {
-                    config: config.clone(),
+                    config: Box::new(config.clone()),
                     connect_info: AgentConnectInfo::Dummy(sender),
                 };
 
