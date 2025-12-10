@@ -91,7 +91,7 @@ impl WindowsError {
     }
 
     /// Returns the underlying error code formatted as a hexadecimal string.
-    pub fn hex_code(&self) -> String {
+    pub fn get_hex_string(&self) -> String {
         let value = match self {
             Self::Windows(code) => *code,
             Self::WinSock(code) => *code as u32,
@@ -106,7 +106,7 @@ impl WindowsError {
             None => write!(
                 f,
                 "WindowsError: Not a valid error code ({})",
-                self.hex_code()
+                self.get_hex_string()
             ),
         }
     }
