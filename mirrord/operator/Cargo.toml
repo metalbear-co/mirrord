@@ -29,7 +29,6 @@ client = [
   "dep:futures",
   "dep:mirrord-analytics",
   "dep:mirrord-auth",
-  "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
   "dep:rand",
@@ -37,7 +36,6 @@ client = [
   "dep:tokio-tungstenite",
   "dep:tracing",
   "dep:serde_urlencoded",
-  "dep:uuid",
   "dep:tower"
 ]
 crd = [
@@ -45,9 +43,11 @@ crd = [
   "dep:kube",
   "dep:mirrord-agent-env",
   "dep:mirrord-config",
+  "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
+  "dep:uuid",
 ]
 setup = ["crd", "dep:serde_yaml"]
 

@@ -38,6 +38,7 @@ k8s-openapi.workspace = true
 kube.workspace = true
 rand.workspace = true
 regex.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shellexpand = "3"
