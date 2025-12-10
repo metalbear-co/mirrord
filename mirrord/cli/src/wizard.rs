@@ -51,7 +51,12 @@
 //!   is a problem seeking resources in the cluster. For the latter, errors are turned into `None`s
 //!   to avoid the frontend stopping altogether.
 
-use std::{io::Cursor, net::SocketAddr, sync::Arc};
+use std::{
+    io::Cursor,
+    net::{Ipv4Addr, SocketAddr},
+    ops::Not,
+    sync::Arc,
+};
 
 use axum::{
     Router,
@@ -72,6 +77,7 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, rollout::Rollout, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
+use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
 use tar::Archive;
 use tempfile::TempDir;
@@ -82,7 +88,7 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
     trace::TraceLayer,
 };
-use mirrord_progress::Progress;
+
 use crate::{
     config::WizardArgs,
     error::{CliError, CliResult},
@@ -155,6 +161,7 @@ where
 
     // prepare temp dir as SPA with endpoints behind `/api` path
     let app = Router::new()
+        .layer(TraceLayer::new_for_http())
         .fallback_service(serve_client)
         .route(
             "/api/v1/is-returning",
@@ -163,12 +170,14 @@ where
         .route("/api/v1/cluster-details", get(cluster_details))
         .route("/api/v1/namespace/{namespace}/targets", get(list_targets))
         .with_state(Arc::new(Mutex::new((user_data, client))));
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 3000);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::debug!("listening on {}", listener.local_addr()?);
     progress.success(None);
 
-    parent_progress.subtask("<|:) Greetings, traveler!").success(None);
+    parent_progress
+        .subtask("<|:) Greetings, traveler!")
+        .success(None);
 
     // open browser window
     let url = "http://localhost:3000/";
@@ -176,10 +185,14 @@ where
         Ok(()) => {}
         Err(error) => {
             tracing::trace!(?error, "failed to open browser");
-            parent_progress.subtask("Couldn't open the browser automatically").failure(None);
+            parent_progress
+                .subtask("Couldn't open the browser automatically")
+                .failure(None);
         }
     }
-    parent_progress.subtask(format!("The wizard is available at: {url}").as_str()).success(None);
+    parent_progress
+        .subtask(format!("The wizard is available at: {url}").as_str())
+        .success(None);
 
     parent_progress.success(None);
     axum::serve(listener, app.layer(TraceLayer::new_for_http()))
@@ -235,7 +248,7 @@ struct Params {
 async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> CliResult<String> {
     let mut user_guard = arc.lock().await;
     // consider the user a returning user in future runs
-    if !user_guard.0.is_returning_wizard() {
+    if user_guard.0.is_returning_wizard().not() {
         // ignore failures to update
         let _ = user_guard.0.update_is_returning_wizard().await;
     }
