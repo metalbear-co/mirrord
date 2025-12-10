@@ -217,6 +217,7 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
     pub async fn outgoing_connection_to_self(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = ["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"]
@@ -458,6 +459,9 @@ mod traffic_tests {
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
         let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .expect("failed to configure UDP socket read timeout");
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = [

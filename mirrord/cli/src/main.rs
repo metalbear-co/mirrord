@@ -995,7 +995,7 @@ fn main() -> miette::Result<()> {
                 list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                windows_unsupported!(args, "operator", { operator_command(*args).await? })
+                operator_command(*args).await?;
             }
             Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
                 extension_exec(*args, watch, &user_data).await?;

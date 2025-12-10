@@ -68,7 +68,7 @@ pub struct LayerSetup {
 }
 
 impl LayerSetup {
-    pub fn new(mut config: LayerConfig, proxy_address: SocketAddr) -> Self {
+    pub fn new(mut config: LayerConfig, proxy_address: SocketAddr, local_hostname: bool) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
@@ -76,8 +76,6 @@ impl LayerSetup {
         let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
 
         let dns_selector = DnsSelector::from(&config.feature.network.dns);
-
-        let local_hostname = !config.feature.hostname;
 
         let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
         tracing::info!(?incoming_mode, ?config, "incoming has changed");
