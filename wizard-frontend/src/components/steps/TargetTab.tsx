@@ -38,7 +38,7 @@ import { useQuery } from "@tanstack/react-query";
 // }
 
 const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [namespace, setNamespace] = useState<string>("default");
   const [targetType, setTargetType] = useState<string>("");
   const [targetSearchText, setTargetSearchText] = useState<string>("");
@@ -50,7 +50,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
     queryFn: () =>
       fetch(window.location.href + "api/v1/cluster-details").then(
         async (res) =>
-          res.ok ? await res.json() : { namespaces: [], target_types: [] }
+          res.ok ? await res.json() : { namespaces: [], target_types: [] },
       ),
   });
 
@@ -73,7 +73,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
           "api/v1/namespace/" +
           namespace +
           "/targets" +
-          (targetType ? "?target_type=" + targetType : "")
+          (targetType ? "?target_type=" + targetType : ""),
       ).then(async (res) => (res.ok ? await res.json() : [])),
   });
 
@@ -163,7 +163,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
                             const updated = updateConfigTarget(
                               config,
                               target.target_path,
-                              target.target_namespace
+                              target.target_namespace,
                             );
 
                             // set target ports for port config in network tab
@@ -171,14 +171,14 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
                             // when the target changes, reset ports config
                             const updatedPorts = updateConfigPorts(
                               target.detected_ports,
-                              updated
+                              updated,
                             );
                             setConfig(updatedPorts);
 
                             document.dispatchEvent(
                               new KeyboardEvent("keydown", {
                                 key: "Escape",
-                              })
+                              }),
                             );
                           }}
                         >

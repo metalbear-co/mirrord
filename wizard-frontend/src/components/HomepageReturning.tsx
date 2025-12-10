@@ -1,11 +1,8 @@
 import { Plus, BookOpen } from "lucide-react";
-import {
-  CardTitle,
-} from "@/components/ui/card";
+import { CardTitle } from "./ui/card";
 import Panel from "./Panel";
-import {LearningStepsReturning} from "./steps/LearningSteps";
-import { WizardStep } from "./Wizard";
-import IntroStep from "./steps/IntroStep";
+import { LearningStepsReturning } from "./steps/LearningSteps";
+import type { WizardStep } from "./Wizard";
 import BoilerplateStep from "./steps/BoilerplateStep";
 import ConfigStep from "./steps/ConfigStep";
 
@@ -25,9 +22,7 @@ const HomepageReturning = () => {
   const configStep = ConfigStep();
 
   const configSteps: WizardStep[] = [boilerplateStep, configStep];
-  const learnSteps: WizardStep[] = LearningStepsReturning.concat(
-    configSteps
-  );
+  const learnSteps: WizardStep[] = LearningStepsReturning.concat(configSteps);
 
   return (
     <div className="min-h-screen w-full bg-background flex items-center justify-center p-6">

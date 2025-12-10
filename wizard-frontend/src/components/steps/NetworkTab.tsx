@@ -1,54 +1,48 @@
-import { useState, useContext } from "react";
-import { Plus, Trash2, ArrowRight, Network } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useState, useContext, type FormEvent } from "react";
+import { Plus, Network } from "lucide-react";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 
-import { TabsContent } from "@/components/ui/tabs";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Separator } from "@/components/ui/separator";
+import { TabsContent } from "../ui/tabs";
+import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
+import { Separator } from "../ui/separator";
 import {
-  addRemoveOrUpdateMapping,
   disableConfigFilter,
   disablePortsAndMapping,
-  getLocalPort,
   readBoilerplateType,
   readCurrentFilters,
   readCurrentPortMapping,
   readCurrentPorts,
   readIncoming,
-  removePortandMapping,
-  UiHttpFilter,
+  type UiHttpFilter,
   updateConfigFilter,
   updateConfigPortMapping,
   updateConfigPorts,
   updateIncoming,
 } from "../JsonUtils";
 import { ConfigDataContext } from "../UserDataContext";
+import type {
+  ToggleableConfigFor_IncomingFileConfig,
+  PortMapping,
+} from "../../mirrord-schema";
 import { Disable } from "react-disable";
-import { PortMapping } from "./PortMapping";
 import HttpFilter from "./HttpFilter";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
 import AddNewFilter from "./AddNewFilter";
 import { Switch } from "../ui/switch";
+import PortMappingEntry from "./PortMapping";
 
 const IncomingConfigToggle = ({
   savedIncoming,
   setSavedIncoming,
 }: {
-  savedIncoming: any;
-  setSavedIncoming: (any) => void;
+  savedIncoming: ToggleableConfigFor_IncomingFileConfig;
+  setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void;
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [toggleEnabled, setToggleEnabled] = useState<boolean>(
-    readBoilerplateType(config) === "replace" || readIncoming(config) !== false
+    readBoilerplateType(config) === "replace" || readIncoming(config) !== false,
   );
 
   return (
@@ -81,9 +75,9 @@ const FilterConfigToggle = ({
   setToggleEnabled,
 }: {
   toggleEnabled: boolean;
-  setToggleEnabled: (boolean) => void;
+  setToggleEnabled: (enabled: boolean) => void;
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [savedFilters, setSavedFilters] = useState<{
     filters: UiHttpFilter[];
     operator: "any" | "all" | null;
@@ -106,7 +100,7 @@ const FilterConfigToggle = ({
           const newConfig = updateConfigFilter(
             savedFilters.filters,
             savedFilters.operator,
-            config
+            config,
           );
           setConfig(newConfig);
         }
@@ -123,11 +117,11 @@ const PortsConfigToggle = ({
   detectedPorts,
 }: {
   toggleEnabled: boolean;
-  setToggleEnabled: (boolean) => void;
+  setToggleEnabled: (enabled: boolean) => void;
   detectedPorts: number[];
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
-  const [savedPorts, setSavedPorts] = useState<any>([
+  const { config, setConfig } = useContext(ConfigDataContext)!;
+  const [savedPorts, setSavedPorts] = useState<[number[], PortMapping]>([
     detectedPorts,
     readCurrentPortMapping(config),
   ]);
@@ -153,7 +147,7 @@ const PortsConfigToggle = ({
           const partialNewConfig = updateConfigPorts(savedPortsOnly, config);
           const newConfig = updateConfigPortMapping(
             savedMapping,
-            partialNewConfig
+            partialNewConfig,
           );
           setConfig(newConfig);
         }
@@ -168,20 +162,20 @@ const NetworkTab = ({
   savedIncoming,
   targetPorts,
   setSavedIncoming,
-  setPortConflicts
+  setPortConflicts,
 }: {
-  savedIncoming: any;
+  savedIncoming: ToggleableConfigFor_IncomingFileConfig;
   targetPorts: number[];
-  setSavedIncoming: (any) => void;
-  setPortConflicts: (boolean) => void;
+  setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void;
+  setPortConflicts: (value: boolean) => void;
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [toggleFiltersEnabled, setToggleFiltersEnabled] =
     useState<boolean>(false);
   const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false);
   const [newRemotePort, setNewRemotePort] = useState<number>();
 
-  const handleOnSubmit = (e) => {
+  const handleOnSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (newRemotePort) {
       const ports = readCurrentPorts(config);
@@ -250,7 +244,7 @@ const NetworkTab = ({
                             <div className="space-y-3">
                               {readCurrentFilters(config)
                                 .filters.filter(
-                                  (filter) => filter.type === "header"
+                                  (filter) => filter.type === "header",
                                 )
                                 .map((headerFilter) => (
                                   <HttpFilter
@@ -278,7 +272,7 @@ const NetworkTab = ({
                             <div className="space-y-3">
                               {readCurrentFilters(config)
                                 .filters.filter(
-                                  (filter) => filter.type === "path"
+                                  (filter) => filter.type === "path",
                                 )
                                 .map((headerFilter) => (
                                   <HttpFilter
@@ -309,7 +303,7 @@ const NetworkTab = ({
                                   const newConfig = updateConfigFilter(
                                     existingFilters,
                                     value,
-                                    config
+                                    config,
                                   );
                                   setConfig(newConfig);
                                 }}
@@ -357,8 +351,8 @@ const NetworkTab = ({
                   {togglePortsEnabled && (
                     <div className="space-y-4">
                       <p className="text-xs text-muted-foreground mb-3">
-                        {targetPorts.length} ports were detected automatically in
-                        the target.
+                        {targetPorts.length} ports were detected automatically
+                        in the target.
                       </p>
                       <div className="space-y-3">
                         <div className="space-y-2">
@@ -382,7 +376,7 @@ const NetworkTab = ({
                           )}
 
                           {readCurrentPorts(config).map((remotePort) => (
-                            <PortMapping
+                            <PortMappingEntry
                               key={remotePort}
                               remotePort={remotePort}
                               detectedPort={targetPorts.includes(remotePort)}

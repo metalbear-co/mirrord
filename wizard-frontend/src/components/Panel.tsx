@@ -1,15 +1,8 @@
-import { useState, useEffect, ReactNode, useContext } from "react";
-import { WizardStep, Wizard } from "@/components/Wizard";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ArrowRight, BookOpen, Plus, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { UserDataContext, ConfigDataContext, ConfigDataContextProvider } from "./UserDataContext";
+import { useState, type ReactNode } from "react";
+import { type WizardStep, Wizard } from "./Wizard";
+import { Card, CardContent, CardDescription, CardHeader } from "./ui/card";
+import { ArrowRight } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface PanelProps {
   title: ReactNode;
@@ -61,11 +54,11 @@ const Panel = ({
     <div>
       <div className="grid gap-6 sm:gap-8 max-w-4xl mx-auto">
         <Wizard
-            steps={steps}
-            isOpen={showWizard}
-            onClose={() => setShowWizard(false)}
-            className="w-full"
-          />
+          steps={steps}
+          isOpen={showWizard}
+          onClose={() => setShowWizard(false)}
+          className="w-full"
+        />
         <Card className="bg-gradient-card border-border/50 hover:shadow-glow transition-all duration-300">
           <CardHeader>
             {title}

@@ -7,7 +7,10 @@ interface DownloadButtonProps {
   filename?: string;
 }
 
-export default function DownloadButton({ json, filename = "mirrord-config" }: DownloadButtonProps) {
+export default function DownloadButton({
+  json,
+  filename = "mirrord-config",
+}: DownloadButtonProps) {
   const { toast } = useToast();
 
   const downloadJson = () => {
@@ -20,7 +23,10 @@ export default function DownloadButton({ json, filename = "mirrord-config" }: Do
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast({ title: "Downloaded", description: "Configuration JSON has been downloaded." });
+    toast({
+      title: "Downloaded",
+      description: "Configuration JSON has been downloaded.",
+    });
   };
 
   return (
@@ -30,5 +36,3 @@ export default function DownloadButton({ json, filename = "mirrord-config" }: Do
     </Button>
   );
 }
-
-

@@ -1,19 +1,22 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ],
   "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    },
-    "noImplicitAny": false,
-    "noUnusedParameters": false,
+    "esModuleInterop": true,
     "skipLibCheck": true,
+    "target": "es2022",
     "allowJs": true,
-    "noUnusedLocals": false,
-    "strictNullChecks": false
+    "resolveJsonModule": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    "module": "preserve",
+    "jsx": "preserve",
+    "outDir": "dist",
+    "sourceMap": true,
+    "lib": ["es2022"]
   }
 }

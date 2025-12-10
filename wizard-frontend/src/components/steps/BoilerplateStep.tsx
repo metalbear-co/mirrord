@@ -1,10 +1,10 @@
 import React from "react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle } from "../ui/card";
+import { Badge } from "../ui/badge";
 import { Check } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Copy, Filter, Repeat } from "lucide-react";
-import { WizardStep } from "../Wizard";
+import { type WizardStep } from "../Wizard";
 import { useContext, useState } from "react";
 import { ConfigDataContext } from "../UserDataContext";
 import { updateConfigCopyTarget, updateConfigMode } from "../JsonUtils";
@@ -26,7 +26,6 @@ export const BoilerplateCard: React.FC<BoilerplateCardProps> = ({
   description,
   features,
   icon: Icon,
-  color,
   selected = false,
   onClick,
 }) => {
@@ -78,7 +77,9 @@ const BoilerplateStep: () => WizardStep = () => {
       icon: Filter,
       color: "text-purple-500",
       selected: false,
-      onClick: () => {},
+      onClick: () => {
+        /* empty */
+      },
     },
     {
       id: "mirror",
@@ -89,7 +90,9 @@ const BoilerplateStep: () => WizardStep = () => {
       icon: Copy,
       color: "text-blue-500",
       selected: false,
-      onClick: () => {},
+      onClick: () => {
+        /* empty */
+      },
     },
     {
       id: "replace",
@@ -100,11 +103,13 @@ const BoilerplateStep: () => WizardStep = () => {
       icon: Repeat,
       color: "text-orange-500",
       selected: false,
-      onClick: () => {},
+      onClick: () => {
+        /* empty */
+      },
     },
   ];
 
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [selectedBoilerplate, setSelectedBoilerplate] = useState<string>("");
   const handleBoilerplateSelect = (boilerplateId: string) => {
     setSelectedBoilerplate(boilerplateId);

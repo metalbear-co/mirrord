@@ -1,6 +1,6 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "./components/ui/toaster";
+import { Toaster as Sonner } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import {
   QueryClient,
   QueryClientProvider,
@@ -18,12 +18,12 @@ const InnerApp = () => {
     queryKey: ["userIsReturning"],
     queryFn: () =>
       fetch(window.location.href + "api/v1/is-returning").then(async (res) =>
-        res.ok && (await res.text()) === "true" ? true : false
+        res.ok && (await res.text()) === "true" ? true : false,
       ),
   });
 
   if (error) {
-    console.log(error)
+    console.log(error);
   }
 
   return isLoading ? (

@@ -21,13 +21,15 @@ import {
   readIncoming,
 } from "../JsonUtils";
 import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
+import type { ToggleableConfigFor_IncomingFileConfig } from "../../mirrord-schema";
 import NetworkTab from "./NetworkTab";
 import TargetTab from "./TargetTab";
 
 const ConfigTabs = () => {
   const { config } = useContext(ConfigDataContext);
   const [currentTab, setCurrentTab] = useState<string>("target");
-  const [savedIncoming, setSavedIncoming] = useState<any>(readIncoming(config));
+  const [savedIncoming, setSavedIncoming] =
+    useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config));
   const [portConflicts, setPortConflicts] = useState<boolean>(false);
   const [targetPorts, setTargetPorts] = useState<number[]>([]);
 

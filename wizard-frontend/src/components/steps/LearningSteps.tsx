@@ -1,5 +1,5 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { WizardStep } from "@/components/Wizard";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { type WizardStep } from "../Wizard";
 import mirroredArchitecture from "@/assets/mirrord-architecture.svg";
 
 const learningStep1NewUser: WizardStep = {

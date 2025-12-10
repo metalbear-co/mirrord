@@ -1,6 +1,6 @@
 import { ArrowRight, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import {
   addRemoveOrUpdateMapping,
   getLocalPort,
@@ -12,18 +12,18 @@ import { useContext, useState } from "react";
 import { ConfigDataContext } from "../UserDataContext";
 import { useToast } from "../ui/use-toast";
 
-export const PortMapping = ({
+export const PortMappingEntry = ({
   remotePort,
   detectedPort,
   setPortConflicts,
 }: {
   remotePort: number;
   detectedPort: boolean;
-  setPortConflicts: React.Dispatch<React.SetStateAction<boolean>>;
+  setPortConflicts: (value: boolean) => void;
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [inputContents, setInputContents] = useState<number>(
-    getLocalPort(remotePort, config)
+    getLocalPort(remotePort, config),
   );
   const [outlineConflict, setOutlineConflict] = useState<boolean>(false);
 
@@ -75,7 +75,7 @@ export const PortMapping = ({
               if (!isNaN(newValue)) {
                 if (
                   readCurrentPorts(config).filter(
-                    (remote) => getLocalPort(remote, config) === newValue
+                    (remote) => getLocalPort(remote, config) === newValue,
                   ).length > 0
                 ) {
                   localPortConflict();
@@ -85,7 +85,7 @@ export const PortMapping = ({
                 const newConfig = addRemoveOrUpdateMapping(
                   remotePort,
                   newValue,
-                  config
+                  config,
                 );
                 setConfig(newConfig);
 
@@ -115,4 +115,4 @@ export const PortMapping = ({
   );
 };
 
-export default PortMapping;
+export default PortMappingEntry;

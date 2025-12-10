@@ -12,7 +12,7 @@ export const HttpFilter = ({
   initValue: string;
   inputType: "header" | "path";
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
 
   return (
     <div className="space-y-2">
@@ -33,7 +33,7 @@ export const HttpFilter = ({
           onClick={() => {
             const newConfig = removeSingleFilter(
               { value: initValue, type: inputType },
-              config
+              config,
             );
             setConfig(newConfig);
           }}

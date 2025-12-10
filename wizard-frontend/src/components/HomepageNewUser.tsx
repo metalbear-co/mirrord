@@ -1,12 +1,12 @@
-import { Zap, BookOpen, ChevronLeft, ChevronRight, Server } from "lucide-react";
-import {  CardTitle } from "@/components/ui/card";
-import { WizardStep } from "@/components/Wizard";
+import { Zap, BookOpen } from "lucide-react";
+import { CardTitle } from "./ui/card";
+import type { WizardStep } from "./Wizard";
 import mirrordLogo from "@/assets/mirrord-logo.svg";
 import Panel from "./Panel";
 import BoilerplateStep from "./steps/BoilerplateStep";
 import IntroStep from "./steps/IntroStep";
 import ConfigStep from "./steps/ConfigStep";
-import {LearningStepsNewUser} from "./steps/LearningSteps";
+import { LearningStepsNewUser } from "./steps/LearningSteps";
 
 const HomepageNewUser = () => {
   const titleCreateConfig = (
@@ -27,7 +27,7 @@ const HomepageNewUser = () => {
   const configSteps: WizardStep[] = [boilerplateStep, configStep];
   const learnSteps: WizardStep[] = [introStep].concat(
     LearningStepsNewUser,
-    configSteps
+    configSteps,
   );
 
   return (
@@ -35,11 +35,7 @@ const HomepageNewUser = () => {
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8 sm:mb-12">
           <div className="flex items-center justify-center mb-6">
-            <img
-              src={mirrordLogo}
-              alt="mirrord"
-              className="size-40"
-            />
+            <img src={mirrordLogo} alt="mirrord" className="size-40" />
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-bold mb-4 text-foreground">

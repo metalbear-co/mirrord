@@ -42,6 +42,7 @@
     "@radix-ui/react-toggle": "^1.1.0",
     "@radix-ui/react-toggle-group": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.4",
+    "@tailwindcss/postcss": "^4.1.18",
     "@tanstack/react-query": "^5.56.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -50,7 +51,6 @@
     "embla-carousel-react": "^8.3.0",
     "input-otp": "^1.2.4",
     "json-schema-to-typescript": "^15.0.4",
-    "lovable-tagger": "^1.1.10",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "react": "^18.3.1",
@@ -68,7 +68,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@eslint/js": "^9.9.0",
+    "@eslint/js": "^9.39.1",
     "@jest/globals": "^30.2.0",
     "@tailwindcss/typography": "^0.5.15",
     "@types/jest": "^30.0.0",
@@ -77,17 +77,18 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
-    "eslint": "^9.9.0",
+    "component-tagger": "^4.0.0",
+    "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
     "globals": "^15.9.0",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.11",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
     "ts-jest": "^29.4.5",
-    "typescript": "^5.5.3",
-    "typescript-eslint": "^8.0.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.49.0",
     "vite": "^6.4.1"
   }
 }

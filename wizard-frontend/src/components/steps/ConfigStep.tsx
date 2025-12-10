@@ -1,8 +1,8 @@
-import { WizardStep } from "../Wizard";
+import type { WizardStep } from "../Wizard";
 import ConfigTabs from "./ConfigTabs";
 
 const ConfigStep: () => WizardStep = () => {
-    return {
+  return {
     id: "config-new-user",
     title: "Configuration Setup",
     content: (
@@ -14,8 +14,8 @@ const ConfigStep: () => WizardStep = () => {
           <ConfigTabs />
         </div>
       </div>
-    )
+    ),
   };
 };
 
-export default ConfigStep
+export default ConfigStep;

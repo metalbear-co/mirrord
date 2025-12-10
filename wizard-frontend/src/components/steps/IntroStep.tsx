@@ -1,10 +1,8 @@
-
 import { Server } from "lucide-react";
-import { WizardStep } from "../Wizard";
+import type { WizardStep } from "../Wizard";
 
 const IntroStep: () => WizardStep = () => {
-
-    return {
+  return {
     id: "intro-new-user",
     title: "Welcome to mirrord Configuration",
     content: (
@@ -15,19 +13,17 @@ const IntroStep: () => WizardStep = () => {
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-lg font-semibold">
-              Get started with mirrord
-            </h3>
+            <h3 className="text-lg font-semibold">Get started with mirrord</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
-              Run local code like it's in your Kubernetes cluster
-              without deploying it first. Get started by creating your
-              first mirrord.json configuration.
+              Run local code like it's in your Kubernetes cluster without
+              deploying it first. Get started by creating your first
+              mirrord.json configuration.
             </p>
           </div>
         </div>
       </div>
-    )
+    ),
   };
 };
 
-export default IntroStep
+export default IntroStep;

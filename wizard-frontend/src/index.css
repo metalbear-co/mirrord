@@ -7,7 +7,7 @@ All colors MUST be HSL.
 */
 
 @layer base {
-:root {
+  :root {
     --background: 240 5% 98%;
     --foreground: 240 6% 7%;
 
@@ -36,7 +36,11 @@ All colors MUST be HSL.
     --input: 240 6% 85%;
     --ring: 258 90% 66%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(258 90% 66%), hsl(272 91% 70%));
+    --gradient-primary: linear-gradient(
+      135deg,
+      hsl(258 90% 66%),
+      hsl(272 91% 70%)
+    );
     --gradient-card: linear-gradient(145deg, hsl(240 5% 96%), hsl(240 6% 90%));
     --shadow-glow: 0 0 20px hsl(258 90% 66% / 0.3);
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);

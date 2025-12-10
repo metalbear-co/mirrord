@@ -1,8 +1,8 @@
-import { LayerFileConfig } from "@/mirrord-schema";
 import React, { useState } from "react";
+import type { LayerFileConfig } from "../mirrord-schema";
 
 export const UserDataContext = React.createContext<boolean | undefined>(
-  undefined
+  undefined,
 );
 
 export interface ConfigData {
@@ -41,5 +41,5 @@ export const ConfigDataContextProvider = ({
 };
 
 export const ConfigDataContext = React.createContext<ConfigData | undefined>(
-  undefined
+  undefined,
 );

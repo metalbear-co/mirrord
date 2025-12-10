@@ -1,10 +1,10 @@
-import React, { useState, ReactNode, useContext } from "react";
+import React, { useState, type ReactNode, useContext } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { Badge } from "./ui/badge";
 import { ConfigDataContext, DefaultConfig } from "./UserDataContext";
 import { readBoilerplateType } from "./JsonUtils";
+import { Button } from "./ui/button";
 
 export interface WizardStep {
   id: string;
@@ -111,7 +111,7 @@ export const Wizard: React.FC<WizardProps> = ({
   const config = useContext(ConfigDataContext);
 
   const fetchConfigBadge = () => {
-    switch (readBoilerplateType(config.config)) {
+    switch (readBoilerplateType(config!.config)) {
       case "mirror":
         return "Mirror mode";
       case "replace":
@@ -126,7 +126,7 @@ export const Wizard: React.FC<WizardProps> = ({
   const goToNext = () => {
     if (isLastStep) {
       onComplete?.();
-      onClose();
+      onClose?.();
     } else {
       const nextStep = currentStep + 1;
       setCurrentStep(nextStep);
@@ -144,9 +144,9 @@ export const Wizard: React.FC<WizardProps> = ({
     // reset current step number
     setCurrentStep(0);
     // reset current config to default
-    config.setConfig(DefaultConfig);
+    config?.setConfig(DefaultConfig);
     // close according to prop
-    onClose();
+    onClose?.();
   };
 
   if (!isOpen) return null;
@@ -156,7 +156,7 @@ export const Wizard: React.FC<WizardProps> = ({
       <DialogContent className="max-w-3xl max-h-[85vh] p-0 flex flex-col">
         {/* Fixed Header */}
         <WizardHeader
-          title={currentStepData.title}
+          title={currentStepData?.title ?? ""}
           currentStep={currentStep}
           totalSteps={steps.length}
           fetchConfigBadge={fetchConfigBadge}
@@ -166,7 +166,7 @@ export const Wizard: React.FC<WizardProps> = ({
         {/* Scrollable Content */}
         <div className="flex-1 px-4 pt-2 pb-4 overflow-y-auto">
           <div className="min-h-[200px]">
-            {React.cloneElement(currentStepData.content as React.ReactElement, {
+            {React.cloneElement(currentStepData?.content as React.ReactElement, {
               currentStep,
               totalSteps: steps.length,
             })}
@@ -180,7 +180,7 @@ export const Wizard: React.FC<WizardProps> = ({
             onNext={goToNext}
             isFirstStep={isFirstStep}
             isLastStep={isLastStep}
-            allowProgress={currentStepData.allowProgress ?? true}
+            allowProgress={currentStepData?.allowProgress ?? true}
           />
         )}
       </DialogContent>

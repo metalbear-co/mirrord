@@ -13,7 +13,7 @@ import {
   regexificationRay,
   updateConfigFilter,
 } from "../JsonUtils";
-import { useContext, useState } from "react";
+import { useContext, useState, type FormEvent } from "react";
 import { ConfigDataContext } from "../UserDataContext";
 
 export const AddNewFilter = ({
@@ -23,12 +23,12 @@ export const AddNewFilter = ({
   type: "header" | "path";
   placeholder: string;
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext);
+  const { config, setConfig } = useContext(ConfigDataContext)!;
   const [inputMatching, setInputMatching] = useState<"exact" | "regex">(
-    "regex"
+    "regex",
   );
   const [inputValue, setInputValue] = useState<string>();
-  const handleOnSubmit = (e) => {
+  const handleOnSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (inputValue) {
       const { filters, operator } = readCurrentFilters(config);
@@ -44,7 +44,7 @@ export const AddNewFilter = ({
             },
           ]),
           operator,
-          config
+          config,
         );
         setConfig(updated);
       }
