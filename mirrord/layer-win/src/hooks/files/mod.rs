@@ -301,8 +301,8 @@ unsafe extern "system" fn nt_create_file_hook(
             return run_original();
         };
 
-        // Some Windows APIs try to open the drive root (e.g. `C:\`) to inspect metadata. We don't
-        // support mirroring root directory handles, so let Windows handle these locally.
+        // Some frameworks try to open the drive root (e.g. `C:\`) to inspect metadata, e.g. Node.
+        // We don't support mirroring root directory handles, so let Windows handle these locally.
         if parsed_unix_path == "/" {
             tracing::debug!(
                 "nt_create_file_hook: bypassing remote open for root directory \"{}\"",
