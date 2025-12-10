@@ -162,7 +162,7 @@ impl fmt::Display for AgentPodTarget {
 }
 
 #[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase")]
 pub enum AgentTarget {
     Targetless {
         /// Target namespace
