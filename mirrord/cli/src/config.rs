@@ -427,11 +427,26 @@ pub(super) struct DumpArgs {
 // `mirrord ci start` command
 #[derive(Args, Debug)]
 pub(super) struct CiStartArgs {
+    /// Args passed down to mirrord itself (similar to `mirrord exec`).
     #[clap(flatten)]
     pub exec_args: Box<ExecArgs>,
 
+    /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
+    /// task).
     #[arg(long)]
     pub foreground: bool,
+
+    /// CI environment, e.g. "staging", "production", "testing", etc.
+    #[arg(long)]
+    pub environment: Option<String>,
+
+    /// CI pipeline or job name, e.g. "e2e-tests".
+    #[arg(long)]
+    pub pipeline: Option<String>,
+
+    /// CI pipeline trigger, e.g. "push", "pull request", "manual", etc.
+    #[arg(long)]
+    pub triggered_by: Option<String>,
 }
 
 /// Target-related parameters, present in more than one command.

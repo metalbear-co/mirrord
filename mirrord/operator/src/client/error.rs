@@ -92,6 +92,9 @@ pub enum OperatorApiError {
 
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
