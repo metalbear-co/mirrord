@@ -9,7 +9,6 @@ use mirrord_protocol::{
     ResolveErrorKindInternal, ResponseError,
     dns::{ADDRINFO_V2_VERSION, AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
-use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;

@@ -15,7 +15,6 @@ use mirrord_protocol::{
     },
     uid::Uid,
 };
-use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;

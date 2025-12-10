@@ -725,9 +725,7 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-    use futures::{StreamExt, stream::FuturesUnordered};
-    use http_body_util::StreamBody;
-    use hyper::{HeaderMap, Method, StatusCode, Uri, Version, header::CONTENT_LENGTH};
+    use hyper::{HeaderMap, Method, StatusCode, Uri, Version};
     use mirrord_analytics::NullReporter;
     use mirrord_config::{
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
@@ -752,15 +750,13 @@ mod test {
         },
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
-    use serde::de::Unexpected;
     use tokio::{
-        io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+        io::{AsyncReadExt, AsyncWriteExt},
         net::{
             TcpListener, TcpStream,
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
         sync::mpsc,
-        task::JoinSet,
     };
 
     use crate::{
@@ -1419,8 +1415,6 @@ mod test {
     #[rstest::rstest]
     #[timeout(Duration::from_secs(5))]
     async fn reconnect_during_http(#[values(true, false)] drop_during_response: bool) {
-        use std::ops::Not;
-
         let ReconnectTestSetup {
             mut conn_rx,
             // Keep the connection so intproxy doesn't exit

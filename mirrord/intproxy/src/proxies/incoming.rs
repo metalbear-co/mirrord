@@ -27,7 +27,6 @@ use mirrord_protocol::{
         NewTcpConnectionV2,
     },
 };
-use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};

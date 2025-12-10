@@ -11,7 +11,6 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
     ResponseError, file::*,
 };
-use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
 use tracing::Level;
