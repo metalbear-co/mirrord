@@ -33,6 +33,11 @@ pub struct MirrordClusterSessionSpec {
     /// None for targetless sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<SessionTarget>,
+
+    /// CI info when a session is started with `mirrord ci start`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci_info: Option<SessionCiInfo>,
+
     /// Copy target configuration for this session.
     ///
     /// Set when the session uses a copied pod.
@@ -133,4 +138,30 @@ pub struct SessionClosed {
     /// Optional human friendly message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Information about the CI session started from `mirrord ci start`.
+///
+/// We try to get some of these fields automatically, but for some that we cannot, the user may
+/// pass them as cli args to `mirrord ci start`, see `cli::ci::StartArgs`.
+///
+/// These values are passed to the operator, and handled by the `ci_controller`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCiInfo {
+    /// CI provider, e.g. "github", "gitlab", ...
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    /// Staging, production, test, nightly, ...
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+
+    /// Pipeline/job name, e.g. "e2e-tests".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<String>,
+
+    /// PR, manual, push, ...
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triggered_by: Option<String>,
 }
