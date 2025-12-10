@@ -57,8 +57,7 @@ use crate::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
         },
         util::{
-            WindowsTime, is_nt_path_disk_path, is_nt_path_disk_root, read_object_attributes_name,
-            try_seek, try_xstat,
+            WindowsTime, is_nt_path_disk_path, read_object_attributes_name, try_seek, try_xstat,
         },
     },
     process::memory::is_memory_valid,
@@ -297,20 +296,20 @@ unsafe extern "system" fn nt_create_file_hook(
             return run_original();
         }
 
+        // Try to create a Linux path from the provided Windows NT path.
+        let Some(parsed_unix_path) = path_to_unix_path(name.clone()) else {
+            return run_original();
+        };
+
         // Some Windows APIs try to open the drive root (e.g. `C:\`) to inspect metadata. We don't
         // support mirroring root directory handles, so let Windows handle these locally.
-        if is_nt_path_disk_root(&name) {
+        if parsed_unix_path == "/" {
             tracing::debug!(
                 "nt_create_file_hook: bypassing remote open for root directory \"{}\"",
                 name
             );
             return run_original();
         }
-
-        // Try to create a Linux path from the provided Windows NT path.
-        let Some(parsed_unix_path) = path_to_unix_path(name.clone()) else {
-            return run_original();
-        };
 
         // NOTE(gabriela): (fs config) - we must make sure to follow the same routine
         // as Unix fs config handling does.
