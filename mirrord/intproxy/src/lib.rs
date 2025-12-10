@@ -726,6 +726,8 @@ mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
     use futures::{StreamExt, stream::FuturesUnordered};
+    use http_body_util::StreamBody;
+    use hyper::{HeaderMap, Method, StatusCode, Uri, Version, header::CONTENT_LENGTH};
     use mirrord_analytics::NullReporter;
     use mirrord_config::{
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
@@ -742,10 +744,17 @@ mod test {
         dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, SockType},
         file::{OpenFileRequest, StatFsRequestV2},
         outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing},
-        tcp::{DaemonTcp, LayerTcpSteal, StealType},
+        tcp::{
+            ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
+            HttpRequestMetadata, HttpResponse, IncomingTrafficTransportType, InternalHttpBodyFrame,
+            InternalHttpBodyNew, InternalHttpRequest, InternalHttpResponse, LayerTcpSteal,
+            StealType,
+        },
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
+    use serde::de::Unexpected;
     use tokio::{
+        io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
         net::{
             TcpListener, TcpStream,
             tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -1402,6 +1411,159 @@ mod test {
                     })
                 )))
             })) if error_msg == "connection with mirrord-agent was lost"
+        ));
+    }
+
+    /// Verifies that [`IntProxy`] reconnects correctly while it was serving a stolen request
+    #[tokio::test]
+    #[rstest::rstest]
+    #[timeout(Duration::from_secs(5))]
+    async fn reconnect_during_http(#[values(true, false)] drop_during_response: bool) {
+        use std::ops::Not;
+
+        let ReconnectTestSetup {
+            mut conn_rx,
+            // Keep the connection so intproxy doesn't exit
+            mut from_layer,
+            mut to_layer,
+        } = setup_reconnect_test().await;
+
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        from_layer
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
+                    PortSubscribe {
+                        listening_on: addr,
+                        subscription: PortSubscription::Steal(StealType::All(80)),
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Incoming(
+                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                )
+            }))
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "hello".len().into());
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                ChunkedRequest::StartV2(ChunkedRequestStartV2 {
+                    connection_id: 0,
+                    request_id: 0,
+                    request: InternalHttpRequest {
+                        method: Method::GET,
+                        uri: Uri::from_static("/test/"),
+                        headers: headers.clone(),
+                        version: Version::HTTP_10,
+                        body: InternalHttpBodyNew {
+                            frames: vec![InternalHttpBodyFrame::Data("he".into())],
+                            is_last: false,
+                        },
+                    },
+                    metadata: HttpRequestMetadata::V1 {
+                        source: "1.2.3.4:58239".parse().unwrap(),
+                        destination: "1.1.1.1:80".parse().unwrap(),
+                    },
+                    transport: IncomingTrafficTransportType::Tcp,
+                }),
+            )))
+            .await
+            .unwrap();
+
+        let (mut conn, _) = server.accept().await.unwrap();
+
+        if drop_during_response {
+            to_proxy
+                .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                    ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: vec![InternalHttpBodyFrame::Data("llo".into())],
+                        is_last: true,
+                        connection_id: 0,
+                        request_id: 0,
+                    }),
+                )))
+                .await
+                .unwrap();
+
+            const EXPECTED: &[u8] = b"GET /test/ HTTP/1.0\r\ncontent-length: 5\r\n\r\nhello";
+            let mut buf = [0u8; EXPECTED.len()];
+            conn.read_exact(&mut buf).await.unwrap();
+            assert_eq!(buf, EXPECTED);
+
+            conn.write_all(b"HTTP/1.0 200 OK\r\ncontent-length: 5\r\n\r\nwo")
+                .await
+                .unwrap();
+
+            assert_eq!(
+                next_proxy_msg(&to_proxy, &from_proxy).await,
+                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                    mirrord_protocol::tcp::ChunkedResponse::Start(HttpResponse {
+                        port: 80,
+                        connection_id: 0,
+                        request_id: 0,
+                        internal_response: InternalHttpResponse {
+                            status: StatusCode::OK,
+                            version: Version::HTTP_10,
+                            headers: headers.clone(),
+                            body: vec![InternalHttpBodyFrame::Data("wo".into())]
+                        }
+                    })
+                ))
+            );
+        }
+
+        drop(to_proxy);
+
+        // Assert intproxy closed the connection
+        assert!(conn.read(&mut [0]).await.is_ok_and(|s| s == 0));
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
+        );
+
+        to_proxy
+            .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Incoming(
+                    mirrord_intproxy_protocol::IncomingResponse::PortSubscribe(Ok(()))
+                )
+            }))
         ));
     }
 }
