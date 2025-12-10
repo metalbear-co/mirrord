@@ -575,7 +575,8 @@ jobs:
       # INSTALL .NET RUNTIME FOR WINGETCREATE
       ###########################################################################
       - name: Install .NET runtime for wingetcreate
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        # Skip on forks without WINGET_TOKEN so they don't fail
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' && secrets.WINGET_TOKEN != '' }}
         uses: actions/setup-dotnet@v4
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}\dotnet
@@ -587,7 +588,8 @@ jobs:
       ###########################################################################
 
       - name: Update WinGet manifest (wingetcreate)
-        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' }}
+        # Skip on forks without WINGET_TOKEN so they don't fail
+        if: ${{ github.event_name != 'pull_request' && env.PUBLISH_WINGET == 'true' && secrets.WINGET_TOKEN != '' }}
         run: |
           $ErrorActionPreference = "Stop"
           $packageId = $env:WINGET_PACKAGE_ID
@@ -631,6 +633,9 @@ jobs:
               throw "wingetcreate update failed with exit code $exitCode"
             }
           }
+      - name: Skip WinGet publish (missing token)
+        if: ${{ env.PUBLISH_WINGET == 'true' && (github.event_name == 'pull_request' || secrets.WINGET_TOKEN == '') }}
+        run: echo "Skipping WinGet publish because WINGET_TOKEN is not available (expected on forks or PRs)."
       ###########################################################################
       # CHOCOLATEY PACKAGE BUILD & PUBLISH
       ###########################################################################
@@ -733,7 +738,8 @@ jobs:
           "CHOCO_NUPKG_PATH=$($nupkg.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
           Write-Host "Built Chocolatey package: $($nupkg.FullName)"
       - name: Push Chocolatey package
-        if: ${{ env.PUBLISH_CHOCO == 'true' }}
+        # Skip on forks without CHOCO_API_KEY so they don't fail
+        if: ${{ env.PUBLISH_CHOCO == 'true' && secrets.CHOCO_API_KEY != '' }}
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
@@ -746,6 +752,9 @@ jobs:
           }
           Write-Host "Pushing Chocolatey package $env:CHOCO_NUPKG_PATH to Chocolatey.org..."
           choco push $env:CHOCO_NUPKG_PATH --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/"
+      - name: Skip Chocolatey publish (missing key)
+        if: ${{ env.PUBLISH_CHOCO == 'true' && secrets.CHOCO_API_KEY == '' }}
+        run: echo "Skipping Chocolatey publish because CHOCO_API_KEY is not available (expected on forks)."
       ###########################################################################
       # SUMMARY
       ###########################################################################
