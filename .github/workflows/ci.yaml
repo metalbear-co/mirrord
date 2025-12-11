@@ -278,7 +278,7 @@ jobs:
           build-args: |
             GCS_BUCKET=${{ secrets.SCCACHE_GCS_BUCKET }}
             GCS_RW_MODE=READ_WRITE
-            GCS_PATH_PREFIX=mirrord/${{ steps.sanitize.outputs.cache_tag }}
+            GCS_PATH_PREFIX=mirrord-agent/${{ steps.sanitize.outputs.cache_tag }}
       - name: upload image
         uses: actions/upload-artifact@v4
         with:

@@ -47,7 +47,7 @@ FROM chef AS builder
 # GCS sccache configuration - prefix format: mirrord/{branch}
 ARG GCS_BUCKET=""
 ARG GCS_RW_MODE="READ_WRITE"
-ARG GCS_PATH_PREFIX="mirrord/"
+ARG GCS_PATH_PREFIX="mirrord-agent/"
 
 COPY --from=planner /app/recipe.json recipe.json
 
