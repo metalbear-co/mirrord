@@ -410,8 +410,13 @@ jobs:
             Remove-Item $Msi -Force
           }
 
-          & $candle -nologo -v "$Root\main.wxs" -out $Obj
-          & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
+          Push-Location $Root
+          try {
+            & $candle -nologo -v ".\main.wxs" -out $Obj
+            & $light  -nologo -v $Obj -out $Msi -ext WixUIExtension -sval
+          } finally {
+            Pop-Location
+          }
 
           if (-not (Test-Path $Msi)) {
             throw "MSI not produced"
