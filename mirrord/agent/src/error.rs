@@ -19,7 +19,7 @@ pub(crate) enum AgentError {
     #[error("Path failed with `{0}`")]
     StripPrefixError(#[from] std::path::StripPrefixError),
 
-    #[error(r#"Failed 2 to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
+    #[error(r#"Failed to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
     Original error `{0}`"#)]
     PacketIgnoreOutgoing(#[source] std::io::Error),
 

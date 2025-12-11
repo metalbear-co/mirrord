@@ -53,17 +53,23 @@ COPY --from=planner /app/recipe.json recipe.json
 
 # Build dependencies with sccache
 RUN --mount=type=secret,id=gcp_credentials \
-    if [ -n "$GCS_BUCKET" ]; then \
+    if [ -n "$GCS_BUCKET" ] && [ -f /run/secrets/gcp_credentials ]; then \
     export SCCACHE_GCS_BUCKET="$GCS_BUCKET"; \
     export SCCACHE_GCS_RW_MODE="$GCS_RW_MODE"; \
     export SCCACHE_GCS_KEY_PREFIX="$GCS_PATH_PREFIX"; \
     export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
-    echo "sccache using GCS: $GCS_BUCKET (prefix: $GCS_PATH_PREFIX)"; \
+    echo "sccache GCS config"; \
+    echo "BUCKET: $SCCACHE_GCS_BUCKET"; \
+    echo "PREFIX: $SCCACHE_GCS_KEY_PREFIX"; \
+    echo "RW_MODE: $SCCACHE_GCS_RW_MODE"; \
+    echo "CREDENTIALS: $(cat /run/secrets/gcp_credentials | head -c 100)..."; \
     else \
-    echo "sccache using local disk cache"; \
+    echo "sccache using local disk cache (GCS_BUCKET=$GCS_BUCKET, secret exists: $(test -f /run/secrets/gcp_credentials && echo yes || echo no))"; \
     fi && \
-    sccache --start-server || true && \
+    sccache --stop-server 2>/dev/null || true && \
+    sccache --start-server && \
     cargo +nightly-2025-08-01 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json && \
+    echo "sccache stats" && \
     sccache --show-stats
 
 # Copy order is important here, since we want the cache to be invalidated as less as possible
@@ -81,17 +87,21 @@ RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.to
 
 # Build final binary with sccache
 RUN --mount=type=secret,id=gcp_credentials \
-    if [ -n "$GCS_BUCKET" ]; then \
+    if [ -n "$GCS_BUCKET" ] && [ -f /run/secrets/gcp_credentials ]; then \
     export SCCACHE_GCS_BUCKET="$GCS_BUCKET"; \
     export SCCACHE_GCS_RW_MODE="$GCS_RW_MODE"; \
     export SCCACHE_GCS_KEY_PREFIX="$GCS_PATH_PREFIX"; \
     export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
-    echo "sccache using GCS: $GCS_BUCKET (prefix: $GCS_PATH_PREFIX)"; \
+    echo "sccache GCS config"; \
+    echo "BUCKET: $SCCACHE_GCS_BUCKET"; \
+    echo "PREFIX: $SCCACHE_GCS_KEY_PREFIX"; \
     else \
     echo "sccache using local disk cache"; \
     fi && \
-    sccache --start-server || true && \
+    sccache --stop-server 2>/dev/null || true && \
+    sccache --start-server && \
     cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    echo "sccache stats" && \
     sccache --show-stats
 
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
