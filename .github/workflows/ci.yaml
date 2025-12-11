@@ -255,8 +255,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Sanitize branch name for cache prefix
+        id: sanitize
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          SANITIZED=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
+          echo "cache_tag=$SANITIZED" >> "$GITHUB_OUTPUT"
       - name: build and export
         uses: docker/build-push-action@v6
+        env:
+          GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
+          GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
         with:
           context: .
           tags: test
@@ -264,6 +273,12 @@ jobs:
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secrets: |
+            gcp_credentials=${{ secrets.GCP_SCCACHE_CREDENTIALS }}
+          build-args: |
+            GCS_BUCKET=${{ secrets.SCCACHE_GCS_BUCKET }}
+            GCS_RW_MODE=READ_WRITE
+            GCS_PATH_PREFIX=mirrord/${{ steps.sanitize.outputs.cache_tag }}
       - name: upload image
         uses: actions/upload-artifact@v4
         with:

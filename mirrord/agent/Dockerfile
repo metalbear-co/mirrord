@@ -8,6 +8,20 @@ RUN ./platform.sh
 # this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
+# Install sccache for compilation caching with GCS
+ENV SCCACHE_VERSION=0.12.0
+RUN SCCACHE_ARCH=$(case ${TARGETARCH} in \
+    amd64) echo "x86_64" ;; \
+    arm64) echo "aarch64" ;; \
+    *) echo "x86_64" ;; \
+    esac) && \
+    curl -fsSL https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${SCCACHE_ARCH}-unknown-linux-musl.tar.gz \
+    | tar -xzv --strip-components=1 -C /usr/local/bin sccache-v${SCCACHE_VERSION}-${SCCACHE_ARCH}-unknown-linux-musl/sccache && \
+    chmod +x /usr/local/bin/sccache
+
+# sccache configuration - will be used if GCS credentials are provided
+ENV RUSTC_WRAPPER=/usr/local/bin/sccache
+
 # cargo-chef 0.1.69 breaks the build
 RUN cargo install cargo-chef@0.1.72
 
@@ -30,8 +44,27 @@ RUN cargo +nightly-2025-08-01 chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
+# GCS sccache configuration - prefix format: mirrord/{branch}
+ARG GCS_BUCKET=""
+ARG GCS_RW_MODE="READ_WRITE"
+ARG GCS_PATH_PREFIX="mirrord/"
+
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo +nightly-2025-08-01 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
+
+# Build dependencies with sccache
+RUN --mount=type=secret,id=gcp_credentials \
+    if [ -n "$GCS_BUCKET" ]; then \
+    export SCCACHE_GCS_BUCKET="$GCS_BUCKET"; \
+    export SCCACHE_GCS_RW_MODE="$GCS_RW_MODE"; \
+    export SCCACHE_GCS_KEY_PREFIX="$GCS_PATH_PREFIX"; \
+    export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
+    echo "sccache using GCS: $GCS_BUCKET (prefix: $GCS_PATH_PREFIX)"; \
+    else \
+    echo "sccache using local disk cache"; \
+    fi && \
+    sccache --start-server || true && \
+    cargo +nightly-2025-08-01 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json && \
+    sccache --show-stats
 
 # Copy order is important here, since we want the cache to be invalidated as less as possible
 # so we start with the most static files, then the most dynamic ones
@@ -46,7 +79,21 @@ COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /a
 # so we remove from the workspace
 RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
 
-RUN cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
+# Build final binary with sccache
+RUN --mount=type=secret,id=gcp_credentials \
+    if [ -n "$GCS_BUCKET" ]; then \
+    export SCCACHE_GCS_BUCKET="$GCS_BUCKET"; \
+    export SCCACHE_GCS_RW_MODE="$GCS_RW_MODE"; \
+    export SCCACHE_GCS_KEY_PREFIX="$GCS_PATH_PREFIX"; \
+    export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
+    echo "sccache using GCS: $GCS_BUCKET (prefix: $GCS_PATH_PREFIX)"; \
+    else \
+    echo "sccache using local disk cache"; \
+    fi && \
+    sccache --start-server || true && \
+    cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    sccache --show-stats
+
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
 FROM ghcr.io/metalbear-co/ci-agent-runtime:30dca9bcb32306a028178cac371b1e47e403916c
