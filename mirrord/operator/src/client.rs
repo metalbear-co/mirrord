@@ -872,7 +872,10 @@ impl OperatorApi<PreparedClientCert> {
             Err(error) => return Err(error),
         };
 
-        Ok(OperatorSessionConnection { session: Box::new(session), conn })
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
