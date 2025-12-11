@@ -7,7 +7,7 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
+    api::{container::ContainerConfig, kubernetes::KubernetesAPI},
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
@@ -16,18 +16,12 @@ use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::sync::mpsc;
+use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
-
-pub(crate) struct AgentConnection {
-    pub sender: mpsc::Sender<ClientMessage>,
-    pub receiver: mpsc::Receiver<DaemonMessage>,
-}
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
@@ -141,16 +135,13 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     analytics: &mut R,
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
-) -> CliResult<(AgentConnectInfo, AgentConnection)> {
+) -> CliResult<(AgentConnectInfo, Connection<Client>)> {
     if let Some(connection) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
         return Ok((
             AgentConnectInfo::Operator(connection.session),
-            AgentConnection {
-                sender: connection.tx,
-                receiver: connection.rx,
-            },
+            connection.conn,
         ));
     }
 
@@ -184,19 +175,17 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
-    let (sender, receiver) = wrap_raw_connection(
+    let conn = Connection::<Client>::from_stream(
         k8s_api
             .create_connection_portforward(agent_connect_info.clone())
             .await
             .map_err(|error| {
                 CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
-    );
+    )
+    .await?;
 
-    Ok((
-        AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        AgentConnection { sender, receiver },
-    ))
+    Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
 }
 
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the

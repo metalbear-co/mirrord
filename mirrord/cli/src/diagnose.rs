@@ -4,7 +4,8 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::{sync::mpsc, time::Instant};
+use mirrord_protocol_io::{Client, Connection};
+use tokio::time::Instant;
 use tracing::Level;
 
 use crate::{
@@ -13,21 +14,14 @@ use crate::{
 };
 
 /// Sends a ping the connection and expects a pong.
-async fn ping(
-    sender: &mpsc::Sender<ClientMessage>,
-    receiver: &mut mpsc::Receiver<DaemonMessage>,
-) -> CliResult<()> {
-    sender.send(ClientMessage::Ping).await.map_err(|_| {
-        CliError::PingPongFailed(
-            "failed to send ping message - agent unexpectedly closed connection".to_string(),
-        )
-    })?;
+async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
+    connection.send(ClientMessage::Ping).await;
 
     loop {
-        let result = match receiver.recv().await {
+        let result = match connection.recv().await {
             Some(DaemonMessage::Pong) => Ok(()),
             Some(DaemonMessage::OperatorPing(id)) => {
-                sender.send(ClientMessage::OperatorPong(id)).await.ok();
+                connection.send(ClientMessage::OperatorPong(id)).await;
                 Ok(())
             }
             Some(DaemonMessage::LogMessage(..)) => continue,
@@ -65,11 +59,11 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     let mut statistics: Vec<Duration> = Vec::new();
 
     // ignore first ping as it's part of the initialization.
-    ping(&connection.sender, &mut connection.receiver).await?;
+    ping(&mut connection).await?;
     // run 100 iterations
     for i in 0..100 {
         let start = Instant::now();
-        ping(&connection.sender, &mut connection.receiver).await?;
+        ping(&mut connection).await?;
         let elapsed = start.elapsed();
         progress.info(
             format!(

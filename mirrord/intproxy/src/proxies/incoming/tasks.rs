@@ -1,10 +1,7 @@
 use std::{convert::Infallible, fmt, io};
 
 use hyper::{Version, upgrade::OnUpgrade};
-use mirrord_protocol::{
-    ConnectionId, Payload, Port, RequestId,
-    tcp::{ChunkedResponse, HttpResponse, InternalHttpBody},
-};
+use mirrord_protocol::{ConnectionId, Port, RequestId};
 use thiserror::Error;
 
 use super::tls::LocalTlsSetupError;
@@ -12,12 +9,6 @@ use super::tls::LocalTlsSetupError;
 /// Messages produced by the [`BackgroundTask`](crate::background_tasks::BackgroundTask)s used in
 /// the [`IncomingProxy`](super::IncomingProxy).
 pub enum InProxyTaskMessage {
-    /// Produced by the [`TcpProxyTask`](super::tcp_proxy::TcpProxyTask) in steal mode.
-    Tcp(
-        /// Data received from the local application.
-        Vec<u8>,
-    ),
-    /// Produced by the [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask).
     Http(
         /// HTTP spefiic message.
         HttpOut,
@@ -27,10 +18,6 @@ pub enum InProxyTaskMessage {
 impl fmt::Debug for InProxyTaskMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tcp(data) => f
-                .debug_tuple("Tcp")
-                .field(&format_args!("{} bytes", data.len()))
-                .finish(),
             Self::Http(msg) => f.debug_tuple("Http").field(msg).finish(),
         }
     }
@@ -39,20 +26,7 @@ impl fmt::Debug for InProxyTaskMessage {
 /// Messages produced by the [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask).
 #[derive(Debug)]
 pub enum HttpOut {
-    /// Response from the local application's HTTP server.
-    ResponseBasic(HttpResponse<Payload>),
-    /// Response from the local application's HTTP server.
-    ResponseFramed(HttpResponse<InternalHttpBody>),
-    /// Response from the local application's HTTP server.
-    ResponseChunked(ChunkedResponse),
-    /// Upgraded HTTP connection, to be handled as a remote connection stolen without any filter.
     Upgraded(OnUpgrade),
-}
-
-impl From<Vec<u8>> for InProxyTaskMessage {
-    fn from(value: Vec<u8>) -> Self {
-        Self::Tcp(value)
-    }
 }
 
 impl From<HttpOut> for InProxyTaskMessage {

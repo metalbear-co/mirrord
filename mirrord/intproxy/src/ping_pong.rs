@@ -5,14 +5,11 @@
 //! Realized using the [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong) and
 //! [`ClientMessage::Ping`] messages.
 
-use std::{
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::{ops::ControlFlow, time::Duration};
 
 use mirrord_protocol::ClientMessage;
 use thiserror::Error;
-use tokio::time::{self, Interval, MissedTickBehavior};
+use tokio::time::{self, Instant, Interval, MissedTickBehavior};
 use tracing::Level;
 
 use crate::{
@@ -62,7 +59,7 @@ impl PingPong {
     ///
     /// * frequency - how often the task should send pings
     pub fn new(frequency: Duration, max_reconnects: usize) -> Self {
-        let mut ticker = time::interval(frequency);
+        let mut ticker = time::interval_at(Instant::now() + frequency, frequency);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         Self {
@@ -98,7 +95,7 @@ impl BackgroundTask for PingPong {
                         break Err(PingPongError::PongTimeout);
                     } else {
                         tracing::debug!("Sending ping to the agent");
-                        let _ = message_bus.send(ProxyMessage::ToAgent(ClientMessage::Ping)).await;
+                        message_bus.send_agent(ClientMessage::Ping).await;
                         self.awaiting_pongs += 1;
                     }
                 },
@@ -132,9 +129,10 @@ impl BackgroundTask for PingPong {
                                 self.awaiting_pongs = 0;
                                 self.reconnecting = true;
                             }
-                            ConnectionRefresh::End => {
+                            ConnectionRefresh::End(new_agent_tx) => {
                                 self.reconnecting = false;
                                 self.ticker.reset();
+                                message_bus.set_agent_tx(new_agent_tx);
                             }
                             ConnectionRefresh::Request => {}
                         }
