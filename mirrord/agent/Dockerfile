@@ -102,7 +102,7 @@ RUN --mount=type=secret,id=gcp_credentials \
     if sccache --start-server; then \
     echo "sccache server started"; \
     else \
-    echo "sccache failed to start, continuing without cache, check secrets maybe?"; \
+    echo "sccache failed to start, continuing without cache?"; \
     unset RUSTC_WRAPPER; \
     fi && \
     cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
