@@ -1,0 +1,1 @@
+This PR adds a run of release tests after each release

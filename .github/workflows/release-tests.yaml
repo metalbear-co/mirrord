@@ -5,9 +5,26 @@ on:
     # Every 5 minutes (for testing)
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
+  workflow_call:
+    secrets:
+      SLACK_PROD_ALERTS_WEBHOOK_URL:
+        required: false
+        description: "Slack webhook URL for production alerts"
 
 permissions:
   contents: read
+  actions: none
+  checks: none
+  deployments: none
+  id-token: none
+  issues: none
+  discussions: none
+  security-events: none
+  packages: none
+  pages: none
+  pull-requests: none
+  repository-projects: none
+  statuses: none
 
 jobs:
   # ============================================================
