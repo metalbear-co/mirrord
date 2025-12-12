@@ -109,7 +109,7 @@ pub struct EnvConfig {
     /// and `Aws_Profile` and other variations.
     pub unset: Option<VecOrSingle<String>>,
 
-    /// ### feature.env_file {#feature-env-file}
+    /// ### feature.env.env_file {#feature-env-env-file}
     ///
     /// Allows for passing environment variables from an env file.
     ///

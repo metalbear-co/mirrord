@@ -1219,7 +1219,7 @@ See the environment variables [reference](https://metalbear.com/mirrord/docs/ref
 }
 ```
 
-### feature.env_file {#feature-env-file}
+### feature.env.env_file {#feature-env-env-file}
 
 Allows for passing environment variables from an env file.
 
