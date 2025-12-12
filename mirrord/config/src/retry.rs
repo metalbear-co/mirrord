@@ -26,7 +26,7 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "StartupRetryFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct StartupRetryConfig {
-    /// ## startup_retry.min_ms {#startup_retry-min_ms}
+    /// ### startup_retry.min_ms {#startup_retry-min_ms}
     ///
     /// Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by
     /// mirrord during startup (e.g. for resolving the target or connecting to the mirrord
@@ -36,7 +36,7 @@ pub struct StartupRetryConfig {
     #[config(default = 500)]
     pub min_ms: u64,
 
-    /// ## startup_retry.max_ms {#startup_retry-max_ms}
+    /// ### startup_retry.max_ms {#startup_retry-max_ms}
     ///
     /// Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by
     /// mirrord during startup (e.g. for resolving the target or connecting to the mirrord
@@ -46,7 +46,7 @@ pub struct StartupRetryConfig {
     #[config(default = 5000)]
     pub max_ms: u64,
 
-    /// ## startup_retry.max_retries {#startup_retry-max_retries}
+    /// ### startup_retry.max_retries {#startup_retry-max_retries}
     ///
     /// Sets the max amount of retries for Kubernetes API requests made by mirrord during startup
     /// (e.g. for resolving the target or connecting to the mirrord Operator).

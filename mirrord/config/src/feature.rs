@@ -72,21 +72,21 @@ pub mod split_queues;
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
-    /// ## feature.env {#feature-env}
+    /// ### feature.env {#feature-env}
     #[config(nested, toggleable)]
     pub env: EnvConfig,
 
     // TODO(alex) [high] 2023-05-18: This links to `FsConfig`, not `FsUserConfig` as I thought
     // before.
-    /// ## feature.fs {#feature-fs}
+    /// ### feature.fs {#feature-fs}
     #[config(nested, toggleable)]
     pub fs: FsConfig,
 
-    /// ## feature.network {#feature-network}
+    /// ### feature.network {#feature-network}
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
-    /// ## feature.copy_target {#feature-copy_target}
+    /// ### feature.copy_target {#feature-copy_target}
     ///
     /// Creates a new copy of the target. mirrord will use this copy instead of the original target
     /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
@@ -96,13 +96,13 @@ pub struct FeatureConfig {
     #[config(nested)]
     pub copy_target: CopyTargetConfig,
 
-    /// ## feature.hostname {#feature-hostname}
+    /// ### feature.hostname {#feature-hostname}
     ///
     /// Should mirrord return the hostname of the target pod when calling `gethostname`
     #[config(default = true)]
     pub hostname: bool,
 
-    /// ## feature.split_queues {#feature-split_queues}
+    /// ### feature.split_queues {#feature-split_queues}
     ///
     /// Define filters to split queues by, and make your local application consume only messages
     /// that match those filters.
@@ -112,7 +112,7 @@ pub struct FeatureConfig {
     #[config(nested, default, unstable)]
     pub split_queues: SplitQueuesConfig,
 
-    /// ## feature.db_branches {#feature-db_branches}
+    /// ### feature.db_branches {#feature-db_branches}
     ///
     /// Configuration for the database branching feature.
     #[config(nested, default, unstable)]

@@ -95,34 +95,34 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
     generator = "FsUserConfig"
 )]
 pub struct FsConfig {
-    /// ### feature.fs.mode {#feature-fs-mode}
+    /// #### feature.fs.mode {#feature-fs-mode}
     #[config(nested)]
     pub mode: FsModeConfig,
 
-    /// ### feature.fs.read_write {#feature-fs-read_write}
+    /// #### feature.fs.read_write {#feature-fs-read_write}
     ///
     /// Specify file path patterns that if matched will be read and written to the remote.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.read_only {#feature-fs-read_only}
+    /// #### feature.fs.read_only {#feature-fs-read_only}
     ///
     /// Specify file path patterns that if matched will be read from the remote.
     /// if file matching the pattern is opened for writing or read/write it will be opened locally.
     pub read_only: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.local {#feature-fs-local}
+    /// #### feature.fs.local {#feature-fs-local}
     ///
     /// Specify file path patterns that if matched will be opened locally.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.not_found {#feature-fs-not_found}
+    /// #### feature.fs.not_found {#feature-fs-not_found}
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
     pub not_found: Option<VecOrSingle<String>>,
 
-    /// ### feature.fs.mapping {#feature-fs-mapping}
+    /// #### feature.fs.mapping {#feature-fs-mapping}
     ///
     /// Specify map of patterns that if matched will replace the path according to specification.
     ///
@@ -144,7 +144,7 @@ pub struct FsConfig {
     ///   `../dev`.
     pub mapping: Option<HashMap<String, String>>,
 
-    /// ### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
+    /// #### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
     ///
     /// Sets buffer size for read-only remote files in bytes. By default, the value is
     /// 128000 bytes, or 128 kB.

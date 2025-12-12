@@ -419,7 +419,7 @@ where
 /// ```
 #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct IncomingConfig {
-    /// #### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
+    /// **feature.network.incoming.port_mapping** {#feature-network-incoming-port_mapping}
     ///
     /// Mapping for local ports to remote ports.
     ///
@@ -432,10 +432,10 @@ pub struct IncomingConfig {
     )]
     pub port_mapping: BiMap<u16, u16>,
 
-    /// #### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
+    /// **feature.network.incoming.ignore_localhost** {#feature-network-incoming-ignore_localhost}
     pub ignore_localhost: bool,
 
-    /// #### feature.network.incoming.ignore_ports {#feature-network-incoming-ignore_ports}
+    /// **feature.network.incoming.ignore_ports** {#feature-network-incoming-ignore_ports}
     ///
     /// Ports to ignore when mirroring/stealing traffic, these ports will remain local.
     ///
@@ -447,13 +447,13 @@ pub struct IncomingConfig {
     /// Mutually exclusive with [`feature.network.incoming.ports`](#feature-network-ports).
     pub ignore_ports: HashSet<u16>,
 
-    /// #### feature.network.incoming.mode {#feature-network-incoming-mode}
+    /// **feature.network.incoming.mode** {#feature-network-incoming-mode}
     pub mode: IncomingMode,
 
-    /// #### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
+    /// **feature.network.incoming.http_filter** {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
 
-    /// #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
+    /// **feature.network.incoming.listen_ports** {#feature-network-incoming-listen_ports}
     ///
     /// Mapping for local ports to actually used local ports.
     /// When application listens on a port while steal/mirror is active
@@ -473,10 +473,11 @@ pub struct IncomingConfig {
     )]
     pub listen_ports: BiMap<u16, u16>,
 
-    /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
+    /// **feature.network.incoming.on_concurrent_steal**
+    /// {#feature-network-incoming-on_concurrent_steal}
     pub on_concurrent_steal: ConcurrentSteal,
 
-    /// #### feature.network.incoming.ports {#feature-network-incoming-ports}
+    /// **feature.network.incoming.ports {#feature-network-incoming-ports}
     ///
     /// List of ports to mirror/steal traffic from. Other ports will remain local.
     ///
@@ -484,12 +485,12 @@ pub struct IncomingConfig {
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
 
-    /// #### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
+    /// **feature.network.incoming.https_delivery** {#feature-network-incoming-https_delivery}
     ///
     /// DEPRECATED: use `tls_delivery` instead.
     pub https_delivery: Option<LocalTlsDelivery>,
 
-    /// #### feature.network.incoming.tls_delivery {#feature-network-incoming-tls_delivery}
+    /// **feature.network.incoming.tls_delivery** {#feature-network-incoming-tls_delivery}
     ///
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
