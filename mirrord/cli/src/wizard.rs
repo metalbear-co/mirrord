@@ -66,6 +66,7 @@ use axum::{
 };
 use flate2::read::GzDecoder;
 use futures::{StreamExt, TryStreamExt};
+use itertools::Itertools;
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
@@ -397,6 +398,17 @@ async fn into_info<T: IntoTargetInfo>(
             tracing::warn!("{error}");
             None
         })
+        .map(
+            |TargetInfo {
+                 target_path,
+                 target_namespace,
+                 detected_ports,
+             }| TargetInfo {
+                target_path,
+                target_namespace,
+                detected_ports: detected_ports.into_iter().unique().collect(),
+            },
+        )
 }
 
 /// Implementable by resources that can be targeted by mirrord and can produce a [`TargetInfo`].

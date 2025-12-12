@@ -194,12 +194,10 @@ pem = "3"
 
 # Used by `cli`, `auth`
 home = "0.5"
+fs4 = { version = "0.13", features = ["tokio"], default-features = false }
 
 # Used by `cli`, `analytics`, `protocol`
 uuid = { version = "1.18", features = ["v4", "serde"] }
-
-# Used by `cli`, `auth`
-fs4 = { version = "0.13", features = ["tokio"], default-features = false }
 
 # Used by `cli`, `sip`
 hex = "0.4"
@@ -227,6 +225,9 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Networking_WinSock",
 ] }
+
+# Used by `cli`, `kube`
+itertools = "0.14.0"
 
 # Used by `layer-win`
 winapi = { version = "0.3.9", features = [
