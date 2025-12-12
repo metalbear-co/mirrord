@@ -60,7 +60,6 @@ RUN --mount=type=secret,id=gcp_credentials \
     export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
     echo "sccache GCS config: bucket=$GCS_BUCKET prefix=$GCS_PATH_PREFIX"; \
     echo "Credentials file size: $(wc -c < /run/secrets/gcp_credentials) bytes"; \
-    echo "Credentials file type check: $(head -c 1 /run/secrets/gcp_credentials)"; \
     else \
     echo "sccache using local disk cache (GCS_BUCKET=$GCS_BUCKET, secret exists: $(test -f /run/secrets/gcp_credentials && echo yes || echo no))"; \
     fi && \
