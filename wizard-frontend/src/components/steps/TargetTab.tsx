@@ -1,23 +1,19 @@
 import { useState, useContext } from "react";
 import { Server, AlertCircle, ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Badge } from "../ui/badge";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { TabsContent } from "@/components/ui/tabs";
+} from "../ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { TabsContent } from "../ui/tabs";
 import {
   readCurrentTargetDetails,
   updateConfigPorts,
@@ -31,13 +27,13 @@ import { useQuery } from "@tanstack/react-query";
 //   target_types: string[];
 // }
 
-// interface Target {
-//   target_path: string;
-//   target_namespace: string;
-//   detected_ports: number[];
-// }
+interface Target {
+  target_path: string;
+  target_namespace: string;
+  detected_ports: number[];
+}
 
-const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
+const TargetTab = ({ setTargetPorts }: { setTargetPorts : (ports: number[]) => void }) => {
   const { config, setConfig } = useContext(ConfigDataContext)!;
   const [namespace, setNamespace] = useState<string>("default");
   const [targetType, setTargetType] = useState<string>("");
@@ -48,19 +44,19 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
     staleTime: 30 * 1000,
     queryKey: ["clusterDetails"],
     queryFn: () =>
-      fetch(window.location.href + "api/v1/cluster-details").then(
+      fetch(window.location.origin + "/api/v1/cluster-details").then(
         async (res) =>
-          res.ok ? await res.json() : { namespaces: [], target_types: [] },
+          res.ok ? await res.json() : { namespaces: [], target_types: [] }
       ),
   });
 
   if (clusterDetailsQuery.error) console.log(clusterDetailsQuery.error);
 
-  const availableNamespaces =
+  const availableNamespaces: string[] =
     clusterDetailsQuery.isLoading || clusterDetailsQuery.error
       ? []
       : clusterDetailsQuery.data.namespaces;
-  const availableTargetTypes =
+  const availableTargetTypes: string[] =
     clusterDetailsQuery.isLoading || clusterDetailsQuery.error
       ? []
       : clusterDetailsQuery.data.target_types;
@@ -69,17 +65,17 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
     queryKey: ["targetDetails", namespace, targetType],
     queryFn: () =>
       fetch(
-        window.location.href +
-          "api/v1/namespace/" +
+        window.location.origin +
+          "/api/v1/namespace/" +
           namespace +
           "/targets" +
-          (targetType ? "?target_type=" + targetType : ""),
+          (targetType ? "?target_type=" + targetType : "")
       ).then(async (res) => (res.ok ? await res.json() : [])),
   });
 
   if (targetsQuery.error) console.log(targetsQuery.error);
 
-  const availableTargets =
+  const availableTargets: Target[] =
     targetsQuery.isLoading || targetsQuery.error ? [] : targetsQuery.data;
 
   return (
@@ -163,7 +159,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
                             const updated = updateConfigTarget(
                               config,
                               target.target_path,
-                              target.target_namespace,
+                              target.target_namespace
                             );
 
                             // set target ports for port config in network tab
@@ -171,14 +167,14 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts }) => {
                             // when the target changes, reset ports config
                             const updatedPorts = updateConfigPorts(
                               target.detected_ports,
-                              updated,
+                              updated
                             );
                             setConfig(updatedPorts);
 
                             document.dispatchEvent(
                               new KeyboardEvent("keydown", {
                                 key: "Escape",
-                              }),
+                              })
                             );
                           }}
                         >

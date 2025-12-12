@@ -1,6 +1,6 @@
 import { Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { removeSingleFilter } from "../JsonUtils";
 import { useContext } from "react";
 import { ConfigDataContext } from "../UserDataContext";

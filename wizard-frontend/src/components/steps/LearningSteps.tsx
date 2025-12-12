@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { type WizardStep } from "../Wizard";
-import mirroredArchitecture from "@/assets/mirrord-architecture.svg";
+import mirrordArchitecture from "@/assets/mirrord-architecture.svg";
 
 const learningStep1NewUser: WizardStep = {
   id: "wizard-1-intro",
@@ -110,7 +110,7 @@ const learningStep2NewUser: WizardStep = {
 
           <div className="bg-background border border-border rounded-lg p-2">
             <img
-              src={mirroredArchitecture}
+              src={mirrordArchitecture}
               alt="mirrord Architecture Diagram"
               className="w-full max-w-full mx-auto rounded"
             />
@@ -369,7 +369,7 @@ const learningStep2Returning: WizardStep = {
 
           <div className="bg-background border border-border rounded-lg p-2">
             <img
-              src={mirroredArchitecture}
+              src={mirrordArchitecture}
               alt="mirrord Architecture Diagram"
               className="w-full max-w-full mx-auto rounded"
             />

@@ -1,19 +1,19 @@
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from "../../hooks/use-toast";
 import { useState, useContext } from "react";
 import { Copy, Save, ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "../ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+} from "../ui/card";
+import { Label } from "../ui/label";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Separator } from "../ui/separator";
+import { Textarea } from "../ui/textarea";
 import DownloadButton from "../DownloadButton";
 import {
   getConfigString,
@@ -26,7 +26,7 @@ import NetworkTab from "./NetworkTab";
 import TargetTab from "./TargetTab";
 
 const ConfigTabs = () => {
-  const { config } = useContext(ConfigDataContext);
+  const { config, } = useContext(ConfigDataContext)!;
   const [currentTab, setCurrentTab] = useState<string>("target");
   const [savedIncoming, setSavedIncoming] =
     useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config));

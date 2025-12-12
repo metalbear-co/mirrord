@@ -17,13 +17,13 @@ const InnerApp = () => {
   const { error, isLoading, data } = useQuery({
     queryKey: ["userIsReturning"],
     queryFn: () =>
-      fetch(window.location.href + "api/v1/is-returning").then(async (res) =>
+      fetch(window.location.origin + "/api/v1/is-returning").then(async (res) =>
         res.ok && (await res.text()) === "true" ? true : false,
       ),
   });
 
   if (error) {
-    console.log(error);
+    console.error(error.message);
   }
 
   return isLoading ? (

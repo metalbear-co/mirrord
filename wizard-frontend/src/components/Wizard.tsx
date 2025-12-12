@@ -1,6 +1,6 @@
 import React, { useState, type ReactNode, useContext } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
 import { Badge } from "./ui/badge";
 import { ConfigDataContext, DefaultConfig } from "./UserDataContext";
 import { readBoilerplateType } from "./JsonUtils";
@@ -154,6 +154,7 @@ export const Wizard: React.FC<WizardProps> = ({
   return (
     <Dialog open={isOpen} onOpenChange={closeWizard}>
       <DialogContent className="max-w-3xl max-h-[85vh] p-0 flex flex-col">
+        <DialogDescription className="sr-only">mirrord wizard dialog</DialogDescription>
         {/* Fixed Header */}
         <WizardHeader
           title={currentStepData?.title ?? ""}
@@ -166,10 +167,7 @@ export const Wizard: React.FC<WizardProps> = ({
         {/* Scrollable Content */}
         <div className="flex-1 px-4 pt-2 pb-4 overflow-y-auto">
           <div className="min-h-[200px]">
-            {React.cloneElement(currentStepData?.content as React.ReactElement, {
-              currentStep,
-              totalSteps: steps.length,
-            })}
+            {React.cloneElement(currentStepData?.content as React.ReactElement)}
           </div>
         </div>
 

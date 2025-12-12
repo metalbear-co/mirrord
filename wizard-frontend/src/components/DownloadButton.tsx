@@ -1,6 +1,6 @@
 import { Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
+import { Button } from "./ui/button";
+import { useToast } from "../hooks/use-toast";
 
 interface DownloadButtonProps {
   json: string;
