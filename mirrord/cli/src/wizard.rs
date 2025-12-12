@@ -72,6 +72,7 @@ use k8s_openapi::api::{
     core::v1::{Namespace, Pod, Service},
 };
 use kube::{Client, client::ClientBuilder};
+use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_config::target::TargetType;
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, rollout::Rollout, seeker::KubeResourceSeeker},
@@ -101,14 +102,23 @@ const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.
 
 /// The entrypoint for the `wizard` command. Unzips the frontend and serves it using axum, along
 /// with internal API endpoints.
+
 pub async fn wizard_command<P>(
-    user_data: UserData,
     args: WizardArgs,
+    watch: drain::Watch,
+    user_data: UserData,
     parent_progress: &mut P,
 ) -> CliResult<()>
 where
     P: Progress,
 {
+    let _analytics = AnalyticsReporter::new(
+        args.telemetry,
+        ExecutionKind::PortForward,
+        watch,
+        user_data.machine_id(),
+    );
+
     let mut progress = parent_progress.subtask("launching wizard");
     let is_returning_string = user_data.is_returning_wizard().to_string();
 

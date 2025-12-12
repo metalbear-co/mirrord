@@ -1193,13 +1193,25 @@ pub struct WizardArgs {
     )]
     pub accept_invalid_certificates: Option<bool>,
 
-    /// Kube context to use from Kubeconfig
+    /// Kube context to use from Kubeconfig.
     #[arg(env = "MIRRORD_KUBE_CONTEXT", long)]
     pub context: Option<String>,
 
-    /// Kubeconfig
+    /// Kubeconfig.
     #[arg(env = "MIRRORD_KUBECONFIG", long)]
     pub kubeconfig: Option<String>,
+
+    /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
+    /// contain personal identifiers or any data that should be considered sensitive. It is used to
+    /// improve the product.
+    /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
+    #[arg(
+        env = "MIRRORD_TELEMETRY",
+        long,
+        default_value = "true",
+        require_equals = true
+    )]
+    pub telemetry: bool,
 }
 
 #[cfg(test)]
