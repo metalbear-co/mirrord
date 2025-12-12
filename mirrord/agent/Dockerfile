@@ -58,19 +58,22 @@ RUN --mount=type=secret,id=gcp_credentials \
     export SCCACHE_GCS_RW_MODE="$GCS_RW_MODE"; \
     export SCCACHE_GCS_KEY_PREFIX="$GCS_PATH_PREFIX"; \
     export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
-    echo "sccache GCS config"; \
-    echo "BUCKET: $SCCACHE_GCS_BUCKET"; \
-    echo "PREFIX: $SCCACHE_GCS_KEY_PREFIX"; \
-    echo "RW_MODE: $SCCACHE_GCS_RW_MODE"; \
-    echo "CREDENTIALS: $(cat /run/secrets/gcp_credentials | head -c 100)..."; \
+    echo "sccache GCS config: bucket=$GCS_BUCKET prefix=$GCS_PATH_PREFIX"; \
+    echo "Credentials file size: $(wc -c < /run/secrets/gcp_credentials) bytes"; \
+    echo "Credentials file type check: $(head -c 1 /run/secrets/gcp_credentials)"; \
     else \
     echo "sccache using local disk cache (GCS_BUCKET=$GCS_BUCKET, secret exists: $(test -f /run/secrets/gcp_credentials && echo yes || echo no))"; \
     fi && \
     sccache --stop-server 2>/dev/null || true && \
-    sccache --start-server && \
+    if sccache --start-server; then \
+    echo "sccache server started"; \
+    else \
+    echo "sccache failed to start, continuing without cache"; \
+    unset RUSTC_WRAPPER; \
+    fi && \
     cargo +nightly-2025-08-01 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json && \
     echo "sccache stats" && \
-    sccache --show-stats
+    (sccache --show-stats || echo "sccache stats unavailable")
 
 # Copy order is important here, since we want the cache to be invalidated as less as possible
 # so we start with the most static files, then the most dynamic ones
@@ -92,17 +95,20 @@ RUN --mount=type=secret,id=gcp_credentials \
     export SCCACHE_GCS_RW_MODE="$GCS_RW_MODE"; \
     export SCCACHE_GCS_KEY_PREFIX="$GCS_PATH_PREFIX"; \
     export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
-    echo "sccache GCS config"; \
-    echo "BUCKET: $SCCACHE_GCS_BUCKET"; \
-    echo "PREFIX: $SCCACHE_GCS_KEY_PREFIX"; \
+    echo "sccache GCS config: bucket=$GCS_BUCKET prefix=$GCS_PATH_PREFIX"; \
     else \
     echo "sccache using local disk cache"; \
     fi && \
     sccache --stop-server 2>/dev/null || true && \
-    sccache --start-server && \
+    if sccache --start-server; then \
+    echo "sccache server started"; \
+    else \
+    echo "sccache failed to start, continuing without cache"; \
+    unset RUSTC_WRAPPER; \
+    fi && \
     cargo +nightly-2025-08-01 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
     echo "sccache stats" && \
-    sccache --show-stats
+    (sccache --show-stats || echo "sccache stats unavailable")
 
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
