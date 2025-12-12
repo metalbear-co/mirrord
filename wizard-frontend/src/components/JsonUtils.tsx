@@ -407,7 +407,6 @@ export const updateConfigFilter = (
   operator: FilterOperator,
   config: LayerFileConfig
 ) => {
-  console.log(filters); // FIX get correct filters, setting config fails
   if (typeof config !== "object") {
     throw "config badly formed";
   }
@@ -449,7 +448,7 @@ export const updateConfigFilter = (
   }
 
   // create new value for config.feature.network.incoming.http_filter
-  let http_filter: HTTPFilter;
+  let http_filter: HTTPFilter = null;
   if (filters.length === 0) {
     // filters config toggled on, but no filters set
     http_filter = null;
@@ -463,7 +462,6 @@ export const updateConfigFilter = (
         http_filter = { path: filter.value } as HttpFilterFileConfig;
       }
     }
-    http_filter = null;
   } else {
     // multiple filters
     switch (operator) {
