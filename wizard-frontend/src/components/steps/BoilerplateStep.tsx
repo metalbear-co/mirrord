@@ -9,8 +9,10 @@ import { useContext, useState } from "react";
 import { ConfigDataContext } from "../UserDataContext";
 import { updateConfigCopyTarget, updateConfigMode } from "../JsonUtils";
 
+type BoilerplateId = "steal" | "mirror" | "replace";
+
 export interface BoilerplateCardProps {
-  id: string;
+  id: BoilerplateId;
   title: string;
   description: string;
   features: string[];
@@ -111,7 +113,7 @@ const BoilerplateStep: () => WizardStep = () => {
 
   const { config, setConfig } = useContext(ConfigDataContext)!;
   const [selectedBoilerplate, setSelectedBoilerplate] = useState<string>("");
-  const handleBoilerplateSelect = (boilerplateId: string) => {
+  const handleBoilerplateSelect = (boilerplateId: BoilerplateId) => {
     setSelectedBoilerplate(boilerplateId);
     if (boilerplateId === "replace") {
       const newConfig = updateConfigCopyTarget(true, true, config);

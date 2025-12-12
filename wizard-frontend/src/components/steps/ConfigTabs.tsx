@@ -25,9 +25,11 @@ import type { ToggleableConfigFor_IncomingFileConfig } from "../../mirrord-schem
 import NetworkTab from "./NetworkTab";
 import TargetTab from "./TargetTab";
 
+type CurrentTabId = "target" | "network" | "export";
+
 const ConfigTabs = () => {
   const { config, } = useContext(ConfigDataContext)!;
-  const [currentTab, setCurrentTab] = useState<string>("target");
+  const [currentTab, setCurrentTab] = useState<CurrentTabId>("target");
   const [savedIncoming, setSavedIncoming] =
     useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config));
   const [portConflicts, setPortConflicts] = useState<boolean>(false);
@@ -65,7 +67,7 @@ const ConfigTabs = () => {
       <Tabs
         value={currentTab}
         onValueChange={(value) => {
-          setCurrentTab(value);
+          if (value as CurrentTabId === value) setCurrentTab(value);
         }}
         className="w-full"
       >
@@ -99,7 +101,7 @@ const ConfigTabs = () => {
         onValueChange={(value) => {
           // Only allow navigation to another tab if target selected
           if (targetNotSelected()) return;
-          setCurrentTab(value);
+          if (value as CurrentTabId === value) setCurrentTab(value);
         }}
         className="w-full"
       >
