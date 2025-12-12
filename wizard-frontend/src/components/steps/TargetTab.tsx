@@ -21,6 +21,7 @@ import {
 } from "../JsonUtils";
 import { ConfigDataContext } from "../UserDataContext";
 import { useQuery } from "@tanstack/react-query";
+import ALL_API_ROUTES from "../../lib/routes";
 
 // interface ClusterDetails {
 //   namespaces: string[];
@@ -44,7 +45,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts : (ports: number[]) => v
     staleTime: 30 * 1000,
     queryKey: ["clusterDetails"],
     queryFn: () =>
-      fetch(window.location.origin + "/api/v1/cluster-details").then(
+      fetch(window.location.origin + ALL_API_ROUTES.clusterDetails).then(
         async (res) =>
           res.ok ? await res.json() : { namespaces: [], target_types: [] }
       ),
@@ -65,11 +66,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts : (ports: number[]) => v
     queryKey: ["targetDetails", namespace, targetType],
     queryFn: () =>
       fetch(
-        window.location.origin +
-          "/api/v1/namespace/" +
-          namespace +
-          "/targets" +
-          (targetType ? "?target_type=" + targetType : "")
+        window.location.origin + ALL_API_ROUTES.targets(namespace, targetType)
       ).then(async (res) => (res.ok ? await res.json() : [])),
   });
 

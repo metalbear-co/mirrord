@@ -72,6 +72,8 @@ wizard-frontend/
 
 ### Interaction with Backend (Endpoints)
 
+These are defined in [routes.ts](./src/lib/routes.ts) and imported elsewhere in the code.
+
 - `/api/v1/is-returning`: Called when the app starts to determine layout and copy.
 - `/api/v1/cluster-details`: Called when rendering [`<ConfigTabs>`](./src/components/steps/ConfigTabs.tsx) in the 'Target' tab to show user available namespaces and target types.
 - `/api/v1/namespace/{namespace}/targets`: Called after the above to show user available targets, including the target's exposed ports (which are used in the 'Config' tab).

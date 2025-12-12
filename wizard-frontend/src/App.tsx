@@ -10,6 +10,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Homepage from "./pages/Homepage";
 import NotFound from "./pages/NotFound";
 import { UserDataContext } from "./components/UserDataContext";
+import ALL_API_ROUTES from "./lib/routes";
 
 const queryClient = new QueryClient();
 
@@ -17,7 +18,7 @@ const InnerApp = () => {
   const { error, isLoading, data } = useQuery({
     queryKey: ["userIsReturning"],
     queryFn: () =>
-      fetch(window.location.origin + "/api/v1/is-returning").then(async (res) =>
+      fetch(window.location.origin + ALL_API_ROUTES.isReturning).then(async (res) =>
         res.ok && (await res.text()) === "true" ? true : false,
       ),
   });
