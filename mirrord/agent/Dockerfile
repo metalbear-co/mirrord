@@ -96,7 +96,7 @@ RUN --mount=type=secret,id=gcp_credentials \
     export SCCACHE_GCS_KEY_PATH=/run/secrets/gcp_credentials; \
     echo "sccache GCS config: bucket=$GCS_BUCKET prefix=$GCS_PATH_PREFIX"; \
     else \
-    echo "sccache using local disk cache"; \
+    echo "sccache using local disk cache."; \
     fi && \
     sccache --stop-server 2>/dev/null || true && \
     if sccache --start-server; then \
