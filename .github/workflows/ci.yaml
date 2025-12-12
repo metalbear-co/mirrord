@@ -281,7 +281,6 @@ jobs:
       - name: build and export
         uses: docker/build-push-action@v6
         env:
-          GCS_BUCKET: ${{ secrets.SCCACHE_GCS_BUCKET }}
           GCP_CREDENTIALS: ${{ secrets.GCP_SCCACHE_CREDENTIALS }}
         with:
           context: .
@@ -290,8 +289,8 @@ jobs:
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          secrets: |
-            gcp_credentials=${{ secrets.GCP_SCCACHE_CREDENTIALS }}
+          secret-envs: |
+            gcp_credentials=GCP_CREDENTIALS
           build-args: |
             GCS_BUCKET=${{ secrets.SCCACHE_GCS_BUCKET }}
             GCS_RW_MODE=READ_WRITE
