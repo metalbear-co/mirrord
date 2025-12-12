@@ -1,10 +1,23 @@
 //! Module responsible for registering hooks targetting file operations syscalls.
+//!
+//! NOTE(gabriela): this is SUPER unsafe to instrument, as printing in the context
+//! of hooks for writing to files/handles (includes stdout/stderr in scope) naturally
+//! overlaps with the functions that would be called while tracing. As a result, there's no
+//! instrumenting over the hooks!
+//!
+//! This is also a problem on the Unix end: https://github.com/metalbear-co/mirrord/issues/425
+//!
+//! In general, you must be careful about your printing in this scope. We should rethink
+//! this approach to logging completely, if I'm honest. But how?
 
 use std::{ffi::c_void, mem::ManuallyDrop, path::PathBuf, sync::OnceLock};
 
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_layer_lib::proxy_connection::{
-    make_proxy_request_no_response, make_proxy_request_with_response,
+use mirrord_layer_lib::{
+    LayerResult,
+    file::filter::FileMode,
+    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    setup::layer_setup,
 };
 use mirrord_protocol::file::{
     CloseFileRequest, OpenFileRequest, OpenOptionsInternal, ReadFileRequest, SeekFromInternal,
@@ -15,6 +28,7 @@ use phnt::ffi::{
     FILE_READ_ONLY_DEVICE, FILE_STANDARD_INFORMATION, FSINFOCLASS, PFILE_BASIC_INFORMATION,
     PIO_APC_ROUTINE,
 };
+use str_win::path_to_unix_path;
 use winapi::{
     shared::{
         minwindef::FILETIME,
@@ -43,8 +57,7 @@ use crate::{
             HandleContext, MANAGED_HANDLES, for_each_handle_with_path, try_insert_handle,
         },
         util::{
-            WindowsTime, read_object_attributes_name, remove_root_dir_from_path, try_seek,
-            try_xstat,
+            WindowsTime, is_nt_path_disk_path, read_object_attributes_name, try_seek, try_xstat,
         },
     },
     process::memory::is_memory_valid,
@@ -58,7 +71,7 @@ type NtCreateFileType = unsafe extern "system" fn(
     PHANDLE,
     ACCESS_MASK,
     POBJECT_ATTRIBUTES,
-    *mut c_void,
+    *mut _IO_STATUS_BLOCK,
     PLARGE_INTEGER,
     ULONG,
     ULONG,
@@ -196,24 +209,51 @@ static NT_CLOSE_ORIGINAL: OnceLock<&NtCloseType> = OnceLock::new();
 /// POSIX file descriptors through the Windows POSIX compatibility layer.
 ///
 /// The mechanism is:
-/// - We try to run the `NtCreateFile` operation normally initially. Only should it fail with
-///   [`STATUS_OBJECT_PATH_NOT_FOUND`], then do we check if the path could possibly be a Linux path.
-/// - If the path is a Linux path, then we send an open request to the pod
-/// - And if it is succesful, we work to replicate the internal behavior of the `NtCreateFile`
-///   function, creating the same expectations for input,
 ///
-/// Internally, this creates a "managed handle" (see [`MANAGED_HANDLES`]), and if there was a
-/// succesful open operation, we create a [`HandleContext`] for the file descriptor, which is
-/// initially filled in with relevant data, and may surely be modified later.
+/// 1. We check if the layer is configured to have file-system hooks enbled or not.
+///     * If not, jump to ["Fallback"](#fallback).
+///     * This is the only point we have to check for this configuration. Without
+///       [`managed_handle::MirrordHandle`]s, there is no other logic.
+/// 2. We check if the path from `object_attributes` is an NT disk path.
+///     * If we fail, jump to ["Fallback"](#fallback).
+/// 3. We try to convert the path from `object_attributes` to a Unix path.
+///     * If we fail, jump to ["Fallback"](#fallback).
+/// 4. We run the Unix path through
+///    [`mirrord_layer_lib::file::mapper::FileRemapper::change_path_str`] to account for file-system
+///    configuration, This becomes the new "path".
+///     * If the result of this operation is different from the original path, this is logged.
+/// 5. We account for filter logic after we run the Unix path through
+///    [`mirrord_layer_lib::file::filter::FileFilter::check`] to account for file-system
+///    configuration.
+/// 6. We check if all input arguments are valid (verify pointer provenance, value, etc.)
+///     * If any is not valid, log and jump to ["Fallback"](#fallback).
+/// 7. We make an [`mirrord_protocol::file::OpenFileRequest`] for the Unix path to obtain a file
+///    descriptor from agent.
+///     * If this fails, log and jump to ["Fallback"](#fallback).
+/// 8. Use the file descriptor from the [`mirrord_protocol::file::OpenFileResponse`] to create a
+///    [`HandleContext`] and insert it into the managed handles map.
+///     * The [`HandleContext`] may be modified by future operations over the
+///       [`managed_handle::MirrordHandle`].
 ///
-/// All instances of a failed network operation are marked by the return value of
-/// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+/// ## Fallback
+///
+/// Discard previous progress, proceed with original execution by the operating system.
+///
+/// ## Caveats
+///
+/// - Currently, file-system write operations are not supported.
+/// - Currently, directory operations are not supported.
+///
+/// ## Notes
+///
+/// mirrord handles can easily be identified by debugging because of the following:
+/// - They are inserted starting from the numeric value `0x50000000`.
+/// - They grow in linear numeric order from the starting point.
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
     object_attributes: POBJECT_ATTRIBUTES,
-    io_status_block: *mut c_void,
+    io_status_block: *mut _IO_STATUS_BLOCK,
     allocation_size: PLARGE_INTEGER,
     file_attributes: ULONG,
     share_access: ULONG,
@@ -223,117 +263,186 @@ unsafe extern "system" fn nt_create_file_hook(
     ea_size: ULONG,
 ) -> NTSTATUS {
     unsafe {
-        let original = NT_CREATE_FILE_ORIGINAL.get().unwrap();
-        let ret = original(
-            file_handle,
-            desired_access,
-            object_attributes,
-            io_status_block,
-            allocation_size,
-            file_attributes,
-            share_access,
-            create_disposition,
-            create_options,
-            ea_buf,
-            ea_size,
-        );
+        // Closure to prevent repeating this long invocation ad-nauseam.
+        let run_original = || -> NTSTATUS {
+            let original = NT_CREATE_FILE_ORIGINAL.get().unwrap();
+            original(
+                file_handle,
+                desired_access,
+                object_attributes,
+                io_status_block,
+                allocation_size,
+                file_attributes,
+                share_access,
+                create_disposition,
+                create_options,
+                ea_buf,
+                ea_size,
+            )
+        };
+
+        let setup = layer_setup();
+        // NOTE(gabriela): this is the only place, realistically, where this logic handling
+        // is even needed in the first place, as the lack of [`MirrordHandle`]s will propagate
+        // to all functions which rely on expecting one!
+        if !setup.fs_hooks_enabled() {
+            return run_original();
+        }
 
         let name = read_object_attributes_name(object_attributes);
 
-        // This is usually the case when a Linux path is provided.
-        if ret == STATUS_OBJECT_PATH_NOT_FOUND {
-            // Try to get path.
-            let linux_path = remove_root_dir_from_path(name);
+        // WIN-56: check if path is a FS path.
+        if !is_nt_path_disk_path(&name) {
+            return run_original();
+        }
 
-            // If no path, return.
-            if linux_path.is_none() {
-                return ret;
+        // Try to create a Linux path from the provided Windows NT path.
+        let Some(parsed_unix_path) = path_to_unix_path(name.clone()) else {
+            return run_original();
+        };
+
+        // Some frameworks try to open the drive root (e.g. `C:\`) to inspect metadata, e.g. Node.
+        // We don't support mirroring root directory handles, so let Windows handle these locally.
+        if parsed_unix_path == "/" {
+            tracing::debug!(
+                "nt_create_file_hook: bypassing remote open for root directory \"{}\"",
+                name
+            );
+            return run_original();
+        }
+
+        // NOTE(gabriela): (fs config) - we must make sure to follow the same routine
+        // as Unix fs config handling does.
+
+        // NOTE(gabriela): (fs config)[1] - take original path, run through mapper
+        let mapper = setup.file_remapper();
+        let unix_path = String::from(mapper.change_path_str(parsed_unix_path.as_str()));
+
+        // NOTE(gabriela): print when a file mapping is found.
+        if parsed_unix_path != unix_path {
+            tracing::info!(
+                "nt_create_file_hook: mapping matched, \"{}\" -> \"{}\"",
+                parsed_unix_path,
+                unix_path
+            );
+        }
+
+        // NOTE(gabriela): not happy about the clone, research implications!
+        let filter = setup.file_filter();
+
+        // NOTE(gabriela): (fs config)[2] - take mapped path, apply filters
+        // NOTE(gabriela): look up if there are any filter settings for the path.
+        // see how it collides with desired_access.
+        let matched_filter = filter.check(&unix_path);
+        match matched_filter {
+            Some(FileMode::Local(_)) => {
+                tracing::trace!("nt_create_file_hook: reading \"{}\" locally!", name);
+                return run_original();
             }
-            let linux_path = linux_path.unwrap();
-            if desired_access & FILE_WRITE_DATA != 0
-                || desired_access & FILE_APPEND_DATA != 0
-                || desired_access & GENERIC_WRITE != 0
-            {
-                // TODO(gabriela): edit when supported!
+            Some(FileMode::NotFound(_)) => {
+                *file_handle = std::ptr::null_mut();
+                *io_status_block = _IO_STATUS_BLOCK::default();
                 return STATUS_OBJECT_PATH_NOT_FOUND;
             }
-
-            // Check if pointer to handle is valid.
-            if file_handle.is_null() {
-                tracing::warn!(
-                    "nt_create_file_hook: Invalid memory for file_handle variable in hook"
-                );
-                return STATUS_ACCESS_VIOLATION;
-            }
-
-            if !is_memory_valid(io_status_block) {
-                tracing::warn!(
-                    "nt_create_file_hook: Invalid memory for io_status_block variable in hook"
-                );
-                return STATUS_ACCESS_VIOLATION;
-            }
-
-            // Get open options.
-            let open_options = OpenOptionsInternal {
-                read: true,
-                ..Default::default()
-            };
-
-            // Try to open the file on the pod.
-            let Ok(req) = make_proxy_request_with_response(OpenFileRequest {
-                path: PathBuf::from(&linux_path),
-                open_options,
-            }) else {
-                tracing::error!("nt_create_file_hook: Request for open file failed!");
-                return STATUS_UNEXPECTED_NETWORK_ERROR;
-            };
-
-            let managed_handle = match req {
-                Ok(file) => {
-                    let current_time = WindowsTime::current().as_file_time();
-
-                    try_insert_handle(HandleContext {
-                        path: linux_path.clone(),
-                        fd: file.fd,
-                        desired_access,
-                        file_attributes,
-                        share_access,
-                        create_disposition,
-                        create_options,
-                        creation_time: current_time,
-                        access_time: current_time,
-                        write_time: current_time,
-                        change_time: current_time,
-                    })
+            // TODO(gabriela): edit when supported!
+            Some(FileMode::ReadOnly(_)) | Some(FileMode::ReadWrite(_)) | None => {
+                // Check if the caller is attempting to get a write capable handle.
+                if desired_access & FILE_WRITE_DATA != 0
+                    || desired_access & FILE_APPEND_DATA != 0
+                    || desired_access & GENERIC_WRITE != 0
+                {
+                    tracing::warn!(
+                        path = unix_path,
+                        "nt_create_file_hook: write mode not supported presently. falling back to original!"
+                    );
+                    return run_original();
                 }
-                Err(e) => {
-                    tracing::warn!("nt_create_file_hook: {:?} {}", e, linux_path.clone());
-                    None
-                }
-            };
-
-            if managed_handle.is_some() {
-                // Write managed handle at the provided pointer
-                *file_handle = *managed_handle.unwrap();
-                tracing::info!(
-                    "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
-                    linux_path,
-                    *file_handle as usize
-                );
-                return STATUS_SUCCESS;
-            } else {
-                // File could not be obtained for reasons, even if the
-                // network operation succeeded.
-
-                tracing::info!(
-                    "nt_create_file_hook: Failed opening remote file handle for {}",
-                    linux_path
-                );
-                return STATUS_OBJECT_PATH_NOT_FOUND;
             }
         }
 
-        ret
+        // Check if pointer to handle is valid.
+        if file_handle.is_null() {
+            tracing::warn!("nt_create_file_hook: Invalid memory for file_handle variable in hook");
+            return run_original();
+        }
+
+        if !is_memory_valid(io_status_block) {
+            tracing::warn!(
+                "nt_create_file_hook: Invalid memory for io_status_block variable in hook"
+            );
+            return run_original();
+        }
+
+        // Get open options.
+        // NOTE(gabriela): currently read-only!
+        // TODO(gabriela): update when write mode supported!
+        let open_options = OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        };
+
+        // Try to open the file on the pod.
+        let req = make_proxy_request_with_response(OpenFileRequest {
+            path: PathBuf::from(&unix_path),
+            open_options,
+        });
+
+        let managed_handle = match req {
+            Ok(Ok(file)) => {
+                let current_time = WindowsTime::current().as_file_time();
+
+                try_insert_handle(HandleContext {
+                    path: unix_path.clone(),
+                    fd: file.fd,
+                    desired_access,
+                    file_attributes,
+                    share_access,
+                    create_disposition,
+                    create_options,
+                    creation_time: current_time,
+                    access_time: current_time,
+                    write_time: current_time,
+                    change_time: current_time,
+                })
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    ?e,
+                    ?unix_path,
+                    "nt_create_file_hook: Request for open file failed!",
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    ?e,
+                    ?unix_path,
+                    "nt_create_file_hook: Request for open file failed!",
+                );
+                None
+            }
+        };
+
+        if let Some(handle) = managed_handle {
+            // Write managed handle at the provided pointer
+            *file_handle = *handle;
+            tracing::info!(
+                "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
+                unix_path,
+                *file_handle as usize
+            );
+            STATUS_SUCCESS
+        } else {
+            // File could not be obtained for reasons, even if the
+            // network operation succeeded.
+
+            tracing::info!(
+                ?unix_path,
+                "nt_create_file_hook: Failed opening remote file handle"
+            );
+
+            run_original()
+        }
     }
 }
 
@@ -356,7 +465,6 @@ unsafe extern "system" fn nt_create_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -395,7 +503,16 @@ unsafe extern "system" fn nt_read_file_hook(
                     SeekFromInternal::Start(*(*byte_offset).QuadPart() as _)
                 },
             ) else {
-                tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
+                tracing::error!(
+                    fd = handle_context.fd,
+                    path = handle_context.path,
+                    byte_offset = if byte_offset.is_null() {
+                        "null".to_string()
+                    } else {
+                        (*byte_offset).QuadPart().to_string()
+                    },
+                    "nt_read_file_hook: Failed seeking when reading file!"
+                );
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             };
 
@@ -441,7 +558,16 @@ unsafe extern "system" fn nt_read_file_hook(
                 {
                     return STATUS_SUCCESS;
                 } else {
-                    tracing::error!("nt_read_file_hook: Failed seeking when reading file!");
+                    tracing::error!(
+                        fd = handle_context.fd,
+                        path = handle_context.path,
+                        byte_offset = if byte_offset.is_null() {
+                            "null".to_string()
+                        } else {
+                            (*byte_offset).QuadPart().to_string()
+                        },
+                        "nt_read_file_hook: Failed seeking when reading file!"
+                    );
                     return STATUS_UNEXPECTED_NETWORK_ERROR;
                 }
             }
@@ -466,7 +592,6 @@ unsafe extern "system" fn nt_read_file_hook(
     }
 }
 
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_write_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -510,7 +635,6 @@ unsafe extern "system" fn nt_write_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -603,9 +727,9 @@ unsafe extern "system" fn nt_set_information_file_hook(
                 }
                 _ => {
                     tracing::warn!(
-                        "nt_set_information_file_hook: Trying to set for file_information_class: {:?}, but it is not implemented! (file: {})",
+                        path = handle_context.path,
+                        "nt_set_information_file_hook: Trying to set for file_information_class: {:?}, but it is not implemented!",
                         file_information_class,
-                        &handle_context.path
                     );
                 }
             }
@@ -627,7 +751,6 @@ unsafe extern "system" fn nt_set_information_file_hook(
 }
 
 /// [`nt_set_volume_information_file_hook`] is not implemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -641,9 +764,9 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_set_volume_information_file_hook: Not implemented! Failling back on original! (file: {}, FSINFOCLASS: {:?})",
-                &handle_context.path,
-                fs_info_class
+                path = handle_context.path,
+                ?fs_info_class,
+                "nt_set_volume_information_file_hook: Not implemented! Failling back on original!"
             );
         }
 
@@ -659,7 +782,6 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
 }
 
 /// [`nt_set_quota_information_file_hook`] is not implemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_set_quota_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -672,8 +794,8 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_set_quota_information_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_set_quota_information_file_hook: Not implemented! Failling back on original!"
             );
         }
 
@@ -709,7 +831,6 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -977,9 +1098,9 @@ unsafe extern "system" fn nt_query_information_file_hook(
                 }
                 _ => {
                     tracing::warn!(
-                        "nt_query_information_file_hook: Trying to query for file_information_class: {:?}, but it is not implemented! (file: {})",
-                        file_information_class,
-                        handle_context.path
+                        path = handle_context.path,
+                        "nt_query_information_file_hook: Trying to query for file_information_class: {:?}, but it is not implemented!",
+                        file_information_class
                     );
                 }
             }
@@ -1001,7 +1122,6 @@ unsafe extern "system" fn nt_query_information_file_hook(
 }
 
 /// [`nt_query_attributes_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_attributes_file_hook(
     object_attributes: POBJECT_ATTRIBUTES,
     file_basic_info: PFILE_BASIC_INFORMATION,
@@ -1009,9 +1129,9 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     unsafe {
         for_each_handle_with_path(object_attributes, |handle, handle_context| {
             tracing::warn!(
-                "nt_query_attributes_file_hook: Function not implemented! (handle: {:08x}, file: {}) ",
-                handle.0 as usize,
-                &handle_context.path
+                path = handle_context.path,
+                "nt_query_attributes_file_hook: Function not implemented! (handle: {:08x})",
+                handle.0 as usize
             );
         });
 
@@ -1027,7 +1147,6 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
 /// - [`FSINFOCLASS::FileFsDeviceInformation`]
 ///
 /// This is responsible to support functions such as `kernelbase!GetFileType`.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1078,9 +1197,9 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
                 }
                 _ => {
                     tracing::warn!(
-                        "nt_query_volume_information_file_hook: Trying to query for FSINFOCLASS: {:?}, but it is not implemented! (file: {})",
-                        fs_info_class,
-                        &handle_context.path
+                        path = handle_context.path,
+                        "nt_query_volume_information_file_hook: Trying to query for FSINFOCLASS: {:?}, but it is not implemented!",
+                        fs_info_class
                     );
                 }
             }
@@ -1102,7 +1221,6 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 }
 
 /// [`nt_query_quota_information_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_query_quota_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1120,8 +1238,8 @@ unsafe extern "system" fn nt_query_quota_information_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_query_quota_information_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_query_quota_information_file_hook: Not implemented! Failling back on original!"
             );
         }
 
@@ -1141,14 +1259,13 @@ unsafe extern "system" fn nt_query_quota_information_file_hook(
 }
 
 /// [`nt_delete_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBUTES) -> NTSTATUS {
     unsafe {
         for_each_handle_with_path(object_attributes, |handle, handle_context| {
             tracing::warn!(
-                "nt_delete_file_hook: Attempt to delete file that current handle ({:8x}) points to! Not implemented! Will fall back on original! (file: {})",
-                handle.0 as usize,
-                &handle_context.path
+                path = handle_context.path,
+                "nt_delete_file_hook: Attempt to delete file that current handle ({:8x}) points to! Not implemented! Will fall back on original!",
+                handle.0 as usize
             );
         });
 
@@ -1158,7 +1275,7 @@ unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBU
 }
 
 /// [`nt_device_io_control_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+/// NOTE(gabriela): SUPER unsafe to print in!
 unsafe extern "system" fn nt_device_io_control_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -1174,13 +1291,8 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
     unsafe {
         if let Ok(handles) = MANAGED_HANDLES.try_read()
             && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
-        {
-            tracing::warn!(
-                "nt_device_io_control_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
-            );
-        }
+            && let Ok(_handle_context) = managed_handle.clone().try_read()
+        {}
 
         let original = NT_DEVICE_IO_CONTROL_FILE_ORIGINAL.get().unwrap();
         original(
@@ -1199,7 +1311,6 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
 }
 
 /// [`nt_lock_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_lock_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -1218,8 +1329,8 @@ unsafe extern "system" fn nt_lock_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_lock_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_lock_file_hook: Not implemented! Failling back on original!",
             );
         }
 
@@ -1240,7 +1351,6 @@ unsafe extern "system" fn nt_lock_file_hook(
 }
 
 /// [`nt_unlock_file_hook`] is unimplemented!
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_unlock_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -1254,8 +1364,8 @@ unsafe extern "system" fn nt_unlock_file_hook(
             && let Ok(handle_context) = managed_handle.clone().try_read()
         {
             tracing::warn!(
-                "nt_unlock_file_hook: Not implemented! Failling back on original! (file: {})",
-                &handle_context.path
+                path = handle_context.path,
+                "nt_unlock_file_hook: Not implemented! Failling back on original!",
             );
         }
 
@@ -1275,7 +1385,6 @@ unsafe extern "system" fn nt_unlock_file_hook(
 ///
 /// All instances of a failed network operation are marked by the return value of
 /// [`STATUS_UNEXPECTED_NETWORK_ERROR`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe {
         if let Ok(mut handles) = MANAGED_HANDLES.try_write()
@@ -1308,7 +1417,7 @@ unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     }
 }
 
-pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> {
+pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     // ----------------------------------------------------------------------------
     // ~NOTE(gabriela):
     //
@@ -1335,6 +1444,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     // wraps around it, and depends on specific returns, etc.
     // ----------------------------------------------------------------------------
 
+    // Core file operation hooks
     apply_hook!(
         guard,
         "ntdll",
@@ -1347,10 +1457,10 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
     apply_hook!(
         guard,
         "ntdll",
-        "NtReadFile",
-        nt_read_file_hook,
-        NtReadFileType,
-        NT_READ_FILE_ORIGINAL
+        "NtClose",
+        nt_close_hook,
+        NtCloseType,
+        NT_CLOSE_ORIGINAL
     )?;
 
     apply_hook!(
@@ -1380,20 +1490,17 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL
     )?;
 
+    // Read hooks
     apply_hook!(
         guard,
         "ntdll",
-        "NtClose",
-        nt_close_hook,
-        NtCloseType,
-        NT_CLOSE_ORIGINAL
+        "NtReadFile",
+        nt_read_file_hook,
+        NtReadFileType,
+        NT_READ_FILE_ORIGINAL
     )?;
 
-    // ----------------------------------------------------------------------------
-    // NOTE(gabriela): the following hooks are unimplemented!
-    // They're only here to trace missing logic! Please move above once they're
-    // implemented!
-
+    // Write hooks
     apply_hook!(
         guard,
         "ntdll",
@@ -1402,6 +1509,13 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         NtWriteFileType,
         NT_WRITE_FILE_ORIGINAL
     )?;
+
+    // Metadata and directory hooks
+
+    // ----------------------------------------------------------------------------
+    // NOTE(gabriela): the following hooks are unimplemented!
+    // They're only here to trace missing logic! Please move above once they're
+    // implemented!
 
     apply_hook!(
         guard,
@@ -1475,7 +1589,6 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> anyhow::Result<()> 
         NT_UNLOCK_FILE_ORIGINAL
     )?;
 
-    // ----------------------------------------------------------------------------
-
+    tracing::info!("File hooks initialization completed");
     Ok(())
 }

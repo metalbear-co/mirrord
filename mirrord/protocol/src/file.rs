@@ -1,14 +1,12 @@
 use core::fmt;
 #[cfg(target_os = "linux")]
 use std::fs::DirEntry;
-#[cfg(unix)]
-use std::fs::Metadata;
 #[cfg(target_os = "linux")]
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-#[cfg(unix)]
-use std::os::unix::prelude::MetadataExt;
+#[cfg(not(target_os = "windows"))]
+use std::{fs::Metadata, os::unix::prelude::MetadataExt};
 use std::{io::SeekFrom, path::PathBuf, sync::LazyLock};
 
 use bincode::{Decode, Encode};
