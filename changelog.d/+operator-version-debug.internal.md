@@ -1,0 +1,1 @@
+mirrord-intproxy now logs operator version on default log level.

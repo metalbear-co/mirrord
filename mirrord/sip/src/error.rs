@@ -1,3 +1,5 @@
+use std::boxed::Box;
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SipError>;
@@ -42,15 +44,22 @@ pub enum SipError {
     BinaryMoveFailed(std::io::Error),
 
     #[error("Code sign error: `{0}`")]
-    CodeSignError(
-        /// Boxed due to large size.
-        #[from]
-        Box<apple_codesign::AppleCodesignError>,
-    ),
+    CodeSignError(#[from] Box<apple_codesign::AppleCodesignError>),
 }
 
+/// NOTE(gabriela): this was introduced in https://github.com/metalbear-co/mirrord/pull/3687
+/// as CI suddenly started failing with unrelated changes.
+///
+/// [`apple_codesign::AppleCodesignError`] is 208 bytes, which is larger than most of the other
+/// [`SipError`] variants, causing https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err
+/// to be triggered.
+///
+/// The [`SipError::CodeSignError`] enum variant has been changed to box the large type, as a result
+/// requiring less space to be allocated, and fixing the clippy lint.
+///
+/// To maintain ergonomics, we implement `From` for the problematic type, and automatically box it.
 impl From<apple_codesign::AppleCodesignError> for SipError {
     fn from(value: apple_codesign::AppleCodesignError) -> Self {
-        Self::CodeSignError(value.into())
+        Self::CodeSignError(Box::new(value))
     }
 }
