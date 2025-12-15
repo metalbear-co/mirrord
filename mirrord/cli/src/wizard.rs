@@ -15,19 +15,12 @@
 //!
 //! ### Working on the Backend
 //!
-//! Note: To compile the backend, you need to enable the `wizard` feature, for which you need the
-//! compressed frontend file. This file is in the `.gitignore` and should NOT be committed.
+//! Note: To compile the backend, you need to enable the `wizard` feature.
 //!
-//! *Example full build and run script*:
-//! ```bash
-//! ## Build the frontend.
-//! cd wizard-frontend/ || exit
-//! npm run build
-//! cd ..
+//! The build script `build.rs` installs node modules, builds the frontend, and compresses it so it
+//! can be accessed by [`COMPRESSED_FRONTEND`].
 //!
-//! ## Zip frontend.
-//! tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
-//! ```
+//! Node modules are installed into the `wizard-frontend` top level dir (and are `.gitignore`d)
 
 use std::{
     io::Cursor,

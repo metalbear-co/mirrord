@@ -54,6 +54,16 @@ wizard-frontend/
    > NOTE: This will start a dev server that is not connected to a backend. The frontend will not be able to list targets or cluster details! In the future, this should support rerouting endpoint calls to a backend running on a different address.
 
 4. Open localhost in the browser: e.g. `http://localhost:8080`
+5. NOTE that you must _update `./src/mirrord-schema.d.ts` manually_ to reflect updates to the main mirrord schema. The
+   types used by the wizard to create a valid config file are not automatically updated (to prevent unexpected runtime
+   errors).
+   Update the file like so:
+
+   ```bash
+   # working directory: wizard-frontend
+   rm -f ./src/mirrord-schema.d.ts
+   npx json2ts ../mirrord-schema.json -o ./src/mirrord-schema.d.ts
+   ```
 
 ### Helpful Scripts
 

@@ -1208,8 +1208,7 @@ pub struct WizardArgs {
     #[arg(
         env = "MIRRORD_TELEMETRY",
         long,
-        default_value = "true",
-        require_equals = true
+        default_value = "true"
     )]
     pub telemetry: bool,
 }

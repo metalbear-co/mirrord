@@ -171,6 +171,9 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.windows_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -184,8 +187,6 @@ jobs:
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
       # ziglang version is pinned, because `cargo zigbuild clippy ...` fails with ziglang==0.14.0
       - run: pip3 install --break-system-packages ziglang==0.13.0.post1 cargo-zigbuild
-      - name: create dummy file to compile wizard feature
-        run: touch wizard-frontend.tar.gz
       - run: cargo fmt --all -- --check
       # x64
       - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
@@ -596,6 +597,9 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
       - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
@@ -611,17 +615,6 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p mirrord-tests --no-default-features --features cli -- --test-threads=6
-      # the wizard eagerly creates a Client from a kubeconfig, hence its inclusion here after we set up minikube
-      - run: npm install
-        working-directory: ./wizard-frontend
-      - name: "Wizard: Update config types from current schema"
-        run: |
-          rm -f ./src/mirrord-schema.d.ts
-          npx json2ts ../mirrord-schema.json -o ./src/mirrord-schema.d.ts
-        working-directory: ./wizard-frontend
-      - run: npm run build
-        working-directory: ./wizard-frontend
-      - run: tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
