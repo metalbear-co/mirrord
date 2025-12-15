@@ -882,7 +882,7 @@ have support for a shortened version, that you can see [here](#root-shortened).
 }
 ```
 
-## feature.copy_target {#feature-copy_target}
+### feature.copy_target {#feature-copy_target}
 
 Creates a new copy of the target. mirrord will use this copy instead of the original target
 (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
@@ -892,15 +892,15 @@ This feature is not compatible with rollout targets and running without a target
 
 Generated configuration for copy target feature.
 
-### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
+#### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
 
 Set a list of containers to be ignored by copy_target
 
-### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
+#### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
 
 Set a list of init containers to be ignored by copy_target
 
-### feature.copy_target.scale_down {#feature-copy_target-scale_down}
+#### feature.copy_target.scale_down {#feature-copy_target-scale_down}
 
 If this option is set, mirrord will scale down the target deployment to 0 for the time
 the copied pod is alive.
@@ -912,7 +912,7 @@ This option is compatible only with deployment targets.
     }
 ```
 
-## feature.db_branches {#feature-db_branches}
+### feature.db_branches {#feature-db_branches}
 
 Configuration for the database branching feature.
 
@@ -963,7 +963,7 @@ When configuring a branch for MySQL, set `type` to `mysql`.
 
 Despite the database type, all database branch config objects share the following fields.
 
-### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+#### feature.db_branches.base.connection {#feature-db_branches-base-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -987,24 +987,24 @@ the target pod template.
 
 Different ways to source the connection options.
 
-### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+#### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-### feature.db_branches.base.id {#feature-db_branches-base-id}
+#### feature.db_branches.base.id {#feature-db_branches-base-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-### feature.db_branches.base.name {#feature-db_branches-base-name}
+#### feature.db_branches.base.name {#feature-db_branches-base-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+#### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -1012,7 +1012,7 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-### feature.db_branches.base.version {#feature-db_branches-base-version}
+#### feature.db_branches.base.version {#feature-db_branches-base-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1076,7 +1076,7 @@ When configuring a branch for PostgreSQL, set `type` to `pg`.
 
 Despite the database type, all database branch config objects share the following fields.
 
-### feature.db_branches.base.connection {#feature-db_branches-base-connection}
+#### feature.db_branches.base.connection {#feature-db_branches-base-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -1100,24 +1100,24 @@ the target pod template.
 
 Different ways to source the connection options.
 
-### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
+#### feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-### feature.db_branches.base.id {#feature-db_branches-base-id}
+#### feature.db_branches.base.id {#feature-db_branches-base-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-### feature.db_branches.base.name {#feature-db_branches-base-name}
+#### feature.db_branches.base.name {#feature-db_branches-base-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
+#### feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -1125,7 +1125,7 @@ Users can set `ttl_secs` to customize this value according to their need. Please
 that longer TTL paired with frequent mirrord session turnover can result in increased
 resource usage. For this reason, branch database TTL caps out at 15 min.
 
-### feature.db_branches.base.version {#feature-db_branches-base-version}
+#### feature.db_branches.base.version {#feature-db_branches-base-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
@@ -1185,7 +1185,7 @@ Example:
 With the config above, only alice and bob from the `users` table and orders
 created after the given timestamp will be copied.
 
-## feature.env {#feature-env}
+### feature.env {#feature-env}
 
 Allows the user to set or override the local process' environment variables with the ones
 from the remote pod.
@@ -1219,13 +1219,13 @@ See the environment variables [reference](https://metalbear.com/mirrord/docs/ref
 }
 ```
 
-### feature.env_file {#feature-env-file}
+#### feature.env.env_file {#feature-env-env-file}
 
 Allows for passing environment variables from an env file.
 
 These variables will override environment fetched from the remote target.
 
-### feature.env.exclude {#feature-env-exclude}
+#### feature.env.exclude {#feature-env-exclude}
 
 Include the remote environment variables in the local process that are **NOT** specified by
 this option.
@@ -1237,7 +1237,7 @@ Some of the variables that are excluded by default:
 
 Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
 
-### feature.env.include {#feature-env-include}
+#### feature.env.include {#feature-env-include}
 
 Include only these remote environment variables in the local process.
 Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
@@ -1248,7 +1248,7 @@ Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR
 Some environment variables are excluded by default (`PATH` for example), including these
 requires specifying them with `include`
 
-### feature.env.load_from_process {#feature-env-load_from_process}
+#### feature.env.load_from_process {#feature-env-load_from_process}
 
 Allows for changing the way mirrord loads remote environment variables.
 If set, the variables are fetched after the user application is started.
@@ -1256,7 +1256,7 @@ If set, the variables are fetched after the user application is started.
 This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
 and the remote environment contains a lot of variables.
 
-### feature.env.mapping {#feature-env-mapping}
+#### feature.env.mapping {#feature-env-mapping}
 
 Specify map of patterns that if matched will replace the value according to specification.
 
@@ -1279,7 +1279,7 @@ Will do the next replacements for environment variables that match:
 
 * `DATA_1234: common-value` => `DATA_1234: magic-value`
 
-### feature.env.override {#feature-env-override}
+#### feature.env.override {#feature-env-override}
 
 Allows setting or overriding environment variables (locally) with a custom value.
 
@@ -1288,7 +1288,7 @@ undesirable value, it's possible to use `override` to set `REGION=2` (locally) i
 
 Environment specified here will also override variables passed via the env file.
 
-### feature.env.unset {#feature-env-unset}
+#### feature.env.unset {#feature-env-unset}
 
 Allows unsetting environment variables in the executed process.
 
@@ -1299,7 +1299,7 @@ In some cases, such as Go the env might not be able to be modified from the proc
 This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE`
 and `Aws_Profile` and other variations.
 
-## feature.fs {#feature-fs}
+### feature.fs {#feature-fs}
 
 Allows the user to specify the default behavior for file operations:
 
@@ -1367,11 +1367,11 @@ For more information, check the file operations
 }
 ```
 
-### feature.fs.local {#feature-fs-local}
+#### feature.fs.local {#feature-fs-local}
 
 Specify file path patterns that if matched will be opened locally.
 
-### feature.fs.mapping {#feature-fs-mapping}
+#### feature.fs.mapping {#feature-fs-mapping}
 
 Specify map of patterns that if matched will replace the path according to specification.
 
@@ -1392,7 +1392,7 @@ Will do the next replacements for any io operaton
 - Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.
   `../dev`.
 
-### feature.fs.mode {#feature-fs-mode}
+#### feature.fs.mode {#feature-fs-mode}
 
 Configuration for enabling read-only or read-write file operations.
 
@@ -1404,36 +1404,36 @@ Default option for general file configuration.
 
 The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 
-#### feature.fs.mode.local {#feature-fs-mode-local}
+**feature.fs.mode.local** {#feature-fs-mode-local}
 
 mirrord won't do anything fs-related, all operations will be local.
 
-#### feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}
+**feature.fs.mode.localwithoverrides** {#feature-fs-mode-localwithoverrides}
 
 mirrord will run overrides on some file operations, but most will be local.
 
-#### feature.fs.mode.read {#feature-fs-mode-read}
+**feature.fs.mode.read** {#feature-fs-mode-read}
 
 mirrord will read files from the remote, but won't write to them.
 
-#### feature.fs.mode.write {#feature-fs-mode-write}
+**feature.fs.mode.write** {#feature-fs-mode-write}
 
 mirrord will read/write from the remote.
 
-### feature.fs.not_found {#feature-fs-not_found}
+#### feature.fs.not_found {#feature-fs-not_found}
 
 Specify file path patterns that if matched will be treated as non-existent.
 
-### feature.fs.read_only {#feature-fs-read_only}
+#### feature.fs.read_only {#feature-fs-read_only}
 
 Specify file path patterns that if matched will be read from the remote.
 if file matching the pattern is opened for writing or read/write it will be opened locally.
 
-### feature.fs.read_write {#feature-fs-read_write}
+#### feature.fs.read_write {#feature-fs-read_write}
 
 Specify file path patterns that if matched will be read and written to the remote.
 
-### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
+#### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
 
 Sets buffer size for read-only remote files in bytes. By default, the value is
 128000 bytes, or 128 kB.
@@ -1442,11 +1442,11 @@ Setting the value to 0 disables file buffering.
 Otherwise, read-only remote files will be read in chunks and buffered locally.
 This improves performance when the user application reads data in small portions.
 
-## feature.hostname {#feature-hostname}
+### feature.hostname {#feature-hostname}
 
 Should mirrord return the hostname of the target pod when calling `gethostname`
 
-## feature.network {#feature-network}
+### feature.network {#feature-network}
 
 Controls mirrord network operations.
 
@@ -1486,7 +1486,7 @@ for more details.
 }
 ```
 
-### feature.network.dns {#feature-network-dns}
+#### feature.network.dns {#feature-network-dns}
 
 Resolve DNS via the remote pod.
 
@@ -1501,7 +1501,7 @@ Mind that:
 - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
   functions.
 
-#### feature.network.dns.filter {#feature-network-dns-filter}
+**feature.network.dns.filter** {#feature-network-dns-filter}
 
 Unstable: the precise syntax of this config is subject to change.
 
@@ -1564,7 +1564,7 @@ app , everything else will go through the remote pod.
 When filters are specified under `remote`, matching DNS queries will go through the remote
 pod, everything else will go through local.
 
-### feature.network.incoming {#feature-network-incoming}
+#### feature.network.incoming {#feature-network-incoming}
 
 Controls the incoming TCP traffic feature.
 
@@ -1635,7 +1635,7 @@ Steal only traffic that matches the
 }
 ```
 
-#### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
+**feature.network.incoming.http_filter** {#feature-network-incoming-http-filter}
 
 Filter configuration for the HTTP traffic stealer feature.
 
@@ -1792,7 +1792,7 @@ health probe ports don't match, then setting this option will override this beha
 
 Set to [80, 8080] by default.
 
-#### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
+**feature.network.incoming.https_delivery** {#feature-network-incoming-https_delivery}
 
 DEPRECATED: use `tls_delivery` instead.
 
@@ -1882,9 +1882,9 @@ Directories are not traversed recursively.
 Each certificate found in the files is treated as an allowed root.
 The files can contain entries of other types, e.g private keys, which are ignored.
 
-#### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
+**feature.network.incoming.ignore_localhost** {#feature-network-incoming-ignore_localhost}
 
-#### feature.network.incoming.ignore_ports {#feature-network-incoming-ignore_ports}
+**feature.network.incoming.ignore_ports** {#feature-network-incoming-ignore_ports}
 
 Ports to ignore when mirroring/stealing traffic, these ports will remain local.
 
@@ -1895,7 +1895,7 @@ a health probe, or other heartbeat-like traffic).
 
 Mutually exclusive with [`feature.network.incoming.ports`](#feature-network-ports).
 
-#### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
+**feature.network.incoming.listen_ports** {#feature-network-incoming-listen_ports}
 
 Mapping for local ports to actually used local ports.
 When application listens on a port while steal/mirror is active
@@ -1910,7 +1910,7 @@ you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
 then access it on `4480` while getting traffic from remote `80`.
 The value of `port_mapping` doesn't affect this.
 
-#### feature.network.incoming.mode {#feature-network-incoming-mode}
+**feature.network.incoming.mode** {#feature-network-incoming-mode}
 
 Allows selecting between mirrorring or stealing traffic.
 
@@ -1928,7 +1928,8 @@ Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
    on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the
    traffic on the port if it is HTTP;
 
-#### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
+**feature.network.incoming.on_concurrent_steal**
+{#feature-network-incoming-on_concurrent_steal}
 
 (Operator Only): Allows overriding port locks
 
@@ -1938,7 +1939,7 @@ Can be set to either `"continue"` or `"override"`.
 - `"override"`: If port lock detected then override it with new lock and force close the
   original locking connection.
 
-#### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
+**feature.network.incoming.port_mapping** {#feature-network-incoming-port_mapping}
 
 Mapping for local ports to remote ports.
 
@@ -1946,14 +1947,14 @@ This is useful when you want to mirror/steal a port to a different port on the r
 machine. For example, your local process listens on port `9333` and the container listens
 on port `80`. You'd use `[[9333, 80]]`
 
-#### feature.network.incoming.ports {#feature-network-incoming-ports}
+**feature.network.incoming.ports {#feature-network-incoming-ports}
 
 List of ports to mirror/steal traffic from. Other ports will remain local.
 
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
 
-#### feature.network.incoming.tls_delivery {#feature-network-incoming-tls_delivery}
+**feature.network.incoming.tls_delivery** {#feature-network-incoming-tls_delivery}
 
 (Operator Only): configures how mirrord delivers stolen TLS traffic
 to the local application.
@@ -2044,12 +2045,12 @@ Directories are not traversed recursively.
 Each certificate found in the files is treated as an allowed root.
 The files can contain entries of other types, e.g private keys, which are ignored.
 
-### feature.network.ipv6 {#feature-network-ipv6}
+#### feature.network.ipv6 {#feature-network-ipv6}
 
 Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,
 or connects to other services over IPv6.
 
-### feature.network.outgoing {#feature-network-outgoing}
+#### feature.network.outgoing {#feature-network-outgoing}
 
 Tunnel outgoing network operations through mirrord.
 
@@ -2089,7 +2090,7 @@ this feature are **mutually** exclusive.
 }
 ```
 
-#### feature.network.outgoing.filter {#feature.network.outgoing.filter}
+**feature.network.outgoing.filter** {#feature.network.outgoing.filter}
 
 Filters that are used to send specific traffic from either the remote pod or the local app
 
@@ -2142,19 +2143,19 @@ everything else will go through the remote pod.
 When filters are specified under `remote`, matching traffic will go through the remote pod,
 everything else will go through local.
 
-#### feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}
+**feature.network.outgoing.ignore_localhost** {#feature.network.outgoing.ignore_localhost}
 
 Defaults to `false`.
 
-#### feature.network.outgoing.tcp {#feature.network.outgoing.tcp}
+**feature.network.outgoing.tcp** {#feature.network.outgoing.tcp}
 
 Defaults to `true`.
 
-#### feature.network.outgoing.udp {#feature.network.outgoing.udp}
+**feature.network.outgoing.udp** {#feature.network.outgoing.udp}
 
 Defaults to `true`.
 
-#### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
+**feature.network.outgoing.unix_streams** {#feature.network.outgoing.unix_streams}
 
 Connect to these unix streams remotely (and to all other paths locally).
 
@@ -2168,7 +2169,7 @@ of regexes specified here. If there is a match, mirrord will connect your applic
 the target unix socket address on the target pod. Otherwise, it will leave the connection
 to happen locally on your machine.
 
-## feature.split_queues {#feature-split_queues}
+### feature.split_queues {#feature-split_queues}
 
 Define filters to split queues by, and make your local application consume only messages
 that match those filters.
@@ -2447,7 +2448,7 @@ some of its initial Kubernetes API requests.
 }
 ```
 
-## startup_retry.max_ms {#startup_retry-max_ms}
+### startup_retry.max_ms {#startup_retry-max_ms}
 
 Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by
 mirrord during startup (e.g. for resolving the target or connecting to the mirrord
@@ -2455,7 +2456,7 @@ Operator).
 
 Defaults to `5000` milliseconds.
 
-## startup_retry.max_retries {#startup_retry-max_retries}
+### startup_retry.max_retries {#startup_retry-max_retries}
 
 Sets the max amount of retries for Kubernetes API requests made by mirrord during startup
 (e.g. for resolving the target or connecting to the mirrord Operator).
@@ -2464,7 +2465,7 @@ If you want to **disable** request retries, set this value to `0`.
 
 Defaults to `2`.
 
-## startup_retry.min_ms {#startup_retry-min_ms}
+### startup_retry.min_ms {#startup_retry-min_ms}
 
 Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by
 mirrord during startup (e.g. for resolving the target or connecting to the mirrord

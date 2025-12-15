@@ -1093,8 +1093,7 @@
           ]
         },
         "filter": {
-          "title": "feature.network.dns.filter {#feature-network-dns-filter}",
-          "description": "Unstable: the precise syntax of this config is subject to change.",
+          "description": "**feature.network.dns.filter** {#feature-network-dns-filter}\n\nUnstable: the precise syntax of this config is subject to change.",
           "anyOf": [
             {
               "$ref": "#/definitions/DnsFilterConfig"
@@ -1143,7 +1142,7 @@
       "type": "object",
       "properties": {
         "env_file": {
-          "title": "feature.env_file {#feature-env-file}",
+          "title": "feature.env.env_file {#feature-env-env-file}",
           "description": "Allows for passing environment variables from an env file.\n\nThese variables will override environment fetched from the remote target.",
           "type": [
             "string",
@@ -1530,32 +1529,28 @@
       "description": "Configuration for enabling read-only or read-write file operations.\n\nThese options are overriden by user specified overrides and mirrord default overrides.\n\nIf you set [`\"localwithoverrides\"`](#feature-fs-mode-localwithoverrides) then some files can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\nThe accepted values are: `\"local\"`, `\"localwithoverrides`, `\"read\"`, or `\"write`.",
       "oneOf": [
         {
-          "title": "feature.fs.mode.local {#feature-fs-mode-local}",
-          "description": "mirrord won't do anything fs-related, all operations will be local.",
+          "description": "**feature.fs.mode.local** {#feature-fs-mode-local}\n\nmirrord won't do anything fs-related, all operations will be local.",
           "type": "string",
           "enum": [
             "local"
           ]
         },
         {
-          "title": "feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}",
-          "description": "mirrord will run overrides on some file operations, but most will be local.",
+          "description": "**feature.fs.mode.localwithoverrides** {#feature-fs-mode-localwithoverrides}\n\nmirrord will run overrides on some file operations, but most will be local.",
           "type": "string",
           "enum": [
             "localwithoverrides"
           ]
         },
         {
-          "title": "feature.fs.mode.read {#feature-fs-mode-read}",
-          "description": "mirrord will read files from the remote, but won't write to them.",
+          "description": "**feature.fs.mode.read** {#feature-fs-mode-read}\n\nmirrord will read files from the remote, but won't write to them.",
           "type": "string",
           "enum": [
             "read"
           ]
         },
         {
-          "title": "feature.fs.mode.write {#feature-fs-mode-write}",
-          "description": "mirrord will read/write from the remote.",
+          "description": "**feature.fs.mode.write** {#feature-fs-mode-write}\n\nmirrord will read/write from the remote.",
           "type": "string",
           "enum": [
             "write"
@@ -2180,8 +2175,7 @@
       "type": "object",
       "properties": {
         "filter": {
-          "title": "feature.network.outgoing.filter {#feature.network.outgoing.filter}",
-          "description": "Filters that are used to send specific traffic from either the remote pod or the local app",
+          "description": "**feature.network.outgoing.filter** {#feature.network.outgoing.filter}\n\nFilters that are used to send specific traffic from either the remote pod or the local app",
           "anyOf": [
             {
               "$ref": "#/definitions/OutgoingFilterConfig"
@@ -2192,32 +2186,28 @@
           ]
         },
         "ignore_localhost": {
-          "title": "feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}",
-          "description": "Defaults to `false`.",
+          "description": "**feature.network.outgoing.ignore_localhost** {#feature.network.outgoing.ignore_localhost}\n\nDefaults to `false`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "tcp": {
-          "title": "feature.network.outgoing.tcp {#feature.network.outgoing.tcp}",
-          "description": "Defaults to `true`.",
+          "description": "**feature.network.outgoing.tcp** {#feature.network.outgoing.tcp}\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "udp": {
-          "title": "feature.network.outgoing.udp {#feature.network.outgoing.udp}",
-          "description": "Defaults to `true`.",
+          "description": "**feature.network.outgoing.udp** {#feature.network.outgoing.udp}\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "unix_streams": {
-          "title": "feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}",
-          "description": "Connect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
+          "description": "**feature.network.outgoing.unix_streams** {#feature.network.outgoing.unix_streams}\n\nConnect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
