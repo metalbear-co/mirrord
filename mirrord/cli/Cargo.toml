@@ -69,8 +69,13 @@ uuid.workspace = true
 fs4.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
-is_ci = "1.2.0"
+ci_info = "0.14"
+
+[target.'cfg(unix)'.dependencies]
 rand.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }
@@ -81,12 +86,6 @@ mirrord-sip = { path = "../sip" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf = "0.10"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-str-win = { path = "../str-win" }
-windows.workspace = true
-dll-syringe.workspace = true
-libc.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }

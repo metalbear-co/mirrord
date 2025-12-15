@@ -12,7 +12,6 @@ use mirrord_config::{
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 #[cfg(target_os = "macos")]
@@ -40,9 +39,6 @@ use crate::{
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
 };
-
-#[cfg(target_os = "windows")]
-pub mod windows;
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -194,8 +190,21 @@ impl MirrordExecution {
     where
         P: Progress,
     {
-        // Extract Layer from exe
-        let lib_path = extract_library(None, progress, true)?;
+        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
+        // debugging)
+        let lib_path = match std::env::var("MIRRORD_LAYER_FILE") {
+            Ok(existing_path) => {
+                tracing::debug!(
+                    "Using existing library file from MIRRORD_LAYER_FILE: {}",
+                    existing_path
+                );
+                std::path::PathBuf::from(existing_path)
+            }
+            Err(_) => {
+                tracing::debug!("MIRRORD_LAYER_FILE not set, extracting library from binary");
+                extract_library(None, progress, true)?
+            }
+        };
 
         if !config.use_proxy {
             remove_proxy_env();
@@ -209,10 +218,7 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let agent_protocol_version = match &connect_info {
-            AgentConnectInfo::Operator(OperatorSession {
-                operator_protocol_version: Some(version),
-                ..
-            }) => Some(version.clone()),
+            AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
             AgentConnectInfo::DirectKubernetes(_) => {
                 Some(MirrordExecution::get_agent_version(&mut connection).await?)
             }

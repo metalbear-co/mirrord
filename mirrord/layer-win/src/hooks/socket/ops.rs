@@ -13,6 +13,7 @@ use mirrord_layer_lib::{
         hostname::remote_dns_resolve_via_proxy,
         is_ignored_port,
         ops::{ConnectResult, call_connect_fn, connect_outgoing},
+        sockets::find_listener_address_by_port,
     },
 };
 use mirrord_protocol::outgoing::SocketAddress;
@@ -331,6 +332,7 @@ where
 
 /// Attempt to establish a connection through the mirrord proxy using layer-lib
 /// This integrates with the shared connect_outgoing logic from layer-lib
+#[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn connect_through_proxy_with_layer_lib<F>(
     socket: SOCKET,
@@ -348,11 +350,30 @@ where
     );
     let raw_remote_addr = SockAddr::from(remote_addr);
     let optional_ip_address = raw_remote_addr.as_socket();
-    if let Some(ip_address) = optional_ip_address
-        && is_ignored_port(&ip_address)
-    {
-        return Err(ConnectError::BypassPort(ip_address.port()).into());
-    };
+
+    if let Some(ip_address) = optional_ip_address {
+        if is_ignored_port(&ip_address) {
+            return Err(ConnectError::BypassPort(ip_address.port()).into());
+        }
+
+        // Handle localhost/unspecified addresses first -
+        //  if applicable, connect locally without proxy
+        if !layer_setup().outgoing_config().ignore_localhost
+            && (ip_address.ip().is_loopback() || ip_address.ip().is_unspecified())
+        {
+            if let Some(local_address) =
+                find_listener_address_by_port(ip_address.port(), user_socket.protocol)
+            {
+                tracing::debug!(
+                    "connect_through_proxy_with_layer_lib -> connecting locally to listener at {}",
+                    local_address
+                );
+                let local_sockaddr = SockAddr::from(local_address);
+                let connect_result = connect_fn(socket, local_sockaddr);
+                return Ok(connect_result);
+            }
+        }
+    }
 
     // Determine the protocol based on the socket type
     let protocol = match user_socket.kind {
@@ -461,6 +482,7 @@ where
 ///
 /// Returns either a prepared sockaddr ready for the original connect function,
 /// or Fallback to indicate the caller should use the original function.
+#[allow(clippy::result_large_err)]
 #[mirrord_layer_macro::instrument(level = "trace", skip(connect_fn), ret)]
 pub fn attempt_proxy_connection<F>(
     socket: SOCKET,

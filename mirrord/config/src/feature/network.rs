@@ -58,19 +58,19 @@ pub mod outgoing;
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
-    /// ### feature.network.incoming {#feature-network-incoming}
+    /// #### feature.network.incoming {#feature-network-incoming}
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 
-    /// ### feature.network.outgoing {#feature-network-outgoing}
+    /// #### feature.network.outgoing {#feature-network-outgoing}
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
 
-    /// ### feature.network.dns {#feature-network-dns}
+    /// #### feature.network.dns {#feature-network-dns}
     #[config(toggleable, nested)]
     pub dns: DnsConfig,
 
-    /// ### feature.network.ipv6 {#feature-network-ipv6}
+    /// #### feature.network.ipv6 {#feature-network-ipv6}
     ///
     /// Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,
     /// or connects to other services over IPv6.

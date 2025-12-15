@@ -15,7 +15,7 @@ use std::{
 
 use libc::{
     self, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY, c_char, c_int, c_void, dirent,
-    iovec, off_t, size_t, ssize_t, stat, statfs,
+    gid_t, iovec, mode_t, off_t, size_t, ssize_t, stat, statfs, timespec, uid_t,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx};
@@ -23,7 +23,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use mirrord_protocol::file::{
-    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
+    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, Timespec,
     WriteFileResponse,
 };
 use nix::errno::Errno;
@@ -88,7 +88,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, _mode: c_int) -
 /// Hook for `libc::open`.
 ///
 /// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
-/// [`super::filter`].
+/// [`mirrord_layer_lib::file::filter`].
 #[hook_fn]
 pub(super) unsafe extern "C" fn open_detour(
     raw_path: *const c_char,
@@ -112,7 +112,7 @@ pub(super) unsafe extern "C" fn open_detour(
 /// Hook for `libc::open64`.
 ///
 /// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
-/// [`super::filter`].
+/// [`mirrord_layer_lib::file::filter`].
 #[hook_fn]
 pub(super) unsafe extern "C" fn open64_detour(
     raw_path: *const c_char,
@@ -179,6 +179,154 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
                 opendir_bypass(raw_filename)
             })
     }
+}
+
+/// Emulates sendfile using a sequence of read + write operations at the layer level.
+/// This allows copying files when the input/output fds are on different
+/// machines.
+///
+/// Returns (bytes_written, new_offset) on success.
+unsafe fn sendfile_impl(
+    in_fd: RawFd,
+    out_fd: RawFd,
+    offset: Option<off_t>,
+    count: size_t,
+) -> Option<(ssize_t, off_t)> {
+    let mut buffer = vec![0u8; count];
+
+    let bytes_read = unsafe {
+        if let Some(offset) = offset {
+            libc::pread(in_fd, buffer.as_mut_ptr() as *mut c_void, count, offset)
+        } else {
+            libc::read(in_fd, buffer.as_mut_ptr() as *mut c_void, count)
+        }
+    };
+
+    if bytes_read < 0 {
+        return None;
+    }
+
+    let written = unsafe {
+        libc::write(
+            out_fd,
+            buffer.as_ptr() as *const c_void,
+            bytes_read as usize,
+        )
+    };
+
+    if written < 0 {
+        return None;
+    }
+
+    Some((written, offset.unwrap_or(0) + bytes_read as off_t))
+}
+
+/// Hook for macos's [`libc::sendfile`].
+#[cfg(target_os = "macos")]
+#[hook_fn]
+pub(super) unsafe extern "C" fn sendfile_detour(
+    fd: c_int,
+    s: c_int,
+    offset: off_t,
+    len: *mut off_t,
+    _hdtr: *const libc::sf_hdtr,
+    _flags: c_int,
+) -> c_int {
+    unsafe {
+        let Some(count) = len.as_mut() else {
+            return -1;
+        };
+
+        sendfile_impl(fd, s, Some(offset), *count as usize)
+            .map(|(written, _)| {
+                *count = written as off_t;
+                0
+            })
+            .unwrap_or(-1)
+    }
+}
+
+/// Hook for linux's [`libc::sendfile`].
+#[cfg(target_os = "linux")]
+#[hook_fn]
+pub(super) unsafe extern "C" fn sendfile_detour(
+    out_fd: c_int,
+    in_fd: c_int,
+    offset: *mut off_t,
+    count: size_t,
+) -> ssize_t {
+    unsafe {
+        let offset_val = if offset.is_null() {
+            None
+        } else {
+            Some(*offset)
+        };
+
+        sendfile_impl(in_fd, out_fd, offset_val, count)
+            .map(|(written, new_offset)| {
+                if !offset.is_null() {
+                    *offset = new_offset;
+                }
+                written
+            })
+            .unwrap_or(-1)
+    }
+}
+
+/// Hook for [`libc::ftruncate`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn ftruncate_detour(fd: c_int, length: off_t) -> c_int {
+    ftruncate(fd, length)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FTRUNCATE(fd, length) })
+}
+
+/// Hook for [`libc::futimens`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn futimens_detour(fd: c_int, raw_times: *const timespec) -> c_int {
+    unsafe {
+        let times = if !raw_times.is_null() {
+            let [first, second] = slice::from_raw_parts(raw_times, 2) else {
+                unreachable!("We create the slice with two elements")
+            };
+
+            Some([
+                Timespec {
+                    tv_sec: first.tv_sec,
+                    tv_nsec: first.tv_nsec,
+                },
+                Timespec {
+                    tv_sec: second.tv_sec,
+                    tv_nsec: second.tv_nsec,
+                },
+            ])
+        } else {
+            None
+        };
+        futimens(fd, times)
+            .map(|()| 0)
+            .unwrap_or_bypass_with(|_| FN_FUTIMENS(fd, raw_times))
+    }
+}
+
+/// Hook for [`libc::fchown`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn fchown_detour(fd: c_int, owner: uid_t, group: gid_t) -> c_int {
+    fchown(fd, owner, group)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FCHOWN(fd, owner, group) })
+}
+
+/// Hook for [`libc::fchmod`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn fchmod_detour(fd: c_int, mode: mode_t) -> c_int {
+    // mode_t is u16 on MacOS but u32 on Linux so clippy warns that the u32 cast is useless when
+    // targetting linux but we want to keep it to explicitly handle both platforms in a
+    // single expr
+    #[allow(clippy::unnecessary_cast)]
+    fchmod(fd, mode as u32)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|_| unsafe { FN_FCHMOD(fd, mode) })
 }
 
 /// see below, to have nice code we also implement it for other archs.
@@ -1718,5 +1866,33 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
                 FN_OPENDIR
             );
         }
+
+        replace!(
+            hook_manager,
+            "sendfile",
+            sendfile_detour,
+            FnSendfile,
+            FN_SENDFILE
+        );
+
+        replace!(
+            hook_manager,
+            "ftruncate",
+            ftruncate_detour,
+            FnFtruncate,
+            FN_FTRUNCATE
+        );
+
+        replace!(
+            hook_manager,
+            "futimens",
+            futimens_detour,
+            FnFutimens,
+            FN_FUTIMENS
+        );
+
+        replace!(hook_manager, "fchown", fchown_detour, FnFchown, FN_FCHOWN);
+
+        replace!(hook_manager, "fchmod", fchmod_detour, FnFchmod, FN_FCHMOD);
     }
 }

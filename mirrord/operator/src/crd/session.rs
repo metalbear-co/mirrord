@@ -33,6 +33,16 @@ pub struct MirrordClusterSessionSpec {
     /// None for targetless sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<SessionTarget>,
+
+    /// CI info when a session is started with `mirrord ci start`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci_info: Option<SessionCiInfo>,
+
+    /// Copy target configuration for this session.
+    ///
+    /// Set when the session uses a copied pod.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_target: Option<SessionCopyTarget>,
 }
 
 /// Describes an owner of a mirrord session.
@@ -71,7 +81,15 @@ pub struct SessionJiraMetrics {
     pub branch_name: String,
 }
 
-/// Describes an owner of a mirrord session.
+/// Describes copy target configuration for a session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCopyTarget {
+    /// Whether the original target should be scaled down.
+    pub scaledown: bool,
+}
+
+/// Status of a mirrord session.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterSessionStatus {
@@ -81,6 +99,34 @@ pub struct MirrordClusterSessionStatus {
     /// If the session has been closed, describes the reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<SessionClosed>,
+    /// Copy target status for sessions using a copied pod.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_target: Option<SessionCopyTargetStatus>,
+}
+
+/// Status of the copy target for a session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCopyTargetStatus {
+    /// Name of the CopyTargetCrd, used by CLI when making connections.
+    pub name: String,
+    /// Status of the produced copied pod.
+    ///
+    /// `None` if there is no valid pod at the moment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copied_pod_status: Option<CopiedPodStatus>,
+}
+
+/// Status of a copied pod.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CopiedPodStatus {
+    /// Name of the copied pod.
+    pub name: String,
+    /// Namespace of the copied pod.
+    pub namespace: String,
+    /// Name of the target container in the copied pod.
+    pub target_container: String,
 }
 
 /// Describes the reason for with a mirrord session was closed.
@@ -92,4 +138,30 @@ pub struct SessionClosed {
     /// Optional human friendly message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Information about the CI session started from `mirrord ci start`.
+///
+/// We try to get some of these fields automatically, but for some that we cannot, the user may
+/// pass them as cli args to `mirrord ci start`, see `cli::ci::StartArgs`.
+///
+/// These values are passed to the operator, and handled by the `ci_controller`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCiInfo {
+    /// CI provider, e.g. "github", "gitlab", ...
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    /// Staging, production, test, nightly, ...
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+
+    /// Pipeline/job name, e.g. "e2e-tests".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<String>,
+
+    /// PR, manual, push, ...
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triggered_by: Option<String>,
 }

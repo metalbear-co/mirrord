@@ -125,10 +125,24 @@ impl From<ConnectResult> for i32 {
 }
 
 // Platform-specific error handling
+#[cfg(unix)]
+fn errno_location() -> *mut libc::c_int {
+    unsafe {
+        #[cfg(target_os = "macos")]
+        {
+            libc::__error()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            libc::__errno_location()
+        }
+    }
+}
+
 fn get_last_error() -> i32 {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location()
+        *errno_location()
     }
 
     #[cfg(windows)]
@@ -141,7 +155,7 @@ fn get_last_error() -> i32 {
 fn set_last_error(error: i32) {
     #[cfg(unix)]
     unsafe {
-        *libc::__errno_location() = error
+        *errno_location() = error
     };
 
     #[cfg(windows)]
@@ -182,6 +196,8 @@ where
     P: FnOnce(OutgoingConnectRequest) -> HookResult<OutgoingConnectResponse>,
     F: FnOnce(SocketDescriptor, SockAddr) -> ConnectResult,
 {
+    debug!("connect_outgoing -> preparing {protocol:?} connection to {remote_address:?}");
+
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_addr: SockAddr| -> HookResult<ConnectResult> {
         // Prepare this socket to be intercepted.
@@ -263,8 +279,7 @@ where
     ) {
         (Some(layer_address), Some(in_cluster_address)) => {
             debug!(
-                "call_connect_fn -> connecting to remote_address={:?}, in_cluster_address={:?}, layer_address={:?}",
-                remote_address, in_cluster_address, layer_address
+                "call_connect_fn -> connecting to remote_address={remote_address:?}, in_cluster_address={in_cluster_address:?}, layer_address={layer_address:?}"
             );
 
             let layer_addr = SockAddr::try_from(layer_address.clone())?;
@@ -297,8 +312,7 @@ where
             }
 
             debug!(
-                "call_connect_fn -> connecting to remote_address={:?} (no mirrord interception)",
-                remote_address
+                "call_connect_fn -> bypassing interception, connecting locally to {remote_address:?}"
             );
 
             let connect_result: ConnectResult = connect_fn(sockfd, remote_addr);

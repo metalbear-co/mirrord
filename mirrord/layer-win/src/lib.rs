@@ -4,120 +4,135 @@
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
 #![feature(slice_pattern)]
+#![feature(ptr_metadata)]
 
 #[cfg(test)]
 mod tests;
 
-mod console;
 mod hooks;
+mod logging;
 mod macros;
 pub mod process;
+mod subprocess;
+mod trace_only;
 
-use std::{net::SocketAddr, thread};
+use std::{io::Write, thread};
 
+use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
-use mirrord_config::{MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_WAIT_FOR_DEBUGGER};
-pub use mirrord_layer_lib::setup::windows::layer_setup;
+pub use mirrord_layer_lib::setup::layer_setup;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
-    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
-    setup::{CONFIG, windows::init_setup},
+    process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
+    proxy_connection::PROXY_CONNECTION,
+    setup::init_setup,
 };
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use winapi::{
     shared::minwindef::{BOOL, FALSE, HINSTANCE, LPVOID, TRUE},
-    um::{
-        processthreadsapi::GetCurrentProcessId,
-        winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
-    },
+    um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, DLL_THREAD_ATTACH, DLL_THREAD_DETACH},
 };
 
-use crate::hooks::initialize_hooks;
+use crate::{
+    hooks::initialize_hooks,
+    logging::init_tracing,
+    subprocess::{create_proxy_connection, detect_process_context, get_setup_address},
+    trace_only::{is_trace_only_mode, modify_config_for_trace_only},
+};
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
 
-fn initialize_detour_guard() -> anyhow::Result<()> {
+fn initialize_detour_guard() -> LayerResult<()> {
     unsafe {
-        DETOUR_GUARD = Some(DetourGuard::new()?);
+        DETOUR_GUARD =
+            Some(DetourGuard::new().map_err(|err| LayerError::DetourGuard(err.to_string()))?);
     }
 
     Ok(())
 }
 
-fn release_detour_guard() -> anyhow::Result<()> {
+fn release_detour_guard() -> LayerResult<()> {
     unsafe {
         // This will release the hooking engine, removing all hooks.
         if let Some(guard) = DETOUR_GUARD.as_mut() {
-            guard.try_close()?;
+            guard
+                .try_close()
+                .map_err(|err| LayerError::DetourGuard(err.to_string()))?;
         }
     }
 
     Ok(())
 }
 
-/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
-/// mirrord-console or to stderr.
-fn init_tracing() {
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-    } else {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .with_thread_ids(true)
-                    .with_writer(std::io::stderr)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .pretty(),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-    }
-}
-
 fn initialize_windows_proxy_connection() -> LayerResult<()> {
-    init_tracing();
+    // init_tracing();
 
-    // Create Windows-specific process info
-    let process_info = mirrord_intproxy_protocol::ProcessInfo {
-        pid: unsafe { GetCurrentProcessId() as i32 },
-        // We don't need parent PID for Windows layer
-        parent_pid: 0,
-        name: std::env::current_exe()
-            .ok()
-            .and_then(|path| path.file_name()?.to_str().map(String::from))
-            .unwrap_or_else(|| "unknown".to_string()),
-        cmdline: std::env::args().collect(),
-        loaded: true,
-    };
+    let process_context = detect_process_context()?;
+    let connection = create_proxy_connection(&process_context)?;
 
-    // Try to parse `SocketAddr` from [`MIRRORD_LAYER_INTPROXY_ADDR`] environment variable.
-    let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-        .map_err(LayerError::MissingEnvIntProxyAddr)?
-        .parse::<SocketAddr>()
-        .map_err(LayerError::MalformedIntProxyAddr)?;
-
-    // Set up session request.
-    let session = mirrord_intproxy_protocol::NewSessionRequest {
-        parent_layer: None,
-        process_info,
-    };
-
-    // Use a default timeout of 30 seconds
-    let timeout = std::time::Duration::from_secs(30);
-    let new_connection = ProxyConnection::new(address, session, timeout)?;
-    PROXY_CONNECTION.set(new_connection).map_err(|_| {
+    PROXY_CONNECTION.set(connection).map_err(|_| {
         LayerError::GlobalAlreadyInitialized("Proxy connection already initialized")
     })?;
 
-    // Read and initialize configuration
-    let config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
-    CONFIG
-        .set(config.clone())
-        .map_err(|_| LayerError::GlobalAlreadyInitialized("Layer config already initialized"))?;
+    setup_layer_config(&process_context)?;
+    Ok(())
+}
 
-    // Initialize layer setup with the configuration
-    init_setup(config, address)?;
+fn setup_layer_config(context: &subprocess::ProcessContext) -> LayerResult<()> {
+    // Read and initialize configuration using the standard method
+    let mut config = mirrord_config::util::read_resolved_config().map_err(LayerError::Config)?;
+
+    // Check if we're in trace only mode (no agent)
+    let trace_only = is_trace_only_mode();
+    let proxy_address = if trace_only {
+        modify_config_for_trace_only(&mut config);
+
+        // In trace-only mode, we still need to initialize setup but with a dummy proxy address
+        // since no actual proxy communication will occur
+        "127.0.0.1:0".parse().unwrap()
+    } else {
+        // Normal mode - get the real proxy address for layer setup
+        get_setup_address(context)?
+    };
+
+    let local_hostname = trace_only || !config.feature.hostname;
+
+    init_setup(config, proxy_address, local_hostname)
+}
+
+fn mirrord_start() -> LayerResult<()> {
+    // Create layer initialization event first
+    let init_event = LayerInitEvent::for_child()?;
+
+    // Check for trace-only mode and initialize accordingly
+    if is_trace_only_mode() {
+        tracing::info!("Running in trace-only mode - skipping proxy connection");
+
+        // In trace-only mode, we still need to set up configuration but skip proxy connection
+        let process_context = detect_process_context()?;
+
+        setup_layer_config(&process_context)?;
+
+        tracing::info!("Configuration setup completed in trace-only mode");
+    } else {
+        // Normal mode - initialize proxy connection
+        initialize_windows_proxy_connection()?;
+        tracing::info!("ProxyConnection initialized");
+    }
+
+    initialize_detour_guard()?;
+    tracing::info!("DetourGuard initialized");
+
+    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
+    initialize_hooks(guard)?;
+    tracing::info!("Hooks initialized");
+
+    // Signal that initialization is complete
+    init_event.signal_complete()?;
+
+    if is_trace_only_mode() {
+        tracing::info!("mirrord-layer-win fully initialized in trace-only mode");
+    } else {
+        tracing::info!("mirrord-layer-win fully initialized");
+    }
 
     Ok(())
 }
@@ -131,14 +146,20 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 ///   [`DLL_PROCESS_DETACH`] notification as long as no exception is thrown.
 /// * Anything else - Failure.
 fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
-    if std::env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER).is_ok() {
+    if should_wait_for_debugger() {
         wait_for_debug!();
     }
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
-    let _ = thread::spawn(|| {
-        mirrord_start().expect("Failed call to mirrord_start");
-        tracing::info!("mirrord-layer-win fully initialized!");
+    let _ = thread::spawn(move || {
+        init_tracing();
+
+        if let Err(e) = mirrord_start() {
+            tracing::error!("Failed call to mirrord_start: {e}");
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().flush();
+            std::process::exit(EXIT_FAILURE);
+        }
     });
 
     TRUE
@@ -180,25 +201,6 @@ fn thread_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * Anything else - Failure.
 fn thread_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     TRUE
-}
-
-fn mirrord_start() -> anyhow::Result<()> {
-    // Create Windows console, and redirects std handles.
-    if let Err(e) = console::create() {
-        tracing::warn!("WARNING: couldn't initialize console: {:?}", e);
-    }
-
-    initialize_windows_proxy_connection()?;
-    tracing::info!("ProxyConnection initialized");
-
-    initialize_detour_guard()?;
-    tracing::info!("DetourGuard initialized");
-
-    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-    initialize_hooks(guard)?;
-    tracing::info!("Hooks initialized");
-
-    Ok(())
 }
 
 entry_point!(|module, reason_for_call, reserved| {

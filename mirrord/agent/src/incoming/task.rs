@@ -255,7 +255,7 @@ where
                 };
 
                 if tx
-                    .send(InternalMessage::Request(request, conn.info.clone()))
+                    .send(InternalMessage::Request(request, conn.info.clone().into()))
                     .await
                     .is_err()
                 {
@@ -270,7 +270,7 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_extracted_request(&self, request: ExtractedRequest, info: ConnectionInfo) {
+    async fn handle_extracted_request(&self, request: ExtractedRequest, info: Arc<ConnectionInfo>) {
         let Some(port_state) = self.ports.get(&info.original_destination.port()) else {
             tracing::warn!(
                 ?request,
@@ -530,7 +530,7 @@ enum InternalMessage {
     /// HTTP detection finished on a redirected connection.
     ConnInitialized(MaybeHttp),
     /// An HTTP request was extracted from a redirected connection.
-    Request(ExtractedRequest, ConnectionInfo),
+    Request(ExtractedRequest, Arc<ConnectionInfo>),
 }
 
 /// State of a single port in the [`RedirectorTask`].

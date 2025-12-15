@@ -111,7 +111,13 @@ where
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
-        .connect_in_new_session(target, layer_config, &session_subtask, branch_name)
+        .connect_in_new_session(
+            target.clone(),
+            layer_config,
+            &session_subtask,
+            branch_name,
+            mirrord_for_ci.map(MirrordCi::info),
+        )
         .await?;
     session_subtask.success(Some("session started"));
 
@@ -237,11 +243,6 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         (false, true) => show_http_filter_warning(progress)?,
         _ => (),
     };
-
-    config.experimental.dns_permission_error_fatal = config
-        .experimental
-        .dns_permission_error_fatal
-        .or(Some(true));
 
     Ok(())
 }

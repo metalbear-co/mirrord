@@ -1,7 +1,9 @@
 use tracing::Level;
 
 use super::CiResult;
-use crate::ci::{MirrordCiStore, error::CiError};
+use crate::ci::MirrordCiStore;
+#[cfg(unix)]
+use crate::ci::error::CiError;
 
 /// Handles the `mirrord ci stop` command.
 ///
@@ -10,6 +12,7 @@ use crate::ci::{MirrordCiStore, error::CiError};
 pub(super) struct CiStopCommandHandler {
     /// The [`MirrordCiStore`] we retrieve from the user's environment (env var and temp files) so
     /// we can kill the intproxy and the user's process.
+    #[cfg_attr(windows, allow(unused))]
     pub(crate) store: MirrordCiStore,
 }
 
@@ -32,6 +35,12 @@ impl CiStopCommandHandler {
             sys::signal::{Signal, kill},
             unistd::Pid,
         };
+
+        // If `ci stop` is issued multiple time, we should exit with success status.
+        if self.store.is_empty() {
+            println!("No mirrord ci process found.");
+            return Ok(());
+        }
 
         fn try_kill(pid: u32) -> CiResult<()> {
             kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL))
@@ -61,6 +70,7 @@ impl CiStopCommandHandler {
         intproxy_killed.and(user_killed)
     }
 
+    #[cfg_attr(windows, allow(unused))]
     #[cfg(target_os = "windows")]
     pub(super) async fn handle(self) -> CiResult<()> {
         unimplemented!("Command not supported on windows.");

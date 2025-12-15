@@ -236,10 +236,6 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::large_enum_variant)]
-// TODO(alex): Get a big `Box` for the big variants.
-#![allow(clippy::result_large_err)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
@@ -265,8 +261,6 @@ use dump::dump_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-#[cfg(target_os = "windows")]
-use libc::EXIT_FAILURE;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -322,10 +316,10 @@ mod vpn;
 mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
+#[cfg(target_os = "windows")]
+use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
 use verify_config::verify_config;
 
-#[cfg(target_os = "windows")]
-use crate::execution::windows::command::WindowsCommand;
 use crate::{
     ci::MirrordCi, newsletter::suggest_newsletter_signup, user_data::UserData,
     util::get_user_git_branch,
@@ -527,67 +521,46 @@ async fn run_process_with_mirrord<P>(
     binary_args: Vec<String>,
     env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
-    mut progress: P,
+    progress: P,
     analytics: &mut AnalyticsReporter,
     _config: &LayerConfig,
 ) -> CliResult<()>
 where
     P: Progress,
 {
-    // Add .exe extension if necessary on Windows
-    // From CreateProcessW documentation:
-    // lpApplicationName - This parameter must include the file name extension; no default extension
-    // is assumed.
-    let binary_name = if binary.ends_with(".exe") {
-        binary.clone()
-    } else {
-        format!("{}.exe", binary)
-    };
+    // Let Windows handle executable resolution naturally
+    // Don't force .exe extension - Windows will try .exe, .bat, .cmd, etc. automatically
+    let binary_name = binary.clone();
 
     let binary_path = process_which(&binary_name).map_err(|e| {
         error!("process_which failed: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         e
     })?;
+    let binary_path_str = binary_path.to_string_lossy().to_string();
 
-    let layer_path = std::env::var_os("MIRRORD_LAYER_FILE")
-        .and_then(|os_str| os_str.into_string().ok())
-        .ok_or_else(|| {
-            CliError::LayerFilePathMissing(
-                binary.clone(),
-                binary_args.clone(),
-                std::env::vars().collect(),
-            )
-        })?;
+    // Create CLI executor and configure it
+    // For Windows, include the full command line with executable name
+    let command_line = binary_args.join(" ");
 
-    let mut env_vars = env_vars.clone();
-    env_vars
-        .entry("MIRRORD_LAYER_FILE".to_string())
-        .or_insert(layer_path.clone());
-
-    let cmd = WindowsCommand::new(&binary_path)
-        .args(&binary_args)
-        .envs(env_vars)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    // On Windows, we need to manually handle process replacement
-    let mut process = cmd.inject_and_spawn(layer_path).map_err(|e| {
+    // spawn the process (including mirrord layer injection and wait for initialization)
+    let exit_code = LayerManagedProcess::execute(
+        Some(binary_path_str),
+        command_line,
+        // current_directory (inherit from parent)
+        None,
+        env_vars,
+        Some(progress),
+    )
+    .and_then(|managed_process| managed_process.wait_until_exit())
+    .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
     })?;
 
-    progress.success(Some("Ready!"));
-
-    // Wait for process and handle I/O
-    let exit_code = process.join_std_pipes().await.unwrap_or_else(|e| {
-        error!("Process failed: {:?}", e);
-        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        EXIT_FAILURE
-    });
-    std::process::exit(exit_code);
+    // Exit with the same code as the child process
+    std::process::exit(exit_code as i32);
 }
 
 /// Prints config summary as multiple info messages, using the given [`Progress`].
@@ -976,6 +949,11 @@ fn main() -> miette::Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
+    // Ensure Windows consoles have VT enabled or fall back to dumb progress before we start
+    // logging.
+    #[cfg(target_os = "windows")]
+    console::ensure_vt_or_dumb_progress();
+
     let cli = Cli::parse();
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1017,7 +995,7 @@ fn main() -> miette::Result<()> {
                 list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                windows_unsupported!(args, "operator", { operator_command(*args).await? })
+                operator_command(*args).await?;
             }
             Commands::ExtensionExec(args) => windows_unsupported!(args, "ext", {
                 extension_exec(*args, watch, &user_data).await?;
@@ -1069,7 +1047,9 @@ fn main() -> miette::Result<()> {
                 windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
             }
             Commands::Newsletter => newsletter::newsletter_command().await,
-            Commands::Ci(args) => ci::ci_command(*args, watch, &mut user_data).await?,
+            Commands::Ci(args) => windows_unsupported!(args, "ci", {
+                ci::ci_command(*args, watch, &mut user_data).await?
+            }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
         };
 
@@ -1118,7 +1098,7 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={version}&platform={platform}&ci={is_ci}",
                     version = CURRENT_VERSION,
                     platform = std::env::consts::OS,
-                    is_ci = is_ci::cached(),
+                    is_ci = ci_info::is_ci(),
                 ))
                 .timeout(Duration::from_secs(1))
                 .send().await?;

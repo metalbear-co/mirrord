@@ -1,7 +1,5 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-#[cfg(target_os = "windows")]
-use ::windows::core as windows_core;
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -246,11 +244,6 @@ pub(crate) enum CliError {
     ))]
     RosettaMissing(String),
 
-    #[cfg(target_os = "windows")]
-    #[error("Failed to execute binary `{0}` with args {1:?}, env {2:?}")]
-    #[diagnostic(help("MIRRORD_LAYER_FILE env var is missing"))]
-    LayerFilePathMissing(String, Vec<String>, Vec<(String, String)>),
-
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
@@ -485,21 +478,6 @@ pub(crate) enum CliError {
     ApiKey(#[from] ApiKeyError),
 }
 
-#[cfg(target_os = "windows")]
-#[derive(Debug, Error, Diagnostic)]
-pub(crate) enum ProcessExecError {
-    #[error("Executed process pid was not found: {0}")]
-    ProcessNotFound(u32, String),
-
-    #[error("Failed to inject DLL \"{0}\" into pid {1}: {2}")]
-    InjectionFailed(String, u32, String),
-
-    #[error("Pipe Error: {0}")]
-    PipeError(#[from] windows_core::Error),
-}
-#[cfg(target_os = "windows")]
-pub(crate) type ProcessExecResult<T> = Result<T, ProcessExecError>;
-
 impl CliError {
     /// Here we give more meaning to some errors, instead of just letting them pass as
     /// whatever [`KubeApiError`] we're getting.
@@ -586,6 +564,7 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
+            OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
         }
     }
 }

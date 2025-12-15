@@ -19,6 +19,7 @@ pub enum OperatorOperation {
     SessionManagement,
     ListingTargets,
     MysqlBranching,
+    PgBranching,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -32,6 +33,7 @@ impl fmt::Display for OperatorOperation {
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
             Self::MysqlBranching => "mysql branching",
+            Self::PgBranching => "postgresql branching",
         };
 
         f.write_str(as_str)
@@ -90,6 +92,9 @@ pub enum OperatorApiError {
 
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

@@ -107,7 +107,7 @@ impl FromMirrordConfig for CopyTargetConfig {
 pub struct CopyTargetConfig {
     pub enabled: bool,
 
-    /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
+    /// #### feature.copy_target.scale_down {#feature-copy_target-scale_down}
     ///
     /// If this option is set, mirrord will scale down the target deployment to 0 for the time
     /// the copied pod is alive.
@@ -120,12 +120,12 @@ pub struct CopyTargetConfig {
     /// ```
     pub scale_down: bool,
 
-    /// ### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
+    /// #### feature.copy_target.exclude_containers {#feature-copy_target-exclude_containers}
     ///
     /// Set a list of containers to be ignored by copy_target
     pub exclude_containers: Vec<String>,
 
-    /// ### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
+    /// #### feature.copy_target.exclude_init_containers {#feature-copy_target-exclude_init_containers}
     ///
     /// Set a list of init containers to be ignored by copy_target
     pub exclude_init_containers: Vec<String>,

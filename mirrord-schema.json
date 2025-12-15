@@ -488,7 +488,7 @@
         },
         "network_interface": {
           "title": "agent.network_interface {#agent-network_interface}",
-          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.",
+          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
           "type": [
             "string",
             "null"
@@ -515,7 +515,7 @@
         },
         "passthrough_mirroring": {
           "title": "agent.passthrough_mirroring {#agent-passthrough_mirroring}",
-          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.",
+          "description": "Enables an implementation of traffic mirroring based on iptables redirects.\n\nWhen used with `agent.flush_connections`, it might fix issues with mirroring non HTTP/1 traffic.\n\nWhen this is set, `network_interface` setting is ignored.\n\nDefaults to true.\n\nDEPRECATED: The mirroring implementation based on raw sockets is deprecated, and will be removed in the future. This field will be removed, and the agent will always use iptables redirects for mirroring traffic.",
           "type": [
             "boolean",
             "null"
@@ -543,6 +543,18 @@
           "anyOf": [
             {
               "$ref": "#/definitions/io.k8s.api.core.v1.ResourceRequirements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "security_context": {
+          "title": "agent.security_context {#agent-security_context}",
+          "description": "Agent pod security context (not with ephemeral agents). Support seccomp profile and app armor profile.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityContext"
             },
             {
               "type": "null"
@@ -918,6 +930,82 @@
               ]
             }
           }
+        },
+        {
+          "description": "When configuring a branch for PostgreSQL, set `type` to `pg`.",
+          "type": "object",
+          "required": [
+            "connection",
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches.base.connection {#feature-db_branches-base-connection}",
+              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "copy": {
+              "default": {
+                "mode": "empty",
+                "tables": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/PgBranchCopyConfig"
+                }
+              ]
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches.base.creation_timeout_secs {#feature-db_branches-base-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "id": {
+              "title": "feature.db_branches.base.id {#feature-db_branches-base-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches.base.name {#feature-db_branches-base-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches.base.ttl_secs {#feature-db_branches-base-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
+              "default": 300,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "pg"
+              ]
+            },
+            "version": {
+              "title": "feature.db_branches.base.version {#feature-db_branches-base-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
         }
       ]
     },
@@ -1005,8 +1093,7 @@
           ]
         },
         "filter": {
-          "title": "feature.network.dns.filter {#feature-network-dns-filter}",
-          "description": "Unstable: the precise syntax of this config is subject to change.",
+          "description": "**feature.network.dns.filter** {#feature-network-dns-filter}\n\nUnstable: the precise syntax of this config is subject to change.",
           "anyOf": [
             {
               "$ref": "#/definitions/DnsFilterConfig"
@@ -1055,7 +1142,7 @@
       "type": "object",
       "properties": {
         "env_file": {
-          "title": "feature.env_file {#feature-env-file}",
+          "title": "feature.env.env_file {#feature-env-env-file}",
           "description": "Allows for passing environment variables from an env file.\n\nThese variables will override environment fetched from the remote target.",
           "type": [
             "string",
@@ -1151,9 +1238,17 @@
             "null"
           ]
         },
+        "dlopen_cgo": {
+          "title": "_experimental_ dlopen_cgo {#experimental-dlopen_cgo}",
+          "description": "Useful when the user's application loads a c-shared golang library dynamically.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "dns_permission_error_fatal": {
           "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
-          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true` in OSS. Defaults to `false` in mfT.",
+          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true`",
           "type": [
             "boolean",
             "null"
@@ -1217,24 +1312,6 @@
             "null"
           ]
         },
-        "readlink": {
-          "title": "_experimental_ readlink {#experimental-readlink}",
-          "description": "DEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "readonly_file_buffer": {
-          "title": "_experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}",
-          "description": "DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
           "description": "Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.",
@@ -1262,14 +1339,6 @@
         "use_dev_null": {
           "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
           "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "vfork_emulation": {
-          "title": "_experimental_ vfork_emulation {#experimental-vfork_emulation}",
-          "description": "Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.\n\nNote that for Go applications on ARM64, this feature is not yet supported, and this setting is ignored.",
           "type": [
             "boolean",
             "null"
@@ -1460,32 +1529,28 @@
       "description": "Configuration for enabling read-only or read-write file operations.\n\nThese options are overriden by user specified overrides and mirrord default overrides.\n\nIf you set [`\"localwithoverrides\"`](#feature-fs-mode-localwithoverrides) then some files can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\nThe accepted values are: `\"local\"`, `\"localwithoverrides`, `\"read\"`, or `\"write`.",
       "oneOf": [
         {
-          "title": "feature.fs.mode.local {#feature-fs-mode-local}",
-          "description": "mirrord won't do anything fs-related, all operations will be local.",
+          "description": "**feature.fs.mode.local** {#feature-fs-mode-local}\n\nmirrord won't do anything fs-related, all operations will be local.",
           "type": "string",
           "enum": [
             "local"
           ]
         },
         {
-          "title": "feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}",
-          "description": "mirrord will run overrides on some file operations, but most will be local.",
+          "description": "**feature.fs.mode.localwithoverrides** {#feature-fs-mode-localwithoverrides}\n\nmirrord will run overrides on some file operations, but most will be local.",
           "type": "string",
           "enum": [
             "localwithoverrides"
           ]
         },
         {
-          "title": "feature.fs.mode.read {#feature-fs-mode-read}",
-          "description": "mirrord will read files from the remote, but won't write to them.",
+          "description": "**feature.fs.mode.read** {#feature-fs-mode-read}\n\nmirrord will read files from the remote, but won't write to them.",
           "type": "string",
           "enum": [
             "read"
           ]
         },
         {
-          "title": "feature.fs.mode.write {#feature-fs-mode-write}",
-          "description": "mirrord will read/write from the remote.",
+          "description": "**feature.fs.mode.write** {#feature-fs-mode-write}\n\nmirrord will read/write from the remote.",
           "type": "string",
           "enum": [
             "write"
@@ -2110,8 +2175,7 @@
       "type": "object",
       "properties": {
         "filter": {
-          "title": "feature.network.outgoing.filter {#feature.network.outgoing.filter}",
-          "description": "Filters that are used to send specific traffic from either the remote pod or the local app",
+          "description": "**feature.network.outgoing.filter** {#feature.network.outgoing.filter}\n\nFilters that are used to send specific traffic from either the remote pod or the local app",
           "anyOf": [
             {
               "$ref": "#/definitions/OutgoingFilterConfig"
@@ -2122,32 +2186,28 @@
           ]
         },
         "ignore_localhost": {
-          "title": "feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}",
-          "description": "Defaults to `false`.",
+          "description": "**feature.network.outgoing.ignore_localhost** {#feature.network.outgoing.ignore_localhost}\n\nDefaults to `false`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "tcp": {
-          "title": "feature.network.outgoing.tcp {#feature.network.outgoing.tcp}",
-          "description": "Defaults to `true`.",
+          "description": "**feature.network.outgoing.tcp** {#feature.network.outgoing.tcp}\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "udp": {
-          "title": "feature.network.outgoing.udp {#feature.network.outgoing.udp}",
-          "description": "Defaults to `true`.",
+          "description": "**feature.network.outgoing.udp** {#feature.network.outgoing.udp}\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "unix_streams": {
-          "title": "feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}",
-          "description": "Connect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
+          "description": "**feature.network.outgoing.unix_streams** {#feature.network.outgoing.unix_streams}\n\nConnect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -2190,6 +2250,83 @@
           "additionalProperties": false
         }
       ]
+    },
+    "PgBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreates an empty database and copies schema of all tables.\n\n- All\n\nCopies both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/PgBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "schema"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/PgBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "PgBranchTableCopyConfig": {
+      "description": "In addition to copying an empty database or all tables' schema, mirrord operator will copy data from the source DB when an array of table configs are specified.\n\nExample:\n\n```json { \"users\": { \"filter\": \"name = 'alice' OR name = 'bob'\" }, \"orders\": { \"filter\": \"created_at > '2025-01-01'\" } } ```\n\nWith the config above, only alice and bob from the `users` table and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "PodTarget": {
       "description": "<!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].",
@@ -2305,6 +2442,48 @@
         }
       },
       "additionalProperties": false
+    },
+    "SecurityContext": {
+      "type": "object",
+      "properties": {
+        "app_armor_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seccomp_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SecurityProfile": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "localhost_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      }
     },
     "ServiceTarget": {
       "type": "object",

@@ -23,8 +23,9 @@ pub enum ConsoleError {
 }
 pub type ConsoleResult<T> = Result<T, ConsoleError>;
 
+#[derive(Error)]
 pub enum WindowsError {
-    /// Usually returned by [`winapi::umm::errhandlingapi::GetLastError`].
+    /// Usually returned by [`winapi::um::errhandlingapi::GetLastError`].
     Windows(u32),
     /// Usually returned by Winsock functions. [`winapi::um::winsock2::WSAGetLastError`].
     WinSock(i32),
@@ -38,7 +39,7 @@ impl WindowsError {
         Self::Windows(error)
     }
 
-    /// Generate a new [`WindowsError`] from [`WSAGetLastError`].
+    /// Generate a new [`WindowsError`] from [`winapi::um::winsock2::WSAGetLastError`].
     pub fn wsa_last_error() -> Self {
         let error = unsafe { winapi::um::winsock2::WSAGetLastError() };
         Self::WinSock(error)
@@ -88,24 +89,57 @@ impl WindowsError {
         };
         Self::format_error_code(err)
     }
+
+    /// Returns the underlying error code formatted as a hexadecimal string.
+    pub fn get_hex_string(&self) -> String {
+        let value = match self {
+            Self::Windows(code) => *code,
+            Self::WinSock(code) => *code as u32,
+        };
+
+        format!("0x{value:08X}")
+    }
+
+    fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.get_formatted_error() {
+            Some(message) => f.write_str(&message),
+            None => write!(
+                f,
+                "WindowsError: Not a valid error code ({})",
+                self.get_hex_string()
+            ),
+        }
+    }
 }
 
 impl Display for WindowsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "{}",
-            self.get_formatted_error()
-                .unwrap_or("Not a valid Windows error code".into())
-        ))
+        self.fmt_message(f)
     }
 }
 
 impl Debug for WindowsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "{}",
-            self.get_formatted_error()
-                .unwrap_or("Not a valid Windows error code".into())
-        ))
+        self.fmt_message(f)
+    }
+}
+
+// Allow direct comparison between WindowsError and i32 for WinSock errors
+impl PartialEq<i32> for WindowsError {
+    fn eq(&self, other: &i32) -> bool {
+        match self {
+            Self::Windows(_) => false,
+            Self::WinSock(code) => code == other,
+        }
+    }
+}
+
+// Allow direct comparison between WindowsError and u32 for Windows errors
+impl PartialEq<u32> for WindowsError {
+    fn eq(&self, other: &u32) -> bool {
+        match self {
+            Self::Windows(code) => code == other,
+            Self::WinSock(_) => false,
+        }
     }
 }

@@ -229,7 +229,14 @@ pub struct AgentConfig {
     ///
     /// The default behavior is try to access the internet and use that interface. If that fails
     /// it uses `eth0`.
-    #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
+    ///
+    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+    /// and will be removed in the future. This field will be removed, and the agent will always
+    /// use iptables redirects for mirroring traffic.
+    #[config(
+        env = "MIRRORD_AGENT_NETWORK_INTERFACE",
+        deprecated = "agent.network_interface is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
+    )]
     pub network_interface: Option<String>,
 
     /// ### agent.flush_connections {#agent-flush_connections}
@@ -448,7 +455,14 @@ pub struct AgentConfig {
     /// When this is set, `network_interface` setting is ignored.
     ///
     /// Defaults to true.
-    #[config(default = true)]
+    ///
+    /// DEPRECATED: The mirroring implementation based on raw sockets is deprecated,
+    /// and will be removed in the future. This field will be removed, and the agent will always
+    /// use iptables redirects for mirroring traffic.
+    #[config(
+        default = true,
+        deprecated = "agent.passthrough_mirroring is deprecated and will be removed when the raw-socket-based mirroring implementation is retired"
+    )]
     pub passthrough_mirroring: bool,
 
     /// ### agent.inject_headers {#agent-inject_headers}
@@ -481,6 +495,12 @@ pub struct AgentConfig {
     /// bodies do not arrive within this timeout.
     #[config(default = 1000)]
     pub max_body_buffer_timeout: u32,
+
+    /// ### agent.security_context {#agent-security_context}
+    ///
+    /// Agent pod security context (not with ephemeral agents).
+    /// Support seccomp profile and app armor profile.
+    pub security_context: Option<SecurityContext>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
@@ -605,6 +625,51 @@ impl AgentFileConfig {
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
             Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct SecurityContext {
+    pub app_armor_profile: Option<AppArmorProfile>,
+    pub seccomp_profile: Option<SeccompProfile>,
+}
+
+impl From<SecurityContext> for k8s_openapi::api::core::v1::PodSecurityContext {
+    fn from(ctx: SecurityContext) -> Self {
+        Self {
+            app_armor_profile: ctx.app_armor_profile.map(Into::into),
+            seccomp_profile: ctx.seccomp_profile.map(Into::into),
+            ..Default::default()
+        }
+    }
+}
+
+pub type AppArmorProfile = SecurityProfile;
+pub type SeccompProfile = SecurityProfile;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct SecurityProfile {
+    pub localhost_profile: Option<String>,
+
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+impl From<AppArmorProfile> for k8s_openapi::api::core::v1::AppArmorProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
+        }
+    }
+}
+
+impl From<SeccompProfile> for k8s_openapi::api::core::v1::SeccompProfile {
+    fn from(profile: SecurityProfile) -> Self {
+        Self {
+            localhost_profile: profile.localhost_profile,
+            type_: profile.type_,
         }
     }
 }
