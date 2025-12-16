@@ -77,7 +77,7 @@ use crate::{
 
 /// The frontend `dist` dir, compressed (as bytes). The CI runs this step automatically, so you only
 /// need to do it manually if making changes to the wizard.
-const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.gz");
+const COMPRESSED_FRONTEND: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wizard-frontend.tar.gz"));
 
 /// The entrypoint for the `wizard` command. Unzips the frontend and serves it on `localhost:3000`.
 ///
