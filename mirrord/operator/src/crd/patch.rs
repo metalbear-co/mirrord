@@ -48,6 +48,8 @@ pub struct AcceptedPatchRequest {
     ///
     /// [`None`] means that replicas should not be patched.
     pub replicas: Option<i32>,
+    #[serde(default)]
+    pub containers: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Hash, PartialEq, Eq)]
