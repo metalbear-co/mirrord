@@ -73,6 +73,14 @@ use crate::{
 const COMPRESSED_FRONTEND: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/wizard-frontend.tar.gz"));
 
+/// Used to store State for endpoint handling
+struct BackendState {
+    // for updating is-returning in `UserData`
+    user_data: UserData,
+    // for resource seeking in the cluster
+    client: Client,
+}
+
 /// The entrypoint for the `wizard` command. Unzips the frontend and serves it on `localhost:3000`.
 ///
 /// Returns `CliError` errors when an io operation fails.
@@ -152,9 +160,9 @@ where
         )
         .route("/api/v1/cluster-details", get(cluster_details))
         .route("/api/v1/namespace/{namespace}/targets", get(list_targets))
-        .with_state(Arc::new(Mutex::new((user_data, client))));
+        .with_state(Arc::new(Mutex::new(BackendState { user_data, client })));
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 3000);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::debug!("listening on {}", listener.local_addr()?);
     progress.success(None);
 
@@ -163,15 +171,15 @@ where
         .success(None);
 
     // open browser window
-    let url = "http://localhost:3000/";
-    if let Err(error) = opener::open(url) {
+    let url = format!("http://{addr}");
+    if let Err(error) = opener::open(&url) {
         tracing::warn!(?error, "failed to open browser");
         parent_progress
             .subtask("Couldn't open the browser automatically")
             .failure(None);
     }
     parent_progress
-        .subtask(format!("The wizard is available at: {url}").as_str())
+        .subtask(format!("The wizard is available at: {}", &url).as_str())
         .success(None);
 
     parent_progress.success(None);
@@ -231,16 +239,16 @@ struct Params {
 /// Called by the `/api/v1/cluster-details` endpoint, returning cluster details that are shown while
 /// the user selects a target.
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
-async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> CliResult<String> {
+async fn cluster_details(State(arc): State<Arc<Mutex<BackendState>>>) -> CliResult<String> {
     let mut user_guard = arc.lock().await;
     // consider the user a returning user in future runs
-    if user_guard.0.is_returning_wizard().not() {
+    if user_guard.user_data.is_returning_wizard().not() {
         // ignore failures to update
-        let _ = user_guard.0.update_is_returning_wizard().await;
+        let _ = user_guard.user_data.update_is_returning_wizard().await;
     }
 
     // return available namespaces
-    let client = user_guard.1.clone();
+    let client = user_guard.client.clone();
     let seeker = KubeResourceSeeker {
         client: &client,
         namespace: "default",
@@ -269,12 +277,12 @@ async fn cluster_details(State(arc): State<Arc<Mutex<(UserData, Client)>>>) -> C
 /// a single [`TargetType`].
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 async fn list_targets(
-    State(arc): State<Arc<Mutex<(UserData, Client)>>>,
+    State(arc): State<Arc<Mutex<BackendState>>>,
     Query(query_params): Query<Params>,
     Path(namespace): Path<String>,
 ) -> CliResult<String> {
     let user_guard = arc.lock().await;
-    let client = user_guard.1.clone();
+    let client = user_guard.client.clone();
     let seeker = KubeResourceSeeker {
         client: &client,
         namespace: &namespace,
