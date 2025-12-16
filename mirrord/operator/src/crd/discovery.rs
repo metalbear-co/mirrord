@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
     version = "v1",
     kind = "SqsQueueDiscovery",
     status = "SqsQueueDiscoveryStatus",
+    plural = "sqsqueuediscoveries",
     namespaced
 )]
 #[serde(rename_all = "camelCase")]
