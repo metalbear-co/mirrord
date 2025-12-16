@@ -71,14 +71,11 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
 pub async fn newsletter_command() {
     // open URL with param utm_source=newslettercmd
     let url = format!("{NEWSLETTER_SIGNUP_URL}cmd");
-    match opener::open(&url) {
-        Ok(()) => {}
-        Err(error) => {
-            tracing::trace!("failed to open browser, command result: {error:?}");
-            println!(
-                "To sign up for the mirrord newsletter and get notified of new features as they come out, visit:\n\n\
+    if let Err(error) = opener::open(&url) {
+        tracing::trace!("failed to open browser, command result: {error:?}");
+        println!(
+            "To sign up for the mirrord newsletter and get notified of new features as they come out, visit:\n\n\
              {url}"
-            );
-        }
+        );
     }
 }

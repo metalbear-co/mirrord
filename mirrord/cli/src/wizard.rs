@@ -3,15 +3,14 @@
 //! The `wizard` module contains everything needed to run the `mirrord wizard` CLI command, with the
 //! exception of the frontend code. This lives in a different top-level directory called
 //! `wizard-frontend`. More documentation specific to the frontend exists in
-//! `wizard-frontend/README.md`.
+//! `wizard-frontend/README.md`. The `wizard` module is gated by the `wizard` feature.
 //!
 //! **The Wizard operates as follows**:
 //!
 //! 1. Build the TypeScript frontend and compress `wizard-frontend/dist` into a Gzipped file
 //! 2. Use the `include_bytes!` macro to make [`COMPRESSED_FRONTEND`] when compiled with the
 //!    `wizard` feature
-//! 3. When the command is run, the file is unzipped and the frontend served on localhost with axum
-//!    as a Single Page App
+//! 3. When the command is run, the file is unzipped and the frontend served on localhost with axum.
 //! 4. The wizard opens in the browser and the user can create and download a config file
 //!
 //! ### Working on the Backend
@@ -28,28 +27,7 @@
 //!
 //! ## Zip frontend.
 //! tar czf wizard-frontend.tar.gz --directory=wizard-frontend/dist .
-//!
-//! ## If you are not changing the frontend, the above steps do not have to be repeated.
-//! ## Build mirrord w/ wizard feature.
-//! cargo build --manifest-path=./Cargo.toml -p mirrord --features wizard
-//!
-//! ## Run the wizard command with trace level TRACE.
-//! RUST_LOG=mirrord=trace ./target/debug/mirrord wizard
 //! ```
-//!
-//! ### Backend Overview
-//!
-//! - Endpoints: the frontend communicates with the backend via some REST endpoints defined in
-//!   `app`.
-//! - [`State`]: the app state contains the tuple `(UserData, Client)` for updating the
-//!   `is_returning` bool and making additional resource seeker requests respectively.
-//! - [`Params`]: when listing targets, the target_type is an optional parameter (which may speed up
-//!   fetching on large clusters).
-//! - [`TargetInfo`] trait: all target types (except Targetless) implement
-//!   [`IntoTargetInfo::into_info`] to retrieve target details from the resource definition.
-//! - Errors: the wizard returns `CliError` errors, either when an io operation fails or when there
-//!   is a problem seeking resources in the cluster. For the latter, errors are turned into `None`s
-//!   to avoid the frontend stopping altogether.
 
 use std::{
     io::Cursor,
@@ -101,9 +79,9 @@ use crate::{
 /// need to do it manually if making changes to the wizard.
 const COMPRESSED_FRONTEND: &[u8] = include_bytes!("../../../wizard-frontend.tar.gz");
 
-/// The entrypoint for the `wizard` command. Unzips the frontend and serves it using axum, along
-/// with internal API endpoints.
-
+/// The entrypoint for the `wizard` command. Unzips the frontend and serves it on `localhost:3000`.
+///
+/// Returns `CliError` errors when an io operation fails.
 pub async fn wizard_command<P>(
     args: WizardArgs,
     watch: drain::Watch,
@@ -192,14 +170,11 @@ where
 
     // open browser window
     let url = "http://localhost:3000/";
-    match opener::open(url) {
-        Ok(()) => {}
-        Err(error) => {
-            tracing::trace!(?error, "failed to open browser");
-            parent_progress
-                .subtask("Couldn't open the browser automatically")
-                .failure(None);
-        }
+    if let Err(error) = opener::open(url) {
+        tracing::warn!(?error, "failed to open browser");
+        parent_progress
+            .subtask("Couldn't open the browser automatically")
+            .failure(None);
     }
     parent_progress
         .subtask(format!("The wizard is available at: {url}").as_str())
@@ -213,8 +188,9 @@ where
     Ok(())
 }
 
-/// The response returned from the `/api/v1/cluster-details` endpoint with namespaces and
-/// target_types that mirrord can target in the user's cluster.
+/// ### Response for `/api/v1/cluster-details`
+///
+/// Namespaces and target_types that mirrord can target in the user's cluster.
 #[derive(Debug, Serialize)]
 struct ClusterDetails {
     namespaces: Vec<String>,
@@ -222,13 +198,18 @@ struct ClusterDetails {
 }
 
 /// Represents the relevant information for each available target returned by the
-/// `/api/v1/namespace/{namespace}/targets` endpoint. `detected_ports` are used in port
-/// configuration in the wizard's Network tab to offer ports that the user is most likely to be
-/// interested in, according to the ports exposed by that target's Pod or Pods
+/// `/api/v1/namespace/{namespace}/targets` endpoint.
 #[derive(Debug, Serialize)]
 struct TargetInfo {
+    /// ### Shown in the wizard's `Target` tab
     target_path: String,
+    /// ### Shown in the wizard's `Target` tab
     target_namespace: String,
+    /// ### Shown in the wizard's `Network` tab
+    ///
+    /// Ports exposed by the target's Pod or Pods that we have auto-detected.
+    ///
+    /// These are the ports the user is most likely to be interested in.
     detected_ports: Vec<u16>,
 }
 

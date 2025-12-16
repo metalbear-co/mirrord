@@ -231,8 +231,17 @@
 //!
 //! > For users interested in getting mirrord for teams, which is a paid feature.
 //!
-//! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
+//! Opens a browser window to our mirrord for teams intro page. If we fail to open it, then it
 //! prints a nice little message to stdout.
+//!
+//! ### `mirrord wizard [OPTIONS]`
+//!
+//! - [`wizard::wizard_command`]
+//!
+//! > Opens the onboarding wizard, for setting up a config file via a UI.
+//!
+//! Opens a browser window for the wizard. The wizard is served on `localhost` and has various
+//! endpoints that are accessed by the frontend. This is all gated behind the `wizard` feature.
 #![feature(try_blocks)]
 #![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
