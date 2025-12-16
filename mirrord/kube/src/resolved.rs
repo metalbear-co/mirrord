@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{EnvVar, Pod, PodSpec, Service},
+    core::v1::{EnvFromSource, EnvVar, Pod, PodSpec, Service},
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::target::Target;
@@ -562,6 +562,27 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                     }
                 }
             }
+        }
+
+        None
+    }
+
+    /// Get the `envFrom` field from the target's pod spec.
+    pub fn get_env_from(&self) -> Option<&Vec<EnvFromSource>> {
+        let pod_spec = self.get_pod_spec()?;
+        let target_container = self.container();
+
+        if let Some(container_name) = target_container {
+            for container in &pod_spec.containers {
+                if container.name == container_name {
+                    return container.env_from.as_ref();
+                }
+            }
+        } else {
+            return pod_spec
+                .containers
+                .first()
+                .and_then(|c| c.env_from.as_ref());
         }
 
         None
