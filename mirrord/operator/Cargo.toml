@@ -74,7 +74,7 @@ rand = { workspace = true, optional = true }
 schemars = { workspace = true, features = ["chrono"] }
 semver = { workspace = true, features = ["serde"], optional = true }
 serde.workspace = true
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true, features = ["preserve_order"] }
 serde_urlencoded = { version = "0.7", optional = true }
 serde_yaml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
