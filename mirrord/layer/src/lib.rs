@@ -1,3 +1,6 @@
+// NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
+// library to allow layer-lib as optional dependency for unix.
+#![cfg(unix)]
 #![feature(c_variadic)]
 #![feature(io_error_uncategorized)]
 #![feature(try_trait_v2)]

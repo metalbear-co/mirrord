@@ -127,10 +127,11 @@ pub struct OperatorSession {
     client_cert: Certificate,
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
     operator_license_fingerprint: Option<String>,
+    /// Version of the operator, right now only for [`fmt::Debug`] implementation.
+    operator_version: Version,
     /// Version of [`mirrord_protocol`] used by the operator.
     /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
-
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
 }
@@ -146,6 +147,7 @@ impl fmt::Debug for OperatorSession {
                 &self.operator_license_fingerprint,
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
+            .field("operator_version", &self.operator_version)
             .field("allow_reconnect", &self.allow_reconnect)
             .finish()
     }
@@ -897,6 +899,7 @@ impl OperatorApi<PreparedClientCert> {
             .protocol_version
             .as_ref()
             .and_then(|version| version.parse().ok());
+        let operator_version = self.operator.spec.operator_version.clone();
         let allow_reconnect = self
             .operator
             .spec
@@ -909,6 +912,7 @@ impl OperatorApi<PreparedClientCert> {
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
+            operator_version,
             allow_reconnect,
         })
     }

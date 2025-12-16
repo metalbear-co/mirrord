@@ -382,6 +382,7 @@ impl MirrordCi {
 struct StartArgs {
     /// Runs mirrord ci in the foreground (the default behaviour is to run it as a background
     /// task).
+    #[cfg_attr(windows, allow(unused))]
     foreground: bool,
 
     /// CI environment, e.g. "staging", "production", "testing", etc.

@@ -11,6 +11,8 @@ mod traffic_tests {
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
 
+    #[cfg(target_os = "windows")]
+    use crate::utils::windows::LegacyConsoleGuard;
     use crate::utils::{
         application::{Application, GoVersion},
         ipv6::ipv6_service,
@@ -215,6 +217,7 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
     pub async fn outgoing_connection_to_self(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = ["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"]
@@ -456,6 +459,9 @@ mod traffic_tests {
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
         let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .expect("failed to configure UDP socket read timeout");
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = [
@@ -753,5 +759,102 @@ mod traffic_tests {
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_no_error_in_stderr().await;
+    }
+
+    /// Test that npm-based Node.js applications work with mirrord (tests Windows non-.exe
+    /// execution). This primarily tests outgoing traffic functionality with npm as a non-.exe
+    /// binary. Tests both regular Windows execution and legacy console scenarios (enforced via
+    /// ForceV2 registry toggle) for older Windows machines support.
+    #[cfg(target_os = "windows")]
+    #[rstest]
+    #[case::regular(false)]
+    #[case::legacy_console(true)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn outgoing_traffic_npm_node(
+        #[case] use_legacy_console: bool,
+        #[future] basic_service: KubeService,
+    ) {
+        let service = basic_service.await;
+
+        let _ = if use_legacy_console {
+            Some(
+                LegacyConsoleGuard::enable()
+                    .expect("failed to enable Windows legacy console mode for test"),
+            )
+        } else {
+            None
+        };
+
+        let npm_command = {
+            let mut args = vec![];
+            if use_legacy_console {
+                // Legacy console scenario for older machines support. Enabling legacy console
+                // mode (ForceV2=0) adjusts the console host to the legacy implementation.
+                args.extend(["cmd.exe", "/c"]);
+            }
+            args.extend(["npm", "--prefix", "node-e2e", "run", "test-outgoing"]);
+            args.into_iter().map(String::from).collect::<Vec<String>>()
+        };
+
+        let mut process = run_exec_with_target(
+            npm_command,
+            &service.pod_container_target(),
+            Some(&service.namespace),
+            None,
+            None,
+        )
+        .await;
+
+        let res = process.wait().await;
+        assert!(res.success(), "npm process should exit with success");
+
+        // Get the combined stdout for validation
+        let stdout = process.get_stdout().await;
+
+        // Verify npm package info is displayed
+        assert!(
+            stdout.contains("mirrord-node-e2e-test@"),
+            "Expected npm package info"
+        );
+        assert!(stdout.contains("test-outgoing"), "Expected npm script name");
+
+        // Verify that npm executed the script (not direct node execution)
+        assert!(
+            stdout.contains("> node test_outgoing_traffic_npm.mjs"),
+            "Expected npm to execute the script, showing npm's command output"
+        );
+
+        // Verify the test script started properly
+        assert!(
+            stdout.contains(">> npm-based outgoing traffic test"),
+            "Expected test script startup message"
+        );
+
+        // Verify successful HTTP connection
+        assert!(
+            stdout.contains(">> statusCode: 200"),
+            "Expected successful HTTP response from rust-lang.org"
+        );
+
+        // Verify data was received from the outgoing request
+        assert!(
+            stdout.contains(">> received data chunk of size"),
+            "Expected to receive HTTP response data chunks"
+        );
+
+        // Verify successful completion
+        assert!(
+            stdout.contains(">> npm outgoing test completed successfully"),
+            "Expected successful test completion message"
+        );
+
+        // Verify multiple data chunks were received (indicating a real HTTP response)
+        let chunk_count = stdout.matches(">> received data chunk of size").count();
+        assert!(
+            chunk_count >= 5,
+            "Expected multiple data chunks (got {}), indicating real HTTP traffic",
+            chunk_count
+        );
     }
 }
