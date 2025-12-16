@@ -236,7 +236,7 @@
 //!
 //! ### `mirrord wizard [OPTIONS]`
 //!
-//! - [`wizard::wizard_command`]
+//! - `wizard::wizard_command`
 //!
 //! > Opens the onboarding wizard, for setting up a config file via a UI.
 //!
