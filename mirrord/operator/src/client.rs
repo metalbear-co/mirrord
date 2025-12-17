@@ -144,8 +144,8 @@ pub struct OperatorSession {
 
 impl fmt::Debug for OperatorSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let debug_struct = f
-            .debug_struct("OperatorSession")
+        let mut debug_struct = f.debug_struct("OperatorSession");
+        debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
             .field("cert_public_key_data", &self.client_cert.public_key_data())
@@ -156,16 +156,12 @@ impl fmt::Debug for OperatorSession {
             .field("operator_protocol_version", &self.operator_protocol_version)
             .field("operator_version", &self.operator_version)
             .field("allow_reconnect", &self.allow_reconnect);
-        let debug_struct = if let Some(traceparent) = &self.traceparent {
-            debug_struct.field("traceparent", traceparent)
-        } else {
-            debug_struct
-        };
-        let debug_struct = if let Some(baggage) = &self.baggage {
-            debug_struct.field("baggage", baggage)
-        } else {
-            debug_struct
-        };
+        if let Some(traceparent) = &self.traceparent {
+            debug_struct.field("traceparent", traceparent);
+        }
+        if let Some(baggage) = &self.baggage {
+            debug_struct.field("baggage", baggage);
+        }
         debug_struct.finish()
     }
 }
