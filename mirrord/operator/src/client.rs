@@ -135,10 +135,10 @@ pub struct OperatorSession {
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
     /// OpenTelemetry (OTel) / W3C trace context.
-    /// See https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     traceparent: Option<String>,
     /// OpenTelemetry (OTel) / W3C baggage propagator.
-    /// See https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     baggage: Option<String>,
 }
 

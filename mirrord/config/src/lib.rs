@@ -393,14 +393,14 @@ pub struct LayerConfig {
     /// ## traceparent {#root-traceparent}
     ///
     /// OpenTelemetry (OTel) / W3C trace context.
-    /// See https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     #[config(env = "TRACEPARENT")]
     pub traceparnet: Option<String>,
 
     /// ## baggage {#root-baggage}
     ///
     /// OpenTelemetry (OTel) / W3C baggage propagator.
-    /// See https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names
+    /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     #[config(env = "BAGGAGE")]
     pub baggage: Option<String>,
 }
