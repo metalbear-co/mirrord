@@ -476,6 +476,10 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
+
+    #[error("Redis operation failed: {0}")]
+    #[diagnostic(help("Please check that Docker is running and accessible."))]
+    RedisError(String),
 }
 
 impl CliError {

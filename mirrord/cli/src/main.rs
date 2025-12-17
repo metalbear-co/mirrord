@@ -308,6 +308,7 @@ mod newsletter;
 mod operator;
 mod port_forward;
 mod profile;
+mod redis;
 mod teams;
 mod user_data;
 mod util;
@@ -1051,6 +1052,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::DbBranches(args) => db_branches_command(*args).await?,
+            Commands::Redis(args) => redis::redis_command(*args).await?,
         };
 
         Ok(())
