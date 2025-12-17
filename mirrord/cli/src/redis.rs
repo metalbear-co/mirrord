@@ -6,10 +6,9 @@ use crate::{CliResult, config::RedisArgs};
 
 const DEFAULT_REDIS_IMAGE: &str = "redis:7-alpine";
 
-/// Execute redis branch command - spawns Redis pod in cluster and optionally copies data
 pub async fn redis_command(args: RedisArgs) -> CliResult<()> {
     let RedisArgs {
-        source_pod,
+        source,
         source_namespace,
         local_port: _,
         container_name,
@@ -103,27 +102,24 @@ pub async fn redis_command(args: RedisArgs) -> CliResult<()> {
         )));
     }
 
-    // Copy data if source_pod provided, otherwise empty branch
-    if let Some(source) = source_pod {
-        println!("Copying data from {}/{}...", namespace, source);
-        copy_data_in_cluster(&source, &branch_name, &namespace).await?;
+    // Copy data if source provided, otherwise empty branch
+    if let Some(ref src) = source {
+        println!("Copying data from {}/{}...", namespace, src);
+        copy_data_in_cluster(src, &branch_name, &namespace).await?;
     }
 
     Ok(())
 }
 
-async fn copy_data_in_cluster(
-    source_pod: &str,
-    target_pod: &str,
-    namespace: &str,
-) -> CliResult<()> {
+/// Source can be deploy/name, deployment/name, or pod-name
+async fn copy_data_in_cluster(source: &str, target_pod: &str, namespace: &str) -> CliResult<()> {
     // Get all keys from source Redis
     let keys_output = Command::new("kubectl")
         .args([
             "exec",
             "-n",
             namespace,
-            source_pod,
+            source,
             "--",
             "redis-cli",
             "KEYS",
@@ -161,7 +157,7 @@ async fn copy_data_in_cluster(
                 "exec",
                 "-n",
                 namespace,
-                source_pod,
+                source,
                 "--",
                 "redis-cli",
                 "GET",

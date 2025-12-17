@@ -1182,10 +1182,10 @@ pub(super) enum DbBranchesCommand {
 
 #[derive(Args, Debug)]
 pub(crate) struct RedisArgs {
-    /// Source Redis pod name in cluster (if provided, copies data)
+    /// Source Redis target (pod/name, deploy/name, or just name for deployment)
     #[arg(long)]
-    pub source_pod: Option<String>,
-    /// Namespace of source pod
+    pub source: Option<String>,
+    /// Namespace of source
     #[arg(short = 'n', long)]
     pub source_namespace: Option<String>,
     /// Local port to expose Redis on
